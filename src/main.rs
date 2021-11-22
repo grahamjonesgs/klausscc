@@ -1,5 +1,7 @@
 
 use clap::{Arg, App};
+mod files;
+use files::lines_from_file;
 
 fn main() {
     let matches = App::new("My Test Program")
@@ -31,4 +33,9 @@ fn main() {
             }
         }
     }
+    let lines = lines_from_file("/etc/hosts");
+    for line in &lines {
+        println!("{:?}", line);
+    }
+    println!("Size of file {}",lines.len());
 }
