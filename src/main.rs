@@ -37,5 +37,14 @@ fn main() {
     for line in &lines {
         println!("{:?}", line);
     }
+    let mut new_lines = Vec::new();// :  Vec<&str> ;
     println!("Size of file {}",lines.len());
+
+    for line in &lines {
+        let words=line.split_whitespace();
+        for word in words {
+            println!("Word is {}",word);
+            new_lines.push(word);
+        }
+    }
 }
