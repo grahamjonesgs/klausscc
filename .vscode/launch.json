@@ -21,7 +21,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["o hello"],
+            "args": ["-n 20","-f testout.txt"],
             "cwd": "${workspaceFolder}"
         },
         {
