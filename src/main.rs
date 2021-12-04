@@ -61,5 +61,6 @@ fn main() {
     println!("Size of new_lines {}",new_lines.len());
 */
     let oplist = parse_opcodes("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
-    println!("Finished {}",oplist.len());
+    println!("Finished {:?}",oplist[10].comment);
+    //println!("Finished {:?}",oplist);
 }
