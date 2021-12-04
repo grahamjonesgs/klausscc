@@ -72,41 +72,6 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     Some(opcode)
 }
 
-pub fn lines_from_file(filename: impl AsRef<Path>) -> Vec<String> {
-    let file = File::open(filename).expect("no such file");
-    let buf = BufReader::new(file);
-    buf.lines()
-        .map(|l| l.expect("Could not parse line"))
-        .collect()
-}
-
-/*pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
-    let file = File::open(filename).expect("no such file");
-    let buf = BufReader::new(file);
-    let mut opcodes: Vec<Opcode> = Vec::new();
-
-    for line in buf.lines() {
-        match line {
-            Ok(v) =>
-               match v.find("16'h") {
-                Some(a) =>  { opcodes.push(Opcode {
-                    name: v[a..].to_string(),
-                    opcode: "Eric".to_string(),
-                    registers: 0,
-                    variables: 1,
-                    comment: "Comment line".to_string(),
-                });
-
-            }
-            None => ()
-            }
-
-
-            Err(e) => println!("error parsing header: {:?}", e),
-    }
-    }
-    opcodes
-} */
 pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
     let file = File::open(filename).expect("no such file");
     let buf = BufReader::new(file);
@@ -119,7 +84,7 @@ pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
                 Some(a) => opcodes.push(a),
             },
 
-            Err(e) => println!("error parsing header: {:?}", e),
+            Err(e) => println!("error parsing opcode file: {:?}", e),
         }
     }
     opcodes
