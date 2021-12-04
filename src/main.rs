@@ -1,7 +1,18 @@
 
 use clap::{Arg, App};
 mod files;
-use files::lines_from_file;
+//use files::lines_from_file;
+use files::parse_opcodes;
+
+/*struct Opcode {
+    char name[32];
+    char opcode[32];
+    int registers;
+    int variables;
+    char comment[80];
+}; */
+
+
 
 fn main() {
     let matches = App::new("My Test Program")
@@ -23,7 +34,7 @@ fn main() {
     let myfile = matches.value_of("file").unwrap_or("input.txt");
     println!("The file passed is: {}", myfile);
 
-    let num_str = matches.value_of("num");
+    /*let num_str = matches.value_of("num");
     match num_str {
         None => println!("No idea what your favorite number is."),
         Some(s) => {
@@ -33,7 +44,7 @@ fn main() {
             }
         }
     }
-    let lines = lines_from_file("/etc/hosts");
+    let lines = lines_from_file("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
     for line in &lines {
         println!("{:?}", line);
     }
@@ -47,4 +58,8 @@ fn main() {
             new_lines.push(word);
         }
     }
+    println!("Size of new_lines {}",new_lines.len());
+*/
+    let oplist = parse_opcodes("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
+    println!("Finished {}",oplist.len());
 }
