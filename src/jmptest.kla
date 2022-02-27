@@ -1,0 +1,40 @@
+BEGIN:
+SETR A 0x0005
+SETR B 0x0010
+SETR C 0x1111
+OR B C
+
+7SEGV 0x4321
+DELAYV 0xFFFF
+
+DISPLOOP:
+DECR A
+JMPZ BEGIN:   // Restart if we reached zero
+
+
+// Call function
+PUSH A // Push A on Stack
+PUSH B
+CALL F_DEC_STACK_TOP:
+POP B
+POP A
+
+
+7SEGV 0x00A
+DELAYV 0xFFFF
+7SEGR A
+DELAYV 0xFFFF
+7SEGV 0x00B
+DELAYV 0xFFFF
+7SEGR B
+DELAYV 0xFFFF
+JMP DISPLOOP:
+
+// Proc to be called
+F_DEC_STACK_TOP:
+POP D  // Store ret value
+POP C
+DECR C
+PUSH C
+PUSH D // Push back ret value
+RET

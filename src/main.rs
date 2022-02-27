@@ -1,10 +1,30 @@
 
 use clap::{Arg, App};
 mod files;
-use files::parse_opcodes;
+mod helper;
+use files::{ parse_opcodes, read_file_to_vec};
+use helper::is_label;
 
+#[derive(Debug)]
+pub enum MessageType {
+    Error,
+    Warning,
+    Info
+}
+
+#[derive(Debug)]
+pub struct ResultCode {
+    pub name: String,
+    pub number: u32,
+    pub level: MessageType,
+}
 
 fn main() {
+    //let mut messages: Vec<files::ResultCode> = Vec::new();
+    let mut msg: files::MessageList =  files::MessageList::new(); // need to work out how to init
+    msg.create_message(7);
+    msg.create_message(14);
+    println!("msg is now {:?}",msg);
     let matches = App::new("Klauss Assembler")
         .version("0.0.1")
         .author("Graham Jones")
@@ -24,9 +44,15 @@ fn main() {
     let myfile = matches.value_of("file").unwrap_or("input.txt");
     println!("The file passed is: {}", myfile);
 
-   
-
     let oplist = parse_opcodes("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
-    println!("Finished {:?}",oplist[10].comment);
-    //println!("Finished {:?}",oplist);
+    println!("Finished {:?}",oplist[10]);
+    
+    let input_file = read_file_to_vec("/Users/graham/Documents/src/rust/opttest/src/jmptest.kla");
+    // println!("Finished {:?}",input_file);
+
+    let result3: Vec<String> = input_file.iter()
+                                    .filter(|n| is_label(n))
+                                    .map(|n| ("Label - ".to_string() + n).to_string())
+                                    .collect();
+    println!("Finished {:?}",result3);
 }

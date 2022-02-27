@@ -2,8 +2,41 @@ use std::{
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
+    fmt,
 };
 
+#[derive(Debug)]
+pub struct MessageList(Vec<Message>);
+
+
+#[derive(Debug)]
+pub enum MessageType {
+    Error,
+    Warning,
+    Info
+
+}
+
+#[derive(Debug)]
+pub struct Message {
+    pub name: String,
+    pub number: u32,
+    pub level: MessageType,
+}
+
+impl MessageList {
+    pub fn create_message(&mut self, number: u32) -> &Message {
+        let new_message = Message {
+            name: String::from("Test Task"),
+            number: number,
+            level: MessageType::Error,
+        };
+        self.0.push(new_message);
+        return &self.0[self.0.len()-1];
+    }
+}
+
+#[derive(Debug)]
 pub struct Opcode {
     pub name: String,
     pub opcode: String,
@@ -12,6 +45,25 @@ pub struct Opcode {
     pub comment: String,
 }
 
+pub struct CodeLine {
+    pub pc: u32,
+    pub code: String,
+}
+
+pub struct Label {
+    pub pc: u32,
+    pub code: String,
+}
+
+impl fmt::Display for Opcode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{} {}, regs {}, vars {} - {}", 
+        self.name,self.opcode, self.registers,self.variables,self.comment)
+    }
+}
+
+// Receive a line from the opcode definition file and if possible 
+// parse to instance of Some(Opcode), or None
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_opcode: usize;
     let pos_name: usize;
@@ -21,15 +73,17 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let num_variables: u32;
     let mut num_registers: u32;
 
+    // Find the opcode if it exists
     match input_line.find("16'h") {
         None => return None,
         Some(a) => pos_opcode = a + 4,
     }
-
+    // Check for lenght of opcode
     if input_line.len() < (pos_opcode + 4) {
         return None;
     }
 
+    // Define number of registers from opcode definition
     num_registers = 0;
     if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
         num_registers = 1
@@ -38,21 +92,26 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         num_registers = 2
     }
 
+    // Look for variable, and set flag
     if input_line.find("w_var1") == None {
         num_variables = 0;
     } else {
         num_variables = 1;
     }
 
+    // Look for comment as first word is opcode name
     match input_line.find("//") {
         None => return None,
         Some(a) => pos_name = a + 3,
     }
 
+    // Find end of first word after comment as end of opcode name
     match input_line[pos_name..].find(" ") {
         None => return None,
         Some(a) => pos_end_name = a + pos_name,
     }
+
+    // Set comments filed, or none if missing
     if input_line.len() > pos_end_name + 1 {
         pos_comment = pos_end_name + 1;
         pos_end_comment = input_line.len();
@@ -60,7 +119,8 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         pos_comment = 0;
         pos_end_comment = 0;
     }
-
+ 
+    // Create opcode
     let opcode = Opcode {
         opcode: input_line[pos_opcode..pos_opcode + 4].to_string(),
         registers: num_registers,
@@ -72,10 +132,12 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     Some(opcode)
 }
 
+// Parse given filename to Vec of Opcode.
 pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
-    let file = File::open(filename).expect("no such file");
+    let file = File::open(filename).expect("No such opcode file");
     let buf = BufReader::new(file);
     let mut opcodes: Vec<Opcode> = Vec::new();
+
 
     for line in buf.lines() {
         match line {
@@ -84,8 +146,23 @@ pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
                 Some(a) => opcodes.push(a),
             },
 
-            Err(e) => println!("error parsing opcode file: {:?}", e),
+            Err(e) => println!("Error parsing opcode file: {:?}", e),
         }
     }
     opcodes
+}
+
+pub fn read_file_to_vec(filename: impl AsRef<Path>) -> Vec<String> {
+    let file = File::open(filename).expect("No such input file");
+    let buf = BufReader::new(file);
+    let mut lines: Vec<String> = Vec::new();
+
+    for line in buf.lines() {
+        match line {
+            Ok(v) => lines.push(v),
+
+            Err(e) => println!("Error parsing opcode file: {:?}", e),
+        }
+    }
+    lines
 }
