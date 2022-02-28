@@ -1,3 +1,5 @@
+use crate::messages;
+
 use std::{
     fs::File,
     io::{prelude::*, BufReader},
@@ -5,36 +7,8 @@ use std::{
     fmt,
 };
 
-#[derive(Debug)]
-pub struct MessageList(Vec<Message>);
 
 
-#[derive(Debug)]
-pub enum MessageType {
-    Error,
-    Warning,
-    Info
-
-}
-
-#[derive(Debug)]
-pub struct Message {
-    pub name: String,
-    pub number: u32,
-    pub level: MessageType,
-}
-
-impl MessageList {
-    pub fn create_message(&mut self, number: u32) -> &Message {
-        let new_message = Message {
-            name: String::from("Test Task"),
-            number: number,
-            level: MessageType::Error,
-        };
-        self.0.push(new_message);
-        return &self.0[self.0.len()-1];
-    }
-}
 
 #[derive(Debug)]
 pub struct Opcode {
@@ -152,10 +126,12 @@ pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
     opcodes
 }
 
-pub fn read_file_to_vec(filename: impl AsRef<Path>) -> Vec<String> {
+pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<Path>) -> Vec<String> {
     let file = File::open(filename).expect("No such input file");
     let buf = BufReader::new(file);
     let mut lines: Vec<String> = Vec::new();
+
+    messages::add_message("Starting opcode import", messages::MessageType::Info,2,msgs);
 
     for line in buf.lines() {
         match line {
