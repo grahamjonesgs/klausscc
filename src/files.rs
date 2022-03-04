@@ -8,8 +8,6 @@ use std::{
 };
 
 
-
-
 #[derive(Debug)]
 pub struct Opcode {
     pub name: String,
