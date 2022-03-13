@@ -38,10 +38,10 @@ fn main() {
         .get_matches();
 
     let myfile = matches.value_of("file").unwrap_or("input.txt");
-    //println!("The file passed is: {}", myfile);
-
+   
+    // Parse the Opcode file
     let mut oplist = parse_opcodes("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
-    //println!("Finished, the 10th one is {:?}",oplist[10]);
+  
     
     let input_file = read_file_to_vec(&mut msg_list,"/Users/graham/Documents/src/rust/opttest/src/jmptest.kla");
     
@@ -52,7 +52,6 @@ fn main() {
                                     PC: 0
                                 })
                                 .collect();
-    //println!("Finished {:?}",result2);
     
     let mut pass1a: Vec<Pass1>= Vec::new();
     let input_file2=input_file.clone();
@@ -71,14 +70,14 @@ fn main() {
         println!("Checking {}, opcode result is {:?}", code_line.clone(),num_operands(&mut oplist,&mut code_line));
         
     }
+    println!("Pass1a is {:?}",pass1a);
   
-    //println!("Finished {:?}",pass1a);
 
     // Test code to find labels
-    let result3: Vec<String> = input_file.iter()
+   /* let labels: Vec<String> = pass1a.iter()//input_file.iter()
                                     .filter(|n| is_label(n.clone()))
                                     .map(|n| ("Label - ".to_string() + n).to_string())
-                                    .collect();
+                                    .collect(); */
 
     //println!("Finished {:?}",result3);
     //println!("Messages are: {:?}",msg_list);
