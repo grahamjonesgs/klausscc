@@ -36,11 +36,21 @@ pub fn num_operands (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> Opt
 pub fn is_valid_line (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> bool {   
     if is_opcode(opcodes, line).is_some() {return true}
     if return_label(line).is_some() {return true}
+    if is_blank(line) {return true}
     let words=line.split_whitespace();
         for (_i,word)  in words.enumerate() {
             if is_comment(&mut word.to_string()) == true {return true}
         } 
     false
+}
+
+pub fn is_blank (line: &mut String) -> bool {
+    let words=line.split_whitespace();
+
+    for (_i,word)  in words.enumerate() {
+        if word.len()>0 {return false}
+        } 
+    true
 }
 
 pub fn is_comment(word: &mut String) -> bool {
