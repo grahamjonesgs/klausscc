@@ -11,6 +11,15 @@ pub fn is_label (line: &String) -> bool {
     false
 }
 
+pub fn return_label (line: &String) -> String {
+    let words=line.split_whitespace();
+    for (i,word)  in words.enumerate() {
+        //println!("Word {} is {}",i,word);
+        if i==0 && word.ends_with(":") {return word.to_string()}
+    }
+    "".to_string()
+}
+
 pub fn is_opcode (opcodes: &mut Vec<files::Opcode>,line: &mut String) -> Option<String> {
     
     for opcode in opcodes {

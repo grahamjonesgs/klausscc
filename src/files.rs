@@ -4,7 +4,7 @@ use std::{
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
-    fmt,
+    fmt, 
 };
 
 
@@ -17,13 +17,14 @@ pub struct Opcode {
     pub comment: String,
 }
 
+#[derive(Debug)]
 pub struct CodeLine {
-    pub pc: u32,
+    pub program_counter: u32,
     pub code: String,
 }
-
+#[derive(Debug)]
 pub struct Label {
-    pub pc: u32,
+    pub program_counter: u32,
     pub code: String,
 }
 
