@@ -9,18 +9,20 @@ use helper::*;
 #[derive(Debug)]
 pub struct Pass1 {
     pub input: String,
-    pub PC: u32,
+    pub program_counter: u32,
 }
 
 fn main() {
     let mut msg_list = Vec::new();
-    let new_message = Message {
-        name: String::from("Test Task"),
-        number: 3,
-        level: messages::MessageType::Error,
-    };
-    msg_list.push(new_message);
-    println!("msg is now {:?}",msg_list);
+
+    msg_list.push(Message {
+        name: String::from("Starting..."),
+        number: 1,
+        level: messages::MessageType::Info,
+    });
+
+
+    //println!("msg is now {:?}",msg_list);
     let matches = App::new("Klauss Assembler")
         .version("0.0.1")
         .author("Graham Jones")
@@ -37,7 +39,7 @@ fn main() {
                  .help("Dummy number"))
         .get_matches();
 
-    let myfile = matches.value_of("file").unwrap_or("input.txt");
+    let myfile = matches.value_of("file").unwrap_or("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
    
     // Parse the Opcode file
     let mut oplist = parse_opcodes("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
@@ -45,41 +47,34 @@ fn main() {
     
     let input_file = read_file_to_vec(&mut msg_list,"/Users/graham/Documents/src/rust/opttest/src/jmptest.kla");
     
-    let result2: Vec<Pass1> = input_file.iter()
-                                
-                                .map(|n| Pass1 {
-                                    input: n.to_string(),
-                                    PC: 0
-                                })
-                                .collect();
-    
-    let mut pass1a: Vec<Pass1>= Vec::new();
-    let input_file2=input_file.clone();
 
+    let mut pass1a: Vec<Pass1>= Vec::new();
     let mut program_counter: u32=0;
-    for mut code_line in input_file2 {
+
+    for mut code_line in input_file {
         pass1a.push( Pass1 {
                     input: code_line.clone(),
-                    PC: program_counter});
+                    program_counter: program_counter});
         let num_args = num_operands(&mut oplist,&mut code_line);
         match num_args {
             Some(p) => {program_counter=program_counter+p+1}
             None => {}
         }
-        //println!("Checking {}, opcode result is {:?}", code_line.clone(),is_opcode(&mut oplist,&mut code_line).unwrap_or("None".to_string()));
-        println!("Checking {}, opcode result is {:?}", code_line.clone(),num_operands(&mut oplist,&mut code_line));
         
     }
     println!("Pass1a is {:?}",pass1a);
   
 
     // Test code to find labels
-   /* let labels: Vec<String> = pass1a.iter()//input_file.iter()
-                                    .filter(|n| is_label(n.clone()))
-                                    .map(|n| ("Label - ".to_string() + n).to_string())
-                                    .collect(); */
+   let labels: Vec<Label> = pass1a.iter()//input_file.iter()
+                                    .filter(|n| is_label(&n.input.clone()))
+                                    .map(|n| -> Label {Label { program_counter: n.program_counter, code: return_label(&n.input) }})
+                                    .collect(); 
 
-    //println!("Finished {:?}",result3);
+    println!("Labels are {:?}",labels);
+
+
+
     //println!("Messages are: {:?}",msg_list);
     //println!("Number of errors is {}, number of warning is {}",
     //        number_errors(&mut msg_list),
