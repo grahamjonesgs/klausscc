@@ -42,10 +42,10 @@ fn main() {
     let myfile = matches.value_of("file").unwrap_or("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
    
     // Parse the Opcode file
-    let mut oplist = parse_opcodes("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
+    let mut oplist = parse_opcodes("src/opcode_select.vh");
   
     
-    let input_file = read_file_to_vec(&mut msg_list,"/Users/graham/Documents/src/rust/opttest/src/jmptest.kla");
+    let input_file = read_file_to_vec(&mut msg_list,"src/jmptest.kla");
     
 
     let mut pass1a: Vec<Pass1>= Vec::new();
@@ -55,6 +55,9 @@ fn main() {
         pass1a.push( Pass1 {
                     input: code_line.clone(),
                     program_counter: program_counter});
+        if is_valid_line(&mut oplist, &mut code_line.clone()) == false {
+            println!("Found invalid line *{}*",code_line);
+        }
         let num_args = num_operands(&mut oplist,&mut code_line);
         match num_args {
             Some(p) => {program_counter=program_counter+p+1}
@@ -62,13 +65,14 @@ fn main() {
         }
         
     }
-    println!("Pass1a is {:?}",pass1a);
+    //println!("Pass1a is {:?}",pass1a);
   
 
     // Test code to find labels
    let labels: Vec<Label> = pass1a.iter()//input_file.iter()
-                                    .filter(|n| is_label(&n.input.clone()))
-                                    .map(|n| -> Label {Label { program_counter: n.program_counter, code: return_label(&n.input) }})
+                                    .filter(|n| return_label(&n.input.clone()).is_some())
+                                    .map(|n| -> Label {Label { program_counter: n.program_counter, 
+                                        code: return_label(&n.input).unwrap_or("".to_string()) }})
                                     .collect(); 
 
     println!("Labels are {:?}",labels);
