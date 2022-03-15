@@ -1,4 +1,4 @@
-dummy
+dummy //test
 // test msg
 BEGIN:
 SETR A 0x0005

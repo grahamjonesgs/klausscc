@@ -29,6 +29,7 @@ pub struct Label {
 }
 
 #[derive(Debug)]
+#[derive(PartialEq)]
 pub enum LineType {
     Comment,
     Blank,

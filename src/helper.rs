@@ -38,21 +38,17 @@ pub fn line_type (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> LineTy
     if is_opcode(opcodes, line).is_some() {return LineType::Opcode}
     if is_blank(line) {return LineType::Blank}
     let words=line.split_whitespace();
-        for (_i,word)  in words.enumerate() {
-            if is_comment(&mut word.to_string()) == true {return LineType::Comment}
+        for (i,word)  in words.enumerate() {
+            if is_comment(&mut word.to_string()) == true && i==0 {return LineType::Comment}
         } 
     LineType::Error
+
+
 } 
 
 pub fn is_valid_line (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> bool {   
-    if is_opcode(opcodes, line).is_some() {return true}
-    if return_label(line).is_some() {return true}
-    if is_blank(line) {return true}
-    let words=line.split_whitespace();
-        for (_i,word)  in words.enumerate() {
-            if is_comment(&mut word.to_string()) == true {return true}
-        } 
-    false
+    if line_type(opcodes, line) == LineType::Error {return false}
+    true
 }
 
 pub fn is_blank (line: &mut String) -> bool {
