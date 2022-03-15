@@ -77,7 +77,6 @@ fn main() {
                 number: 1,
                 level: messages::MessageType::Error,
             });
-            println!("{}",msg_line);
         }
         let num_args = num_arguments(&mut oplist,&mut code_line);
         match num_args {
@@ -90,7 +89,7 @@ fn main() {
   
 
     // Test code to find labels
-   let labels: Vec<Label> = pass1.iter()//input_file.iter()
+   let mut labels: Vec<Label> = pass1.iter()//input_file.iter()
                                     .filter(|n| return_label(&n.input.clone()).is_some())
                                     .map(|n| -> Label {Label { program_counter: n.program_counter, 
                                         code: return_label(&n.input).unwrap_or("".to_string()) }})
@@ -107,7 +106,7 @@ fn main() {
             line_type: (line.line_type.clone()),
             opcode: (if line.line_type==LineType::Opcode {
                 add_registers(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter)
-            + add_arguments(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter).as_str()}
+            + add_arguments(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter,&mut labels).as_str()}
                 else 
                 {"".to_string()}) });
        
@@ -117,13 +116,28 @@ fn main() {
     //let test_line="SHLR SD ";
     //println!("Line is {}, added regs is {}",test_line,add_registers(&mut oplist, &mut test_line.to_string(),&mut msg_list,4));
 
+
+    for msg in msg_list.clone() {
+        let mut message = "".to_string();
+        match msg.level {
+            messages::MessageType::Info => message = "Info".to_string(),
+            messages::MessageType::Warning => message = "Warning".to_string(),
+            messages::MessageType::Error => message = "Error".to_string(),
+        };
+        message=message+" - "+ &msg.name;
+        println!("{}",message);
+    }
+
     println!("Number of errors is {}, number of warning is {}",
             number_errors(&mut msg_list),
             number_warnings(&mut msg_list));
 
-    
-    println!("{:?}",convert_argument("0x1234".to_string()));
-    println!("{:?}",convert_argument("787".to_string()));
+
+    for pass in pass2 {
+        println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input);
+    }
+
+   
 
 
 }

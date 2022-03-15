@@ -130,7 +130,7 @@ pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
                 Some(a) => opcodes.push(a),
             },
 
-            Err(e) => println!("Error parsing opcode file: {:?}", e),
+            Err(e) => println!("Failed parsing opcode file: {:?}", e),
         }
     }
     opcodes

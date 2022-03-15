@@ -1,7 +1,7 @@
-dummy //test
+//test
 // test msg
 BEGIN:
-SETR A 0x0005
+SETR A 1234
 SETR B 0x0010
 SETR C 0x1111
 OR B C

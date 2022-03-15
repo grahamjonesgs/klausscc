@@ -13,6 +13,13 @@ pub fn return_label (line: &String) -> Option<String> {
     }
     None
 }
+pub fn return_label_value(line: &String,labels: &mut Vec<Label>) -> Option<u32> {
+    for label in labels {
+        if label.code==line.as_str() {return Some(label.program_counter)}
+    }
+    None
+}
+
 
 pub fn is_opcode (opcodes: &mut Vec<Opcode>,line: &mut String) -> Option<String> {  
     for opcode in opcodes {
@@ -111,7 +118,7 @@ pub fn map_reg_to_hex(input: String) -> String {
 }
 
 // Returns the hex code operand from the line, adding regiter values
-pub fn add_registers (opcodes: & mut Vec<files::Opcode>,line: &mut String,msg_list: &mut Vec<Message>,line_number: u32) -> String {
+pub fn add_registers (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mut Vec<Message>,line_number: u32) -> String {
     let num_registers=num_registers(opcodes, line).unwrap_or(0);
     //println!("Num reg {}",num_registers);
     
@@ -127,8 +134,7 @@ pub fn add_registers (opcodes: & mut Vec<files::Opcode>,line: &mut String,msg_li
     //println!("Opcode is now *{}*, length {}",opcode_found,opcode_found.len());
 
     if opcode_found.len()!=4 || opcode_found.find("X").is_some(){
-        let msg_line = format!("Warning incorrect register defintion - line {}, \"{}\"",line_number,line);
-        println!("{}",msg_line);
+        let msg_line = format!("Incorrect register defintion - line {}, \"{}\"",line_number,line);
         msg_list.push(Message {
             name: msg_line.clone(),
             number: 1,
@@ -139,7 +145,7 @@ pub fn add_registers (opcodes: & mut Vec<files::Opcode>,line: &mut String,msg_li
     opcode_found
 }
 // Returns the hex code argument from the line
-pub fn add_arguments (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mut Vec<Message>,line_number: u32,labels: Vec<Label>) -> String {
+pub fn add_arguments (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mut Vec<Message>,line_number: u32,labels: &mut Vec<Label>) -> String {
     let num_registers=num_registers(opcodes, line).unwrap_or(0);
     let num_arguments=num_arguments(opcodes, line).unwrap_or(0);
     let mut arguments="".to_string();
@@ -147,14 +153,13 @@ pub fn add_arguments (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mu
     let words=line.split_whitespace();
     for (i,word)  in words.enumerate() {
         if i==num_registers as usize + 1 && num_arguments==1
-            {arguments=arguments+&convert_argument(word.to_string()).unwrap_or("".to_string())}
+            {arguments=arguments+&convert_argument(word.to_string(),msg_list,line_number,labels).unwrap_or("".to_string())}
         if i==num_registers as usize + 2 && num_arguments==2
-            {arguments=arguments+&convert_argument(word.to_string()).unwrap_or("".to_string())}
+            {arguments=arguments+&convert_argument(word.to_string(),msg_list,line_number,labels).unwrap_or("".to_string())}
     } 
 
     if arguments.len()!=4*num_arguments as usize {
-        let msg_line = format!("Warning incorrect argument defintion - line {}, \"{}\"",line_number,line);
-        println!("{}",msg_line);
+        let msg_line = format!("Incorrect argument defintion - line {}, \"{}\"",line_number,line);
         msg_list.push(Message {
             name: msg_line.clone(),
             number: 1,
@@ -164,7 +169,15 @@ pub fn add_arguments (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mu
     arguments
 }
 
-pub fn convert_argument(argument: String) -> Option<String> {
+pub fn convert_argument(argument: String,msg_list: &mut Vec<Message>,line_number: u32,labels: &mut Vec<Label>) -> Option<String> {
+    
+    if return_label(&argument).is_some() {
+        match return_label_value(&argument, labels) {
+            Some(n) => return Some(format!("{:04X}",n)),
+            None => return None,
+        };
+    }
+    
     if argument.len()==6 {
         let _temp=argument[0..2].to_string();
         if &argument[0..2]=="0x" {

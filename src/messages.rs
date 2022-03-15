@@ -1,5 +1,6 @@
 #[derive(Debug)]
 #[derive(PartialEq)]
+#[derive(Clone)]
 pub enum MessageType {
     Error,
     Warning,
@@ -7,6 +8,7 @@ pub enum MessageType {
 }
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct Message {
     pub name: String,
     pub number: u32,
