@@ -79,7 +79,7 @@ fn main() {
             });
             println!("{}",msg_line);
         }
-        let num_args = num_operands(&mut oplist,&mut code_line);
+        let num_args = num_arguments(&mut oplist,&mut code_line);
         match num_args {
             Some(p) => {program_counter=program_counter+p+1}
             None => {}
@@ -102,19 +102,20 @@ fn main() {
     for mut line  in pass1 {
         pass2.push (Pass2 { 
             input: line.input.clone(),
-            line_counter: (line.program_counter),
+            line_counter: (line.line_counter),
             program_counter: (line.program_counter),
             line_type: (line.line_type.clone()),
             opcode: (if line.line_type==LineType::Opcode {
-                return_opcode(&mut oplist, &mut line.input)} 
+                add_registers(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter)
+            + add_arguments(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter).as_str()}
                 else 
                 {"".to_string()}) });
-       // println!("{:?} Line {}, PC {},{}",line.line_type,line.line_counter,line.program_counter,line.input)
+       
     }
     //println!("{:?}",pass2);
  
-    let test_line="SHLR SD ";
-    println!("Line is {}, added regs is {}",test_line,add_registers(&mut oplist, &mut test_line.to_string(),&mut msg_list,4));
+    //let test_line="SHLR SD ";
+    //println!("Line is {}, added regs is {}",test_line,add_registers(&mut oplist, &mut test_line.to_string(),&mut msg_list,4));
 
     println!("Number of errors is {}, number of warning is {}",
             number_errors(&mut msg_list),
