@@ -99,7 +99,7 @@ fn main() {
     //println!("Labels are {:?}",labels);
 
     let mut pass2: Vec<Pass2>= Vec::new();
-    for mut line  in pass1 {
+    for line  in pass1 {
         pass2.push (Pass2 { 
             input: line.input.clone(),
             line_counter: (line.line_counter),
@@ -120,5 +120,10 @@ fn main() {
     println!("Number of errors is {}, number of warning is {}",
             number_errors(&mut msg_list),
             number_warnings(&mut msg_list));
+
+    
+    println!("{:?}",convert_argument("0x1234".to_string()));
+    println!("{:?}",convert_argument("787".to_string()));
+
 
 }

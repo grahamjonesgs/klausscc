@@ -1,7 +1,7 @@
 use std::default;
 
 //use crate::messages;
-use crate::files::{self, LineType};
+use crate::files::*;
 use crate::messages::*;
 
 // Check if end of first word is colon
@@ -14,7 +14,7 @@ pub fn return_label (line: &String) -> Option<String> {
     None
 }
 
-pub fn is_opcode (opcodes: &mut Vec<files::Opcode>,line: &mut String) -> Option<String> {  
+pub fn is_opcode (opcodes: &mut Vec<Opcode>,line: &mut String) -> Option<String> {  
     for opcode in opcodes {
         let words=line.split_whitespace();
         for (i,word)  in words.enumerate() {
@@ -24,7 +24,7 @@ pub fn is_opcode (opcodes: &mut Vec<files::Opcode>,line: &mut String) -> Option<
     None
 }
   
-pub fn num_arguments (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> Option<u32> { 
+pub fn num_arguments (opcodes: & mut Vec<Opcode>,line: &mut String) -> Option<u32> { 
     for opcode in opcodes {
         let words=line.split_whitespace();
         for (i,word)  in words.enumerate() {
@@ -34,7 +34,7 @@ pub fn num_arguments (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> Op
     None
 }
 
-pub fn num_registers (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> Option<u32> {
+pub fn num_registers (opcodes: & mut Vec<Opcode>,line: &mut String) -> Option<u32> {
     for opcode in opcodes {
         let words=line.split_whitespace();
         for (i,word)  in words.enumerate() {
@@ -44,7 +44,7 @@ pub fn num_registers (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> Op
     None
 }
  
-pub fn line_type (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> LineType {  
+pub fn line_type (opcodes: & mut Vec<Opcode>,line: &mut String) -> LineType {  
     if return_label(line).is_some() {return LineType::Label};
     if is_opcode(opcodes, line).is_some() {return LineType::Opcode}
     if is_blank(line) {return LineType::Blank}
@@ -55,7 +55,7 @@ pub fn line_type (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> LineTy
     LineType::Error
 } 
 
-pub fn is_valid_line (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> bool {   
+pub fn is_valid_line (opcodes: & mut Vec<Opcode>,line: &mut String) -> bool {   
     if line_type(opcodes, line) == LineType::Error {return false}
     true
 }
@@ -81,7 +81,7 @@ pub fn is_comment(word: &mut String) -> bool {
     false
 }
 
-pub fn return_opcode(opcodes: & mut Vec<files::Opcode>,line: &mut String) -> String {
+pub fn return_opcode(opcodes: & mut Vec<Opcode>,line: &mut String) -> String {
     let num_operands=num_arguments(opcodes, line).unwrap_or(0);
 
     "rrr".to_string()
@@ -139,7 +139,7 @@ pub fn add_registers (opcodes: & mut Vec<files::Opcode>,line: &mut String,msg_li
     opcode_found
 }
 // Returns the hex code argument from the line
-pub fn add_arguments (opcodes: & mut Vec<files::Opcode>,line: &mut String,msg_list: &mut Vec<Message>,line_number: u32) -> String {
+pub fn add_arguments (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mut Vec<Message>,line_number: u32,labels: Vec<Label>) -> String {
     let num_registers=num_registers(opcodes, line).unwrap_or(0);
     let num_arguments=num_arguments(opcodes, line).unwrap_or(0);
     let mut arguments="".to_string();
@@ -147,9 +147,9 @@ pub fn add_arguments (opcodes: & mut Vec<files::Opcode>,line: &mut String,msg_li
     let words=line.split_whitespace();
     for (i,word)  in words.enumerate() {
         if i==num_registers as usize + 1 && num_arguments==1
-            {arguments=arguments+&word.to_string()}
+            {arguments=arguments+&convert_argument(word.to_string()).unwrap_or("".to_string())}
         if i==num_registers as usize + 2 && num_arguments==2
-            {arguments=arguments+&word.to_string()}
+            {arguments=arguments+&convert_argument(word.to_string()).unwrap_or("".to_string())}
     } 
 
     if arguments.len()!=4*num_arguments as usize {
@@ -162,6 +162,22 @@ pub fn add_arguments (opcodes: & mut Vec<files::Opcode>,line: &mut String,msg_li
         });
     }
     arguments
+}
+
+pub fn convert_argument(argument: String) -> Option<String> {
+    if argument.len()==6 {
+        let _temp=argument[0..2].to_string();
+        if &argument[0..2]=="0x" {
+            return Some(argument[2..].to_string())   // was hex so return
+        }
+    }
+    match argument.parse::<i32>() {
+        Ok(n) => if n<=65535 
+                    {return Some(format!("{:04X}",n).to_string())}
+                    else
+                    {return None},
+        Err(_e) => return None,
+      };
 }
 
 
