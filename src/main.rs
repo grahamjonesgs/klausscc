@@ -9,6 +9,7 @@ use helper::*;
 #[derive(Debug)]
 pub struct Pass1 {
     pub input: String,
+    pub line_counter: u32,
     pub program_counter: u32,
 }
 
@@ -50,13 +51,22 @@ fn main() {
 
     let mut pass1a: Vec<Pass1>= Vec::new();
     let mut program_counter: u32=0;
+    let mut input_line_count: u32=0;
 
-    for mut code_line in input_file {
+    for mut code_line in input_file.clone() {
         pass1a.push( Pass1 {
                     input: code_line.clone(),
+                    line_counter: input_line_count,
                     program_counter: program_counter});
-        if is_valid_line(&mut oplist, &mut code_line.clone()) == false {
-            println!("Found invalid line *{}*",code_line);
+        input_line_count=input_line_count+1;
+        if is_valid_line(&mut oplist, &mut code_line) == false {
+            let msg_line = format!("Syntax error found on line {} - {}",input_line_count,code_line);
+            msg_list.push(Message {
+                name: msg_line.clone(),
+                number: 1,
+                level: messages::MessageType::Error,
+            });
+            println!("{}",msg_line);
         }
         let num_args = num_operands(&mut oplist,&mut code_line);
         match num_args {
@@ -75,13 +85,15 @@ fn main() {
                                         code: return_label(&n.input).unwrap_or("".to_string()) }})
                                     .collect(); 
 
-    println!("Labels are {:?}",labels);
+    //println!("Labels are {:?}",labels);
 
+    for mut code_line in input_file {
+        println!("{:?}- {}",line_type(&mut oplist, &mut code_line),code_line)
+    }
 
-
-    //println!("Messages are: {:?}",msg_list);
-    //println!("Number of errors is {}, number of warning is {}",
-    //        number_errors(&mut msg_list),
-    //        number_warnings(&mut msg_list));
+ 
+    println!("Number of errors is {}, number of warning is {}",
+            number_errors(&mut msg_list),
+            number_warnings(&mut msg_list));
 
 }

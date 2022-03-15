@@ -1,5 +1,5 @@
 //use crate::messages;
-use crate::files;
+use crate::files::{self, LineType};
 
 // Check if end of first word is colon
 pub fn return_label (line: &String) -> Option<String> {
@@ -33,6 +33,17 @@ pub fn num_operands (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> Opt
     None
 }
  
+pub fn line_type (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> LineType {  
+    if return_label(line).is_some() {return LineType::Label};
+    if is_opcode(opcodes, line).is_some() {return LineType::Opcode}
+    if is_blank(line) {return LineType::Blank}
+    let words=line.split_whitespace();
+        for (_i,word)  in words.enumerate() {
+            if is_comment(&mut word.to_string()) == true {return LineType::Comment}
+        } 
+    LineType::Error
+} 
+
 pub fn is_valid_line (opcodes: & mut Vec<files::Opcode>,line: &mut String) -> bool {   
     if is_opcode(opcodes, line).is_some() {return true}
     if return_label(line).is_some() {return true}

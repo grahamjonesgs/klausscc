@@ -28,6 +28,15 @@ pub struct Label {
     pub code: String,
 }
 
+#[derive(Debug)]
+pub enum LineType {
+    Comment,
+    Blank,
+    Label,
+    Opcode,
+    Error,
+}
+
 impl fmt::Display for Opcode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}, regs {}, vars {} - {}", 
