@@ -28,13 +28,11 @@ fn main() {
 
     msg_list.push(Message {
         name: String::from("Starting..."),
-        number: 1,
+        line_number: 0,
         level: messages::MessageType::Info,
     });
 
-
-    //println!("msg is now {:?}",msg_list);
-    let matches = App::new("Klauss Assembler")
+    let _matches = App::new("Klauss Assembler")
         .version("0.0.1")
         .author("Graham Jones")
         .about("Assembler for FPGA_CPU")
@@ -50,7 +48,7 @@ fn main() {
                  .help("Dummy number"))
         .get_matches();
 
-    let myfile = matches.value_of("file").unwrap_or("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
+    //let myfile = matches.value_of("file").unwrap_or("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
    
     // Parse the Opcode file
     let mut oplist = parse_opcodes("src/opcode_select.vh");
@@ -71,10 +69,10 @@ fn main() {
                     line_type: line_type(&mut oplist, &mut code_line)});
         input_line_count=input_line_count+1;
         if is_valid_line(&mut oplist, &mut code_line) == false {
-            let msg_line = format!("Syntax error found on line {} - {}",input_line_count,code_line);
+            let msg_line = format!("Syntax error found on line {}",code_line);
             msg_list.push(Message {
                 name: msg_line.clone(),
-                number: 1,
+                line_number: input_line_count,
                 level: messages::MessageType::Error,
             });
         }
@@ -85,17 +83,13 @@ fn main() {
         }
         
     }
-    //println!("Pass1a is {:?}",pass1a);
-  
-
-    // Test code to find labels
+ 
    let mut labels: Vec<Label> = pass1.iter()//input_file.iter()
                                     .filter(|n| return_label(&n.input.clone()).is_some())
                                     .map(|n| -> Label {Label { program_counter: n.program_counter, 
                                         code: return_label(&n.input).unwrap_or("".to_string()) }})
                                     .collect(); 
 
-    //println!("Labels are {:?}",labels);
 
     let mut pass2: Vec<Pass2>= Vec::new();
     for line  in pass1 {
@@ -111,33 +105,15 @@ fn main() {
                 {"".to_string()}) });
        
     }
-    //println!("{:?}",pass2);
- 
-    //let test_line="SHLR SD ";
-    //println!("Line is {}, added regs is {}",test_line,add_registers(&mut oplist, &mut test_line.to_string(),&mut msg_list,4));
 
 
-    for msg in msg_list.clone() {
-        let mut message = "".to_string();
-        match msg.level {
-            messages::MessageType::Info => message = "Info".to_string(),
-            messages::MessageType::Warning => message = "Warning".to_string(),
-            messages::MessageType::Error => message = "Error".to_string(),
-        };
-        message=message+" - "+ &msg.name;
-        println!("{}",message);
-    }
-
+    print_messages(&mut msg_list);
     println!("Number of errors is {}, number of warning is {}",
             number_errors(&mut msg_list),
             number_warnings(&mut msg_list));
 
-
-    for pass in pass2 {
-        println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input);
-    }
-
-   
-
+    //for pass in pass2 {
+    //    println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input);
+    //}
 
 }

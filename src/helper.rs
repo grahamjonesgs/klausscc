@@ -1,10 +1,8 @@
-use std::default;
-
 //use crate::messages;
 use crate::files::*;
 use crate::messages::*;
 
-// Check if end of first word is colon
+// Check if end of first word is colon if so return label
 pub fn return_label (line: &String) -> Option<String> {
     let words=line.split_whitespace();
     for (i,word)  in words.enumerate() {
@@ -13,6 +11,8 @@ pub fn return_label (line: &String) -> Option<String> {
     }
     None
 }
+
+// Return option of progam counter for label if it exists. 
 pub fn return_label_value(line: &String,labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
         if label.code==line.as_str() {return Some(label.program_counter)}
@@ -20,7 +20,7 @@ pub fn return_label_value(line: &String,labels: &mut Vec<Label>) -> Option<u32> 
     None
 }
 
-
+// Checks if first word is opcode and if so returns opcode hex value
 pub fn is_opcode (opcodes: &mut Vec<Opcode>,line: &mut String) -> Option<String> {  
     for opcode in opcodes {
         let words=line.split_whitespace();
@@ -31,6 +31,7 @@ pub fn is_opcode (opcodes: &mut Vec<Opcode>,line: &mut String) -> Option<String>
     None
 }
   
+// Returns option of number of arguments for opcode
 pub fn num_arguments (opcodes: & mut Vec<Opcode>,line: &mut String) -> Option<u32> { 
     for opcode in opcodes {
         let words=line.split_whitespace();
@@ -41,6 +42,7 @@ pub fn num_arguments (opcodes: & mut Vec<Opcode>,line: &mut String) -> Option<u3
     None
 }
 
+// Returns option of number of registers for opcode
 pub fn num_registers (opcodes: & mut Vec<Opcode>,line: &mut String) -> Option<u32> {
     for opcode in opcodes {
         let words=line.split_whitespace();
@@ -51,6 +53,7 @@ pub fn num_registers (opcodes: & mut Vec<Opcode>,line: &mut String) -> Option<u3
     None
 }
  
+// Returns emum of type of line
 pub fn line_type (opcodes: & mut Vec<Opcode>,line: &mut String) -> LineType {  
     if return_label(line).is_some() {return LineType::Label};
     if is_opcode(opcodes, line).is_some() {return LineType::Opcode}
@@ -62,11 +65,13 @@ pub fn line_type (opcodes: & mut Vec<Opcode>,line: &mut String) -> LineType {
     LineType::Error
 } 
 
+//Returns true if line is not error
 pub fn is_valid_line (opcodes: & mut Vec<Opcode>,line: &mut String) -> bool {   
     if line_type(opcodes, line) == LineType::Error {return false}
     true
 }
 
+// Returns true if line if just whitespace
 pub fn is_blank (line: &mut String) -> bool {
     let words=line.split_whitespace();
 
@@ -76,6 +81,7 @@ pub fn is_blank (line: &mut String) -> bool {
     true
 }
 
+// Returns true is line is just comment
 pub fn is_comment(word: &mut String) -> bool {
     if word.len() < 2 {return false}
     let bytes = word.as_bytes();
@@ -86,12 +92,6 @@ pub fn is_comment(word: &mut String) -> bool {
         if item == b'/' && i==1 && found_first==true {return true}
     }
     false
-}
-
-pub fn return_opcode(opcodes: & mut Vec<Opcode>,line: &mut String) -> String {
-    let num_operands=num_arguments(opcodes, line).unwrap_or(0);
-
-    "rrr".to_string()
 }
 
 // map the reigter to the hex code for the opcode
@@ -123,21 +123,18 @@ pub fn add_registers (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mu
     //println!("Num reg {}",num_registers);
     
     let mut opcode_found=is_opcode(opcodes, line).unwrap_or("xxxx".to_string());
-    //println!("Opcode is {:?}",opcode_found.clone());
     opcode_found=opcode_found[..(4-num_registers) as usize].to_string();
-    //println!("Opcode is now *{}*, length {}",opcode_found,opcode_found.len());
     let words=line.split_whitespace();
     for (i,word)  in words.enumerate() {
         if (i==2 && num_registers==2) || (i==1 && (num_registers==2||num_registers==1))
             {opcode_found=opcode_found+&map_reg_to_hex(word.to_string())}
     } 
-    //println!("Opcode is now *{}*, length {}",opcode_found,opcode_found.len());
 
     if opcode_found.len()!=4 || opcode_found.find("X").is_some(){
         let msg_line = format!("Incorrect register defintion - line {}, \"{}\"",line_number,line);
         msg_list.push(Message {
             name: msg_line.clone(),
-            number: 1,
+            line_number: line_number,
             level: MessageType::Warning,
         });
         
@@ -162,19 +159,27 @@ pub fn add_arguments (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mu
         let msg_line = format!("Incorrect argument defintion - line {}, \"{}\"",line_number,line);
         msg_list.push(Message {
             name: msg_line.clone(),
-            number: 1,
-            level: MessageType::Warning,
+            line_number: line_number,
+            level: MessageType::Error,
         });
     }
     arguments
 }
 
+// Converts argument to label value or converts to Hex
 pub fn convert_argument(argument: String,msg_list: &mut Vec<Message>,line_number: u32,labels: &mut Vec<Label>) -> Option<String> {
     
     if return_label(&argument).is_some() {
         match return_label_value(&argument, labels) {
             Some(n) => return Some(format!("{:04X}",n)),
-            None => return None,
+            None => {
+                let msg_line = format!("Label {} not found - line {}",argument,line_number);
+                msg_list.push(Message {
+                    name: msg_line.clone(),
+                    line_number: line_number,
+                    level: MessageType::Warning,
+                });
+                return None},
         };
     }
     
@@ -188,7 +193,13 @@ pub fn convert_argument(argument: String,msg_list: &mut Vec<Message>,line_number
         Ok(n) => if n<=65535 
                     {return Some(format!("{:04X}",n).to_string())}
                     else
-                    {return None},
+                    {let msg_line = format!("Decimal value out {} of bounds",n);
+                    msg_list.push(Message {
+                        name: msg_line.clone(),
+                        line_number: line_number,
+                        level: MessageType::Warning,
+                    });
+                    return None},
         Err(_e) => return None,
       };
 }

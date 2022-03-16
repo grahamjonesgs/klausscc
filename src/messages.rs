@@ -11,14 +11,14 @@ pub enum MessageType {
 #[derive(Clone)]
 pub struct Message {
     pub name: String,
-    pub number: u32,
+    pub line_number: u32,
     pub level: MessageType,
 }
 
-pub fn add_message(name: &str, msg_type: MessageType, number: u32, msgs: &mut Vec<Message>) {
+pub fn add_message(name: &str, msg_type: MessageType, line_number: u32, msgs: &mut Vec<Message>) {
     let new_message = Message {
         name: String::from(name),
-        number: number,
+        line_number: line_number,
         level: msg_type,
     };
     msgs.push(new_message);
@@ -38,4 +38,19 @@ pub fn number_warnings(msgs: &mut Vec<Message>) -> usize {
                     filter(|&x| x.level == MessageType::Warning).
                     count();
     errors
+}
+
+pub fn print_messages(msgs: &mut Vec<Message>) {
+
+for msg in msgs.clone() {
+    let mut message;
+    match msg.level {
+        MessageType::Info => message = "I".to_string(),
+        MessageType::Warning => message = "W".to_string(),
+        MessageType::Error => message = "E".to_string(),
+    };
+    message=message+". Line " +&msg.line_number.to_string() + " " + &msg.name;
+    println!("{}",message);
+    }
+    
 }
