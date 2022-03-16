@@ -5,6 +5,7 @@ mod messages;
 use files::*;
 use messages::*;
 use helper::*;
+//use inflector::cases::uppercase::to_upper_case;
 
 #[derive(Debug)]
 pub struct Pass1 {
@@ -99,8 +100,8 @@ fn main() {
             program_counter: (line.program_counter),
             line_type: (line.line_type.clone()),
             opcode: (if line.line_type==LineType::Opcode {
-                add_registers(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter)
-            + add_arguments(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter,&mut labels).as_str()}
+                add_registers(&mut oplist, &mut line.input.to_string().to_uppercase(),&mut msg_list,line.line_counter)
+            + add_arguments(&mut oplist, &mut line.input.to_string().to_uppercase(),&mut msg_list,line.line_counter,&mut labels).as_str()}
                 else 
                 {"".to_string()}) });
        
@@ -112,8 +113,8 @@ fn main() {
             number_errors(&mut msg_list),
             number_warnings(&mut msg_list));
 
-    //for pass in pass2 {
-    //    println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input);
-    //}
+    for pass in pass2 {
+        println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input);
+    }
 
 }

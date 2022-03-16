@@ -25,7 +25,7 @@ pub fn is_opcode (opcodes: &mut Vec<Opcode>,line: &mut String) -> Option<String>
     for opcode in opcodes {
         let words=line.split_whitespace();
         for (i,word)  in words.enumerate() {
-            if i==0 && word==opcode.name {return Some(opcode.opcode.to_string())}
+            if i==0 && word.to_uppercase()==opcode.name {return Some(opcode.opcode.to_string().to_uppercase())}
         }
     }
     None
@@ -96,7 +96,7 @@ pub fn is_comment(word: &mut String) -> bool {
 
 // map the reigter to the hex code for the opcode
 pub fn map_reg_to_hex(input: String) -> String {
-    match input.as_str() {
+    match input.to_uppercase().as_str() {
         "A" => {"0".to_string()}
         "B" => {"1".to_string()}
         "C" => {"2".to_string()}
@@ -115,6 +115,15 @@ pub fn map_reg_to_hex(input: String) -> String {
         "P" => {"F".to_string()}
         _ => {"X".to_string()}
     }
+}
+
+pub fn is_valid_hex(input: &mut String) -> bool {
+    for char in input.to_uppercase().chars(){
+        if char<'0' {return false};
+        if char>'F' {return false};
+        if char>'9' && char <'A' {return false};
+    }
+    true
 }
 
 // Returns the hex code operand from the line, adding regiter values
@@ -186,9 +195,14 @@ pub fn convert_argument(argument: String,msg_list: &mut Vec<Message>,line_number
     if argument.len()==6 {
         let _temp=argument[0..2].to_string();
         if &argument[0..2]=="0x" {
-            return Some(argument[2..].to_string())   // was hex so return
+            if is_valid_hex(&mut argument[2..].to_string()) {
+                return Some(argument[2..].to_string().to_uppercase()) }  // was hex so return
+            else {
+                return None
+            }
         }
     }
+
     match argument.parse::<i32>() {
         Ok(n) => if n<=65535 
                     {return Some(format!("{:04X}",n).to_string())}
