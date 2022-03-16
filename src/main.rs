@@ -16,6 +16,7 @@ pub struct Pass1 {
 }
 
 #[derive(Debug)]
+#[derive(Clone)]
 pub struct Pass2 {
     pub input: String,
     pub line_counter: u32,
@@ -113,8 +114,14 @@ fn main() {
             number_errors(&mut msg_list),
             number_warnings(&mut msg_list));
 
-    for pass in pass2 {
+    for pass in pass2.clone() {
         println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input);
     }
+    println!("");
+
+    for pass in pass2 {
+        print!("{} ",pass.opcode);
+    }
+    println!("");
 
 }
