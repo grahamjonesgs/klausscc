@@ -23,7 +23,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-n 20","-f testout.txt"],
+            "args": ["-n 20","-fsrc/opcode_select.vh"],
             "cwd": "${workspaceFolder}"
         },
         {

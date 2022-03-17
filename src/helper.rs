@@ -130,7 +130,7 @@ pub fn is_valid_hex(input: &mut String) -> bool {
 pub fn add_registers (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mut Vec<Message>,line_number: u32) -> String {
     let num_registers=num_registers(opcodes, line).unwrap_or(0);
     //println!("Num reg {}",num_registers);
-    
+     
     let mut opcode_found=is_opcode(opcodes, line).unwrap_or("xxxx".to_string());
     opcode_found=opcode_found[..(4-num_registers) as usize].to_string();
     let words=line.split_whitespace();

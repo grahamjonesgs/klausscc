@@ -34,7 +34,7 @@ fn main() {
         level: messages::MessageType::Info,
     });
 
-    let _matches = App::new("Klauss Assembler")
+    let matches = App::new("Klauss Assembler")
         .version("0.0.1")
         .author("Graham Jones")
         .about("Assembler for FPGA_CPU")
@@ -50,10 +50,11 @@ fn main() {
                  .help("Dummy number"))
         .get_matches();
 
-    //let myfile = matches.value_of("file").unwrap_or("/Users/graham/Documents/src/rust/opttest/src/opcode_select.vh");
+    let myfile = matches.value_of("file").unwrap_or("src/opcode_select.vh");
    
     // Parse the Opcode file
-    let mut oplist = parse_opcodes("src/opcode_select.vh");
+    //let mut oplist = parse_opcodes("src/opcode_select.vh");
+    let mut oplist = parse_opcodes(myfile);
   
     
     let input_file = read_file_to_vec(&mut msg_list,"src/jmptest.kla");

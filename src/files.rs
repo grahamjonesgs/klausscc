@@ -134,10 +134,16 @@ pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
         }
     }
     opcodes
-}
+} 
 
 pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<Path>) -> Vec<String> {
-    let file = File::open(filename).expect("No such input file");
+    //let file = File::open(filename).expect("No such input file");
+    let rfile = File::open(filename);
+    let file: File;
+    match rfile {
+        Err(e) => panic!(),
+        Ok(f) => file=f,
+    }
     let buf = BufReader::new(file);
     let mut lines: Vec<String> = Vec::new();
 
@@ -152,3 +158,5 @@ pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<P
     }
     lines
 }
+
+
