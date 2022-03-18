@@ -194,7 +194,7 @@ pub fn convert_argument(argument: String,msg_list: &mut Vec<Message>,line_number
     
     if argument.len()==6 {
         let _temp=argument[0..2].to_string();
-        if &argument[0..2]=="0x" {
+        if &argument[0..2]=="0x" || &argument[0..2]=="0X"{
             if is_valid_hex(&mut argument[2..].to_string()) {
                 return Some(argument[2..].to_string().to_uppercase()) }  // was hex so return
             else {

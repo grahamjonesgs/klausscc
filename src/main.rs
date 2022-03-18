@@ -42,15 +42,12 @@ fn main() {
                  .short("c")
                  .long("opcode")
                  .takes_value(true)
+                 .required(true)
                  .help("Opcode source file from VHDL"))
-        .arg(Arg::with_name("num")
-                 .short("n")
-                 .long("number")
-                 .takes_value(true)
-                 .help("Dummy number"))
         .arg(Arg::with_name("input")
                  .short("i")
                  .long("input")
+                 .required(true)
                  .takes_value(true)
                  .help("Input file to be assembled"))
         .arg(Arg::with_name("output")
@@ -70,22 +67,28 @@ fn main() {
                  .help("Set if verbose"))
         .get_matches();
 
-    let opcode_file = matches.value_of("opcode_file").unwrap_or("src/opcode_select.vh");
- 
-    let input_file = matches.value_of("input").unwrap_or("src/jmptest.kla");
+    let opcode_file_name = matches.value_of("opcode_file").unwrap_or("opcode_select.vh").replace(" ", "");
+    let input_file_name = matches.value_of("input").unwrap_or("").replace(" ", "");
+    let binary_file_name = matches.value_of("bitcode")
+                .unwrap_or(&filename_stem(input_file_name.clone()))
+                .replace(" ", "")+".kbt";
+    let output_file_name = matches.value_of("output")
+                .unwrap_or(&filename_stem(input_file_name.clone()))
+                .replace(" ", "")+".code";
    
+
     // Parse the Opcode file
-    let opt_oplist = parse_opcodes(opcode_file);
+    let opt_oplist = parse_opcodes(opcode_file_name.clone());
     if opt_oplist.is_none() {
-        println!("Unable to open opcode file {:?}",input_file);
+        println!("Unable to open opcode file {:?}",opcode_file_name);
         std::process::exit(1);
     }
     let mut oplist=opt_oplist.unwrap();
 
     // Parse the input file
-    let input_list = read_file_to_vec(&mut msg_list,input_file);
+    let input_list = read_file_to_vec(&mut msg_list,input_file_name.clone());
     if input_list.is_none() {
-        println!("Unable to open input file {:?}",input_file);
+        println!("Unable to open input file {:?}",input_file_name);
         std::process::exit(1);
     }
 
@@ -144,14 +147,25 @@ fn main() {
             number_errors(&mut msg_list),
             number_warnings(&mut msg_list));
 
+
+
     for pass in pass2.clone() {
-        println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input);
+        if pass.line_type==LineType::Opcode {
+        println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input)}
+        else {
+        println!("     {} // {}",pass.opcode,pass.input)}
     }
     println!("");
 
-    for pass in pass2 {
+    for pass in pass2.clone() {
         print!("{} ",pass.opcode);
     }
     println!("");
+
+    if !output_binary(output_file_name,pass2) {
+        println!("Unable to write to bincode file {:?}",binary_file_name);
+        std::process::exit(1);
+    }
+
 
 }

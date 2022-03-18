@@ -1,4 +1,4 @@
-use crate::messages;
+use crate::{messages, Pass2};
 
 use std::{
     fs::File,
@@ -157,4 +157,23 @@ pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<P
     Some(lines)
 }
 
+pub fn filename_stem (full_name: String) -> String {
+    let dot_pos=full_name.find(".");
+    if dot_pos.is_none() {return  full_name;}
+    full_name[..dot_pos.unwrap_or(0)].to_string()
+}
+
+pub fn output_binary (filename: impl AsRef<Path>, pass2: Vec<Pass2>) -> bool {
+    let rfile = File::create(filename);
+    if rfile.is_err() {return false}
+
+    let mut file=rfile.unwrap();
+    if file.write(b"S").is_err() {return false};
+    for pass in pass2 {
+        if file.write(pass.opcode.as_bytes()).is_err() {return false};
+    }
+    if file.write(b"X").is_err() {return false};
+
+    true
+}
 

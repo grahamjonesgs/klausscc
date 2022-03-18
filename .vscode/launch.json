@@ -23,7 +23,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-n 20","-csrc/opcode_select.vh"],
+            "args": ["-c src/opcode_select.vh","-i src/jmptest.kla"],
             "cwd": "${workspaceFolder}"
         },
         {
