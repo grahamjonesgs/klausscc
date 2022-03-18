@@ -38,33 +38,62 @@ fn main() {
         .version("0.0.1")
         .author("Graham Jones")
         .about("Assembler for FPGA_CPU")
-        .arg(Arg::with_name("file")
-                 .short("f")
-                 .long("file")
+        .arg(Arg::with_name("opcode_file")
+                 .short("c")
+                 .long("opcode")
                  .takes_value(true)
-                 .help("Opcode source file"))
+                 .help("Opcode source file from VHDL"))
         .arg(Arg::with_name("num")
                  .short("n")
                  .long("number")
                  .takes_value(true)
                  .help("Dummy number"))
+        .arg(Arg::with_name("input")
+                 .short("i")
+                 .long("input")
+                 .takes_value(true)
+                 .help("Input file to be assembled"))
+        .arg(Arg::with_name("output")
+                 .short("o")
+                 .long("output")
+                 .takes_value(true)
+                 .help("Output info file fomr assembled code"))
+        .arg(Arg::with_name("bitcode")
+                 .short("b")
+                 .long("bitcode")
+                 .takes_value(true)
+                 .help("Output bitcode file fomr assembled code"))
+        .arg(Arg::with_name("verbose")
+                 .short("v")
+                 .long("verbose")
+                 .takes_value(false)
+                 .help("Set if verbose"))
         .get_matches();
 
-    let myfile = matches.value_of("file").unwrap_or("src/opcode_select.vh");
+    let opcode_file = matches.value_of("opcode_file").unwrap_or("src/opcode_select.vh");
+ 
+    let input_file = matches.value_of("input").unwrap_or("src/jmptest.kla");
    
     // Parse the Opcode file
-    //let mut oplist = parse_opcodes("src/opcode_select.vh");
-    let mut oplist = parse_opcodes(myfile);
-  
-    
-    let input_file = read_file_to_vec(&mut msg_list,"src/jmptest.kla");
-    
+    let opt_oplist = parse_opcodes(opcode_file);
+    if opt_oplist.is_none() {
+        println!("Unable to open opcode file {:?}",input_file);
+        std::process::exit(1);
+    }
+    let mut oplist=opt_oplist.unwrap();
+
+    // Parse the input file
+    let input_list = read_file_to_vec(&mut msg_list,input_file);
+    if input_list.is_none() {
+        println!("Unable to open input file {:?}",input_file);
+        std::process::exit(1);
+    }
 
     let mut pass1: Vec<Pass1>= Vec::new();
     let mut program_counter: u32=0;
     let mut input_line_count: u32=0;
 
-    for mut code_line in input_file.clone() {
+    for mut code_line in input_list.unwrap() {
         pass1.push( Pass1 {
                     input: code_line.clone(),
                     line_counter: input_line_count,
@@ -87,7 +116,7 @@ fn main() {
         
     }
  
-   let mut labels: Vec<Label> = pass1.iter()//input_file.iter()
+   let mut labels: Vec<Label> = pass1.iter()
                                     .filter(|n| return_label(&n.input.clone()).is_some())
                                     .map(|n| -> Label {Label { program_counter: n.program_counter, 
                                         code: return_label(&n.input).unwrap_or("".to_string()) }})

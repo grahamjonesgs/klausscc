@@ -117,11 +117,12 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 }
 
 // Parse given filename to Vec of Opcode.
-pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
-    let file = File::open(filename).expect("No such opcode file");
-    let buf = BufReader::new(file);
-    let mut opcodes: Vec<Opcode> = Vec::new();
+pub fn parse_opcodes(filename: impl AsRef<Path>) -> Option<Vec<Opcode>> {
+    let file = File::open(filename);
+    if file.is_err() {return None}
 
+    let buf = BufReader::new(file.unwrap());
+    let mut opcodes: Vec<Opcode> = Vec::new();
 
     for line in buf.lines() {
         match line {
@@ -133,18 +134,15 @@ pub fn parse_opcodes(filename: impl AsRef<Path>) -> Vec<Opcode> {
             Err(e) => println!("Failed parsing opcode file: {:?}", e),
         }
     }
-    opcodes
+    Some(opcodes)
 } 
 
-pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<Path>) -> Vec<String> {
+pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<Path>) -> Option<Vec<String>> {
     //let file = File::open(filename).expect("No such input file");
-    let rfile = File::open(filename);
-    let file: File;
-    match rfile {
-        Err(e) => panic!(),
-        Ok(f) => file=f,
-    }
-    let buf = BufReader::new(file);
+    let file = File::open(filename);
+    if file.is_err() {return None}
+   
+    let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
 
     messages::add_message("Starting opcode import", messages::MessageType::Info,2,msgs);
@@ -156,7 +154,7 @@ pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<P
             Err(e) => println!("Error parsing opcode file: {:?}", e),
         }
     }
-    lines
+    Some(lines)
 }
 
 

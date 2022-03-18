@@ -23,7 +23,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-n 20","-fsrc/opcode_select.vh"],
+            "args": ["-n 20","-csrc/opcode_select.vh"],
             "cwd": "${workspaceFolder}"
         },
         {
