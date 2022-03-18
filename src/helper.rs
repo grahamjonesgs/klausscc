@@ -131,7 +131,7 @@ pub fn add_registers (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mu
     let num_registers=num_registers(opcodes, line).unwrap_or(0);
     //println!("Num reg {}",num_registers);
      
-    let mut opcode_found=is_opcode(opcodes, line).unwrap_or("xxxx".to_string());
+    let mut opcode_found=is_opcode(opcodes, &mut line.to_uppercase()).unwrap_or("xxxx".to_string());
     opcode_found=opcode_found[..(4-num_registers) as usize].to_string();
     let words=line.split_whitespace();
     for (i,word)  in words.enumerate() {
@@ -159,9 +159,9 @@ pub fn add_arguments (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mu
     let words=line.split_whitespace();
     for (i,word)  in words.enumerate() {
         if i==num_registers as usize + 1 && num_arguments==1
-            {arguments=arguments+&convert_argument(word.to_string(),msg_list,line_number,labels).unwrap_or("".to_string())}
+            {arguments=arguments+&convert_argument(word.to_string().to_uppercase(),msg_list,line_number,labels).unwrap_or("".to_string())}
         if i==num_registers as usize + 2 && num_arguments==2
-            {arguments=arguments+&convert_argument(word.to_string(),msg_list,line_number,labels).unwrap_or("".to_string())}
+            {arguments=arguments+&convert_argument(word.to_string().to_uppercase(),msg_list,line_number,labels).unwrap_or("".to_string())}
     } 
 
     if arguments.len()!=4*num_arguments as usize {

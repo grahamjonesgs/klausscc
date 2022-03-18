@@ -134,8 +134,8 @@ fn main() {
             program_counter: (line.program_counter),
             line_type: (line.line_type.clone()),
             opcode: (if line.line_type==LineType::Opcode {
-                add_registers(&mut oplist, &mut line.input.to_string().to_uppercase(),&mut msg_list,line.line_counter)
-            + add_arguments(&mut oplist, &mut line.input.to_string().to_uppercase(),&mut msg_list,line.line_counter,&mut labels).as_str()}
+                add_registers(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter)
+            + add_arguments(&mut oplist, &mut line.input.to_string(),&mut msg_list,line.line_counter,&mut labels).as_str()}
                 else 
                 {"".to_string()}) });
        
