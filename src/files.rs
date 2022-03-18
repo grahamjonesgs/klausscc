@@ -163,7 +163,7 @@ pub fn filename_stem (full_name: String) -> String {
     full_name[..dot_pos.unwrap_or(0)].to_string()
 }
 
-pub fn output_binary (filename: impl AsRef<Path>, pass2: Vec<Pass2>) -> bool {
+pub fn output_binary (filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let rfile = File::create(filename);
     if rfile.is_err() {return false}
 
@@ -176,4 +176,24 @@ pub fn output_binary (filename: impl AsRef<Path>, pass2: Vec<Pass2>) -> bool {
 
     true
 }
+
+pub fn output_code (filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
+    let rfile = File::create(filename);
+    if rfile.is_err() {return false}
+    let mut out_line: String;
+    let mut file=rfile.unwrap();
+ 
+    for pass in pass2 {
+        if pass.line_type==LineType::Opcode {
+            out_line = format!("{:04X} {:<8} -- {}\n",pass.program_counter,pass.opcode,pass.input);}
+        else  if pass.line_type==LineType::Error  {
+            out_line=format!("Error         -- {}\n",pass.input);}
+        else {
+            out_line=format!("              -- {}\n",pass.input);} 
+        if file.write(&out_line.as_bytes()).is_err() {return false};
+    }
+    true
+}
+
+
 

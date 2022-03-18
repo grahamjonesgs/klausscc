@@ -148,21 +148,13 @@ fn main() {
             number_warnings(&mut msg_list));
 
 
-
-    for pass in pass2.clone() {
-        if pass.line_type==LineType::Opcode {
-        println!("{:04X} {} // {}",pass.program_counter,pass.opcode,pass.input)}
-        else {
-        println!("     {} // {}",pass.opcode,pass.input)}
+    if !output_code(output_file_name.clone(),&mut pass2) {
+        println!("Unable to write to code file {:?}",output_file_name);
+        std::process::exit(1);
     }
-    println!("");
 
-    for pass in pass2.clone() {
-        print!("{} ",pass.opcode);
-    }
-    println!("");
 
-    if !output_binary(output_file_name,pass2) {
+    if !output_binary(binary_file_name.clone(),&mut pass2) {
         println!("Unable to write to bincode file {:?}",binary_file_name);
         std::process::exit(1);
     }
