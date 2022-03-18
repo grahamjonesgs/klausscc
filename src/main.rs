@@ -5,7 +5,8 @@ mod messages;
 use files::*;
 use messages::*;
 use helper::*;
-//use inflector::cases::uppercase::to_upper_case;
+
+
 
 #[derive(Debug)]
 pub struct Pass1 {
@@ -26,6 +27,12 @@ pub struct Pass2 {
 }
 
 fn main() {
+
+    let raw = "0xf";
+    let without_prefix = raw.trim_start_matches("0x");
+    let z = i64::from_str_radix(without_prefix, 16);
+    println!("{:?}", z);
+
     let mut msg_list = Vec::new();
 
     msg_list.push(Message {

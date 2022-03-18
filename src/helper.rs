@@ -128,7 +128,7 @@ pub fn is_valid_hex(input: &mut String) -> bool {
 
 // Returns the hex code operand from the line, adding regiter values
 pub fn add_registers (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mut Vec<Message>,line_number: u32) -> String {
-    let num_registers=num_registers(opcodes, line).unwrap_or(0);
+    let num_registers=num_registers(opcodes, &mut line.to_string().to_uppercase()).unwrap_or(0);
     //println!("Num reg {}",num_registers);
      
     let mut opcode_found=is_opcode(opcodes, &mut line.to_uppercase()).unwrap_or("xxxx".to_string());
@@ -164,7 +164,7 @@ pub fn add_arguments (opcodes: & mut Vec<Opcode>,line: &mut String,msg_list: &mu
             {arguments=arguments+&convert_argument(word.to_string().to_uppercase(),msg_list,line_number,labels).unwrap_or("".to_string())}
     } 
 
-    if arguments.len()!=4*num_arguments as usize {
+    if arguments.len()!=8*num_arguments as usize {
         let msg_line = format!("Incorrect argument defintion - line {}, \"{}\"",line_number,line);
         msg_list.push(Message {
             name: msg_line.clone(),
@@ -191,21 +191,19 @@ pub fn convert_argument(argument: String,msg_list: &mut Vec<Message>,line_number
                 return None},
         };
     }
-    
-    if argument.len()==6 {
-        let _temp=argument[0..2].to_string();
-        if &argument[0..2]=="0x" || &argument[0..2]=="0X"{
-            if is_valid_hex(&mut argument[2..].to_string()) {
-                return Some(argument[2..].to_string().to_uppercase()) }  // was hex so return
-            else {
-                return None
-            }
-        }
+
+    if argument[0..2]=="0x".to_string() || argument[0..2]=="0X".to_string() {  
+        let without_prefix = argument.trim_start_matches("0x");
+        let without_prefix = without_prefix.trim_start_matches("0X");
+        let int_value = i64::from_str_radix(without_prefix, 16);
+        if int_value.is_err() {return None}
+        let ret_hex=format!("{:08X}",int_value.unwrap());
+        return Some(ret_hex);
     }
 
-    match argument.parse::<i32>() {
-        Ok(n) => if n<=65535 
-                    {return Some(format!("{:04X}",n).to_string())}
+    match argument.parse::<i64>() {
+        Ok(n) => if n<=4294967295 
+                    {return Some(format!("{:08X}",n).to_string())}
                     else
                     {let msg_line = format!("Decimal value out {} of bounds",n);
                     msg_list.push(Message {

@@ -1,44 +1,44 @@
-              -- //test
-              -- // test msg
-              -- BEGIN:
-0000 0800     -- SETR A 12347867
-0002 0801     -- SETR B 0x001G
-0004 08021111 -- SETR C 0x1111
-0006 03??     -- or B C
-0006 0312     -- OR B C // Hello
-              -- 
-0007 30714321 -- 7SEG1V 0x4321
-0009 30714321 -- 7SEG1V 0x4321
-000B F013FFFF -- DELAYV 0xFFFF
-              -- 
-              -- DISPLOOP:
-000D 0850     -- DECR A
-000E 1001     -- JMPZ BEGIN1:   // Restart if we reached zero
-              -- 
-              -- 
-              -- // Call function
-0010 4000     -- PUSH A // Push A on Stack
-0011 4001     -- PUSH B
-0012 10090022 -- CALL F_DEC_STACK_TOP:
-0014 4011     -- POP B
-0015 4010     -- POP A
-              -- 
-              -- 
-Error         -- 7SEGV 0x00A
-0016 F013FFFF -- DELAYV 0xFFFF
-0018 3040     -- 7SEGR A
-0019 F013FFFF -- DELAYV 0xFFFF
-Error         -- 7SEGV 0x00B
-001B F013FFFF -- DELAYV 0xFFFF
-001D 3041     -- 7SEGR B
-001E F013FFFF -- DELAYV 0xFFFF
-0020 1000000D -- JMP DISPLOOP:
-              -- 
-              -- // Proc to be called
-              -- F_DEC_STACK_TOP:
-0022 4013     -- POP D  // Store ret value
-0023 4012     -- POP C
-0024 0852     -- DECR C
-0025 4002     -- PUSH C
-0026 4003     -- PUSH D // Push back ret value
-0027 1012     -- RET
+                     -- //test
+                     -- // test msg
+                     -- BEGIN:
+0x00000000: 080000BC69DB -- SETR A 12347867
+0x00000002: 08010000001A -- SETR B 0x001A
+0x00000004: 080200001111 -- SETR C 0x1111
+0x00000006: 0312     -- or B C
+0x00000006: 0312     -- OR B C // Hello
+                     -- 
+0x00000007: 307100004321 -- 7SEG1V 0x4321
+0x00000009: 307100004321 -- 7SEG1V 0x4321
+0x0000000B: F0130000FFFF -- DELAYV 0xFFFF
+                     -- 
+                     -- DISPLOOP:
+0x0000000D: 0850     -- DECR A
+0x0000000E: 10010000 -- JMPZ BEGIN:   // Restart if we reached zero
+                     -- 
+                     -- 
+                     -- // Call function
+0x00000010: 4000     -- PUSH A // Push A on Stack
+0x00000011: 4001     -- PUSH B
+0x00000012: 10090026 -- CALL F_DEC_STACK_TOP:
+0x00000014: 4011     -- POP B
+0x00000015: 4010     -- POP A
+                     -- 
+                     -- 
+0x00000016: 30710000000A -- 7SEG1V 0x00A
+0x00000018: F0130000FFFF -- DELAYV 0xFFFF
+0x0000001A: 3040     -- 7SEGR A
+0x0000001B: F0130000FFFF -- DELAYV 0xFFFF
+0x0000001D: 30710000000B -- 7SEG1V 0x00B
+0x0000001F: F0130000FFFF -- DELAYV 0xFFFF
+0x00000021: 3041     -- 7SEGR B
+0x00000022: F0130000FFFF -- DELAYV 0xFFFF
+0x00000024: 1000000D -- JMP DISPLOOP:
+                     -- 
+                     -- // Proc to be called
+                     -- F_DEC_STACK_TOP:
+0x00000026: 4013     -- POP D  // Store ret value
+0x00000027: 4012     -- POP C
+0x00000028: 0852     -- DECR C
+0x00000029: 4002     -- PUSH C
+0x0000002A: 4003     -- PUSH D // Push back ret value
+0x0000002B: 1012     -- RET
