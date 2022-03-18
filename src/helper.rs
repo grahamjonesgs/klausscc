@@ -180,7 +180,7 @@ pub fn convert_argument(argument: String,msg_list: &mut Vec<Message>,line_number
     
     if return_label(&argument).is_some() {
         match return_label_value(&argument, labels) {
-            Some(n) => return Some(format!("{:04X}",n)),
+            Some(n) => return Some(format!("{:08X}",n)),
             None => {
                 let msg_line = format!("Label {} not found - line {}",argument,line_number);
                 msg_list.push(Message {
