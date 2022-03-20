@@ -14,11 +14,32 @@ pub fn return_label(line: &String) -> Option<String> {
     None
 }
 
+pub fn return_macro(line: &String) -> Option<String> {
+    let words = line.split_whitespace();
+    for (i, word) in words.enumerate() {
+        //println!("Word {} is {}",i,word);
+        if i == 0 && word.starts_with("$") {
+            return Some(word.to_string());
+        }
+    }
+    None
+}
+
 // Return option of progam counter for label if it exists.
 pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
         if label.code == line.as_str() {
             return Some(label.program_counter);
+        }
+    }
+    None
+}
+
+// Return option of progam counter for label if it exists.
+pub fn return_macro_items(line: &String, Macros: &mut Vec<Macro>) -> Option<Vec<String>> {
+    for macro_line in Macros {
+        if macro_line.name == line.as_str() {
+            return Some(macro_line.items.clone());
         }
     }
     None

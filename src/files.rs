@@ -158,7 +158,7 @@ pub fn macro_from_string(input_line: &str) -> Option<Macro> {
 }
 
 // Parse given filename to Vec of Opcode.
-pub fn parse_opcodes(filename: impl AsRef<Path>) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+pub fn parse_vh_file(filename: impl AsRef<Path>) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     let file = File::open(filename);
     if file.is_err() {
         return (None, None);

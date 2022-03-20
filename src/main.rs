@@ -30,7 +30,6 @@ pub struct Pass2 {
     pub opcode: String,
 }
 
-
 fn main() {
     let mut msg_list = Vec::new();
     add_message(
@@ -106,16 +105,19 @@ fn main() {
         messages::MessageType::Info,
         &mut msg_list,
     );
-    let (opt_oplist,opt_macro_list) = parse_opcodes(opcode_file_name.clone());
+    let (opt_oplist, opt_macro_list) = parse_vh_file(opcode_file_name.clone());
     if opt_oplist.is_none() {
         println!("Unable to open opcode file {:?}", opcode_file_name);
         std::process::exit(1);
     }
     let mut oplist = opt_oplist.unwrap();
 
-    if opt_macro_list.is_some() {
-        println!("{:?}",opt_macro_list.unwrap())
-    }
+    /*if opt_macro_list.is_some() {
+        println!("{:?}", opt_macro_list.unwrap())
+    } */
+
+    //  xxx add checks on invalid macro of None
+    let mut macro_list=opt_macro_list.unwrap();
 
     // Parse the input file
     add_message(
@@ -130,18 +132,36 @@ fn main() {
         std::process::exit(1);
     }
 
-    let mut pass0:Vec<Pass0> = Vec::new();
+    add_message(
+        format!("Starting pass 0"),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
 
+    // Pass 0 to add macros
+    let mut pass0: Vec<Pass0> = Vec::new();
     let mut input_line_count: u32 = 1;
-    for mut code_line in input_list.clone().unwrap() {
-        pass0.push(Pass0 {
-            input: code_line.clone(),
-            line_counter: input_line_count,
-        })}
+    for code_line in input_list.clone().unwrap() {
+        if return_macro(&code_line).is_some() {
+            let items=return_macro_items(&code_line,&mut macro_list);
+            for item in items.unwrap() {  // xxxxxx add code to check for None
+                pass0.push(Pass0 {
+                    input: item.clone(),
+                    line_counter: input_line_count,
+                });
+            }
+        } else {
+            pass0.push(Pass0 {
+                input: code_line.clone(),
+                line_counter: input_line_count,
+            });
+            input_line_count=input_line_count+1;
+        }
+    }
 
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
-    
 
     add_message(
         format!("Starting pass 1"),
@@ -158,12 +178,11 @@ fn main() {
             program_counter: program_counter,
             line_type: line_type(&mut oplist, &mut pass.input),
         });
-        input_line_count = input_line_count + 1;
         if is_valid_line(&mut oplist, &mut strip_comments(&mut pass.input)) == false {
             let msg_line = format!("Opcode error {}", pass.input);
             add_message(
                 msg_line.clone(),
-                Some(input_line_count),
+                Some(pass.line_counter),
                 messages::MessageType::Error,
                 &mut msg_list,
             );
@@ -252,18 +271,25 @@ fn main() {
 
     if number_errors(&mut msg_list) == 0 {
         if !output_binary(binary_file_name.clone(), &mut pass2) {
-            println!("Unable to write to bincode file {:?}", binary_file_name.clone());
+            println!(
+                "Unable to write to bincode file {:?}",
+                binary_file_name.clone()
+            );
             std::process::exit(1);
         }
     } else {
         match fs::remove_file(binary_file_name.clone()) {
             Err(e) => add_message(
-                format!("Removing binary file {}, error {}", binary_file_name.clone(),e),
+                format!(
+                    "Removing binary file {}, error {}",
+                    binary_file_name.clone(),
+                    e
+                ),
                 None,
                 messages::MessageType::Info,
                 &mut msg_list,
             ),
-            _ => ()
+            _ => (),
         }
     }
 
