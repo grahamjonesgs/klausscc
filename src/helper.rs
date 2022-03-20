@@ -145,20 +145,6 @@ pub fn map_reg_to_hex(input: String) -> String {
     }
 }
 
-pub fn is_valid_hex(input: &mut String) -> bool {
-    for char in input.to_uppercase().chars() {
-        if char < '0' {
-            return false;
-        };
-        if char > 'F' {
-            return false;
-        };
-        if char > '9' && char < 'A' {
-            return false;
-        };
-    }
-    true
-}
 
 // Returns the hex code operand from the line, adding regiter values
 pub fn add_registers(

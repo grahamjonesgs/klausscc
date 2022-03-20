@@ -27,6 +27,13 @@ pub struct Label {
     pub code: String,
 }
 
+#[derive(Debug)]
+pub struct Macro {
+    pub name: String,
+    pub variables: u32,
+    pub items: Vec<String>,
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum LineType {
     Comment,
@@ -104,39 +111,80 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         pos_end_comment = 0;
     }
 
-    // Create opcode
-    let opcode = Opcode {
+    Some(Opcode {
         opcode: input_line[pos_opcode..pos_opcode + 4].to_string(),
         registers: num_registers,
         variables: num_variables,
         comment: input_line[pos_comment..pos_end_comment].to_string(),
         name: input_line[pos_name..pos_end_name].to_string(),
-    };
+    })
+}
 
-    Some(opcode)
+// Receive a line from the opcode definition file and if possible
+// parse to instance of Some(Macro), or None
+pub fn macro_from_string(input_line: &str) -> Option<Macro> {
+    // Find the macro if it exists
+    if input_line.find("$").unwrap_or(usize::MAX) != 0 {
+        return None;
+    }
+    let mut name: String = "".to_string();
+    let mut item: String = "".to_string();
+    let mut items: Vec<String> = Vec::new();
+
+    let words = input_line.split_whitespace();
+    for (i, word) in words.enumerate() {
+        if i == 0 {
+            name = word.to_string();
+        } else {
+            //items.push(word.to_string())
+            if word == "/" {
+                items.push(item.to_string());
+                item = "".to_string();
+            } else {
+                item = item + " " + word;
+            }
+        }
+    }
+
+    if item.len() > 0 {
+        items.push(item.to_string());
+    }
+
+    Some(Macro {
+        name: name.to_string(),
+        variables: 3,
+        items: items,
+    })
 }
 
 // Parse given filename to Vec of Opcode.
-pub fn parse_opcodes(filename: impl AsRef<Path>) -> Option<Vec<Opcode>> {
+pub fn parse_opcodes(filename: impl AsRef<Path>) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     let file = File::open(filename);
     if file.is_err() {
-        return None;
+        return (None, None);
     }
 
     let buf = BufReader::new(file.unwrap());
     let mut opcodes: Vec<Opcode> = Vec::new();
+    let mut macros: Vec<Macro> = Vec::new();
 
     for line in buf.lines() {
         match line {
-            Ok(v) => match opcode_from_string(&v) {
-                None => (),
-                Some(a) => opcodes.push(a),
-            },
+            Ok(v) => {
+                match opcode_from_string(&v) {
+                    None => (),
+                    Some(a) => opcodes.push(a),
+                }
+                match macro_from_string(&v) {
+                    None => (),
+                    Some(a) => macros.push(a),
+                }
+            }
 
             Err(e) => println!("Failed parsing opcode file: {:?}", e),
         }
     }
-    Some(opcodes)
+    (Some(opcodes), Some(macros))
 }
 
 pub fn read_file_to_vec(

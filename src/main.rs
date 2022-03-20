@@ -5,6 +5,7 @@ mod messages;
 use files::*;
 use helper::*;
 use messages::*;
+use std::fs;
 
 #[derive(Debug)]
 pub struct Pass1 {
@@ -22,6 +23,7 @@ pub struct Pass2 {
     pub line_type: LineType,
     pub opcode: String,
 }
+
 
 fn main() {
     let mut msg_list = Vec::new();
@@ -98,12 +100,16 @@ fn main() {
         messages::MessageType::Info,
         &mut msg_list,
     );
-    let opt_oplist = parse_opcodes(opcode_file_name.clone());
+    let (opt_oplist,opt_macro_list) = parse_opcodes(opcode_file_name.clone());
     if opt_oplist.is_none() {
         println!("Unable to open opcode file {:?}", opcode_file_name);
         std::process::exit(1);
     }
     let mut oplist = opt_oplist.unwrap();
+
+    if opt_macro_list.is_some() {
+        println!("{:?}",opt_macro_list.unwrap())
+    }
 
     // Parse the input file
     add_message(
@@ -218,9 +224,22 @@ fn main() {
         messages::MessageType::Info,
         &mut msg_list,
     );
-    if !output_binary(binary_file_name.clone(), &mut pass2) {
-        println!("Unable to write to bincode file {:?}", binary_file_name);
-        std::process::exit(1);
+
+    if number_errors(&mut msg_list) == 0 {
+        if !output_binary(binary_file_name.clone(), &mut pass2) {
+            println!("Unable to write to bincode file {:?}", binary_file_name.clone());
+            std::process::exit(1);
+        }
+    } else {
+        match fs::remove_file(binary_file_name.clone()) {
+            Err(e) => add_message(
+                format!("Removing binary file {}, error {}", binary_file_name.clone(),e),
+                None,
+                messages::MessageType::Info,
+                &mut msg_list,
+            ),
+            _ => ()
+        }
     }
 
     print_messages(&mut msg_list);

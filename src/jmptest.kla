@@ -1,11 +1,11 @@
 //test
 // test msg
 BEGIN:
-SETR A 4 12347867
+SETR A 12347867
 SETR B 0x001A
-SETR C 0x111X
-orx B X     
-OR B X // Hello
+SETR C 0x1110
+orx B C     
+OR B D // Hello
 
 7SEG1V 0x4321
 7SEG1V 0x4321
@@ -13,7 +13,7 @@ DELAYV 0xFFFF// test message
 
 DISPLOOP:
 DECR A
-JMPZ BEGIN1:   // Restart if we reached zero
+JMPZ BEGIN:   // Restart if we reached zero
 
 
 // Call function
