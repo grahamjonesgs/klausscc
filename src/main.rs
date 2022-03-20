@@ -123,7 +123,7 @@ fn main() {
             line_type: line_type(&mut oplist, &mut code_line),
         });
         input_line_count = input_line_count + 1;
-        if is_valid_line(&mut oplist, &mut code_line) == false {
+        if is_valid_line(&mut oplist, &mut strip_comments(&mut code_line)) == false {
             let msg_line = format!("Syntax error found on line {}", code_line);
             msg_list.push(Message {
                 name: msg_line.clone(),
@@ -131,7 +131,7 @@ fn main() {
                 level: messages::MessageType::Error,
             });
         }
-        let num_args = num_arguments(&mut oplist, &mut code_line);
+        let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut code_line));
         match num_args {
             Some(p) => program_counter = program_counter + p + 1,
             None => {}
@@ -159,12 +159,12 @@ fn main() {
             opcode: (if line.line_type == LineType::Opcode {
                 add_registers(
                     &mut oplist,
-                    &mut line.input.to_string(),
+                    &mut strip_comments(&mut line.input.clone()),
                     &mut msg_list,
                     line.line_counter,
                 ) + add_arguments(
                     &mut oplist,
-                    &mut line.input.to_string(),
+                    &mut strip_comments(&mut line.input.clone()),
                     &mut msg_list,
                     line.line_counter,
                     &mut labels,
@@ -192,4 +192,7 @@ fn main() {
         println!("Unable to write to bincode file {:?}", binary_file_name);
         std::process::exit(1);
     }
+
+    let test_in="Hello World   // Helo //";
+        println!("In *{}*, out *{}*", test_in, strip_comments(&mut test_in.to_string()));
 }

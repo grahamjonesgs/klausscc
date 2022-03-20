@@ -9,7 +9,7 @@
                            -- 
 0x00000007: 3071 0000 4321 -- 7SEG1V 0x4321
 0x00000009: 3071 0000 4321 -- 7SEG1V 0x4321
-0x0000000B: F013 0000 FFFF -- DELAYV 0xFFFF
+0x0000000B: F013 0000 FFFF -- DELAYV 0xFFFF// test message
                            -- 
                            -- DISPLOOP:
 0x0000000D: 0850           -- DECR A

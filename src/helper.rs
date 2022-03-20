@@ -294,3 +294,10 @@ pub fn convert_argument(
         Err(_e) => return None,
     };
 }
+
+pub fn strip_comments(input: &mut String) -> String {
+    match input.find("//") {
+        None => return input.to_string(),
+        Some(a) => return input[0..a].to_string(),
+    }
+}
