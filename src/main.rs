@@ -15,6 +15,12 @@ pub struct Pass1 {
     pub line_type: LineType,
 }
 
+#[derive(Debug)]
+pub struct Pass0 {
+    pub input: String,
+    pub line_counter: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct Pass2 {
     pub input: String,
@@ -124,9 +130,18 @@ fn main() {
         std::process::exit(1);
     }
 
+    let mut pass0:Vec<Pass0> = Vec::new();
+
+    let mut input_line_count: u32 = 1;
+    for mut code_line in input_list.clone().unwrap() {
+        pass0.push(Pass0 {
+            input: code_line.clone(),
+            line_counter: input_line_count,
+        })}
+
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
-    let mut input_line_count: u32 = 1;
+    
 
     add_message(
         format!("Starting pass 1"),
@@ -134,16 +149,18 @@ fn main() {
         messages::MessageType::Info,
         &mut msg_list,
     );
-    for mut code_line in input_list.unwrap() {
+
+    //for mut code_line in input_list.clone().unwrap() {
+    for mut pass in pass0 {
         pass1.push(Pass1 {
-            input: code_line.clone(),
-            line_counter: input_line_count,
+            input: pass.input.clone(),
+            line_counter: pass.line_counter,
             program_counter: program_counter,
-            line_type: line_type(&mut oplist, &mut code_line),
+            line_type: line_type(&mut oplist, &mut pass.input),
         });
         input_line_count = input_line_count + 1;
-        if is_valid_line(&mut oplist, &mut strip_comments(&mut code_line)) == false {
-            let msg_line = format!("Opcode error {}", code_line);
+        if is_valid_line(&mut oplist, &mut strip_comments(&mut pass.input)) == false {
+            let msg_line = format!("Opcode error {}", pass.input);
             add_message(
                 msg_line.clone(),
                 Some(input_line_count),
@@ -151,12 +168,19 @@ fn main() {
                 &mut msg_list,
             );
         }
-        let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut code_line));
+        let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
         match num_args {
             Some(p) => program_counter = program_counter + p + 1,
             None => {}
         }
     }
+
+    add_message(
+        format!("Finding labels"),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
 
     let mut labels: Vec<Label> = pass1
         .iter()
@@ -168,6 +192,7 @@ fn main() {
             }
         })
         .collect();
+
     add_message(
         format!("Starting pass 2"),
         None,

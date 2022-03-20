@@ -152,7 +152,7 @@ pub fn macro_from_string(input_line: &str) -> Option<Macro> {
 
     Some(Macro {
         name: name.to_string(),
-        variables: 3,
+        variables: 0,
         items: items,
     })
 }
