@@ -168,10 +168,8 @@ pub fn add_registers(
     line_number: u32,
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_string().to_uppercase()).unwrap_or(0);
-    //println!("Num reg {}",num_registers);
 
-    let mut opcode_found =
-        is_opcode(opcodes, &mut line.to_uppercase()).unwrap_or("xxxx".to_string());
+    let mut opcode_found = is_opcode(opcodes, &mut line.to_uppercase()).unwrap_or("".to_string());
     opcode_found = opcode_found[..(4 - num_registers) as usize].to_string();
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -188,6 +186,7 @@ pub fn add_registers(
             MessageType::Warning,
             msg_list,
         );
+        return "ERR ".to_string();
     }
     opcode_found
 }
@@ -199,8 +198,8 @@ pub fn add_arguments(
     line_number: u32,
     labels: &mut Vec<Label>,
 ) -> String {
-    let num_registers = num_registers(opcodes, line).unwrap_or(0);
-    let num_arguments = num_arguments(opcodes, line).unwrap_or(0);
+    let num_registers = num_registers(opcodes, &mut line.to_uppercase().to_string()).unwrap_or(0);
+    let num_arguments = num_arguments(opcodes, &mut line.to_uppercase().to_string()).unwrap_or(0);
     let mut arguments = "".to_string();
 
     let words = line.split_whitespace();
@@ -213,7 +212,7 @@ pub fn add_arguments(
                     line_number,
                     labels,
                 )
-                .unwrap_or("".to_string())
+                .unwrap_or(" ERROR    ".to_string())
         }
         if i == num_registers as usize + 2 && num_arguments == 2 {
             arguments = arguments
@@ -223,7 +222,16 @@ pub fn add_arguments(
                     line_number,
                     labels,
                 )
-                .unwrap_or("".to_string())
+                .unwrap_or(" ERROR    ".to_string())
+        }
+        if i > num_registers as usize + num_arguments as usize {
+            //arguments = " ERROR    ".to_string()
+            add_message(
+                format!("Too many arguments found - \"{}\"", line),
+                Some(line_number),
+                MessageType::Warning,
+                msg_list,
+            );
         }
     }
 
@@ -260,15 +268,17 @@ pub fn convert_argument(
         };
     }
 
-    if argument[0..2] == "0x".to_string() || argument[0..2] == "0X".to_string() {
-        let without_prefix = argument.trim_start_matches("0x");
-        let without_prefix = without_prefix.trim_start_matches("0X");
-        let int_value = i64::from_str_radix(without_prefix, 16);
-        if int_value.is_err() {
-            return None;
+    if argument.len() >= 2 {
+        if argument[0..2] == "0x".to_string() || argument[0..2] == "0X".to_string() {
+            let without_prefix = argument.trim_start_matches("0x");
+            let without_prefix = without_prefix.trim_start_matches("0X");
+            let int_value = i64::from_str_radix(without_prefix, 16);
+            if int_value.is_err() {
+                return None;
+            }
+            let ret_hex = format!("{:08X}", int_value.unwrap());
+            return Some(ret_hex);
         }
-        let ret_hex = format!("{:08X}", int_value.unwrap());
-        return Some(ret_hex);
     }
 
     match argument.parse::<i64>() {

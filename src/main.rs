@@ -120,7 +120,7 @@ fn main() {
 
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
-    let mut input_line_count: u32 = 0;
+    let mut input_line_count: u32 = 1;
 
     add_message(
         format!("Starting pass 1"),
@@ -137,7 +137,7 @@ fn main() {
         });
         input_line_count = input_line_count + 1;
         if is_valid_line(&mut oplist, &mut strip_comments(&mut code_line)) == false {
-            let msg_line = format!("Syntax error found on line {}", code_line);
+            let msg_line = format!("Opcode error {}", code_line);
             add_message(
                 msg_line.clone(),
                 Some(input_line_count),
@@ -170,28 +170,34 @@ fn main() {
     );
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
+        let new_opcode = if line.line_type == LineType::Opcode {
+            add_registers(
+                &mut oplist,
+                &mut strip_comments(&mut line.input.clone()),
+                &mut msg_list,
+                line.line_counter,
+            ) + add_arguments(
+                &mut oplist,
+                &mut strip_comments(&mut line.input.clone()),
+                &mut msg_list,
+                line.line_counter,
+                &mut labels,
+            )
+            .as_str()
+        } else {
+            "".to_string()
+        };
+
         pass2.push(Pass2 {
             input: line.input.clone(),
-            line_counter: (line.line_counter),
-            program_counter: (line.program_counter),
-            line_type: (line.line_type.clone()),
-            opcode: (if line.line_type == LineType::Opcode {
-                add_registers(
-                    &mut oplist,
-                    &mut strip_comments(&mut line.input.clone()),
-                    &mut msg_list,
-                    line.line_counter,
-                ) + add_arguments(
-                    &mut oplist,
-                    &mut strip_comments(&mut line.input.clone()),
-                    &mut msg_list,
-                    line.line_counter,
-                    &mut labels,
-                )
-                .as_str()
+            line_counter: line.line_counter,
+            program_counter: line.program_counter,
+            line_type: if new_opcode.find("ERR").is_some() {
+                LineType::Error
             } else {
-                "".to_string()
-            }),
+                line.line_type.clone()
+            },
+            opcode: new_opcode,
         });
     }
 

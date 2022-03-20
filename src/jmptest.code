@@ -1,11 +1,11 @@
                            -- //test
                            -- // test msg
                            -- BEGIN:
-0x00000000: 0800 00BC 69DB -- SETR A 12347867
+0x00000000: 0800 0000 0004 -- SETR A 4 12347867
 0x00000002: 0801 0000 001A -- SETR B 0x001A
-0x00000004: 0802 0000 1111 -- SETR C 0x1111
-0x00000006: 031      --   or B       
-0x00000006: 0312           --   OR B C // Hello
+Error                      -- SETR C 0x111X
+Error                      -- orx B X     
+Error                      -- OR B X // Hello
                            -- 
 0x00000007: 3071 0000 4321 -- 7SEG1V 0x4321
 0x00000009: 3071 0000 4321 -- 7SEG1V 0x4321
@@ -13,7 +13,7 @@
                            -- 
                            -- DISPLOOP:
 0x0000000D: 0850           -- DECR A
-0x0000000E: 1001           -- JMPZ BEGIN1:   // Restart if we reached zero
+Error                      -- JMPZ BEGIN1:   // Restart if we reached zero
                            -- 
                            -- 
                            -- // Call function
