@@ -1,12 +1,11 @@
 use crate::{messages, Pass2};
 
 use std::{
+    fmt,
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
-    fmt, 
 };
-
 
 #[derive(Debug)]
 pub struct Opcode {
@@ -28,9 +27,7 @@ pub struct Label {
     pub code: String,
 }
 
-#[derive(Debug)]
-#[derive(PartialEq)]
-#[derive(Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum LineType {
     Comment,
     Blank,
@@ -41,12 +38,15 @@ pub enum LineType {
 
 impl fmt::Display for Opcode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}, regs {}, vars {} - {}", 
-        self.name,self.opcode, self.registers,self.variables,self.comment)
+        write!(
+            f,
+            "{} {}, regs {}, vars {} - {}",
+            self.name, self.opcode, self.registers, self.variables, self.comment
+        )
     }
 }
 
-// Receive a line from the opcode definition file and if possible 
+// Receive a line from the opcode definition file and if possible
 // parse to instance of Some(Opcode), or None
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_opcode: usize;
@@ -103,7 +103,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         pos_comment = 0;
         pos_end_comment = 0;
     }
- 
+
     // Create opcode
     let opcode = Opcode {
         opcode: input_line[pos_opcode..pos_opcode + 4].to_string(),
@@ -119,7 +119,9 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 // Parse given filename to Vec of Opcode.
 pub fn parse_opcodes(filename: impl AsRef<Path>) -> Option<Vec<Opcode>> {
     let file = File::open(filename);
-    if file.is_err() {return None}
+    if file.is_err() {
+        return None;
+    }
 
     let buf = BufReader::new(file.unwrap());
     let mut opcodes: Vec<Opcode> = Vec::new();
@@ -135,17 +137,27 @@ pub fn parse_opcodes(filename: impl AsRef<Path>) -> Option<Vec<Opcode>> {
         }
     }
     Some(opcodes)
-} 
+}
 
-pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<Path>) -> Option<Vec<String>> {
+pub fn read_file_to_vec(
+    msgs: &mut Vec<messages::Message>,
+    filename: impl AsRef<Path>,
+) -> Option<Vec<String>> {
     //let file = File::open(filename).expect("No such input file");
     let file = File::open(filename);
-    if file.is_err() {return None}
-   
+    if file.is_err() {
+        return None;
+    }
+
     let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
 
-    messages::add_message("Starting opcode import", messages::MessageType::Info,2,msgs);
+    messages::add_message(
+        "Starting opcode import",
+        messages::MessageType::Info,
+        2,
+        msgs,
+    );
 
     for line in buf.lines() {
         match line {
@@ -157,50 +169,77 @@ pub fn read_file_to_vec(msgs: &mut Vec<messages::Message>,filename: impl AsRef<P
     Some(lines)
 }
 
-pub fn filename_stem (full_name: String) -> String {
-    let dot_pos=full_name.find(".");
-    if dot_pos.is_none() {return  full_name;}
+pub fn filename_stem(full_name: String) -> String {
+    let dot_pos = full_name.find(".");
+    if dot_pos.is_none() {
+        return full_name;
+    }
     full_name[..dot_pos.unwrap_or(0)].to_string()
 }
 
-pub fn output_binary (filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
+pub fn output_binary(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let rfile = File::create(filename);
-    if rfile.is_err() {return false}
-
-    let mut file=rfile.unwrap();
-    if file.write(b"S").is_err() {return false};
-    for pass in pass2 {
-        if file.write(pass.opcode.as_bytes()).is_err() {return false};
+    if rfile.is_err() {
+        return false;
     }
-    if file.write(b"X").is_err() {return false};
+
+    let mut file = rfile.unwrap();
+    if file.write(b"S").is_err() {
+        return false;
+    };
+    for pass in pass2 {
+        if file.write(pass.opcode.as_bytes()).is_err() {
+            return false;
+        };
+    }
+    if file.write(b"X").is_err() {
+        return false;
+    };
 
     true
 }
 
-pub fn output_code (filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
+pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let rfile = File::create(filename);
-    if rfile.is_err() {return false}
+    if rfile.is_err() {
+        return false;
+    }
     let mut out_line: String;
-    let mut file=rfile.unwrap();
- 
+    let mut file = rfile.unwrap();
+
     for pass in pass2 {
-        if pass.line_type==LineType::Opcode {
-            out_line = format!("0x{:08X}: {:<8} -- {}\n",pass.program_counter,split_opcodes(&mut pass.opcode),pass.input);}
-        else  if pass.line_type==LineType::Error  {
-            out_line=format!("Error                      -- {}\n",pass.input);}
-        else {
-            out_line=format!("                           -- {}\n",pass.input);} 
-        if file.write(&out_line.as_bytes()).is_err() {return false};
+        if pass.line_type == LineType::Opcode {
+            out_line = format!(
+                "0x{:08X}: {:<8} -- {}\n",
+                pass.program_counter,
+                split_opcodes(&mut pass.opcode),
+                pass.input
+            );
+        } else if pass.line_type == LineType::Error {
+            out_line = format!("Error                      -- {}\n", pass.input);
+        } else {
+            out_line = format!("                           -- {}\n", pass.input);
+        }
+        if file.write(&out_line.as_bytes()).is_err() {
+            return false;
+        };
     }
     true
 }
 
-pub fn split_opcodes (input: &mut String) -> String {
-    if input.len()==4 {return input.to_string()+"          ";}
-    if input.len()==8 {return input.clone()[0..4].to_string()+" "+&input[4..8].to_string()+"     ";}
-    if input.len()==12 {return input.clone()[0..4].to_string()+" "+&input[4..8].to_string()+" "+&input[8..12].to_string();}
+pub fn split_opcodes(input: &mut String) -> String {
+    if input.len() == 4 {
+        return input.to_string() + "          ";
+    }
+    if input.len() == 8 {
+        return input.clone()[0..4].to_string() + " " + &input[4..8].to_string() + "     ";
+    }
+    if input.len() == 12 {
+        return input.clone()[0..4].to_string()
+            + " "
+            + &input[4..8].to_string()
+            + " "
+            + &input[8..12].to_string();
+    }
     input.to_string()
 }
-
-
-

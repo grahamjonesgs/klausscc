@@ -1,14 +1,11 @@
-#[derive(Debug)]
-#[derive(PartialEq)]
-#[derive(Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum MessageType {
     Error,
     Warning,
-    Info
+    Info,
 }
 
-#[derive(Debug)]
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Message {
     pub name: String,
     pub line_number: u32,
@@ -25,32 +22,30 @@ pub fn add_message(name: &str, msg_type: MessageType, line_number: u32, msgs: &m
 }
 
 pub fn number_errors(msgs: &mut Vec<Message>) -> usize {
-    let errors  = msgs.
-                    iter().
-                    filter(|&x| x.level == MessageType::Error).
-                    count();
+    let errors = msgs
+        .iter()
+        .filter(|&x| x.level == MessageType::Error)
+        .count();
     errors
 }
 
 pub fn number_warnings(msgs: &mut Vec<Message>) -> usize {
-    let errors  = msgs.
-                    iter().
-                    filter(|&x| x.level == MessageType::Warning).
-                    count();
+    let errors = msgs
+        .iter()
+        .filter(|&x| x.level == MessageType::Warning)
+        .count();
     errors
 }
 
 pub fn print_messages(msgs: &mut Vec<Message>) {
-
-for msg in msgs.clone() {
-    let mut message;
-    match msg.level {
-        MessageType::Info => message = "I".to_string(),
-        MessageType::Warning => message = "W".to_string(),
-        MessageType::Error => message = "E".to_string(),
-    };
-    message=message+". Line " +&msg.line_number.to_string() + " " + &msg.name;
-    println!("{}",message);
+    for msg in msgs.clone() {
+        let mut message;
+        match msg.level {
+            MessageType::Info => message = "I".to_string(),
+            MessageType::Warning => message = "W".to_string(),
+            MessageType::Error => message = "E".to_string(),
+        };
+        message = message + ". Line " + &msg.line_number.to_string() + " " + &msg.name;
+        println!("{}", message);
     }
-    
 }
