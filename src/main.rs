@@ -24,18 +24,13 @@ pub struct Pass2 {
 }
 
 fn main() {
-    let raw = "0xf";
-    let without_prefix = raw.trim_start_matches("0x");
-    let z = i64::from_str_radix(without_prefix, 16);
-    println!("{:?}", z);
-
     let mut msg_list = Vec::new();
-
-    msg_list.push(Message {
-        name: String::from("Starting..."),
-        line_number: 0,
-        level: messages::MessageType::Info,
-    });
+    add_message(
+        "Starting...".to_string(),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
 
     let matches = App::new("Klauss Assembler")
         .version("0.0.1")
@@ -97,6 +92,12 @@ fn main() {
         + ".code";
 
     // Parse the Opcode file
+    add_message(
+        format!("Opcode file is {}", opcode_file_name),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
     let opt_oplist = parse_opcodes(opcode_file_name.clone());
     if opt_oplist.is_none() {
         println!("Unable to open opcode file {:?}", opcode_file_name);
@@ -105,6 +106,12 @@ fn main() {
     let mut oplist = opt_oplist.unwrap();
 
     // Parse the input file
+    add_message(
+        format!("Input file is {}", input_file_name),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
     let input_list = read_file_to_vec(&mut msg_list, input_file_name.clone());
     if input_list.is_none() {
         println!("Unable to open input file {:?}", input_file_name);
@@ -115,6 +122,12 @@ fn main() {
     let mut program_counter: u32 = 0;
     let mut input_line_count: u32 = 0;
 
+    add_message(
+        format!("Starting pass 1"),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
     for mut code_line in input_list.unwrap() {
         pass1.push(Pass1 {
             input: code_line.clone(),
@@ -125,11 +138,12 @@ fn main() {
         input_line_count = input_line_count + 1;
         if is_valid_line(&mut oplist, &mut strip_comments(&mut code_line)) == false {
             let msg_line = format!("Syntax error found on line {}", code_line);
-            msg_list.push(Message {
-                name: msg_line.clone(),
-                line_number: input_line_count,
-                level: messages::MessageType::Error,
-            });
+            add_message(
+                msg_line.clone(),
+                Some(input_line_count),
+                messages::MessageType::Error,
+                &mut msg_list,
+            );
         }
         let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut code_line));
         match num_args {
@@ -148,7 +162,12 @@ fn main() {
             }
         })
         .collect();
-
+    add_message(
+        format!("Starting pass 2"),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
         pass2.push(Pass2 {
@@ -176,23 +195,32 @@ fn main() {
         });
     }
 
+    add_message(
+        format!("Writing code file to {}", output_file_name),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
+    if !output_code(output_file_name.clone(), &mut pass2) {
+        println!("Unable to write to code file {:?}", output_file_name);
+        std::process::exit(1);
+    }
+
+    add_message(
+        format!("Writing binary file to {}", binary_file_name),
+        None,
+        messages::MessageType::Info,
+        &mut msg_list,
+    );
+    if !output_binary(binary_file_name.clone(), &mut pass2) {
+        println!("Unable to write to bincode file {:?}", binary_file_name);
+        std::process::exit(1);
+    }
+
     print_messages(&mut msg_list);
     println!(
         "Number of errors is {}, number of warning is {}",
         number_errors(&mut msg_list),
         number_warnings(&mut msg_list)
     );
-
-    if !output_code(output_file_name.clone(), &mut pass2) {
-        println!("Unable to write to code file {:?}", output_file_name);
-        std::process::exit(1);
-    }
-
-    if !output_binary(binary_file_name.clone(), &mut pass2) {
-        println!("Unable to write to bincode file {:?}", binary_file_name);
-        std::process::exit(1);
-    }
-
-    let test_in="Hello World   // Helo //";
-        println!("In *{}*, out *{}*", test_in, strip_comments(&mut test_in.to_string()));
 }

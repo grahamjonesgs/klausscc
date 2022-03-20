@@ -153,9 +153,9 @@ pub fn read_file_to_vec(
     let mut lines: Vec<String> = Vec::new();
 
     messages::add_message(
-        "Starting opcode import",
+        "Starting opcode import".to_string(),
+        None,
         messages::MessageType::Info,
-        2,
         msgs,
     );
 

@@ -182,15 +182,12 @@ pub fn add_registers(
     }
 
     if opcode_found.len() != 4 || opcode_found.find("X").is_some() {
-        let msg_line = format!(
-            "Incorrect register defintion - line {}, \"{}\"",
-            line_number, line
+        add_message(
+            format!("Incorrect register defintion - \"{}\"", line),
+            Some(line_number),
+            MessageType::Warning,
+            msg_list,
         );
-        msg_list.push(Message {
-            name: msg_line.clone(),
-            line_number: line_number,
-            level: MessageType::Warning,
-        });
     }
     opcode_found
 }
@@ -231,15 +228,12 @@ pub fn add_arguments(
     }
 
     if arguments.len() != 8 * num_arguments as usize {
-        let msg_line = format!(
-            "Incorrect argument defintion - line {}, \"{}\"",
-            line_number, line
+        add_message(
+            format!("Incorrect argument defintion - \"{}\"", line),
+            Some(line_number),
+            MessageType::Error,
+            msg_list,
         );
-        msg_list.push(Message {
-            name: msg_line.clone(),
-            line_number: line_number,
-            level: MessageType::Error,
-        });
     }
     arguments
 }
@@ -255,12 +249,12 @@ pub fn convert_argument(
         match return_label_value(&argument, labels) {
             Some(n) => return Some(format!("{:08X}", n)),
             None => {
-                let msg_line = format!("Label {} not found - line {}", argument, line_number);
-                msg_list.push(Message {
-                    name: msg_line.clone(),
-                    line_number: line_number,
-                    level: MessageType::Warning,
-                });
+                add_message(
+                    format!("Label {} not found - line {}", argument, line_number),
+                    Some(line_number),
+                    MessageType::Warning,
+                    msg_list,
+                );
                 return None;
             }
         };
@@ -282,12 +276,13 @@ pub fn convert_argument(
             if n <= 4294967295 {
                 return Some(format!("{:08X}", n).to_string());
             } else {
-                let msg_line = format!("Decimal value out {} of bounds", n);
-                msg_list.push(Message {
-                    name: msg_line.clone(),
-                    line_number: line_number,
-                    level: MessageType::Warning,
-                });
+                add_message(
+                    format!("Decimal value out {} of bounds", n),
+                    Some(line_number),
+                    MessageType::Warning,
+                    msg_list,
+                    //  });
+                );
                 return None;
             }
         }
@@ -295,9 +290,10 @@ pub fn convert_argument(
     };
 }
 
+// Removes comments and starting and training whitespace
 pub fn strip_comments(input: &mut String) -> String {
     match input.find("//") {
-        None => return input.to_string(),
-        Some(a) => return input[0..a].to_string(),
+        None => return input.trim().to_string(),
+        Some(a) => return input[0..a].trim().to_string(),
     }
 }
