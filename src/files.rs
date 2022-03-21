@@ -27,7 +27,7 @@ pub struct Label {
     pub code: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Macro {
     pub name: String,
     pub variables: u32,
@@ -141,7 +141,11 @@ pub fn macro_from_string(input_line: &str) -> Option<Macro> {
                 items.push(item.to_string());
                 item = "".to_string();
             } else {
-                item = item + " " + word;
+                if item.len() > 0 {
+                    item = item + " " + word;
+                } else {
+                    item = item + word;
+                }
             }
         }
     }

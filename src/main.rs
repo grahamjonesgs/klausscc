@@ -110,14 +110,16 @@ fn main() {
         println!("Unable to open opcode file {:?}", opcode_file_name);
         std::process::exit(1);
     }
+
+    if opt_macro_list.is_none() || opt_oplist.is_none() {
+        println!(
+            "Error parsing opcode file {} to marco and opcode lists",
+            opcode_file_name
+        );
+        std::process::exit(1);
+    }
     let mut oplist = opt_oplist.unwrap();
-
-    /*if opt_macro_list.is_some() {
-        println!("{:?}", opt_macro_list.unwrap())
-    } */
-
-    //  xxx add checks on invalid macro of None
-    let mut macro_list=opt_macro_list.unwrap();
+    let mut macro_list = opt_macro_list.unwrap();
 
     // Parse the input file
     add_message(
@@ -144,19 +146,33 @@ fn main() {
     let mut input_line_count: u32 = 1;
     for code_line in input_list.clone().unwrap() {
         if return_macro(&code_line).is_some() {
-            let items=return_macro_items(&code_line,&mut macro_list);
-            for item in items.unwrap() {  // xxxxxx add code to check for None
+            let items = return_macro_items(&code_line.trim().to_string(), &mut macro_list);
+            if items.is_some() {
+                for item in items.unwrap() {
+                    // xxxxxx add code to check for None
+                    pass0.push(Pass0 {
+                        input: item.clone() + " // From macro " + &code_line.trim(),
+                        line_counter: input_line_count,
+                    });
+                }
+            } else {
+                add_message(
+                    format!("Macro not found {}", code_line),
+                    None,
+                    messages::MessageType::Error,
+                    &mut msg_list,
+                );
                 pass0.push(Pass0 {
-                    input: item.clone(),
+                    input: code_line.clone(),
                     line_counter: input_line_count,
-                });
+                })
             }
         } else {
             pass0.push(Pass0 {
                 input: code_line.clone(),
                 line_counter: input_line_count,
             });
-            input_line_count=input_line_count+1;
+            input_line_count = input_line_count + 1;
         }
     }
 
