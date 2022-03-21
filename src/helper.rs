@@ -95,7 +95,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list:&mut Vec<Message>) -> Ve
 }
 
 // Checks if first word is opcode and if so returns opcode hex value
-pub fn is_opcode(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<String> {
+pub fn is_opcode(opcodes: &mut Vec<Opcode>, line: String) -> Option<String> {
     for opcode in opcodes {
         let words = line.split_whitespace();
         for (i, word) in words.enumerate() {
@@ -135,13 +135,13 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32
 
 // Returns emum of type of line
 pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut String) -> LineType {
-    if return_label(line).is_some() {
+    if return_label(&line).is_some() {
         return LineType::Label;
     };
-    if is_opcode(opcodes, line).is_some() {
+    if is_opcode(opcodes, line.clone()).is_some() {
         return LineType::Opcode;
     }
-    if is_blank(line) {
+    if is_blank(line.clone()) {
         return LineType::Blank;
     }
     let words = line.split_whitespace();
@@ -154,15 +154,16 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut String) -> LineType {
 }
 
 //Returns true if line is not error
-pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: &mut String) -> bool {
-    if line_type(opcodes, line) == LineType::Error {
+pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
+    let mut myline: String=line;
+    if line_type(opcodes, &mut myline) == LineType::Error {
         return false;
     }
     true
 }
 
 // Returns true if line if just whitespace
-pub fn is_blank(line: &mut String) -> bool {
+pub fn is_blank(line: String) -> bool {
     let words = line.split_whitespace();
 
     for (_i, word) in words.enumerate() {
@@ -224,7 +225,7 @@ pub fn add_registers(
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_string().to_uppercase()).unwrap_or(0);
 
-    let mut opcode_found = is_opcode(opcodes, &mut line.to_uppercase()).unwrap_or("".to_string());
+    let mut opcode_found = is_opcode(opcodes, line.to_uppercase()).unwrap_or("".to_string());
     opcode_found = opcode_found[..(4 - num_registers) as usize].to_string();
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {

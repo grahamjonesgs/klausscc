@@ -34,7 +34,7 @@ pub struct Macro {
     pub items: Vec<String>,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq)]
 pub enum LineType {
     Comment,
     Blank,
@@ -162,7 +162,7 @@ pub fn macro_from_string(input_line: &str) -> Option<Macro> {
 }
 
 // Parse given filename to Vec of Opcode.
-pub fn parse_vh_file(filename: impl AsRef<Path>) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+pub fn parse_vh_file(filename: &impl AsRef<Path>) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     let file = File::open(filename);
     if file.is_err() {
         return (None, None);
@@ -193,7 +193,7 @@ pub fn parse_vh_file(filename: impl AsRef<Path>) -> (Option<Vec<Opcode>>, Option
 
 pub fn read_file_to_vec(
     msgs: &mut Vec<messages::Message>,
-    filename: impl AsRef<Path>,
+    filename: &impl AsRef<Path>,
 ) -> Option<Vec<String>> {
     //let file = File::open(filename).expect("No such input file");
     let file = File::open(filename);
@@ -221,15 +221,15 @@ pub fn read_file_to_vec(
     Some(lines)
 }
 
-pub fn filename_stem(full_name: String) -> String {
+pub fn filename_stem(full_name: &String) -> String {
     let dot_pos = full_name.find(".");
     if dot_pos.is_none() {
-        return full_name;
+        return full_name.to_string();
     }
     full_name[..dot_pos.unwrap_or(0)].to_string()
 }
 
-pub fn output_binary(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
+pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let rfile = File::create(filename);
     if rfile.is_err() {
         return false;

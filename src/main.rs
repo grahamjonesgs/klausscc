@@ -21,7 +21,7 @@ pub struct Pass0 {
     pub line_counter: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Pass2 {
     pub input: String,
     pub line_counter: u32,
@@ -89,12 +89,12 @@ fn main() {
     let input_file_name = matches.value_of("input").unwrap_or("").replace(" ", "");
     let binary_file_name = matches
         .value_of("bitcode")
-        .unwrap_or(&filename_stem(input_file_name.clone()))
+        .unwrap_or(&filename_stem(&input_file_name))
         .replace(" ", "")
         + ".kbt";
     let output_file_name = matches
         .value_of("output")
-        .unwrap_or(&filename_stem(input_file_name.clone()))
+        .unwrap_or(&filename_stem(&input_file_name))
         .replace(" ", "")
         + ".code";
 
@@ -105,7 +105,7 @@ fn main() {
         messages::MessageType::Info,
         &mut msg_list,
     );
-    let (opt_oplist, opt_macro_list) = parse_vh_file(opcode_file_name.clone());
+    let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name);
     if opt_oplist.is_none() {
         println!("Unable to open opcode file {:?}", opcode_file_name);
         std::process::exit(1);
@@ -128,7 +128,7 @@ fn main() {
         messages::MessageType::Info,
         &mut msg_list,
     );
-    let input_list = read_file_to_vec(&mut msg_list, input_file_name.clone());
+    let input_list = read_file_to_vec(&mut msg_list, &input_file_name);
     if input_list.is_none() {
         println!("Unable to open input file {:?}", input_file_name);
         std::process::exit(1);
@@ -188,12 +188,12 @@ fn main() {
 
     for mut pass in pass0 {
         pass1.push(Pass1 {
-            input: pass.input.clone(),
+            input: pass.input.to_string(),
             line_counter: pass.line_counter,
             program_counter: program_counter,
             line_type: line_type(&mut oplist, &mut pass.input),
         });
-        if is_valid_line(&mut oplist, &mut strip_comments(&mut pass.input)) == false {
+        if is_valid_line(&mut oplist, strip_comments(&mut pass.input)) == false {
             add_message(
                 format!("Opcode error {}", pass.input),
                 Some(pass.line_counter),
@@ -217,7 +217,7 @@ fn main() {
 
     let mut labels: Vec<Label> = pass1
         .iter()
-        .filter(|n| return_label(&n.input.clone()).is_some())
+        .filter(|n| return_label(&n.input).is_some())
         .map(|n| -> Label {
             Label {
                 program_counter: n.program_counter,
@@ -233,16 +233,16 @@ fn main() {
         &mut msg_list,
     );
     let mut pass2: Vec<Pass2> = Vec::new();
-    for mut line in pass1 {
+    for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
             add_registers(
                 &mut oplist,
-                &mut strip_comments(&mut line.input),
+                &mut strip_comments(&mut line.input.clone()),
                 &mut msg_list,
                 line.line_counter,
             ) + add_arguments(
                 &mut oplist,
-                &mut strip_comments(&mut line.input),
+                &mut strip_comments(&mut line.input.clone()),
                 &mut msg_list,
                 line.line_counter,
                 &mut labels,
@@ -284,7 +284,7 @@ fn main() {
     );
 
     if number_errors(&mut msg_list) == 0 {
-        if !output_binary(binary_file_name.clone(), &mut pass2) {
+        if !output_binary(&binary_file_name, &mut pass2) {
             println!(
                 "Unable to write to bincode file {:?}",
                 &binary_file_name
