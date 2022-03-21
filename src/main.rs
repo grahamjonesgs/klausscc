@@ -119,7 +119,9 @@ fn main() {
         std::process::exit(1);
     }
     let mut oplist = opt_oplist.unwrap();
-    let mut macro_list = opt_macro_list.unwrap();
+    let mut macro_list = expand_macros(opt_macro_list.unwrap());
+
+    println!("{:?}", macro_list);
 
     // Parse the input file
     add_message(

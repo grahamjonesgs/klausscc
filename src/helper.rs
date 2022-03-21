@@ -36,13 +36,46 @@ pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32>
 }
 
 // Return option of progam counter for label if it exists.
-pub fn return_macro_items(line: &String, Macros: &mut Vec<Macro>) -> Option<Vec<String>> {
-    for macro_line in Macros {
-        if macro_line.name == line.as_str() {
-            return Some(macro_line.items.clone());
+pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<String>> {
+    let words = line.split_whitespace();
+    for (i, word) in words.enumerate() {
+        if i == 0 {
+            for macro_line in macros.clone() {
+                if macro_line.name == word {
+                    return Some(macro_line.items.clone());
+                }
+            }
         }
     }
     None
+}
+
+// One pass to resolve embedded macros
+pub fn expand_macros(input_macros: Vec<Macro>) -> Vec<Macro> {
+    let mut output_macros: Vec<Macro> = Vec::new();
+
+    for input_macro_line in input_macros.clone() {
+        let mut output_items: Vec<String> = Vec::new();
+        for item in input_macro_line.items.clone() {
+            if return_macro_items(&item, &mut input_macros.clone()).is_some() {
+                println!(
+                    "Found emdedded macro {} in macro {}",
+                    item, input_macro_line.name
+                );
+                for new_item in return_macro_items(&item,&mut input_macros.clone()).unwrap() {
+                    output_items.push(new_item);
+                }
+            } else {
+                output_items.push(item);
+            }
+        }
+        output_macros.push(Macro {
+            name: input_macro_line.name,
+            variables: 2,
+            items: output_items,
+        })
+    }
+    output_macros.to_vec()
 }
 
 // Checks if first word is opcode and if so returns opcode hex value
@@ -165,7 +198,6 @@ pub fn map_reg_to_hex(input: String) -> String {
         _ => "X".to_string(),
     }
 }
-
 
 // Returns the hex code operand from the line, adding regiter values
 pub fn add_registers(

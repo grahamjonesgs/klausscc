@@ -1,5 +1,6 @@
 //test
 // test msg
+$TESTM2
 BEGIN:
 SETR A 12347867
 SETR B 0x001A
