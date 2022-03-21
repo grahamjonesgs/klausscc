@@ -42,7 +42,7 @@ pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<
         if i == 0 {
             for macro_line in macros.clone() {
                 if macro_line.name == word {
-                    return Some(macro_line.items.clone());
+                    return Some(macro_line.items);
                 }
             }
         }
@@ -63,9 +63,9 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list:&mut Vec<Message>) -> Ve
         let mut output_macros: Vec<Macro> = Vec::new();
         for input_macro_line in input_macros.clone() {
             let mut output_items: Vec<String> = Vec::new();
-            for item in input_macro_line.items.clone() {
-                if return_macro_items(&item, &mut input_macros.clone()).is_some() {
-                    for new_item in return_macro_items(&item, &mut input_macros.clone()).unwrap() {
+            for item in input_macro_line.items {
+                if return_macro_items(&item, &mut input_macros).is_some() {
+                    for new_item in return_macro_items(&item, &mut input_macros).unwrap() {
                         output_items.push(new_item);
                     }
                     last_macro=input_macro_line.name.clone();

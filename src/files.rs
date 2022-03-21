@@ -284,10 +284,10 @@ pub fn split_opcodes(input: &mut String) -> String {
         return input.to_string() + "          ";
     }
     if input.len() == 8 {
-        return input.clone()[0..4].to_string() + " " + &input[4..8].to_string() + "     ";
+        return input[0..4].to_string() + " " + &input[4..8].to_string() + "     ";
     }
     if input.len() == 12 {
-        return input.clone()[0..4].to_string()
+        return input[0..4].to_string()
             + " "
             + &input[4..8].to_string()
             + " "

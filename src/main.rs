@@ -144,14 +144,14 @@ fn main() {
     // Pass 0 to add macros
     let mut pass0: Vec<Pass0> = Vec::new();
     let mut input_line_count: u32 = 1;
-    for code_line in input_list.clone().unwrap() {
+    for code_line in input_list.unwrap() {
         if return_macro(&code_line).is_some() {
             let items = return_macro_items(&code_line.trim().to_string(), &mut macro_list);
             if items.is_some() {
                 for item in items.unwrap() {
                     // xxxxxx add code to check for None
                     pass0.push(Pass0 {
-                        input: item.clone() + " // From macro " + &code_line.trim(),
+                        input: item + " // From macro " + &code_line.trim(),
                         line_counter: input_line_count,
                     });
                 }
@@ -163,13 +163,13 @@ fn main() {
                     &mut msg_list,
                 );
                 pass0.push(Pass0 {
-                    input: code_line.clone(),
+                    input: code_line,
                     line_counter: input_line_count,
                 })
             }
         } else {
             pass0.push(Pass0 {
-                input: code_line.clone(),
+                input: code_line,
                 line_counter: input_line_count,
             });
             input_line_count = input_line_count + 1;
@@ -186,7 +186,6 @@ fn main() {
         &mut msg_list,
     );
 
-    //for mut code_line in input_list.clone().unwrap() {
     for mut pass in pass0 {
         pass1.push(Pass1 {
             input: pass.input.clone(),
@@ -195,9 +194,8 @@ fn main() {
             line_type: line_type(&mut oplist, &mut pass.input),
         });
         if is_valid_line(&mut oplist, &mut strip_comments(&mut pass.input)) == false {
-            let msg_line = format!("Opcode error {}", pass.input);
             add_message(
-                msg_line.clone(),
+                format!("Opcode error {}", pass.input),
                 Some(pass.line_counter),
                 messages::MessageType::Error,
                 &mut msg_list,
@@ -235,16 +233,16 @@ fn main() {
         &mut msg_list,
     );
     let mut pass2: Vec<Pass2> = Vec::new();
-    for line in pass1 {
+    for mut line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
             add_registers(
                 &mut oplist,
-                &mut strip_comments(&mut line.input.clone()),
+                &mut strip_comments(&mut line.input),
                 &mut msg_list,
                 line.line_counter,
             ) + add_arguments(
                 &mut oplist,
-                &mut strip_comments(&mut line.input.clone()),
+                &mut strip_comments(&mut line.input),
                 &mut msg_list,
                 line.line_counter,
                 &mut labels,
@@ -255,13 +253,13 @@ fn main() {
         };
 
         pass2.push(Pass2 {
-            input: line.input.clone(),
+            input: line.input,
             line_counter: line.line_counter,
             program_counter: line.program_counter,
             line_type: if new_opcode.find("ERR").is_some() {
                 LineType::Error
             } else {
-                line.line_type.clone()
+                line.line_type
             },
             opcode: new_opcode,
         });
@@ -273,8 +271,8 @@ fn main() {
         messages::MessageType::Info,
         &mut msg_list,
     );
-    if !output_code(output_file_name.clone(), &mut pass2) {
-        println!("Unable to write to code file {:?}", output_file_name);
+    if !output_code(&output_file_name, &mut pass2) {
+        println!("Unable to write to code file {:?}", &output_file_name);
         std::process::exit(1);
     }
 
@@ -289,16 +287,16 @@ fn main() {
         if !output_binary(binary_file_name.clone(), &mut pass2) {
             println!(
                 "Unable to write to bincode file {:?}",
-                binary_file_name.clone()
+                &binary_file_name
             );
             std::process::exit(1);
         }
     } else {
-        match fs::remove_file(binary_file_name.clone()) {
+        match fs::remove_file(&binary_file_name) {
             Err(e) => add_message(
                 format!(
                     "Removing binary file {}, error {}",
-                    binary_file_name.clone(),
+                    &binary_file_name,
                     e
                 ),
                 None,

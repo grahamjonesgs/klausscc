@@ -42,7 +42,7 @@ pub fn number_warnings(msgs: &mut Vec<Message>) -> usize {
 }
 
 pub fn print_messages(msgs: &mut Vec<Message>) {
-    for msg in msgs.clone() {
+    for msg in msgs {
         let message : String;
         let warning: String;
         match msg.level {
