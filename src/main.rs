@@ -121,8 +121,6 @@ fn main() {
     let mut oplist = opt_oplist.unwrap();
     let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(),&mut msg_list);
 
-    println!("{:?}", macro_list);
-
     // Parse the input file
     add_message(
         format!("Input file is {}", input_file_name),
