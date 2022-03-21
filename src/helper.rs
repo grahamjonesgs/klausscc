@@ -51,31 +51,47 @@ pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<
 }
 
 // One pass to resolve embedded macros
-pub fn expand_macros(input_macros: Vec<Macro>) -> Vec<Macro> {
-    let mut output_macros: Vec<Macro> = Vec::new();
+pub fn expand_macros_multi(macros: Vec<Macro>, msg_list:&mut Vec<Message>) -> Vec<Macro> {
+    let mut pass: u32 = 0;
+    let mut changed:bool=true;
+    let mut last_macro:String="".to_string();
+    
+    let mut input_macros=macros;
 
-    for input_macro_line in input_macros.clone() {
-        let mut output_items: Vec<String> = Vec::new();
-        for item in input_macro_line.items.clone() {
-            if return_macro_items(&item, &mut input_macros.clone()).is_some() {
-                println!(
-                    "Found emdedded macro {} in macro {}",
-                    item, input_macro_line.name
-                );
-                for new_item in return_macro_items(&item,&mut input_macros.clone()).unwrap() {
-                    output_items.push(new_item);
+    while pass < 10 && changed {
+        changed=false;
+        let mut output_macros: Vec<Macro> = Vec::new();
+        for input_macro_line in input_macros.clone() {
+            let mut output_items: Vec<String> = Vec::new();
+            for item in input_macro_line.items.clone() {
+                if return_macro_items(&item, &mut input_macros.clone()).is_some() {
+                    for new_item in return_macro_items(&item, &mut input_macros.clone()).unwrap() {
+                        output_items.push(new_item);
+                    }
+                    last_macro=input_macro_line.name.clone();
+                    changed=true;
+                } else {
+                    output_items.push(item);
                 }
-            } else {
-                output_items.push(item);
             }
+            output_macros.push(Macro {
+                name: input_macro_line.name,
+                variables: 2,
+                items: output_items,
+            })
         }
-        output_macros.push(Macro {
-            name: input_macro_line.name,
-            variables: 2,
-            items: output_items,
-        })
+        pass=pass+1;
+        input_macros=output_macros.clone();
     }
-    output_macros.to_vec()
+    if changed==true {
+        add_message(
+            format!("Too many macro passes, check {}", last_macro),
+            None,
+            MessageType::Error,
+            msg_list,
+        );
+    }
+    input_macros.to_vec()
 }
 
 // Checks if first word is opcode and if so returns opcode hex value
