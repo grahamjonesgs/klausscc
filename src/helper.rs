@@ -1,26 +1,24 @@
+use std::mem::take;
+
 //use crate::messages;
 use crate::files::*;
 use crate::messages::*;
 
 // Check if end of first word is colon if so return label
 pub fn return_label(line: &String) -> Option<String> {
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        //println!("Word {} is {}",i,word);
-        if i == 0 && word.ends_with(":") {
-            return Some(word.to_string());
-        }
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if first_word.ends_with(":") {
+        return Some(first_word.to_string());
     }
     None
 }
 
 pub fn return_macro(line: &String) -> Option<String> {
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        //println!("Word {} is {}",i,word);
-        if i == 0 && word.starts_with("$") {
-            return Some(word.to_string());
-        }
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if first_word.starts_with("$") {
+        return Some(first_word.to_string());
     }
     None
 }
@@ -37,29 +35,29 @@ pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32>
 
 // Return option of progam counter for label if it exists.
 pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<String>> {
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if i == 0 {
-            for macro_line in macros.clone() {
-                if macro_line.name == word {
-                    return Some(macro_line.items);
-                }
-            }
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if return_macro(&first_word.to_string()).is_none() {
+        return None;
+    }
+    for macro_line in macros.clone() {
+        if macro_line.name == first_word {
+            return Some(macro_line.items);
         }
     }
     None
 }
 
 // One pass to resolve embedded macros
-pub fn expand_macros_multi(macros: Vec<Macro>, msg_list:&mut Vec<Message>) -> Vec<Macro> {
+pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut Vec<Message>) -> Vec<Macro> {
     let mut pass: u32 = 0;
-    let mut changed:bool=true;
-    let mut last_macro:String="".to_string();
-    
-    let mut input_macros=macros;
+    let mut changed: bool = true;
+    let mut last_macro: String = "".to_string();
+
+    let mut input_macros = macros;
 
     while pass < 10 && changed {
-        changed=false;
+        changed = false;
         let mut output_macros: Vec<Macro> = Vec::new();
         for input_macro_line in input_macros.clone() {
             let mut output_items: Vec<String> = Vec::new();
@@ -68,8 +66,8 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list:&mut Vec<Message>) -> Ve
                     for new_item in return_macro_items(&item, &mut input_macros).unwrap() {
                         output_items.push(new_item);
                     }
-                    last_macro=input_macro_line.name.clone();
-                    changed=true;
+                    last_macro = input_macro_line.name.clone();
+                    changed = true;
                 } else {
                     output_items.push(item);
                 }
@@ -80,10 +78,10 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list:&mut Vec<Message>) -> Ve
                 items: output_items,
             })
         }
-        pass=pass+1;
-        input_macros=output_macros.clone();
+        pass = pass + 1;
+        input_macros = output_macros.clone();
     }
-    if changed==true {
+    if changed == true {
         add_message(
             format!("Too many macro passes, check {}", last_macro),
             None,
@@ -97,24 +95,26 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list:&mut Vec<Message>) -> Ve
 // Checks if first word is opcode and if so returns opcode hex value
 pub fn is_opcode(opcodes: &mut Vec<Opcode>, line: String) -> Option<String> {
     for opcode in opcodes {
-        let words = line.split_whitespace();
-        for (i, word) in words.enumerate() {
-            if i == 0 && word.to_uppercase() == opcode.name {
-                return Some(opcode.opcode.to_string().to_uppercase());
-            }
+        let mut words = line.split_whitespace();
+        let first_word = words.next().unwrap_or("");
+        if first_word.to_uppercase() == opcode.name {
+            return Some(opcode.opcode.to_string().to_uppercase());
         }
     }
     None
 }
 
+
 // Returns option of number of arguments for opcode
 pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32> {
     for opcode in opcodes {
-        let words = line.split_whitespace();
-        for (i, word) in words.enumerate() {
-            if i == 0 && word == opcode.name {
-                return Some(opcode.variables);
-            }
+        let mut words = line.split_whitespace();
+        let first_word = words.next().unwrap_or("");
+        if first_word == "" {
+            return None;
+        }
+        if first_word == opcode.name {
+            return Some(opcode.variables);
         }
     }
     None
@@ -123,12 +123,14 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32
 // Returns option of number of registers for opcode
 pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32> {
     for opcode in opcodes {
-        let words = line.split_whitespace();
-        for (i, word) in words.enumerate() {
-            if i == 0 && word == opcode.name {
+        let mut words = line.split_whitespace();
+        let first_word = words.next().unwrap_or("");
+        if first_word == "" {
+            return None;
+        }
+            if first_word == opcode.name {
                 return Some(opcode.registers);
             }
-        }
     }
     None
 }
@@ -155,7 +157,7 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut String) -> LineType {
 
 //Returns true if line is not error
 pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
-    let mut myline: String=line;
+    let mut myline: String = line;
     if line_type(opcodes, &mut myline) == LineType::Error {
         return false;
     }

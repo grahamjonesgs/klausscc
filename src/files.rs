@@ -69,7 +69,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         None => return None,
         Some(a) => pos_opcode = a + 4,
     }
-    // Check for lenght of opcode
+    // Check for length of opcode
     if input_line.len() < (pos_opcode + 4) {
         return None;
     }
@@ -136,7 +136,6 @@ pub fn macro_from_string(input_line: &str) -> Option<Macro> {
         if i == 0 {
             name = word.to_string();
         } else {
-            //items.push(word.to_string())
             if word == "/" {
                 items.push(item.to_string());
                 item = "".to_string();
@@ -195,7 +194,7 @@ pub fn read_file_to_vec(
     msgs: &mut Vec<messages::Message>,
     filename: &impl AsRef<Path>,
 ) -> Option<Vec<String>> {
-    //let file = File::open(filename).expect("No such input file");
+    
     let file = File::open(filename);
     if file.is_err() {
         return None;

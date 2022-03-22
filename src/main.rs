@@ -119,7 +119,7 @@ fn main() {
         std::process::exit(1);
     }
     let mut oplist = opt_oplist.unwrap();
-    let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(),&mut msg_list);
+    let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(), &mut msg_list);
 
     // Parse the input file
     add_message(
@@ -149,9 +149,8 @@ fn main() {
             let items = return_macro_items(&code_line.trim().to_string(), &mut macro_list);
             if items.is_some() {
                 for item in items.unwrap() {
-                    // xxxxxx add code to check for None
                     pass0.push(Pass0 {
-                        input: item + " // From macro " + &code_line.trim(),
+                        input: item + " //-- From macro " + &code_line.trim(),
                         line_counter: input_line_count,
                     });
                 }
@@ -285,20 +284,13 @@ fn main() {
 
     if number_errors(&mut msg_list) == 0 {
         if !output_binary(&binary_file_name, &mut pass2) {
-            println!(
-                "Unable to write to bincode file {:?}",
-                &binary_file_name
-            );
+            println!("Unable to write to bincode file {:?}", &binary_file_name);
             std::process::exit(1);
         }
     } else {
         match fs::remove_file(&binary_file_name) {
             Err(e) => add_message(
-                format!(
-                    "Removing binary file {}, error {}",
-                    &binary_file_name,
-                    e
-                ),
+                format!("Removing binary file {}, error {}", &binary_file_name, e),
                 None,
                 messages::MessageType::Info,
                 &mut msg_list,
