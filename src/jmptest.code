@@ -16,7 +16,7 @@
 0x0000000F: F010           -- NOP //-- From macro $TESTM
 0x00000010: F010           -- NOP //-- From macro $TESTM
 0x00000011: F010           -- NOP //-- From macro $TESTM
-Error                      -- POP to replace xxxx %1 //-- From macro $POPALL
+Error                      -- POP //-- From macro $POPALL
 0x00000013: 4011           -- POP B //-- From macro $POPALL
 0x00000014: 4012           -- POP C //-- From macro $POPALL
 0x00000015: 3071 0000 4321 -- 7SEG1V 0x4321

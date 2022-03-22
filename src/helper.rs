@@ -68,7 +68,20 @@ pub fn return_macro_items_replace(line: &String, macros: &mut Vec<Macro>) -> Opt
                 for item_word in item_words {
                     if item_word.find("%").is_some() {
                         println!("Found % in macro {}, word is *{}*", first_word, item_word);
-                        build_line = build_line + " to replace xxxx " + item_word
+                        //build_line = build_line + " to replace xxxx " + item_word
+                        let without_prefix = item_word.trim_start_matches("%");
+                        let int_value = i64::from_str_radix(without_prefix, 10);
+                        if int_value.is_err() {
+                            
+                        }
+                        println!("The int value found for % is {}",int_value.unwrap_or(0));
+                        /* 
+                        Use 
+                        let without_prefix = without_prefix.trim_start_matches("0X");
+                        let int_value = i64::from_str_radix(without_prefix, 16);
+                        
+                        
+                        */
                     } else {
                         build_line = build_line + " " + item_word
                     }
