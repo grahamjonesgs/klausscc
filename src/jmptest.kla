@@ -1,4 +1,4 @@
-//test
+$TESTM 0x1234 0x4321
 // test msg
 $TESTM2
 BEGIN:

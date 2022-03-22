@@ -1,6 +1,3 @@
-use std::mem::take;
-
-//use crate::messages;
 use crate::files::*;
 use crate::messages::*;
 
@@ -33,7 +30,7 @@ pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32>
     None
 }
 
-// Return option of progam counter for label if it exists.
+// Return option all items forming macro if it exists.
 pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<String>> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -46,6 +43,45 @@ pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<
         }
     }
     None
+}
+
+// Return option all items forming macro if it exists.
+// Update to find the % in the macro and repoace wiht the right element from test code array
+pub fn return_macro_items_replace(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<String>> {
+    let mut words = line.split_whitespace();
+    let mut return_items: Vec<String> = Vec::new();
+    let mut found: bool = false;
+
+    let input_line_array: Vec<_> = words.clone().collect();
+    //let test2 = test1.len();
+
+    let first_word = words.next().unwrap_or("");
+    if return_macro(&first_word.to_string()).is_none() {
+        return None;
+    }
+    for macro_line in macros.clone() {
+        if macro_line.name == first_word {
+            found = true;
+            for item in macro_line.items {
+                let item_words = item.split_whitespace();
+                let mut build_line: String = "".to_string();
+                for item_word in item_words {
+                    if item_word.find("%").is_some() {
+                        println!("Found % in macro {}, word is *{}*", first_word, item_word);
+                        build_line = build_line + " to replace xxxx " + item_word
+                    } else {
+                        build_line = build_line + " " + item_word
+                    }
+                }
+                return_items.push(build_line.trim().to_string())
+            }
+        }
+    }
+    if found {
+        return Some(return_items);
+    } else {
+        None
+    }
 }
 
 // One pass to resolve embedded macros
@@ -104,7 +140,6 @@ pub fn is_opcode(opcodes: &mut Vec<Opcode>, line: String) -> Option<String> {
     None
 }
 
-
 // Returns option of number of arguments for opcode
 pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32> {
     for opcode in opcodes {
@@ -128,9 +163,9 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32
         if first_word == "" {
             return None;
         }
-            if first_word == opcode.name {
-                return Some(opcode.registers);
-            }
+        if first_word == opcode.name {
+            return Some(opcode.registers);
+        }
     }
     None
 }

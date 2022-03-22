@@ -194,7 +194,6 @@ pub fn read_file_to_vec(
     msgs: &mut Vec<messages::Message>,
     filename: &impl AsRef<Path>,
 ) -> Option<Vec<String>> {
-    
     let file = File::open(filename);
     if file.is_err() {
         return None;
