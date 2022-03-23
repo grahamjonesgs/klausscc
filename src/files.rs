@@ -1,6 +1,7 @@
 use crate::{
-    messages::{self, MsgList},
+    messages::{MsgList},
     Pass2,
+    MessageType::*
 };
 
 use std::{
@@ -208,7 +209,7 @@ pub fn read_file_to_vec(
     msg_list.push(
         "Starting opcode import".to_string(),
         None,
-        messages::MessageType::Info,
+        Info,
     );
 
     for line in buf.lines() {
