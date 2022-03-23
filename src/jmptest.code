@@ -13,7 +13,7 @@
 0x0000000A: F010           -- NOP //-- From macro $TESTM
 0x0000000B: F010           -- NOP //-- From macro $TESTM
 0x0000000C: F010           -- NOP //-- From macro $TESTM
-Error                      -- POP //-- From macro $POPALL
+0x0000000D: 4015           -- POP F //-- From macro $POPALL
 0x0000000E: 4011           -- POP B //-- From macro $POPALL
 0x0000000F: 4012           -- POP C //-- From macro $POPALL
 0x00000010: 3071 0000 4321 -- 7SEG1V 0x4321

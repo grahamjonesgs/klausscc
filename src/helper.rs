@@ -72,8 +72,6 @@ pub fn return_macro_items_replace(
                 let mut build_line: String = "".to_string();
                 for item_word in item_words {
                     if item_word.find("%").is_some() {
-                        println!("Found % in macro {}, word is *{}*", first_word, item_word);
-                        //build_line = build_line + " to replace xxxx " + item_word
                         let without_prefix = item_word.trim_start_matches("%");
                         let int_value = i64::from_str_radix(without_prefix, 10);
                         if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
@@ -87,10 +85,6 @@ pub fn return_macro_items_replace(
                                 msg_list,
                             );
                         } else {
-                            println!(
-                                "The int value found for % is {}",
-                                int_value.clone().unwrap_or(0)
-                            );
                             if int_value.clone().unwrap_or(0) > input_line_array.len() as i64 - 1 {
                                 add_message(
                                     format!(

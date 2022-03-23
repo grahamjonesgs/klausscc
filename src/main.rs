@@ -120,7 +120,7 @@ fn main() {
     }
     let mut oplist = opt_oplist.unwrap();
     let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(), &mut msg_list);
-    println!("{:?}", macro_list);
+
     // Parse the input file
     add_message(
         format!("Input file is {}", input_file_name),
@@ -284,26 +284,35 @@ fn main() {
         std::process::exit(1);
     }
 
-    add_message(
-        format!("Writing binary file to {}", binary_file_name),
-        None,
-        messages::MessageType::Info,
-        &mut msg_list,
-    );
-
     if number_errors(&mut msg_list) == 0 {
+        add_message(
+            format!("Writing binary file to {}", binary_file_name),
+            None,
+            messages::MessageType::Info,
+            &mut msg_list,
+        );
         if !output_binary(&binary_file_name, &mut pass2) {
-            println!("Unable to write to bincode file {:?}", &binary_file_name);
-            std::process::exit(1);
+            add_message(
+                format!("Unable to write to bincode file {:?}", &binary_file_name),
+                None,
+                messages::MessageType::Error,
+                &mut msg_list,
+            );
         }
     } else {
         match fs::remove_file(&binary_file_name) {
-            Err(e) => add_message(
-                format!("Removing binary file {}, error {}", &binary_file_name, e),
-                None,
-                messages::MessageType::Info,
-                &mut msg_list,
-            ),
+            Err(e) => {
+                match e.kind() {
+                    std::io::ErrorKind::NotFound => (),
+                    _ => add_message(
+                        format!("Removing binary file {}, error {}", &binary_file_name, e),
+                        None,
+                        messages::MessageType::Info,
+                        &mut msg_list,
+                    ),
+                };
+            }
+
             _ => (),
         }
     }
