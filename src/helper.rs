@@ -47,7 +47,12 @@ pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<
 
 // Return option all items forming macro if it exists.
 // Update to find the % in the macro and repoace wiht the right element from test code array
-pub fn return_macro_items_replace(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<String>> {
+pub fn return_macro_items_replace(
+    line: &String,
+    macros: &mut Vec<Macro>,
+    input_line_number: u32,
+    msg_list: &mut Vec<Message>,
+) -> Option<Vec<String>> {
     let mut words = line.split_whitespace();
     let mut return_items: Vec<String> = Vec::new();
     let mut found: bool = false;
@@ -71,17 +76,38 @@ pub fn return_macro_items_replace(line: &String, macros: &mut Vec<Macro>) -> Opt
                         //build_line = build_line + " to replace xxxx " + item_word
                         let without_prefix = item_word.trim_start_matches("%");
                         let int_value = i64::from_str_radix(without_prefix, 10);
-                        if int_value.is_err() {
-                            
+                        if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
+                            add_message(
+                                format!(
+                                    "Invalid macro argument number {}, in macro {}",
+                                    without_prefix, macro_line.name
+                                ),
+                                Some(input_line_number),
+                                MessageType::Error,
+                                msg_list,
+                            );
+                        } else {
+                            println!(
+                                "The int value found for % is {}",
+                                int_value.clone().unwrap_or(0)
+                            );
+                            if int_value.clone().unwrap_or(0) > input_line_array.len() as i64 - 1 {
+                                add_message(
+                                    format!(
+                                        "Missing argument {} for macro {}",
+                                        int_value.clone().unwrap_or(0),
+                                        macro_line.name
+                                    ),
+                                    Some(input_line_number),
+                                    MessageType::Error,
+                                    msg_list,
+                                );
+                            } else {
+                                build_line = build_line
+                                    + " "
+                                    + input_line_array[int_value.clone().unwrap_or(0) as usize];
+                            }
                         }
-                        println!("The int value found for % is {}",int_value.unwrap_or(0));
-                        /* 
-                        Use 
-                        let without_prefix = without_prefix.trim_start_matches("0X");
-                        let int_value = i64::from_str_radix(without_prefix, 16);
-                        
-                        
-                        */
                     } else {
                         build_line = build_line + " " + item_word
                     }

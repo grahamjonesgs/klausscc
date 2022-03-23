@@ -120,7 +120,7 @@ fn main() {
     }
     let mut oplist = opt_oplist.unwrap();
     let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(), &mut msg_list);
-println!("{:?}",macro_list);
+    println!("{:?}", macro_list);
     // Parse the input file
     add_message(
         format!("Input file is {}", input_file_name),
@@ -146,11 +146,20 @@ println!("{:?}",macro_list);
     let mut input_line_count: u32 = 1;
     for code_line in input_list.unwrap() {
         if return_macro(&code_line).is_some() {
-            let items = return_macro_items_replace(&code_line.trim().to_string(), &mut macro_list);
+            let items = return_macro_items_replace(
+                &code_line.trim().to_string(),
+                &mut macro_list,
+                input_line_count,
+                &mut msg_list,
+            );
             if items.is_some() {
                 for item in items.unwrap() {
                     pass0.push(Pass0 {
-                        input: item + " //-- From macro " + &return_macro(&code_line).unwrap_or("".to_string()).to_string(),
+                        input: item
+                            + " //-- From macro "
+                            + &return_macro(&code_line)
+                                .unwrap_or("".to_string())
+                                .to_string(),
                         line_counter: input_line_count,
                     });
                 }
@@ -171,8 +180,8 @@ println!("{:?}",macro_list);
                 input: code_line,
                 line_counter: input_line_count,
             });
-            input_line_count = input_line_count + 1;
         }
+        input_line_count = input_line_count + 1;
     }
 
     let mut pass1: Vec<Pass1> = Vec::new();
