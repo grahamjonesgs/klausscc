@@ -1,4 +1,7 @@
-use crate::{messages, Pass2};
+use crate::{
+    messages::{self, MsgList},
+    Pass2,
+};
 
 use std::{
     fmt,
@@ -191,7 +194,7 @@ pub fn parse_vh_file(filename: &impl AsRef<Path>) -> (Option<Vec<Opcode>>, Optio
 }
 
 pub fn read_file_to_vec(
-    msgs: &mut Vec<messages::Message>,
+    msg_list: &mut MsgList,
     filename: &impl AsRef<Path>,
 ) -> Option<Vec<String>> {
     let file = File::open(filename);
@@ -202,11 +205,10 @@ pub fn read_file_to_vec(
     let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
 
-    messages::add_message(
+    msg_list.push(
         "Starting opcode import".to_string(),
         None,
         messages::MessageType::Info,
-        msgs,
     );
 
     for line in buf.lines() {

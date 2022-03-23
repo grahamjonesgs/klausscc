@@ -1,4 +1,4 @@
-use chrono::{NaiveTime,Local};
+use chrono::{Local, NaiveTime};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum MessageType {
@@ -15,35 +15,43 @@ pub struct Message {
     pub time: NaiveTime,
 }
 
-pub fn add_message(name: String,  line_number: Option<u32>, msg_type: MessageType, msgs: &mut Vec<Message>) {
-    let new_message = Message {
-        name: String::from(name),
-        line_number: line_number,
-        level: msg_type,
-        time: Local::now().time(),
-    };
-    msgs.push(new_message);
+pub struct MsgList {
+    list: Vec<Message>,
 }
 
-pub fn number_errors(msgs: &mut Vec<Message>) -> usize {
-    let errors = msgs
-        .iter()
-        .filter(|&x| x.level == MessageType::Error)
-        .count();
-    errors
+impl MsgList {
+    pub fn new() -> MsgList {
+        MsgList { list: Vec::new() }
+    }
+    pub fn push(&mut self, name: String, line_number: Option<u32>, msg_type: MessageType) {
+        let _ = &mut self.list.push(Message {
+            name: name,
+            line_number: line_number,
+            level: msg_type,
+            time: Local::now().time(),
+        });
+    }
+    pub fn number_errors(&self) -> usize {
+        let errors = self
+            .list
+            .iter()
+            .filter(|&x| x.level == MessageType::Error)
+            .count();
+        errors
+    }
+    pub fn number_warnings(&self) -> usize {
+        let errors = self
+            .list
+            .iter()
+            .filter(|&x| x.level == MessageType::Warning)
+            .count();
+        errors
+    }
 }
 
-pub fn number_warnings(msgs: &mut Vec<Message>) -> usize {
-    let errors = msgs
-        .iter()
-        .filter(|&x| x.level == MessageType::Warning)
-        .count();
-    errors
-}
-
-pub fn print_messages(msgs: &mut Vec<Message>) {
-    for msg in msgs {
-        let message : String;
+pub fn print_messages(msg_list: &mut MsgList) {
+    for msg in &msg_list.list {
+        let message: String;
         let warning: String;
         match msg.level {
             MessageType::Info => warning = "I".to_string(),
@@ -51,10 +59,15 @@ pub fn print_messages(msgs: &mut Vec<Message>) {
             MessageType::Error => warning = "E".to_string(),
         };
         if msg.line_number.is_some() {
-        message=format!("{} {} Line {} {} ",msg.time.to_string(),warning,msg.line_number.unwrap(),msg.name);
-        }
-        else {
-            message=format!("{} {} {} ",msg.time.to_string(),warning,msg.name);
+            message = format!(
+                "{} {} Line {} {} ",
+                msg.time.to_string(),
+                warning,
+                msg.line_number.unwrap(),
+                msg.name
+            );
+        } else {
+            message = format!("{} {} {} ", msg.time.to_string(), warning, msg.name);
         }
         //message = &msg.time.to_string() + " " + &warning.to_string() + ". Line " + &msg.line_number.to_string() + " " + &msg.name;
         println!("{}", message);

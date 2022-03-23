@@ -51,7 +51,7 @@ pub fn return_macro_items_replace(
     line: &String,
     macros: &mut Vec<Macro>,
     input_line_number: u32,
-    msg_list: &mut Vec<Message>,
+    msg_list: &mut MsgList,
 ) -> Option<Vec<String>> {
     let mut words = line.split_whitespace();
     let mut return_items: Vec<String> = Vec::new();
@@ -75,18 +75,17 @@ pub fn return_macro_items_replace(
                         let without_prefix = item_word.trim_start_matches("%");
                         let int_value = i64::from_str_radix(without_prefix, 10);
                         if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
-                            add_message(
+                            msg_list.push(
                                 format!(
                                     "Invalid macro argument number {}, in macro {}",
                                     without_prefix, macro_line.name
                                 ),
                                 Some(input_line_number),
                                 MessageType::Error,
-                                msg_list,
                             );
                         } else {
                             if int_value.clone().unwrap_or(0) > input_line_array.len() as i64 - 1 {
-                                add_message(
+                                msg_list.push(
                                     format!(
                                         "Missing argument {} for macro {}",
                                         int_value.clone().unwrap_or(0),
@@ -94,7 +93,6 @@ pub fn return_macro_items_replace(
                                     ),
                                     Some(input_line_number),
                                     MessageType::Error,
-                                    msg_list,
                                 );
                             } else {
                                 build_line = build_line
@@ -118,7 +116,7 @@ pub fn return_macro_items_replace(
 }
 
 // One pass to resolve embedded macros
-pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut Vec<Message>) -> Vec<Macro> {
+pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed: bool = true;
     let mut last_macro: String = "".to_string();
@@ -151,11 +149,10 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut Vec<Message>) -> V
         input_macros = output_macros.clone();
     }
     if changed == true {
-        add_message(
+        msg_list.push(
             format!("Too many macro passes, check {}", last_macro),
             None,
             MessageType::Error,
-            msg_list,
         );
     }
     input_macros.to_vec()
@@ -290,7 +287,7 @@ pub fn map_reg_to_hex(input: String) -> String {
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
     line: &mut String,
-    msg_list: &mut Vec<Message>,
+    msg_list: &mut MsgList,
     line_number: u32,
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_string().to_uppercase()).unwrap_or(0);
@@ -306,11 +303,10 @@ pub fn add_registers(
     }
 
     if opcode_found.len() != 4 || opcode_found.find("X").is_some() {
-        add_message(
+        msg_list.push(
             format!("Incorrect register defintion - \"{}\"", line),
             Some(line_number),
             MessageType::Warning,
-            msg_list,
         );
         return "ERR ".to_string();
     }
@@ -320,7 +316,7 @@ pub fn add_registers(
 pub fn add_arguments(
     opcodes: &mut Vec<Opcode>,
     line: &mut String,
-    msg_list: &mut Vec<Message>,
+    msg_list: &mut MsgList,
     line_number: u32,
     labels: &mut Vec<Label>,
 ) -> String {
@@ -352,21 +348,19 @@ pub fn add_arguments(
         }
         if i > num_registers as usize + num_arguments as usize {
             //arguments = " ERROR    ".to_string()
-            add_message(
+            msg_list.push(
                 format!("Too many arguments found - \"{}\"", line),
                 Some(line_number),
                 MessageType::Warning,
-                msg_list,
             );
         }
     }
 
     if arguments.len() != 8 * num_arguments as usize {
-        add_message(
+        msg_list.push(
             format!("Incorrect argument defintion - \"{}\"", line),
             Some(line_number),
             MessageType::Error,
-            msg_list,
         );
     }
     arguments
@@ -375,7 +369,7 @@ pub fn add_arguments(
 // Converts argument to label value or converts to Hex
 pub fn convert_argument(
     argument: String,
-    msg_list: &mut Vec<Message>,
+    msg_list: &mut MsgList,
     line_number: u32,
     labels: &mut Vec<Label>,
 ) -> Option<String> {
@@ -383,11 +377,10 @@ pub fn convert_argument(
         match return_label_value(&argument, labels) {
             Some(n) => return Some(format!("{:08X}", n)),
             None => {
-                add_message(
+                msg_list.push(
                     format!("Label {} not found - line {}", argument, line_number),
                     Some(line_number),
                     MessageType::Warning,
-                    msg_list,
                 );
                 return None;
             }
@@ -412,11 +405,10 @@ pub fn convert_argument(
             if n <= 4294967295 {
                 return Some(format!("{:08X}", n).to_string());
             } else {
-                add_message(
+                msg_list.push(
                     format!("Decimal value out {} of bounds", n),
                     Some(line_number),
                     MessageType::Warning,
-                    msg_list,
                     //  });
                 );
                 return None;

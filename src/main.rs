@@ -31,13 +31,12 @@ pub struct Pass2 {
 }
 
 fn main() {
-    let mut msg_list = Vec::new();
-    add_message(
-        "Starting...".to_string(),
-        None,
-        messages::MessageType::Info,
-        &mut msg_list,
-    );
+    let mut msg_list: MsgList = MsgList::new();
+    msg_list.push("ttt".to_string(), None, MessageType::Info);
+    msg_list.push("xxx".to_string(), None, MessageType::Error);
+
+    //let mut msg_list = Vec::new();
+    msg_list.push("Starting...".to_string(), None, messages::MessageType::Info);
 
     let matches = App::new("Klauss Assembler")
         .version("0.0.1")
@@ -99,11 +98,10 @@ fn main() {
         + ".code";
 
     // Parse the Opcode file
-    add_message(
+    msg_list.push(
         format!("Opcode file is {}", opcode_file_name),
         None,
         messages::MessageType::Info,
-        &mut msg_list,
     );
     let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name);
     if opt_oplist.is_none() {
@@ -122,11 +120,10 @@ fn main() {
     let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(), &mut msg_list);
 
     // Parse the input file
-    add_message(
+    msg_list.push(
         format!("Input file is {}", input_file_name),
         None,
         messages::MessageType::Info,
-        &mut msg_list,
     );
     let input_list = read_file_to_vec(&mut msg_list, &input_file_name);
     if input_list.is_none() {
@@ -134,11 +131,10 @@ fn main() {
         std::process::exit(1);
     }
 
-    add_message(
+    msg_list.push(
         format!("Starting pass 0"),
         None,
         messages::MessageType::Info,
-        &mut msg_list,
     );
 
     // Pass 0 to add macros
@@ -164,11 +160,10 @@ fn main() {
                     });
                 }
             } else {
-                add_message(
+                msg_list.push(
                     format!("Macro not found {}", code_line),
                     None,
                     messages::MessageType::Error,
-                    &mut msg_list,
                 );
                 pass0.push(Pass0 {
                     input: code_line,
@@ -187,11 +182,10 @@ fn main() {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
 
-    add_message(
+    msg_list.push(
         format!("Starting pass 1"),
         None,
         messages::MessageType::Info,
-        &mut msg_list,
     );
 
     for mut pass in pass0 {
@@ -202,11 +196,10 @@ fn main() {
             line_type: line_type(&mut oplist, &mut pass.input),
         });
         if is_valid_line(&mut oplist, strip_comments(&mut pass.input)) == false {
-            add_message(
+            msg_list.push(
                 format!("Opcode error {}", pass.input),
                 Some(pass.line_counter),
                 messages::MessageType::Error,
-                &mut msg_list,
             );
         }
         let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
@@ -216,12 +209,7 @@ fn main() {
         }
     }
 
-    add_message(
-        format!("Finding labels"),
-        None,
-        messages::MessageType::Info,
-        &mut msg_list,
-    );
+    msg_list.push(format!("Finding labels"), None, messages::MessageType::Info);
 
     let mut labels: Vec<Label> = pass1
         .iter()
@@ -234,11 +222,10 @@ fn main() {
         })
         .collect();
 
-    add_message(
+    msg_list.push(
         format!("Starting pass 2"),
         None,
         messages::MessageType::Info,
-        &mut msg_list,
     );
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
@@ -273,30 +260,27 @@ fn main() {
         });
     }
 
-    add_message(
+    msg_list.push(
         format!("Writing code file to {}", output_file_name),
         None,
         messages::MessageType::Info,
-        &mut msg_list,
     );
     if !output_code(&output_file_name, &mut pass2) {
         println!("Unable to write to code file {:?}", &output_file_name);
         std::process::exit(1);
     }
 
-    if number_errors(&mut msg_list) == 0 {
-        add_message(
+    if msg_list.number_errors() == 0 {
+        msg_list.push(
             format!("Writing binary file to {}", binary_file_name),
             None,
             messages::MessageType::Info,
-            &mut msg_list,
         );
         if !output_binary(&binary_file_name, &mut pass2) {
-            add_message(
+            msg_list.push(
                 format!("Unable to write to bincode file {:?}", &binary_file_name),
                 None,
                 messages::MessageType::Error,
-                &mut msg_list,
             );
         }
     } else {
@@ -304,11 +288,10 @@ fn main() {
             Err(e) => {
                 match e.kind() {
                     std::io::ErrorKind::NotFound => (),
-                    _ => add_message(
+                    _ => msg_list.push(
                         format!("Removing binary file {}, error {}", &binary_file_name, e),
                         None,
                         messages::MessageType::Info,
-                        &mut msg_list,
                     ),
                 };
             }
@@ -320,7 +303,7 @@ fn main() {
     print_messages(&mut msg_list);
     println!(
         "Number of errors is {}, number of warning is {}",
-        number_errors(&mut msg_list),
-        number_warnings(&mut msg_list)
+        msg_list.number_errors(),
+        msg_list.number_warnings()
     );
 }
