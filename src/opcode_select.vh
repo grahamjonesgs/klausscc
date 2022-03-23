@@ -1,7 +1,7 @@
 // Can be read by assembler, so format is fixed. Opcode must be first word in comment. If opcode takes variable, it mst be passed as w_var1
 /* Macro definition
 $TESTM NOP / NOP / NOP
-$POPALL POP %34 / POP B / POP C 
+$POPALL POP %1 / POP B / POP C 
 $PUSHALL PUSH A / PUSH B / PUSH C
 $WAIT DELAYV FFFF / DELAYV FFFF
 

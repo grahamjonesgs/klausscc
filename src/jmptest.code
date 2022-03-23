@@ -1,56 +1,53 @@
-0x00000000: F010           -- NOP //-- From macro $TESTM
-0x00000001: F010           -- NOP //-- From macro $TESTM
-0x00000002: F010           -- NOP //-- From macro $TESTM
+0x00000000: 4015           -- POP F //-- From macro $POPALL
+0x00000001: 4011           -- POP B //-- From macro $POPALL
+0x00000002: 4012           -- POP C //-- From macro $POPALL
+                           -- // $TESTM 0x1234 0x4321
                            -- // test msg
-0x00000003: 0400           -- XOR A A //-- From macro $TESTM2
-0x00000004: 4000           -- PUSH A //-- From macro $TESTM2
-0x00000005: 4001           -- PUSH B //-- From macro $TESTM2
-0x00000006: 4002           -- PUSH C //-- From macro $TESTM2
-0x00000007: F010           -- NOP //-- From macro $TESTM2
+                           -- // $TESTM2
                            -- BEGIN:
-0x00000008: 0800 00BC 69DB -- SETR A 12347867
-0x0000000A: 0801 0000 001A -- SETR B 0x001A
-0x0000000C: 0802 0000 1110 -- SETR C 0x1110
-0x0000000E: 0312           -- or B C     
-0x0000000E: 0313           -- OR B D // Hello
-0x0000000F: F010           -- NOP //-- From macro $TESTM
-0x00000010: F010           -- NOP //-- From macro $TESTM
-0x00000011: F010           -- NOP //-- From macro $TESTM
+0x00000003: 0800 00BC 69DB -- SETR A 12347867
+0x00000005: 0801 0000 001A -- SETR B 0x001A
+0x00000007: 0802 0000 1110 -- SETR C 0x1110
+0x00000009: 0312           -- or B C     
+0x00000009: 0313           -- OR B D // Hello
+0x0000000A: F010           -- NOP //-- From macro $TESTM
+0x0000000B: F010           -- NOP //-- From macro $TESTM
+0x0000000C: F010           -- NOP //-- From macro $TESTM
 Error                      -- POP //-- From macro $POPALL
-0x00000013: 4011           -- POP B //-- From macro $POPALL
-0x00000014: 4012           -- POP C //-- From macro $POPALL
-0x00000015: 3071 0000 4321 -- 7SEG1V 0x4321
-0x00000017: 3071 0000 4321 -- 7SEG1V 0x4321
-0x00000019: F013 0000 FFFF -- DELAYV 0xFFFF// test message
-0x0000001B: 08B?           -- 
+0x0000000E: 4011           -- POP B //-- From macro $POPALL
+0x0000000F: 4012           -- POP C //-- From macro $POPALL
+0x00000010: 3071 0000 4321 -- 7SEG1V 0x4321
+0x00000012: 3071 0000 4321 -- 7SEG1V 0x4321
+0x00000014: F013 0000 FFFF -- DELAYV 0xFFFF// test message
+0x00000016: 08B?           -- 
                            -- DISPLOOP:
-0x0000001B: 0850           -- DECR A
-0x0000001C: 1001 0000 0008 -- JMPZ BEGIN:   // Restart if we reached zero
-0x0000001E: 08B?           -- 
-0x0000001E: 08B?           -- 
+0x00000016: 0850           -- DECR A
+0x00000017: 1001 0000 0003 -- JMPZ BEGIN:   // Restart if we reached zero
+0x00000019: 08B?           -- 
+0x00000019: 08B?           -- 
                            -- // Call function
-0x0000001E: 4000           -- PUSH A // Push A on Stack
-0x0000001F: 4001           -- PUSH B
-0x00000020: 1009 0000 0034 -- CALL F_DEC_STACK_TOP:
-0x00000022: 4011           -- POP B
-0x00000023: 4010           -- POP A
-0x00000024: 08B?           -- 
-0x00000024: 08B?           -- 
-0x00000024: 3071 0000 000A -- 7SEG1V 0x00A
-0x00000026: F013 0000 FFFF -- DELAYV 0xFFFF
-0x00000028: 3040           -- 7SEGR A
-0x00000029: F013 0000 FFFF -- DELAYV 0xFFFF
-0x0000002B: 3071 0000 000B -- 7SEG1V 0x00B
-0x0000002D: F013 0000 FFFF -- DELAYV 0xFFFF
-0x0000002F: 3041           -- 7SEGR B
-0x00000030: F013 0000 FFFF -- DELAYV 0xFFFF
-0x00000032: 1000 0000 001B -- JMP DISPLOOP:
-0x00000034: 08B?           -- 
+0x00000019: 4000           -- PUSH A // Push A on Stack
+0x0000001A: 4001           -- PUSH B
+0x0000001B: 1009 0000 002F -- CALL F_DEC_STACK_TOP:
+0x0000001D: 4011           -- POP B
+0x0000001E: 4010           -- POP A
+0x0000001F: 08B?           -- 
+0x0000001F: 08B?           -- 
+0x0000001F: 3071 0000 000A -- 7SEG1V 0x00A
+0x00000021: F013 0000 FFFF -- DELAYV 0xFFFF
+0x00000023: 3040           -- 7SEGR A
+0x00000024: F013 0000 FFFF -- DELAYV 0xFFFF
+0x00000026: 3071 0000 000B -- 7SEG1V 0x00B
+0x00000028: F013 0000 FFFF -- DELAYV 0xFFFF
+0x0000002A: 3041           -- 7SEGR B
+0x0000002B: F013 0000 FFFF -- DELAYV 0xFFFF
+0x0000002D: 1000 0000 0016 -- JMP DISPLOOP:
+0x0000002F: 08B?           -- 
                            -- // Proc to be called
                            -- F_DEC_STACK_TOP:
-0x00000034: 4013           -- POP D  // Store ret value
-0x00000035: 4012           -- POP C
-0x00000036: 0852           -- DECR C
-0x00000037: 4002           -- PUSH C
-0x00000038: 4003           -- PUSH D // Push back ret value
-0x00000039: 1012           -- RET
+0x0000002F: 4013           -- POP D  // Store ret value
+0x00000030: 4012           -- POP C
+0x00000031: 0852           -- DECR C
+0x00000032: 4002           -- PUSH C
+0x00000033: 4003           -- PUSH D // Push back ret value
+0x00000034: 1012           -- RET
