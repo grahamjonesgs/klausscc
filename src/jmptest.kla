@@ -9,7 +9,7 @@ SETR C 0x1110
 or B C     
 OR B D // Hello
 $TESTM
-$POPALL F
+$POPALL F F F
 7SEG1V 0x4321
 7SEG1V 0x4321
 DELAYV 0xFFFF// test message

@@ -6,10 +6,10 @@ $PUSHALL PUSH A / PUSH B / PUSH C
 $WAIT DELAYV FFFF / DELAYV FFFF
 
 $TESTM2 XOR A A / $PUSHALL / NOP
-$LEVEL1 $LEVEL2
-$LEVEL2 $LEVEL3
-$LEVEL3 NOP
-
+$LEVEL1 $LEVEL2 %1 / $LEVEL3 %2
+$LEVEL2 POP %1
+$LEVEL3 PUSH %1
+// Expected level1 pop %1 / push %2
 */
 
 task t_opcode_select;

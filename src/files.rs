@@ -1,7 +1,6 @@
 use crate::{
-    messages::{MsgList},
+    messages::{MsgList,MessageType::*},
     Pass2,
-    MessageType::*
 };
 
 use std::{

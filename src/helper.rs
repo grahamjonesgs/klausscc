@@ -115,7 +115,7 @@ pub fn return_macro_items_replace(
     }
 }
 
-// One pass to resolve embedded macros
+// Multi pass to resolve embedded macros
 pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed: bool = true;
@@ -131,6 +131,10 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
             for item in input_macro_line.items {
                 if return_macro_items(&item, &mut input_macros).is_some() {
                     for new_item in return_macro_items(&item, &mut input_macros).unwrap() {
+                        if new_item.find("%").is_some() {
+                            println!("Found imbeded macro argument in macro {}",item);
+                        }
+                        
                         output_items.push(new_item);
                     }
                     last_macro = input_macro_line.name.clone();
