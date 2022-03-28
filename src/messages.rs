@@ -1,4 +1,5 @@
 use chrono::{Local, NaiveTime};
+use colored::{Colorize, ColoredString};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum MessageType {
@@ -52,11 +53,11 @@ impl MsgList {
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
         let message: String;
-        let warning: String;
+        let warning: ColoredString;
         match msg.level {
-            MessageType::Info => warning = "I".to_string(),
-            MessageType::Warning => warning = "W".to_string(),
-            MessageType::Error => warning = "E".to_string(),
+            MessageType::Info => warning = "I".to_string().green(),
+            MessageType::Warning => warning = "W".to_string().yellow(),
+            MessageType::Error => warning = "E".to_string().red(),
         };
         if msg.line_number.is_some() {
             message = format!(

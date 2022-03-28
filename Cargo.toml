@@ -9,4 +9,5 @@ edition = "2021"
 getopts = "0.2"
 clap = "2.33.3"
 chrono = "0.4"
+colored = "2.0.0"
 

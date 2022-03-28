@@ -3,10 +3,10 @@ $POPALL F
 // test msg
 // $TESTM2
 BEGIN:
-SETR A 12347867
+SETRx A 12347867
 SETR B 0x001A
 SETR C 0x1110
-or B C     
+or B      
 OR B D // Hello
 $TESTM
 $POPALL F F F
