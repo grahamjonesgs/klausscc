@@ -23,7 +23,7 @@ pub fn return_macro(line: &String) -> Option<String> {
 // Return option of progam counter for label if it exists.
 pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
-        if label.code == line.as_str() {
+        if label.name == line.as_str() {
             return Some(label.program_counter);
         }
     }
@@ -427,5 +427,19 @@ pub fn strip_comments(input: &mut String) -> String {
     match input.find("//") {
         None => return input.trim().to_string(),
         Some(a) => return input[0..a].trim().to_string(),
+    }
+}
+
+pub fn find_duplicate_label (labels: &mut Vec<Label>,msg_list: &mut MsgList) {
+    let mut local_labels=labels.clone();
+    for label in labels {
+        let opt_found_line =return_label_value(&label.name,&mut local_labels);
+        if opt_found_line.unwrap_or(0)!=label.program_counter {
+            msg_list.push(
+                format!("Duplicate label {} found, with differing values", label.name),
+                Some(label.line_counter),
+                MessageType::Error,
+            );
+        }
     }
 }

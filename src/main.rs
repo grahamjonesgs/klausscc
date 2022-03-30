@@ -114,7 +114,7 @@ fn main() {
     let mut oplist = opt_oplist.unwrap();
     let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(), &mut msg_list);
 
-    println!("{:?}",macro_list);
+    println!("{:?}", macro_list);
     // Parse the input file
     msg_list.push(format!("Input file is {}", input_file_name), None, Info);
     let input_list = read_file_to_vec(&mut msg_list, &input_file_name);
@@ -197,10 +197,13 @@ fn main() {
         .map(|n| -> Label {
             Label {
                 program_counter: n.program_counter,
-                code: return_label(&n.input).unwrap_or("".to_string()),
+                name: return_label(&n.input).unwrap_or("".to_string()),
+                line_counter: n.line_counter,
             }
         })
         .collect();
+
+    find_duplicate_label(&mut labels, &mut msg_list);
 
     msg_list.push(format!("Starting pass 2"), None, Info);
     let mut pass2: Vec<Pass2> = Vec::new();

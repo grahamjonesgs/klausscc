@@ -24,10 +24,11 @@ pub struct CodeLine {
     pub program_counter: u32,
     pub code: String,
 }
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Label {
     pub program_counter: u32,
-    pub code: String,
+    pub name: String,
+    pub line_counter: u32,
 }
 
 #[derive(Debug, Clone)]
