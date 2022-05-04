@@ -281,8 +281,10 @@ fn main() {
 
     print_messages(&mut msg_list);
     println!(
-        "Number of errors is {}, number of warning is {}",
+        "Completed with {} error{} and {} waning{}",
         msg_list.number_errors(),
-        msg_list.number_warnings()
+        if msg_list.number_errors()==1 {""} else {"s"},
+        msg_list.number_warnings(),
+        if msg_list.number_warnings()==1 {""} else {"s"},
     );
 }
