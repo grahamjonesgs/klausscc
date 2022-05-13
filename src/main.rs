@@ -129,7 +129,7 @@ fn main() {
     let mut pass0: Vec<Pass0> = Vec::new();
     let mut input_line_count: u32 = 1;
     for code_line in input_list.unwrap() {
-        if return_macro(&code_line).is_some() {
+        if macro_name_from_string(&code_line).is_some() {
             let items = return_macro_items_replace(
                 &code_line.trim().to_string(),
                 &mut macro_list,
@@ -141,7 +141,7 @@ fn main() {
                     pass0.push(Pass0 {
                         input: item
                             + " //-- From macro "
-                            + &return_macro(&code_line)
+                            + &macro_name_from_string(&code_line)
                                 .unwrap_or("".to_string())
                                 .to_string(),
                         line_counter: input_line_count,
@@ -193,11 +193,11 @@ fn main() {
 
     let mut labels: Vec<Label> = pass1
         .iter()
-        .filter(|n| return_label(&n.input).is_some())
+        .filter(|n| label_name_from_string(&n.input).is_some())
         .map(|n| -> Label {
             Label {
                 program_counter: n.program_counter,
-                name: return_label(&n.input).unwrap_or("".to_string()),
+                name: label_name_from_string(&n.input).unwrap_or("".to_string()),
                 line_counter: n.line_counter,
             }
         })

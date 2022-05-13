@@ -2,7 +2,7 @@ use crate::files::*;
 use crate::messages::*;
 
 // Check if end of first word is colon if so return label
-pub fn return_label(line: &String) -> Option<String> {
+pub fn label_name_from_string(line: &String) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.ends_with(":") {
@@ -11,7 +11,7 @@ pub fn return_label(line: &String) -> Option<String> {
     None
 }
 
-pub fn return_macro(line: &String) -> Option<String> {
+pub fn macro_name_from_string(line: &String) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.starts_with("$") {
@@ -30,31 +30,17 @@ pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32>
     None
 }
 
-// Return option all items forming macro if it exists.
-pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<String>> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if return_macro(&first_word.to_string()).is_none() {
-        return None;
-    }
-    for macro_line in macros.clone() {
-        if macro_line.name == first_word {
-            return Some(macro_line.items);
-        }
-    }
-    None
-}
 
-// Return option varibales from macro if it exists.
-pub fn return_macro_variables(line: &String, macros: &mut Vec<Macro>) -> Option<u32> {
+// Return option macro if it exists.
+pub fn return_macro(line: &String, macros: &mut Vec<Macro>) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
-    if return_macro(&first_word.to_string()).is_none() {
+    if macro_name_from_string(&first_word.to_string()).is_none() {
         return None;
     }
     for macro_line in macros.clone() {
         if macro_line.name == first_word {
-            return Some(macro_line.variables);
+            return Some(macro_line);
         }
     }
     None
@@ -74,14 +60,14 @@ pub fn return_macro_items_replace(
     let input_line_array: Vec<_> = words.clone().collect();
 
     let first_word = words.next().unwrap_or("");
-    if return_macro(&first_word.to_string()).is_none() {
+    if macro_name_from_string(&first_word.to_string()).is_none() {
         return None;
     }
     for macro_line in macros.clone() {
         if macro_line.name == first_word {
             found = true;
 
-            if input_line_array.len() > macro_line.variables as usize + 1 {
+            if input_line_array.len() as u32 > macro_line.variables + 1 {
                 msg_list.push(
                     format!("Too many variables for macro {}", macro_line.name),
                     Some(input_line_number),
@@ -151,14 +137,14 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
         for input_macro_line in input_macros.clone() {
             let mut output_items: Vec<String> = Vec::new();
             for item in input_macro_line.items {
-                if return_macro_items(&item, &mut input_macros).is_some() {
+                if return_macro(&item, &mut input_macros).is_some() {
                     let mut item_line_array: Vec<String> = Vec::new();
                     let item_words = item.split_whitespace();
                     for item_word in item_words {
                         item_line_array.push(item_word.to_string());
                     }    
 
-                    if return_macro_variables(&item, &mut input_macros).unwrap_or(0) < item_line_array.len() as u32 -1 {
+                    if return_macro(&item, &mut input_macros).unwrap().variables < item_line_array.len() as u32 -1 {
                         msg_list.push(
                             format!(
                             "Too many variables in imbedded macro \"{}\" in macro {}",
@@ -172,7 +158,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                     }
 
 
-                    for new_item in return_macro_items(&item, &mut input_macros).unwrap() {
+                    for new_item in return_macro(&item, &mut input_macros).unwrap().items {
                         if new_item.find("%").is_some() {
                             // Replace %n in new _tems with the nth value in item
 
@@ -292,7 +278,7 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32
 
 // Returns emum of type of line
 pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut String) -> LineType {
-    if return_label(&line).is_some() {
+    if label_name_from_string(&line).is_some() {
         return LineType::Label;
     };
     if is_opcode(opcodes, line.clone()).is_some() {
@@ -416,7 +402,7 @@ pub fn add_arguments(
 
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
-        if i == num_registers as usize + 1 && num_arguments == 1 {
+        if i as u32 == num_registers + 1  && num_arguments == 1 {
             arguments = arguments
                 + &convert_argument(
                     word.to_string().to_uppercase(),
@@ -426,7 +412,7 @@ pub fn add_arguments(
                 )
                 .unwrap_or(" ERROR    ".to_string())
         }
-        if i == num_registers as usize + 2 && num_arguments == 2 {
+        if i as u32== num_registers + 2 && num_arguments == 2 {
             arguments = arguments
                 + &convert_argument(
                     word.to_string().to_uppercase(),
@@ -436,7 +422,7 @@ pub fn add_arguments(
                 )
                 .unwrap_or(" ERROR    ".to_string())
         }
-        if i > num_registers as usize + num_arguments as usize {
+        if i as u32 > num_registers + num_arguments {
             //arguments = " ERROR    ".to_string()
             msg_list.push(
                 format!("Too many arguments found - \"{}\"", line),
@@ -446,7 +432,7 @@ pub fn add_arguments(
         }
     }
 
-    if arguments.len() != 8 * num_arguments as usize {
+    if arguments.len() as u32 != 8 * num_arguments {
         msg_list.push(
             format!("Incorrect argument defintion - \"{}\"", line),
             Some(line_number),
@@ -463,7 +449,7 @@ pub fn convert_argument(
     line_number: u32,
     labels: &mut Vec<Label>,
 ) -> Option<String> {
-    if return_label(&argument).is_some() {
+    if label_name_from_string(&argument).is_some() {
         match return_label_value(&argument, labels) {
             Some(n) => return Some(format!("{:08X}", n)),
             None => {
