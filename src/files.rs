@@ -137,7 +137,10 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     let mut item: String = "".to_string();
     let mut items: Vec<String> = Vec::new();
     let mut max_variable: i64 = 0;
+    let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
+    let mut dedup_all_found_variables: Vec<i64> = Vec::new();
+    //let mut difference_all_found_variables: Vec<i64> = Vec::new();
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -153,7 +156,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
                     let int_value = i64::from_str_radix(without_prefix, 10);
                     if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                     } else {
-                        all_variables.push(int_value.clone().unwrap_or(0));
+                        all_found_variables.push(int_value.clone().unwrap_or(0));
                         if int_value.clone().unwrap_or(0) > max_variable as i64 {
                             max_variable = int_value.clone().unwrap_or(0);
                         }
@@ -173,20 +176,35 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         items.push(item.to_string());
     }
     // remove duplicates
-    all_variables=all_variables.into_iter().unique().collect();
+    dedup_all_found_variables=all_found_variables.clone().into_iter().unique().collect();
 
     println!(
         "For {} max var is {}, array is{:?} array size is {}",
         name,
         max_variable,
-        all_variables,
-        all_variables.len()
+        dedup_all_found_variables,
+        dedup_all_found_variables.len()
     );
-    if max_variable!=all_variables.len() as i64 {
+
+    if max_variable!=dedup_all_found_variables.len() as i64 {
+        for i in 1..max_variable {
+            all_variables.push(i);
+        }
+        let difference_all_variables: Vec<_> = all_variables.into_iter().filter(|item| !all_found_variables.contains(item)).clone().collect();
+        let mut missing: String="".to_string();
+        for i in difference_all_variables {
+            if missing.len()>0{
+                missing.push(' ');
+            }
+            missing.push_str(&format!("%{}",i));
+        }
+
+
         msg_list.push(
             format!(
-                "Error in macro variable definition for macro {}",
-                name
+                "Error in macro variable definition for macro {}, missing {:?}",
+                name,
+                missing,
             ),
             None,
             MessageType::Warning,
