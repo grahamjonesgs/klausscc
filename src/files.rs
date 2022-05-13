@@ -1,5 +1,5 @@
 use crate::{
-    messages::{MsgList,MessageType::*},
+    messages::*,
     Pass2,
 };
 
@@ -9,6 +9,8 @@ use std::{
     io::{prelude::*, BufReader},
     path::Path,
 };
+
+use itertools::Itertools;
 
 #[derive(Debug)]
 pub struct Opcode {
@@ -24,7 +26,7 @@ pub struct CodeLine {
     pub program_counter: u32,
     pub code: String,
 }
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 pub struct Label {
     pub program_counter: u32,
     pub name: String,
@@ -126,7 +128,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 
 // Receive a line from the opcode definition file and if possible
 // parse to instance of Some(Macro), or None
-pub fn macro_from_string(input_line: &str) -> Option<Macro> {
+pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Macro> {
     // Find the macro if it exists
     if input_line.find("$").unwrap_or(usize::MAX) != 0 {
         return None;
@@ -134,6 +136,8 @@ pub fn macro_from_string(input_line: &str) -> Option<Macro> {
     let mut name: String = "".to_string();
     let mut item: String = "".to_string();
     let mut items: Vec<String> = Vec::new();
+    let mut max_variable: i64 = 0;
+    let mut all_variables: Vec<i64> = Vec::new();
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -144,6 +148,18 @@ pub fn macro_from_string(input_line: &str) -> Option<Macro> {
                 items.push(item.to_string());
                 item = "".to_string();
             } else {
+                if word.find("%").is_some() {
+                    let without_prefix = word.trim_start_matches("%");
+                    let int_value = i64::from_str_radix(without_prefix, 10);
+                    if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
+                    } else {
+                        all_variables.push(int_value.clone().unwrap_or(0));
+                        if int_value.clone().unwrap_or(0) > max_variable as i64 {
+                            max_variable = int_value.clone().unwrap_or(0);
+                        }
+                    }
+                }
+
                 if item.len() > 0 {
                     item = item + " " + word;
                 } else {
@@ -156,16 +172,39 @@ pub fn macro_from_string(input_line: &str) -> Option<Macro> {
     if item.len() > 0 {
         items.push(item.to_string());
     }
+    // remove duplicates
+    all_variables=all_variables.into_iter().unique().collect();
 
+    println!(
+        "For {} max var is {}, array is{:?} array size is {}",
+        name,
+        max_variable,
+        all_variables,
+        all_variables.len()
+    );
+    if max_variable!=all_variables.len() as i64 {
+        msg_list.push(
+            format!(
+                "Error in macro variable definition for macro {}",
+                name
+            ),
+            None,
+            MessageType::Warning,
+        );
+    }
+    
     Some(Macro {
         name: name.to_string(),
-        variables: 0,
+        variables: max_variable as u32,
         items: items,
     })
 }
 
 // Parse given filename to Vec of Opcode.
-pub fn parse_vh_file(filename: &impl AsRef<Path>) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+pub fn parse_vh_file(
+    filename: &impl AsRef<Path>,
+    msg_list: &mut MsgList,
+) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     let file = File::open(filename);
     if file.is_err() {
         return (None, None);
@@ -182,7 +221,7 @@ pub fn parse_vh_file(filename: &impl AsRef<Path>) -> (Option<Vec<Opcode>>, Optio
                     None => (),
                     Some(a) => opcodes.push(a),
                 }
-                match macro_from_string(&v) {
+                match macro_from_string(&v,msg_list) {
                     None => (),
                     Some(a) => macros.push(a),
                 }
@@ -206,11 +245,7 @@ pub fn read_file_to_vec(
     let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
 
-    msg_list.push(
-        "Starting opcode import".to_string(),
-        None,
-        Info,
-    );
+    msg_list.push("Starting opcode import".to_string(), None, MessageType::Info);
 
     for line in buf.lines() {
         match line {

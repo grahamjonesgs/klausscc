@@ -1,26 +1,25 @@
-$POPALL F
+//$POPALL F
+$LEVEL1 A B 
 // $TESTM 0x1234 0x4321
 // test msg
 // $TESTM2
 BEGIN:
-BEGIN:
-SETRx A 12347867
+SETR A 12347867
 SETR B 0x001A
 SETR C 0x1110
-or B      
+or B B     
 OR B D // Hello
-$TESTM
-$POPALL F F F
+
+$VARS A B 
+
 7SEG1V 0x4321
 7SEG1V 0x4321
 DELAYV 0xFFFF// test message
 
-BEGIN:
 DISPLOOP:
 DECR A
 JMPZ BEGIN:   // Restart if we reached zero
 
-BEGIN:
 // Call function
 PUSH A // Push A on Stack
 PUSH B

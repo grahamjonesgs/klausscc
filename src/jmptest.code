@@ -1,32 +1,30 @@
-0x00000000: 4015           -- POP F //-- From macro $POPALL
-0x00000001: 4011           -- POP B //-- From macro $POPALL
-0x00000002: 4012           -- POP C //-- From macro $POPALL
+                           -- //$POPALL F
+0x00000000: 4010           -- POP A //-- From macro $LEVEL1
+0x00000001: 4000           -- PUSH A //-- From macro $LEVEL1
                            -- // $TESTM 0x1234 0x4321
                            -- // test msg
                            -- // $TESTM2
                            -- BEGIN:
-                           -- BEGIN:
-Error                      -- SETRx A 12347867
-0x00000003: 0801 0000 001A -- SETR B 0x001A
-0x00000005: 0802 0000 1110 -- SETR C 0x1110
-Error                      -- or B      
-0x00000007: 0313           -- OR B D // Hello
-0x00000008: F010           -- NOP //-- From macro $TESTM
-0x00000009: F010           -- NOP //-- From macro $TESTM
-0x0000000A: F010           -- NOP //-- From macro $TESTM
-0x0000000B: 4015           -- POP F //-- From macro $POPALL
-0x0000000C: 4011           -- POP B //-- From macro $POPALL
-0x0000000D: 4012           -- POP C //-- From macro $POPALL
+0x00000002: 0800 00BC 69DB -- SETR A 12347867
+0x00000004: 0801 0000 001A -- SETR B 0x001A
+0x00000006: 0802 0000 1110 -- SETR C 0x1110
+0x00000008: 0311           -- or B B     
+0x00000008: 0313           -- OR B D // Hello
+0x00000009: 08B?           -- 
+0x00000009: 4010           -- POP A //-- From macro $VARS
+0x0000000A: 4011           -- POP B //-- From macro $VARS
+0x0000000B: 4011           -- POP B //-- From macro $VARS
+0x0000000C: 4010           -- POP A //-- From macro $VARS
+Error                      -- POP //-- From macro $VARS
+0x0000000E: 08B?           -- 
 0x0000000E: 3071 0000 4321 -- 7SEG1V 0x4321
 0x00000010: 3071 0000 4321 -- 7SEG1V 0x4321
 0x00000012: F013 0000 FFFF -- DELAYV 0xFFFF// test message
 0x00000014: 08B?           -- 
-                           -- BEGIN:
                            -- DISPLOOP:
 0x00000014: 0850           -- DECR A
-0x00000015: 1001 0000 0003 -- JMPZ BEGIN:   // Restart if we reached zero
+0x00000015: 1001 0000 0002 -- JMPZ BEGIN:   // Restart if we reached zero
 0x00000017: 08B?           -- 
-                           -- BEGIN:
                            -- // Call function
 0x00000017: 4000           -- PUSH A // Push A on Stack
 0x00000018: 4001           -- PUSH B

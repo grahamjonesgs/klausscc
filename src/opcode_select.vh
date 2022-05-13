@@ -1,15 +1,11 @@
 // Can be read by assembler, so format is fixed. Opcode must be first word in comment. If opcode takes variable, it mst be passed as w_var1
 /* Macro definition
-$TESTM NOP / NOP / NOP
-$POPALL POP %1 / POP B / POP C 
-$PUSHALL PUSH A / PUSH B / PUSH C
-$WAIT DELAYV FFFF / DELAYV FFFF
 
-$TESTM2 XOR A A / $PUSHALL / NOP
 $LEVEL1 $LEVEL2 %1 / $LEVEL3 %2
 $LEVEL2 POP %1
 $LEVEL3 PUSH %1
-// Expected level1 pop %1 / push %2
+$VARS POP %1 / POP %2 / POP %2 / POP %1 / POP %4
+// Expected level1 pop %1 / push %5
 */
 
 task t_opcode_select;

@@ -45,8 +45,7 @@ pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<
     None
 }
 
-// Return option all items forming macro if it exists.
-// Update to find the % in the macro and repoace wiht the right element from test code array
+// Return option all vec string replacing %x with correct value.
 pub fn return_macro_items_replace(
     line: &String,
     macros: &mut Vec<Macro>,
@@ -58,7 +57,6 @@ pub fn return_macro_items_replace(
     let mut found: bool = false;
 
     let input_line_array: Vec<_> = words.clone().collect();
-    //let test2 = test1.len();
 
     let first_word = words.next().unwrap_or("");
     if return_macro(&first_word.to_string()).is_none() {
@@ -145,7 +143,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
             }
             output_macros.push(Macro {
                 name: input_macro_line.name,
-                variables: 2,
+                variables: input_macro_line.variables,
                 items: output_items,
             })
         }
