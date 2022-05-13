@@ -61,7 +61,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
         };
         if msg.line_number.is_some() {
             message = format!(
-                "{} {} Line {} {} ",
+                "{} {} Line {}. {} ",
                 msg.time.to_string(),
                 warning,
                 msg.line_number.unwrap(),

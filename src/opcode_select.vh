@@ -1,10 +1,10 @@
 // Can be read by assembler, so format is fixed. Opcode must be first word in comment. If opcode takes variable, it mst be passed as w_var1
 /* Macro definition
 
-$LEVEL1 $LEVEL2 %1 / $LEVEL3 %2
-$LEVEL2 POP %1
-$LEVEL3 PUSH %1
-$VARS POP %1 / POP %2 / POP %2 / POP %1 / POP %9
+$LEVEL1 $LEVEL2 %1 %2 / $LEVEL3 %4 %3 
+$LEVEL2 POP %1 / POP %2
+$LEVEL3 PUSH %2 / PUSH %1
+$VARS POP %1 / POP %2 / POP %2 / POP %1 / POP %2
 // Expected level1 pop %1 / push %5
 */
 

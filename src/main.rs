@@ -98,7 +98,7 @@ fn main() {
 
     // Parse the Opcode file
     msg_list.push(format!("Opcode file is {}", opcode_file_name), None, Info);
-    let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name,&mut msg_list);
+    let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name, &mut msg_list);
     if opt_oplist.is_none() {
         println!("Unable to open opcode file {:?}", opcode_file_name);
         std::process::exit(1);
@@ -283,8 +283,16 @@ fn main() {
     println!(
         "Completed with {} error{} and {} waning{}",
         msg_list.number_errors(),
-        if msg_list.number_errors()==1 {""} else {"s"},
+        if msg_list.number_errors() == 1 {
+            ""
+        } else {
+            "s"
+        },
         msg_list.number_warnings(),
-        if msg_list.number_warnings()==1 {""} else {"s"},
+        if msg_list.number_warnings() == 1 {
+            ""
+        } else {
+            "s"
+        },
     );
 }

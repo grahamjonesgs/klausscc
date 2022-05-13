@@ -1,7 +1,4 @@
-use crate::{
-    messages::*,
-    Pass2,
-};
+use crate::{messages::*, Pass2};
 
 use std::{
     fmt,
@@ -176,41 +173,37 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         items.push(item.to_string());
     }
     // remove duplicates
-    dedup_all_found_variables=all_found_variables.clone().into_iter().unique().collect();
+    dedup_all_found_variables = all_found_variables.clone().into_iter().unique().collect();
 
-    println!(
-        "For {} max var is {}, array is{:?} array size is {}",
-        name,
-        max_variable,
-        dedup_all_found_variables,
-        dedup_all_found_variables.len()
-    );
-
-    if max_variable!=dedup_all_found_variables.len() as i64 {
+    if max_variable != dedup_all_found_variables.len() as i64 {
         for i in 1..max_variable {
             all_variables.push(i);
         }
-        let difference_all_variables: Vec<_> = all_variables.into_iter().filter(|item| !all_found_variables.contains(item)).clone().collect();
-        let mut missing: String="".to_string();
+
+        // Find the missing variables and create string
+        let difference_all_variables: Vec<_> = all_variables
+            .into_iter()
+            .filter(|item| !all_found_variables.contains(item))
+            .clone()
+            .collect();
+        let mut missing: String = "".to_string();
         for i in difference_all_variables {
-            if missing.len()>0{
+            if missing.len() > 0 {
                 missing.push(' ');
             }
-            missing.push_str(&format!("%{}",i));
+            missing.push_str(&format!("%{}", i));
         }
-
 
         msg_list.push(
             format!(
                 "Error in macro variable definition for macro {}, missing {:?}",
-                name,
-                missing,
+                name, missing,
             ),
             None,
             MessageType::Warning,
         );
     }
-    
+
     Some(Macro {
         name: name.to_string(),
         variables: max_variable as u32,
@@ -239,7 +232,7 @@ pub fn parse_vh_file(
                     None => (),
                     Some(a) => opcodes.push(a),
                 }
-                match macro_from_string(&v,msg_list) {
+                match macro_from_string(&v, msg_list) {
                     None => (),
                     Some(a) => macros.push(a),
                 }
@@ -263,7 +256,11 @@ pub fn read_file_to_vec(
     let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
 
-    msg_list.push("Starting opcode import".to_string(), None, MessageType::Info);
+    msg_list.push(
+        "Starting opcode import".to_string(),
+        None,
+        MessageType::Info,
+    );
 
     for line in buf.lines() {
         match line {

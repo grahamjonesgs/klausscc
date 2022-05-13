@@ -45,6 +45,21 @@ pub fn return_macro_items(line: &String, macros: &mut Vec<Macro>) -> Option<Vec<
     None
 }
 
+// Return option varibales from macro if it exists.
+pub fn return_macro_variables(line: &String, macros: &mut Vec<Macro>) -> Option<u32> {
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if return_macro(&first_word.to_string()).is_none() {
+        return None;
+    }
+    for macro_line in macros.clone() {
+        if macro_line.name == first_word {
+            return Some(macro_line.variables);
+        }
+    }
+    None
+}
+
 // Return option all vec string replacing %x with correct value.
 pub fn return_macro_items_replace(
     line: &String,
@@ -65,6 +80,15 @@ pub fn return_macro_items_replace(
     for macro_line in macros.clone() {
         if macro_line.name == first_word {
             found = true;
+
+            if input_line_array.len() > macro_line.variables as usize + 1 {
+                msg_list.push(
+                    format!("Too many variables for macro {}", macro_line.name),
+                    Some(input_line_number),
+                    MessageType::Warning,
+                );
+            }
+
             for item in macro_line.items {
                 let item_words = item.split_whitespace();
                 let mut build_line: String = "".to_string();
@@ -128,12 +152,76 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
             let mut output_items: Vec<String> = Vec::new();
             for item in input_macro_line.items {
                 if return_macro_items(&item, &mut input_macros).is_some() {
+                    let mut item_line_array: Vec<String> = Vec::new();
+                    let item_words = item.split_whitespace();
+                    for item_word in item_words {
+                        item_line_array.push(item_word.to_string());
+                    }    
+
+                    if return_macro_variables(&item, &mut input_macros).unwrap_or(0) < item_line_array.len() as u32 -1 {
+                        msg_list.push(
+                            format!(
+                            "Too many variables in imbedded macro \"{}\" in macro {}",
+                            item,
+                            input_macro_line.name,
+                        ),
+                            None,
+                            MessageType::Warning,
+                        );
+                        
+                    }
+
+
                     for new_item in return_macro_items(&item, &mut input_macros).unwrap() {
                         if new_item.find("%").is_some() {
-                            println!("Found imbeded macro argument in macro {}",item);
+                            // Replace %n in new _tems with the nth value in item
+
+                            let new_item_words = new_item.split_whitespace();
+                            let mut build_line: String = "".to_string();
+                            for item_word in new_item_words {
+                                if item_word.find("%").is_some() {
+                                    let without_prefix = item_word.trim_start_matches("%");
+                                    let int_value = i64::from_str_radix(without_prefix, 10);
+                                    if int_value.clone().is_err()
+                                        || int_value.clone().unwrap_or(0) < 1
+                                    {
+                                        msg_list.push(
+                                            format!(
+                                            "Invalid macro argument number {}, in imbedded macro \"{}\" in {}",
+                                            without_prefix,
+                                            item,
+                                            input_macro_line.name,
+                                        ),
+                                            None,
+                                            MessageType::Error,
+                                        );
+                                    } else {
+                                        if int_value.clone().unwrap_or(0)
+                                            > item_line_array.len() as i64 - 1
+                                        {
+                                            msg_list.push(
+                                                format!(
+                                                    "Missing argument {} for imbedded macro \"{}\" in {}",
+                                                    int_value.clone().unwrap_or(0),
+                                                    item,
+                                                    input_macro_line.name,
+                                                ),
+                                                None,
+                                                MessageType::Error,
+                                            );
+                                        } else {
+                                            build_line = build_line
+                                                + " "
+                                                + &item_line_array
+                                                    [int_value.clone().unwrap_or(0) as usize];
+                                        }
+                                    }
+                                } else {
+                                    build_line = build_line + " " + item_word
+                                }
+                            }
+                            output_items.push(build_line);
                         }
-                        
-                        output_items.push(new_item);
                     }
                     last_macro = input_macro_line.name.clone();
                     changed = true;
@@ -428,13 +516,16 @@ pub fn strip_comments(input: &mut String) -> String {
     }
 }
 
-pub fn find_duplicate_label (labels: &mut Vec<Label>,msg_list: &mut MsgList) {
-    let mut local_labels=labels.clone();
+pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
+    let mut local_labels = labels.clone();
     for label in labels {
-        let opt_found_line =return_label_value(&label.name,&mut local_labels);
-        if opt_found_line.unwrap_or(0)!=label.program_counter {
+        let opt_found_line = return_label_value(&label.name, &mut local_labels);
+        if opt_found_line.unwrap_or(0) != label.program_counter {
             msg_list.push(
-                format!("Duplicate label {} found, with differing values", label.name),
+                format!(
+                    "Duplicate label {} found, with differing values",
+                    label.name
+                ),
                 Some(label.line_counter),
                 MessageType::Error,
             );
