@@ -66,12 +66,26 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_end_comment: usize;
     let num_variables: u32;
     let mut num_registers: u32;
+    let mut line_pos_opcode: usize;
 
     // Find the opcode if it exists
     match input_line.find("16'h") {
         None => return None,
-        Some(a) => pos_opcode = a + 4,
+        Some(a) =>  { 
+            line_pos_opcode=a;
+            pos_opcode = a + 4}
     }
+
+    // check if the line was commented out
+    match input_line.find("//") {
+        None => {},
+        Some(a) => {
+            if a < line_pos_opcode {
+                return None
+            }
+        }
+    }
+
     // Check for length of opcode
     if input_line.len() < (pos_opcode + 4) {
         return None;

@@ -114,7 +114,7 @@ fn main() {
     let mut oplist = opt_oplist.unwrap();
     let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(), &mut msg_list);
 
-    println!("{:?}", macro_list);
+    println!("{:?}", oplist);
     // Parse the input file
     msg_list.push(format!("Input file is {}", input_file_name), None, Info);
     let input_list = read_file_to_vec(&mut msg_list, &input_file_name);
