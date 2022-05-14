@@ -30,7 +30,6 @@ pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32>
     None
 }
 
-
 // Return option macro if it exists.
 pub fn return_macro(line: &String, macros: &mut Vec<Macro>) -> Option<Macro> {
     let mut words = line.split_whitespace();
@@ -142,21 +141,20 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                     let item_words = item.split_whitespace();
                     for item_word in item_words {
                         item_line_array.push(item_word.to_string());
-                    }    
+                    }
 
-                    if return_macro(&item, &mut input_macros).unwrap().variables < item_line_array.len() as u32 -1 {
+                    if return_macro(&item, &mut input_macros).unwrap().variables
+                        < item_line_array.len() as u32 - 1
+                    {
                         msg_list.push(
                             format!(
-                            "Too many variables in imbedded macro \"{}\" in macro {}",
-                            item,
-                            input_macro_line.name,
-                        ),
+                                "Too many variables in imbedded macro \"{}\" in macro {}",
+                                item, input_macro_line.name,
+                            ),
                             None,
                             MessageType::Warning,
                         );
-                        
                     }
-
 
                     for new_item in return_macro(&item, &mut input_macros).unwrap().items {
                         if new_item.find("%").is_some() {
@@ -402,7 +400,7 @@ pub fn add_arguments(
 
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
-        if i as u32 == num_registers + 1  && num_arguments == 1 {
+        if i as u32 == num_registers + 1 && num_arguments == 1 {
             arguments = arguments
                 + &convert_argument(
                     word.to_string().to_uppercase(),
@@ -412,7 +410,7 @@ pub fn add_arguments(
                 )
                 .unwrap_or(" ERROR    ".to_string())
         }
-        if i as u32== num_registers + 2 && num_arguments == 2 {
+        if i as u32 == num_registers + 2 && num_arguments == 2 {
             arguments = arguments
                 + &convert_argument(
                     word.to_string().to_uppercase(),
@@ -517,4 +515,31 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
             );
         }
     }
+}
+
+pub fn calc_checksum(input_string: &String, msg_list: &mut MsgList) -> String {
+    let mut stripped_string: String = "".to_string();
+
+    // Remove S, Z and X
+    for char in input_string.chars() {
+        if (char != 'S') && (char != 'Z') & (char != 'X') {
+            stripped_string.push(char);
+        }
+    }
+
+    // check if len is divisable by 4
+    if stripped_string.len() % 4 !=0 {
+        msg_list.push(
+            {
+                format!(
+                    "Opcode list length not multiple of 4, lenght is {}",
+                    stripped_string.len(),
+                )
+            },
+            None,
+            MessageType::Error,
+        );
+    }
+
+    "ABCD".to_string()
 }

@@ -1,4 +1,4 @@
-use crate::{messages::*, Pass2};
+use crate::{messages::*, Pass2,calc_checksum};
 
 use std::{
     fmt,
@@ -66,7 +66,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_end_comment: usize;
     let num_variables: u32;
     let mut num_registers: u32;
-    let mut line_pos_opcode: usize;
+    let line_pos_opcode: usize;
 
     // Find the opcode if it exists
     match input_line.find("16'h") {
@@ -294,8 +294,10 @@ pub fn filename_stem(full_name: &String) -> String {
     full_name[..dot_pos.unwrap_or(0)].to_string()
 }
 
-pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
+/* pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let rfile = File::create(filename);
+    let mut checksum: i64=0;
+
     if rfile.is_err() {
         return false;
     }
@@ -305,11 +307,53 @@ pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> boo
         return false;
     };
     for pass in pass2 {
+        // calc checksum
+        checksum=checksum+0;
+
+
         if file.write(pass.opcode.as_bytes()).is_err() {
             return false;
         };
     }
+
+    // Add writing Z0010 and then checksum.
+
+
     if file.write(b"X").is_err() {
+        return false;
+    };
+
+    true
+} */
+
+pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> bool {
+    let rfile = File::create(filename);
+    let mut output_string = "".to_string();
+
+
+    if rfile.is_err() {
+        return false;
+    }
+
+    let mut file = rfile.unwrap();
+    output_string.push('S'); // Start character
+   
+    for pass in pass2 {
+        output_string.push_str(&pass.opcode);        
+    }
+
+    // Add writing Z0010 and then checksum.
+    output_string.push_str("Z0010"); // Holding for stack of needed
+
+    output_string.push_str("ABCD"); // Dummy ofr checksum
+
+    let checksum:String = calc_checksum(&output_string,msg_list);
+
+    println!("xxxx checksum is {}",checksum);
+
+    output_string.push('X'); // Stop character
+
+    if file.write(output_string.as_bytes()).is_err() {
         return false;
     };
 
