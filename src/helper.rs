@@ -252,7 +252,7 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32
         if first_word == "" {
             return None;
         }
-        if first_word == opcode.name {
+        if first_word.to_uppercase() == opcode.name {
             return Some(opcode.variables);
         }
     }
@@ -519,6 +519,7 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
 
 pub fn calc_checksum(input_string: &String, msg_list: &mut MsgList) -> String {
     let mut stripped_string: String = "".to_string();
+    let mut checksum:u32 = 0;
 
     // Remove S, Z and X
     for char in input_string.chars() {
@@ -539,7 +540,35 @@ pub fn calc_checksum(input_string: &String, msg_list: &mut MsgList) -> String {
             None,
             MessageType::Error,
         );
+        "0000".to_string();
     }
 
-    "ABCD".to_string()
+    let mut index: usize = 0;
+    let mut possition_index: u32 = 0;
+
+    for _ in stripped_string.chars() {
+        if index % 4 == 0 {
+            let int_value = i64::from_str_radix(&stripped_string[index..index +4], 16);
+            if int_value.is_err() {
+                msg_list.push(
+                    {
+                        format!(
+                            "Error creating opcode for invalid value {}",
+                            &stripped_string[index..index +4],
+                        )
+                    },
+                    None,
+                    MessageType::Error,
+                );
+            }
+            else {
+            checksum=(checksum + int_value.unwrap_or(0) as u32)%(0xFFFF+1);
+            possition_index=possition_index+1;
+
+            }
+        }
+        index = index +1;
+    }
+    checksum=(checksum + possition_index -1)%(0xFFFF+1);
+    format!("{:04X}",checksum)
 }

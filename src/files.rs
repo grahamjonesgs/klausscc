@@ -150,8 +150,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     let mut max_variable: i64 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
-    let mut dedup_all_found_variables: Vec<i64> = Vec::new();
-    //let mut difference_all_found_variables: Vec<i64> = Vec::new();
+    let dedup_all_found_variables: Vec<i64>;
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -345,11 +344,12 @@ pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>, msg_li
     // Add writing Z0010 and then checksum.
     output_string.push_str("Z0010"); // Holding for stack of needed
 
-    output_string.push_str("ABCD"); // Dummy ofr checksum
+   // output_string.push_str("ABCD"); // Dummy ofr checksum
 
     let checksum:String = calc_checksum(&output_string,msg_list);
 
     println!("xxxx checksum is {}",checksum);
+    output_string.push_str(&checksum);
 
     output_string.push('X'); // Stop character
 
