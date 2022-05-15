@@ -1,5 +1,5 @@
 
-use crate::{messages::*, Pass2,calc_checksum,is_opcode, helper::return_macro};
+use crate::{messages::*, Pass2,calc_checksum,return_opcode, helper::return_macro};
 
 use std::{
     fmt,
@@ -250,7 +250,7 @@ pub fn parse_vh_file(
                     None => (),
                     Some(a) => {
                         
-                        if is_opcode(&mut opcodes,a.name.clone()).is_some() {
+                        if return_opcode(&a.name,&mut opcodes,).is_some() {
                             msg_list.push(
                                 format!("Duplicate Opcode {} found",a.name),
                                 None,

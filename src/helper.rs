@@ -242,7 +242,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
 }
 
 // Checks if first word is opcode and if so returns opcode hex value
-pub fn is_opcode(opcodes: &mut Vec<Opcode>, line: String) -> Option<String> {
+pub fn return_opcode( line: &String,opcodes: &mut Vec<Opcode>) -> Option<String> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -288,7 +288,7 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut String) -> LineType {
     if label_name_from_string(&line).is_some() {
         return LineType::Label;
     };
-    if is_opcode(opcodes, line.clone()).is_some() {
+    if return_opcode(&line,opcodes).is_some() {
         return LineType::Opcode;
     }
     if is_blank(line.clone()) {
@@ -375,7 +375,7 @@ pub fn add_registers(
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_string().to_uppercase()).unwrap_or(0);
 
-    let mut opcode_found = is_opcode(opcodes, line.to_uppercase()).unwrap_or("".to_string());
+    let mut opcode_found = return_opcode(&line.to_uppercase(),opcodes).unwrap_or("".to_string());
     opcode_found = opcode_found[..(4 - num_registers) as usize].to_string();
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
