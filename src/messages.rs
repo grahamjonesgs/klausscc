@@ -26,8 +26,8 @@ impl MsgList {
     }
     pub fn push(&mut self, name: String, line_number: Option<u32>, msg_type: MessageType) {
         let _ = &mut self.list.push(Message {
-            name: name,
-            line_number: line_number,
+            name,
+            line_number,
             level: msg_type,
             time: Local::now().time(),
         });
@@ -55,24 +55,24 @@ impl MsgList {
 /// Prints all the message in passed MsgList vector to terminal with coloured messages
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
-        let message: String;
-        let warning: ColoredString;
-        match msg.level {
-            MessageType::Info => warning = "I".to_string().green(),
-            MessageType::Warning => warning = "W".to_string().yellow(),
-            MessageType::Error => warning = "E".to_string().red(),
+        //let message: String;
+        
+        let warning: ColoredString = match msg.level {
+            MessageType::Info => "I".to_string().green(),
+            MessageType::Warning => "W".to_string().yellow(),
+            MessageType::Error => "E".to_string().red(),
         };
-        if msg.line_number.is_some() {
-            message = format!(
+        let message = if msg.line_number.is_some() {
+            format!(
                 "{} {} Line {}. {} ",
-                msg.time.to_string(),
+                msg.time,
                 warning,
                 msg.line_number.unwrap(),
                 msg.name
-            );
+            )
         } else {
-            message = format!("{} {} {} ", msg.time.to_string(), warning, msg.name);
-        }
+            format!("{} {} {} ", msg.time, warning, msg.name)
+        };
         println!("{}", message);
     }
 }

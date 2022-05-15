@@ -83,17 +83,17 @@ fn main() {
     let opcode_file_name = matches
         .value_of("opcode_file")
         .unwrap_or("opcode_select.vh")
-        .replace(" ", "");
-    let input_file_name = matches.value_of("input").unwrap_or("").replace(" ", "");
+        .replace(' ', "");
+    let input_file_name = matches.value_of("input").unwrap_or("").replace(' ', "");
     let binary_file_name = matches
         .value_of("bitcode")
         .unwrap_or(&filename_stem(&input_file_name))
-        .replace(" ", "")
+        .replace(' ', "")
         + ".kbt";
     let output_file_name = matches
         .value_of("output")
         .unwrap_or(&filename_stem(&input_file_name))
-        .replace(" ", "")
+        .replace(' ', "")
         + ".code";
 
     // Parse the Opcode file
@@ -122,7 +122,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    msg_list.push(format!("Starting pass 0"), None, MessageType::Info);
+    msg_list.push("Starting pass 0".to_string(), None, MessageType::Info);
 
     // Pass 0 to add macros
     let mut pass0: Vec<Pass0> = Vec::new();
@@ -130,18 +130,24 @@ fn main() {
     for code_line in input_list.unwrap() {
         if macro_name_from_string(&code_line).is_some() {
             let items = return_macro_items_replace(
-                &code_line.trim().to_string(),
+                code_line.trim(),
                 &mut macro_list,
                 input_line_count,
                 &mut msg_list,
             );
             if items.is_some() {
-                for item in items.unwrap() {
+                for item in Option::unwrap(items) {
                     pass0.push(Pass0 {
                         input: item
                             + " //-- From macro "
-                            + &macro_name_from_string(&code_line)
-                                .unwrap_or("".to_string())
+                            + &{
+                                let this = macro_name_from_string(&code_line);
+                                let default = r#""#.to_string();
+                                match this {
+                                    Some(x) => x,
+                                    None => default,
+                                }
+                            }
                                 .to_string(),
                         line_counter: input_line_count,
                     });
@@ -159,22 +165,22 @@ fn main() {
                 line_counter: input_line_count,
             });
         }
-        input_line_count = input_line_count + 1;
+        input_line_count += 1;
     }
 
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
 
-    msg_list.push(format!("Starting pass 1"), None, MessageType::Info);
+    msg_list.push("Starting pass 1".to_string(), None, MessageType::Info);
 
     for mut pass in pass0 {
         pass1.push(Pass1 {
             input: pass.input.to_string(),
             line_counter: pass.line_counter,
-            program_counter: program_counter,
+            program_counter,
             line_type: line_type(&mut oplist, &mut pass.input),
         });
-        if is_valid_line(&mut oplist, strip_comments(&mut pass.input)) == false {
+        if !is_valid_line(&mut oplist, strip_comments(&mut pass.input)) {
             msg_list.push(
                 format!("Opcode error {}", pass.input),
                 Some(pass.line_counter),
@@ -188,7 +194,7 @@ fn main() {
         }
     }
 
-    msg_list.push(format!("Finding labels"), None, messages::MessageType::Info);
+    msg_list.push("Finding labels".to_string(), None, messages::MessageType::Info);
 
     let mut labels: Vec<Label> = pass1
         .iter()
@@ -196,7 +202,14 @@ fn main() {
         .map(|n| -> Label {
             Label {
                 program_counter: n.program_counter,
-                name: label_name_from_string(&n.input).unwrap_or("".to_string()),
+                name: {
+                    let this = label_name_from_string(&n.input);
+                    let default = "".to_string();
+                    match this {
+                        Some(x) => x,
+                        None => default,
+                    }
+                },
                 line_counter: n.line_counter,
             }
         })
@@ -204,7 +217,7 @@ fn main() {
 
     find_duplicate_label(&mut labels, &mut msg_list);
 
-    msg_list.push(format!("Starting pass 2"), None, MessageType::Info);
+    msg_list.push("Starting pass 2".to_string(), None, MessageType::Info);
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
@@ -229,7 +242,7 @@ fn main() {
             input: line.input,
             line_counter: line.line_counter,
             program_counter: line.program_counter,
-            line_type: if new_opcode.find("ERR").is_some() {
+            line_type: if new_opcode.contains("ERR") {
                 LineType::Error
             } else {
                 line.line_type
@@ -261,21 +274,15 @@ fn main() {
                 MessageType::Error,
             );
         }
-    } else {
-        match fs::remove_file(&binary_file_name) {
-            Err(e) => {
-                match e.kind() {
-                    std::io::ErrorKind::NotFound => (),
-                    _ => msg_list.push(
-                        format!("Removing binary file {}, error {}", &binary_file_name, e),
-                        None,
-                        MessageType::Info,
-                    ),
-                };
-            }
-
-            _ => (),
-        }
+    } else if let Err(e) = fs::remove_file(&binary_file_name) {
+        match e.kind() {
+            std::io::ErrorKind::NotFound => (),
+            _ => msg_list.push(
+                format!("Removing binary file {}, error {}", &binary_file_name, e),
+                None,
+                MessageType::Info,
+            ),
+        };
     }
 
     print_messages(&mut msg_list);

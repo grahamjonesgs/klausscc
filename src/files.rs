@@ -7,6 +7,7 @@ use std::{
     io::{prelude::*, BufReader},
     path::Path,
 };
+use std::fmt::Write as _;
 
 use itertools::Itertools;
 
@@ -61,22 +62,22 @@ impl fmt::Display for Opcode {
 /// 
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
-    let pos_opcode: usize;
-    let pos_name: usize;
-    let pos_end_name: usize;
+    //let pos_opcode: usize;
+    //let pos_name: usize;
+    //let pos_end_name: usize;
     let pos_comment: usize;
     let pos_end_comment: usize;
-    let num_variables: u32;
+    //let num_variables: u32;
     let mut num_registers: u32;
     let line_pos_opcode: usize;
 
     // Find the opcode if it exists
-    match input_line.find("16'h") {
+    let pos_opcode: usize = match input_line.find("16'h") {
         None => return None,
         Some(a) =>  { 
             line_pos_opcode=a;
-            pos_opcode = a + 4}
-    }
+            a + 4},
+    };
 
     // check if the line was commented out
     match input_line.find("//") {
@@ -103,23 +104,23 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     // Look for variable, and set flag
-    if input_line.find("w_var1") == None {
-        num_variables = 0;
+    let num_variables:u32 = if input_line.find("w_var1") == None {
+        0
     } else {
-        num_variables = 1;
-    }
+        1
+    };
 
     // Look for comment as first word is opcode name
-    match input_line.find("//") {
+    let pos_name:usize = match input_line.find("//") {
         None => return None,
-        Some(a) => pos_name = a + 3,
-    }
+        Some(a) => a + 3,
+    };
 
     // Find end of first word after comment as end of opcode name
-    match input_line[pos_name..].find(" ") {
+    let pos_end_name:usize = match input_line[pos_name..].find(' ') {
         None => return None,
-        Some(a) => pos_end_name = a + pos_name,
-    }
+        Some(a) => a + pos_name,
+    };
 
     // Set comments filed, or none if missing
     if input_line.len() > pos_end_name + 1 {
@@ -144,7 +145,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 /// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None
 pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Macro> {
     // Find the macro if it exists
-    if input_line.find("$").unwrap_or(usize::MAX) != 0 {
+    if input_line.find('$').unwrap_or(usize::MAX) != 0 {
         return None;
     }
     let mut name: String = "".to_string();
@@ -153,45 +154,42 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     let mut max_variable: i64 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
-    let dedup_all_found_variables: Vec<i64>;
+    
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
         if i == 0 {
             name = word.to_string();
+        } else if word == "/" {
+            items.push(item.to_string());
+            item = "".to_string();
         } else {
-            if word == "/" {
-                items.push(item.to_string());
-                item = "".to_string();
-            } else {
-                if word.find("%").is_some() {
-                    let without_prefix = word.trim_start_matches("%");
-                    let int_value = i64::from_str_radix(without_prefix, 10);
-                    if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
-                    } else {
-                        all_found_variables.push(int_value.clone().unwrap_or(0));
-                        if int_value.clone().unwrap_or(0) > max_variable as i64 {
-                            max_variable = int_value.clone().unwrap_or(0);
-                        }
+            if word.contains('%') {
+                let without_prefix = word.trim_start_matches('%');
+                let int_value = without_prefix.parse::<i64>();
+                if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
+                } else {
+                    all_found_variables.push(int_value.clone().unwrap_or(0));
+                    if int_value.clone().unwrap_or(0) > max_variable as i64 {
+                        max_variable = int_value.clone().unwrap_or(0);
                     }
                 }
+            }
 
-                if item.len() > 0 {
-                    item = item + " " + word;
-                } else {
-                    item = item + word;
-                }
+            if !item.is_empty() {
+                item = item + " " + word;
+            } else {
+                item += word;
             }
         }
     }
 
-    if item.len() > 0 {
+    if !item.is_empty() {
         items.push(item.to_string());
     }
-    // remove duplicates
-    dedup_all_found_variables = all_found_variables.clone().into_iter().unique().collect();
 
-    if max_variable != dedup_all_found_variables.len() as i64 {
+
+    if max_variable != all_found_variables.clone().into_iter().unique().count() as i64 {
         for i in 1..max_variable {
             all_variables.push(i);
         }
@@ -204,10 +202,11 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
             .collect();
         let mut missing: String = "".to_string();
         for i in difference_all_variables {
-            if missing.len() > 0 {
+            if !missing.is_empty() {
                 missing.push(' ');
             }
-            missing.push_str(&format!("%{}", i));
+            //missing.push_str(&format!("%{}", i));
+            write!(missing,"%{}",i).ok();
         }
 
         msg_list.push(
@@ -221,9 +220,9 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     }
 
     Some(Macro {
-        name: name.to_string(),
+        name,
         variables: max_variable as u32,
-        items: items,
+        items,
     })
 }
 
@@ -316,7 +315,7 @@ pub fn read_file_to_vec(
 /// 
 /// Looks for first dot in the string, and returns the slice before the dot
 pub fn filename_stem(full_name: &String) -> String {
-    let dot_pos = full_name.find(".");
+    let dot_pos = full_name.find('.');
     if dot_pos.is_none() {
         return full_name.to_string();
     }
@@ -385,7 +384,7 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
         } else {
             out_line = format!("                           -- {}\n", pass.input);
         }
-        if file.write(&out_line.as_bytes()).is_err() {
+        if file.write(out_line.as_bytes()).is_err() {
             return false;
         };
     }

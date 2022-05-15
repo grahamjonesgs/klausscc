@@ -4,10 +4,10 @@ use crate::messages::*;
 /// Extracts label from string
 /// 
 /// Checks if end of first word is colon if so return label as option string
-pub fn label_name_from_string(line: &String) -> Option<String> {
+pub fn label_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
-    if first_word.ends_with(":") {
+    if first_word.ends_with(':') {
         return Some(first_word.to_string());
     }
     None
@@ -16,10 +16,10 @@ pub fn label_name_from_string(line: &String) -> Option<String> {
 /// Extracts macro from string
 /// 
 /// Checks if end of first word is colon if so return macro name as option string
-pub fn macro_name_from_string(line: &String) -> Option<String> {
+pub fn macro_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
-    if first_word.starts_with("$") {
+    if first_word.starts_with('$') {
         return Some(first_word.to_string());
     }
     None
@@ -28,9 +28,9 @@ pub fn macro_name_from_string(line: &String) -> Option<String> {
 /// Return program counter for label
 /// 
 /// Return option of progam counter for label if it exists, or None
-pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32> {
+pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
-        if label.name == line.as_str() {
+        if label.name == line {
             return Some(label.program_counter);
         }
     }
@@ -40,15 +40,13 @@ pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32>
 /// Returns Macro from name
 /// 
 /// Return option macro if it exists, or none
-pub fn return_macro(line: &String, macros: &mut Vec<Macro>) -> Option<Macro> {
+pub fn return_macro(line: &str, macros: &mut [Macro]) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
-    if macro_name_from_string(&first_word.to_string()).is_none() {
-        return None;
-    }
-    for macro_line in macros.clone() {
+    macro_name_from_string(first_word)?;
+    for macro_line in macros {
         if macro_line.name == first_word {
-            return Some(macro_line);
+            return Some(macro_line.clone());
         }
     }
     None
@@ -56,8 +54,8 @@ pub fn return_macro(line: &String, macros: &mut Vec<Macro>) -> Option<Macro> {
 
 // Return option all vec string replacing %x with correct value.
 pub fn return_macro_items_replace(
-    line: &String,
-    macros: &mut Vec<Macro>,
+    line: &str,
+    macros: &mut [Macro],
     input_line_number: u32,
     msg_list: &mut MsgList,
 ) -> Option<Vec<String>> {
@@ -68,10 +66,8 @@ pub fn return_macro_items_replace(
     let input_line_array: Vec<_> = words.clone().collect();
 
     let first_word = words.next().unwrap_or("");
-    if macro_name_from_string(&first_word.to_string()).is_none() {
-        return None;
-    }
-    for macro_line in macros.clone() {
+    macro_name_from_string(first_word)?;
+    for macro_line in macros {
         if macro_line.name == first_word {
             found = true;
 
@@ -83,13 +79,13 @@ pub fn return_macro_items_replace(
                 );
             }
 
-            for item in macro_line.items {
+            for item in &macro_line.items {
                 let item_words = item.split_whitespace();
                 let mut build_line: String = "".to_string();
                 for item_word in item_words {
-                    if item_word.find("%").is_some() {
-                        let without_prefix = item_word.trim_start_matches("%");
-                        let int_value = i64::from_str_radix(without_prefix, 10);
+                    if item_word.contains('%') {
+                        let without_prefix = item_word.trim_start_matches('%');
+                        let int_value = without_prefix.parse::<i64>();
                         if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                             msg_list.push(
                                 format!(
@@ -99,22 +95,20 @@ pub fn return_macro_items_replace(
                                 Some(input_line_number),
                                 MessageType::Error,
                             );
+                        } else if int_value.clone().unwrap_or(0) > input_line_array.len() as i64 - 1 {
+                            msg_list.push(
+                                format!(
+                                    "Missing argument {} for macro {}",
+                                    int_value.clone().unwrap_or(0),
+                                    macro_line.name
+                                ),
+                                Some(input_line_number),
+                                MessageType::Error,
+                            );
                         } else {
-                            if int_value.clone().unwrap_or(0) > input_line_array.len() as i64 - 1 {
-                                msg_list.push(
-                                    format!(
-                                        "Missing argument {} for macro {}",
-                                        int_value.clone().unwrap_or(0),
-                                        macro_line.name
-                                    ),
-                                    Some(input_line_number),
-                                    MessageType::Error,
-                                );
-                            } else {
-                                build_line = build_line
-                                    + " "
-                                    + input_line_array[int_value.clone().unwrap_or(0) as usize];
-                            }
+                            build_line = build_line
+                                + " "
+                                + input_line_array[int_value.clone().unwrap_or(0) as usize];
                         }
                     } else {
                         build_line = build_line + " " + item_word
@@ -125,7 +119,7 @@ pub fn return_macro_items_replace(
         }
     }
     if found {
-        return Some(return_items);
+        Some(return_items)
     } else {
         None
     }
@@ -166,15 +160,15 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                     }
 
                     for new_item in return_macro(&item, &mut input_macros).unwrap().items {
-                        if new_item.find("%").is_some() {
+                        if new_item.contains('%') {
                             // Replace %n in new _tems with the nth value in item
 
                             let new_item_words = new_item.split_whitespace();
                             let mut build_line: String = "".to_string();
                             for item_word in new_item_words {
-                                if item_word.find("%").is_some() {
-                                    let without_prefix = item_word.trim_start_matches("%");
-                                    let int_value = i64::from_str_radix(without_prefix, 10);
+                                if item_word.contains('%') {
+                                    let without_prefix = item_word.trim_start_matches('%');
+                                    let int_value = without_prefix.parse::<i64>();
                                     if int_value.clone().is_err()
                                         || int_value.clone().unwrap_or(0) < 1
                                     {
@@ -188,26 +182,24 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                             None,
                                             MessageType::Error,
                                         );
+                                    } else if int_value.clone().unwrap_or(0)
+                                        > item_line_array.len() as i64 - 1
+                                    {
+                                        msg_list.push(
+                                            format!(
+                                                "Missing argument {} for imbedded macro \"{}\" in {}",
+                                                int_value.clone().unwrap_or(0),
+                                                item,
+                                                input_macro_line.name,
+                                            ),
+                                            None,
+                                            MessageType::Error,
+                                        );
                                     } else {
-                                        if int_value.clone().unwrap_or(0)
-                                            > item_line_array.len() as i64 - 1
-                                        {
-                                            msg_list.push(
-                                                format!(
-                                                    "Missing argument {} for imbedded macro \"{}\" in {}",
-                                                    int_value.clone().unwrap_or(0),
-                                                    item,
-                                                    input_macro_line.name,
-                                                ),
-                                                None,
-                                                MessageType::Error,
-                                            );
-                                        } else {
-                                            build_line = build_line
-                                                + " "
-                                                + &item_line_array
-                                                    [int_value.clone().unwrap_or(0) as usize];
-                                        }
+                                        build_line = build_line
+                                            + " "
+                                            + &item_line_array
+                                                [int_value.clone().unwrap_or(0) as usize];
                                     }
                                 } else {
                                     build_line = build_line + " " + item_word
@@ -228,10 +220,10 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                 items: output_items,
             })
         }
-        pass = pass + 1;
+        pass += 1;
         input_macros = output_macros.clone();
     }
-    if changed == true {
+    if changed {
         msg_list.push(
             format!("Too many macro passes, check {}", last_macro),
             None,
@@ -242,7 +234,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
 }
 
 // Checks if first word is opcode and if so returns opcode hex value
-pub fn return_opcode( line: &String,opcodes: &mut Vec<Opcode>) -> Option<String> {
+pub fn return_opcode( line: &str,opcodes: &mut Vec<Opcode>) -> Option<String> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -254,11 +246,11 @@ pub fn return_opcode( line: &String,opcodes: &mut Vec<Opcode>) -> Option<String>
 }
 
 // Returns option of number of arguments for opcode
-pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32> {
+pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
-        if first_word == "" {
+        if first_word.is_empty() {
             return None;
         }
         if first_word.to_uppercase() == opcode.name {
@@ -269,11 +261,11 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32
 }
 
 // Returns option of number of registers for opcode
-pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32> {
+pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
-        if first_word == "" {
+        if first_word.is_empty() {
             return None;
         }
         if first_word == opcode.name {
@@ -284,19 +276,19 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut String) -> Option<u32
 }
 
 // Returns emum of type of line
-pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut String) -> LineType {
-    if label_name_from_string(&line).is_some() {
+pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
+    if label_name_from_string(line).is_some() {
         return LineType::Label;
     };
-    if return_opcode(&line,opcodes).is_some() {
+    if return_opcode(line,opcodes).is_some() {
         return LineType::Opcode;
     }
-    if is_blank(line.clone()) {
+    if is_blank(line.to_string()) {
         return LineType::Blank;
     }
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
-        if is_comment(&mut word.to_string()) == true && i == 0 {
+        if is_comment(&mut word.to_string()) && i == 0 {
             return LineType::Comment;
         }
     }
@@ -317,7 +309,7 @@ pub fn is_blank(line: String) -> bool {
     let words = line.split_whitespace();
 
     for (_i, word) in words.enumerate() {
-        if word.len() > 0 {
+        if !word.is_empty() {
             return false;
         }
     }
@@ -336,7 +328,7 @@ pub fn is_comment(word: &mut String) -> bool {
         if item == b'/' && i == 0 {
             found_first = true
         }
-        if item == b'/' && i == 1 && found_first == true {
+        if item == b'/' && i == 1 && found_first {
             return true;
         }
     }
@@ -375,7 +367,19 @@ pub fn add_registers(
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_string().to_uppercase()).unwrap_or(0);
 
-    let mut opcode_found = return_opcode(&line.to_uppercase(),opcodes).unwrap_or("".to_string());
+    let mut opcode_found = {
+        let this = return_opcode(&line.to_uppercase(),opcodes);
+        let default = "".to_string();
+        match this {
+            Some(x) => x,
+            None => default,
+        }
+    };
+
+
+
+
+
     opcode_found = opcode_found[..(4 - num_registers) as usize].to_string();
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -385,7 +389,7 @@ pub fn add_registers(
         }
     }
 
-    if opcode_found.len() != 4 || opcode_found.find("X").is_some() {
+    if opcode_found.len() != 4 || opcode_found.contains('X') {
         msg_list.push(
             format!("Incorrect register defintion - \"{}\"", line),
             Some(line_number),
@@ -403,31 +407,43 @@ pub fn add_arguments(
     line_number: u32,
     labels: &mut Vec<Label>,
 ) -> String {
-    let num_registers = num_registers(opcodes, &mut line.to_uppercase().to_string()).unwrap_or(0);
-    let num_arguments = num_arguments(opcodes, &mut line.to_uppercase().to_string()).unwrap_or(0);
+    let num_registers = num_registers(opcodes, &mut line.to_uppercase()).unwrap_or(0);
+    let num_arguments = num_arguments(opcodes, &mut line.to_uppercase()).unwrap_or(0);
     let mut arguments = "".to_string();
 
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if i as u32 == num_registers + 1 && num_arguments == 1 {
             arguments = arguments
-                + &convert_argument(
-                    word.to_string().to_uppercase(),
-                    msg_list,
-                    line_number,
-                    labels,
-                )
-                .unwrap_or(" ERROR    ".to_string())
+                + &{
+                    let this = convert_argument(
+                                word.to_string().to_uppercase(),
+                                msg_list,
+                                line_number,
+                                labels,
+                            );
+                    let default = " ERROR    ".to_string();
+                    match this {
+                        Some(x) => x,
+                        None => default,
+                    }
+                }
         }
         if i as u32 == num_registers + 2 && num_arguments == 2 {
             arguments = arguments
-                + &convert_argument(
-                    word.to_string().to_uppercase(),
-                    msg_list,
-                    line_number,
-                    labels,
-                )
-                .unwrap_or(" ERROR    ".to_string())
+                + &{
+                    let this = convert_argument(
+                                word.to_string().to_uppercase(),
+                                msg_list,
+                                line_number,
+                                labels,
+                            );
+                    let default = " ERROR    ".to_string();
+                    match this {
+                        Some(x) => x,
+                        None => default,
+                    }
+                }
         }
         if i as u32 > num_registers + num_arguments {
             //arguments = " ERROR    ".to_string()
@@ -470,23 +486,21 @@ pub fn convert_argument(
         };
     }
 
-    if argument.len() >= 2 {
-        if argument[0..2] == "0x".to_string() || argument[0..2] == "0X".to_string() {
-            let without_prefix = argument.trim_start_matches("0x");
-            let without_prefix = without_prefix.trim_start_matches("0X");
-            let int_value = i64::from_str_radix(without_prefix, 16);
-            if int_value.is_err() {
-                return None;
-            }
-            let ret_hex = format!("{:08X}", int_value.unwrap());
-            return Some(ret_hex);
+    if argument.len() >= 2 && (argument[0..2] == *"0x" || argument[0..2] == *"0X") {
+        let without_prefix = argument.trim_start_matches("0x");
+        let without_prefix = without_prefix.trim_start_matches("0X");
+        let int_value = i64::from_str_radix(without_prefix, 16);
+        if int_value.is_err() {
+            return None;
         }
+        let ret_hex = format!("{:08X}", int_value.unwrap());
+        return Some(ret_hex);
     }
 
     match argument.parse::<i64>() {
         Ok(n) => {
             if n <= 4294967295 {
-                return Some(format!("{:08X}", n).to_string());
+                return Some(format!("{:08X}", n));
             } else {
                 msg_list.push(
                     format!("Decimal value out {} of bounds", n),
@@ -494,15 +508,15 @@ pub fn convert_argument(
                     MessageType::Warning,
                     //  });
                 );
-                return None;
             }
         }
-        Err(_e) => return None,
+        Err(_e) => {},
     };
+    None
 }
 
 // Removes comments and starting and training whitespace
-pub fn strip_comments(input: &mut String) -> String {
+pub fn strip_comments(input: &mut str) -> String {
     match input.find("//") {
         None => return input.trim().to_string(),
         Some(a) => return input[0..a].trim().to_string(),
@@ -526,7 +540,7 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
     }
 }
 
-pub fn calc_checksum(input_string: &String, msg_list: &mut MsgList) -> String {
+pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string: String = "".to_string();
     let mut checksum:u32 = 0;
 
@@ -552,10 +566,9 @@ pub fn calc_checksum(input_string: &String, msg_list: &mut MsgList) -> String {
         "0000".to_string();
     }
 
-    let mut index: usize = 0;
     let mut possition_index: u32 = 0;
 
-    for _ in stripped_string.chars() {
+    for (index, _) in stripped_string.chars().enumerate() {
         if index % 4 == 0 {
             let int_value = i64::from_str_radix(&stripped_string[index..index +4], 16);
             if int_value.is_err() {
@@ -572,11 +585,10 @@ pub fn calc_checksum(input_string: &String, msg_list: &mut MsgList) -> String {
             }
             else {
             checksum=(checksum + int_value.unwrap_or(0) as u32)%(0xFFFF+1);
-            possition_index=possition_index+1;
+            possition_index += 1;
 
             }
         }
-        index = index +1;
     }
     checksum=(checksum + possition_index -1)%(0xFFFF+1);
     format!("{:04X}",checksum)
