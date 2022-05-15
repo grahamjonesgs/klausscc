@@ -52,7 +52,9 @@ pub fn return_macro(line: &str, macros: &mut [Macro]) -> Option<Macro> {
     None
 }
 
-// Return option all vec string replacing %x with correct value.
+/// Update variables in a macro
+/// 
+/// Return option all vec string replacing %x with correct value.
 pub fn return_macro_items_replace(
     line: &str,
     macros: &mut [Macro],
@@ -125,7 +127,10 @@ pub fn return_macro_items_replace(
     }
 }
 
-// Multi pass to resolve embedded macros
+/// Multi pass to resolve embedded macros
+/// 
+/// Takes Vector of macros, and embeds macros recursivly, up to 10 passes
+/// Will create errors message for more than 10 passes
 pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed: bool = true;
@@ -233,7 +238,9 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
     input_macros.to_vec()
 }
 
-// Checks if first word is opcode and if so returns opcode hex value
+/// Returns hex opcode from name
+/// 
+/// Checks if first word is opcode and if so returns opcode hex value
 pub fn return_opcode( line: &str,opcodes: &mut Vec<Opcode>) -> Option<String> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
@@ -245,7 +252,9 @@ pub fn return_opcode( line: &str,opcodes: &mut Vec<Opcode>) -> Option<String> {
     None
 }
 
-// Returns option of number of arguments for opcode
+/// Returns number of args for opcode
+/// 
+/// From opcode name, option of number of arguments for opcode, or None
 pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
@@ -260,7 +269,9 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     None
 }
 
-// Returns option of number of registers for opcode
+//// Returns number of regs for opcode
+/// 
+/// From opcode name, option of number of registers for opcode, or None
 pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
@@ -275,7 +286,9 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     None
 }
 
-// Returns emum of type of line
+/// Returns emum of type of line
+/// 
+/// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error
 pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
     if label_name_from_string(line).is_some() {
         return LineType::Label;
@@ -304,7 +317,9 @@ pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
     true
 }
 
-// Returns true if line if just whitespace
+/// Check if line is blank
+/// 
+/// Returns true if line if just whitespace
 pub fn is_blank(line: String) -> bool {
     let words = line.split_whitespace();
 
@@ -316,7 +331,9 @@ pub fn is_blank(line: String) -> bool {
     true
 }
 
-// Returns true is line is just comment
+/// Check if line is comment
+/// 
+/// Returns true if line if just comment
 pub fn is_comment(word: &mut String) -> bool {
     if word.len() < 2 {
         return false;
@@ -335,7 +352,9 @@ pub fn is_comment(word: &mut String) -> bool {
     false
 }
 
-// map the reigter to the hex code for the opcode
+/// Register name to hex 
+/// 
+/// Map the reigter to the hex code for the opcode
 pub fn map_reg_to_hex(input: String) -> String {
     match input.to_uppercase().as_str() {
         "A" => "0".to_string(),
@@ -358,7 +377,9 @@ pub fn map_reg_to_hex(input: String) -> String {
     }
 }
 
-// Returns the hex code operand from the line, adding regiter values
+/// Updates opcode with register
+/// 
+/// Returns the hex code operand from the line, adding regiter values
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
     line: &mut String,
@@ -375,10 +396,6 @@ pub fn add_registers(
             None => default,
         }
     };
-
-
-
-
 
     opcode_found = opcode_found[..(4 - num_registers) as usize].to_string();
     let words = line.split_whitespace();
@@ -399,7 +416,11 @@ pub fn add_registers(
     }
     opcode_found
 }
-// Returns the hex code argument from the line
+
+/// Return opcode with formatted arguments
+/// 
+/// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values
+/// Converts label names to hex addresses
 pub fn add_arguments(
     opcodes: &mut Vec<Opcode>,
     line: &mut String,
@@ -408,7 +429,6 @@ pub fn add_arguments(
     labels: &mut Vec<Label>,
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_uppercase()).unwrap_or(0);
-    let num_arguments = num_arguments(opcodes, &mut line.to_uppercase()).unwrap_or(0);
     let mut arguments = "".to_string();
 
     let words = line.split_whitespace();
@@ -465,7 +485,9 @@ pub fn add_arguments(
     arguments
 }
 
-// Converts argument to label value or converts to Hex
+/// Gets address from label or absolute values
+/// 
+/// Converts argument to label value or converts to Hex
 pub fn convert_argument(
     argument: String,
     msg_list: &mut MsgList,
@@ -515,7 +537,9 @@ pub fn convert_argument(
     None
 }
 
-// Removes comments and starting and training whitespace
+/// Strip trailing comments
+/// 
+///  Removes comments and starting and training whitespace
 pub fn strip_comments(input: &mut str) -> String {
     match input.find("//") {
         None => return input.trim().to_string(),
@@ -523,6 +547,9 @@ pub fn strip_comments(input: &mut str) -> String {
     }
 }
 
+/// Check if label is duplicate
+/// 
+/// Check if label is duplicate, and output message if duplicate is found
 pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
     let mut local_labels = labels.clone();
     for label in labels {
@@ -540,6 +567,9 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
     }
 }
 
+/// Find checksum
+/// 
+/// Calculates the checksum from the string of hex values, removing control charaters
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string: String = "".to_string();
     let mut checksum:u32 = 0;
