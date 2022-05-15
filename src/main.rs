@@ -2,7 +2,7 @@
 mod files;
 mod helper;
 mod messages;
-use clap::{App, Arg};
+use clap::{Command, Arg};
 use files::*;
 use helper::*;
 use messages::*;
@@ -37,43 +37,43 @@ fn main() {
     //let mut msg_list = Vec::new();
     msg_list.push("Starting...".to_string(), None, MessageType::Info);
 
-    let matches = App::new("Klauss Assembler")
+    let matches = Command::new("Klauss Assembler")
         .version("0.0.1")
         .author("Graham Jones")
         .about("Assembler for FPGA_CPU")
         .arg(
-            Arg::with_name("opcode_file")
-                .short("c")
+            Arg::new("opcode_file")
+                .short('c')
                 .long("opcode")
                 .takes_value(true)
                 .required(true)
                 .help("Opcode source file from VHDL"),
         )
         .arg(
-            Arg::with_name("input")
-                .short("i")
+            Arg::new("input")
+                .short('i')
                 .long("input")
                 .required(true)
                 .takes_value(true)
                 .help("Input file to be assembled"),
         )
         .arg(
-            Arg::with_name("output")
-                .short("o")
+            Arg::new("output")
+                .short('o')
                 .long("output")
                 .takes_value(true)
                 .help("Output info file fomr assembled code"),
         )
         .arg(
-            Arg::with_name("bitcode")
-                .short("b")
+            Arg::new("bitcode")
+                .short('b')
                 .long("bitcode")
                 .takes_value(true)
                 .help("Output bitcode file fomr assembled code"),
         )
         .arg(
-            Arg::with_name("verbose")
-                .short("v")
+            Arg::new("verbose")
+                .short('v')
                 .long("verbose")
                 .takes_value(false)
                 .help("Set if verbose"),

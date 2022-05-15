@@ -252,6 +252,7 @@ pub fn return_opcode( line: &str,opcodes: &mut Vec<Opcode>) -> Option<String> {
     None
 }
 
+
 /// Returns number of args for opcode
 /// 
 /// From opcode name, option of number of arguments for opcode, or None
@@ -429,11 +430,12 @@ pub fn add_arguments(
     labels: &mut Vec<Label>,
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_uppercase()).unwrap_or(0);
+    let num_arguments = num_arguments(opcodes, &mut line.to_uppercase()).unwrap_or(0);
     let mut arguments = "".to_string();
 
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
-        if i as u32 == num_registers + 1 && num_arguments == 1 {
+        if (i as u32 == num_registers + 1) && (num_arguments == 1) {
             arguments = arguments
                 + &{
                     let this = convert_argument(
