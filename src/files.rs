@@ -1,4 +1,5 @@
-use crate::{messages::*, Pass2,calc_checksum};
+
+use crate::{messages::*, Pass2,calc_checksum,is_opcode, helper::return_macro};
 
 use std::{
     fmt,
@@ -56,8 +57,9 @@ impl fmt::Display for Opcode {
     }
 }
 
-// Receive a line from the opcode definition file and if possible
-// parse to instance of Some(Opcode), or None
+/// Parse opcode definition line to opcode
+/// 
+/// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_opcode: usize;
     let pos_name: usize;
@@ -137,8 +139,9 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     })
 }
 
-// Receive a line from the opcode definition file and if possible
-// parse to instance of Some(Macro), or None
+/// Parse opcode definition line to macro
+/// 
+/// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None
 pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Macro> {
     // Find the macro if it exists
     if input_line.find("$").unwrap_or(usize::MAX) != 0 {
@@ -224,7 +227,9 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     })
 }
 
-// Parse given filename to Vec of Opcode.
+/// Parse file to opcode and macro vectors
+/// 
+/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some<Opcode>, Some<Macro>
 pub fn parse_vh_file(
     filename: &impl AsRef<Path>,
     msg_list: &mut MsgList,
@@ -243,11 +248,30 @@ pub fn parse_vh_file(
             Ok(v) => {
                 match opcode_from_string(&v) {
                     None => (),
-                    Some(a) => opcodes.push(a),
+                    Some(a) => {
+                        
+                        if is_opcode(&mut opcodes,a.name.clone()).is_some() {
+                            msg_list.push(
+                                format!("Duplicate Opcode {} found",a.name),
+                                None,
+                                MessageType::Error,
+                            );
+                        }
+                        opcodes.push(a) 
+                    },
                 }
                 match macro_from_string(&v, msg_list) {
                     None => (),
-                    Some(a) => macros.push(a),
+                    Some(a) => {
+                        if return_macro(&a.name, &mut macros).is_some() {
+                            msg_list.push(
+                                format!("Duplicate Macro definition {} found",a.name),
+                                None,
+                                MessageType::Error,
+                            );
+                        }
+                        macros.push(a)
+                    },
                 }
             }
 
@@ -257,6 +281,9 @@ pub fn parse_vh_file(
     (Some(opcodes), Some(macros))
 }
 
+/// Open text file and return as vector of strings
+/// 
+/// Reads any given file by filename, adding the fill line by line into vector and returns None or Some<String>
 pub fn read_file_to_vec(
     msg_list: &mut MsgList,
     filename: &impl AsRef<Path>,
@@ -285,6 +312,9 @@ pub fn read_file_to_vec(
     Some(lines)
 }
 
+/// Return the stem of given filename
+/// 
+/// Looks for first dot in the string, and returns the slice before the dot
 pub fn filename_stem(full_name: &String) -> String {
     let dot_pos = full_name.find(".");
     if dot_pos.is_none() {
@@ -293,38 +323,10 @@ pub fn filename_stem(full_name: &String) -> String {
     full_name[..dot_pos.unwrap_or(0)].to_string()
 }
 
-/* pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
-    let rfile = File::create(filename);
-    let mut checksum: i64=0;
-
-    if rfile.is_err() {
-        return false;
-    }
-
-    let mut file = rfile.unwrap();
-    if file.write(b"S").is_err() {
-        return false;
-    };
-    for pass in pass2 {
-        // calc checksum
-        checksum=checksum+0;
-
-
-        if file.write(pass.opcode.as_bytes()).is_err() {
-            return false;
-        };
-    }
-
-    // Add writing Z0010 and then checksum.
-
-
-    if file.write(b"X").is_err() {
-        return false;
-    };
-
-    true
-} */
-
+/// Output the bitcode to given filen
+/// 
+/// Based on the Pass2 vector, outputs the bitcode, calculating the checksum, and adding control charaters. 
+/// Currently only ever sets the stack to 16 bytes (Z0010)
 pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> bool {
     let rfile = File::create(filename);
     let mut output_string = "".to_string();
@@ -348,7 +350,6 @@ pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>, msg_li
 
     let checksum:String = calc_checksum(&output_string,msg_list);
 
-    println!("xxxx checksum is {}",checksum);
     output_string.push_str(&checksum);
 
     output_string.push('X'); // Stop character
@@ -360,6 +361,9 @@ pub fn output_binary(filename: &impl AsRef<Path>, pass2: &mut Vec<Pass2>, msg_li
     true
 }
 
+/// Output the code details file to given filename
+/// 
+/// Writes all data to the detailed code file
 pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let rfile = File::create(filename);
     if rfile.is_err() {
@@ -373,7 +377,7 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
             out_line = format!(
                 "0x{:08X}: {:<8} -- {}\n",
                 pass.program_counter,
-                split_opcodes(&mut pass.opcode),
+                format_opcodes(&mut pass.opcode),
                 pass.input
             );
         } else if pass.line_type == LineType::Error {
@@ -388,7 +392,11 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     true
 }
 
-pub fn split_opcodes(input: &mut String) -> String {
+
+/// Format a given string, adding spaces between groups of 4
+/// 
+/// For string of 8 and 12 charters addes spaces between grouops of 4 characters, otherwise returns original string
+pub fn format_opcodes(input: &mut String) -> String {
     if input.len() == 4 {
         return input.to_string() + "          ";
     }

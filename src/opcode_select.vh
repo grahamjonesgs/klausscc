@@ -3,6 +3,7 @@
 
 $LEVEL1 $LEVEL2 %1 %2 / $LEVEL3 %4 %3 
 $LEVEL2 POP %1 / POP %2
+$LEVEL22 POP %1 / POP %2
 $LEVEL3 PUSH %2 / PUSH %1
 $VARS POP %1 / POP %2 / POP %2 / POP %1 / POP %2
 // Expected level1 pop %1 / push %5

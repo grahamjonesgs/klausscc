@@ -1,5 +1,5 @@
 use chrono::{Local, NaiveTime};
-use colored::{Colorize, ColoredString};
+use colored::{ColoredString, Colorize};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum MessageType {
@@ -50,6 +50,9 @@ impl MsgList {
     }
 }
 
+/// Print out all messages
+/// 
+/// Prints all the message in passed MsgList vector to terminal with coloured messages
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
         let message: String;
@@ -70,7 +73,6 @@ pub fn print_messages(msg_list: &mut MsgList) {
         } else {
             message = format!("{} {} {} ", msg.time.to_string(), warning, msg.name);
         }
-        //message = &msg.time.to_string() + " " + &warning.to_string() + ". Line " + &msg.line_number.to_string() + " " + &msg.name;
         println!("{}", message);
     }
 }

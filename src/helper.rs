@@ -1,7 +1,9 @@
 use crate::files::*;
 use crate::messages::*;
 
-// Check if end of first word is colon if so return label
+/// Extracts label from string
+/// 
+/// Checks if end of first word is colon if so return label as option string
 pub fn label_name_from_string(line: &String) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -11,6 +13,9 @@ pub fn label_name_from_string(line: &String) -> Option<String> {
     None
 }
 
+/// Extracts macro from string
+/// 
+/// Checks if end of first word is colon if so return macro name as option string
 pub fn macro_name_from_string(line: &String) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -20,7 +25,9 @@ pub fn macro_name_from_string(line: &String) -> Option<String> {
     None
 }
 
-// Return option of progam counter for label if it exists.
+/// Return program counter for label
+/// 
+/// Return option of progam counter for label if it exists, or None
 pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
         if label.name == line.as_str() {
@@ -30,7 +37,9 @@ pub fn return_label_value(line: &String, labels: &mut Vec<Label>) -> Option<u32>
     None
 }
 
-// Return option macro if it exists.
+/// Returns Macro from name
+/// 
+/// Return option macro if it exists, or none
 pub fn return_macro(line: &String, macros: &mut Vec<Macro>) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
