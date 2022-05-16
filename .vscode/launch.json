@@ -11,16 +11,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug executable 'opttest'",
+            "name": "Debug executable 'klausscc'",
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=opttest",
-                    "--package=opttest",
+                    "--bin=klausscc",
+                    "--package=klausscc",
                     
                 ],
                 "filter": {
-                    "name": "opttest",
+                    "name": "klausscc",
                     "kind": "bin"
                 }
             },
@@ -30,16 +30,16 @@
         {
             "type": "lldb",
             "request": "launch",
-            "name": "Debug unit tests in executable 'opttest'",
+            "name": "Debug unit tests in executable 'klausscc'",
             "cargo": {
                 "args": [
                     "test",
                     "--no-run",
-                    "--bin=opttest",
-                    "--package=opttest"
+                    "--bin=klausscc",
+                    "--package=klausscc"
                 ],
                 "filter": {
-                    "name": "opttest",
+                    "name": "klausscc",
                     "kind": "bin"
                 }
             },

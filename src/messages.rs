@@ -24,6 +24,7 @@ impl MsgList {
     pub fn new() -> MsgList {
         MsgList { list: Vec::new() }
     }
+
     pub fn push(&mut self, name: String, line_number: Option<u32>, msg_type: MessageType) {
         let _ = &mut self.list.push(Message {
             name,

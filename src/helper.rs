@@ -309,7 +309,9 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
     LineType::Error
 }
 
-//Returns true if line is not error
+/// Check if line is valid
+///  
+/// Returns true if line is not error
 pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
     let mut myline: String = line;
     if line_type(opcodes, &mut myline) == LineType::Error {
