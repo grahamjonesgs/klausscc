@@ -7,6 +7,7 @@ use files::*;
 use helper::*;
 use messages::*;
 use std::fs;
+use chrono::{Local, NaiveTime};
 
 #[derive(Debug)]
 pub struct Pass0 {
@@ -31,8 +32,11 @@ pub struct Pass2 {
     pub opcode: String,
 }
 
+
+
 fn main() {
     let mut msg_list: MsgList = MsgList::new();
+    let start_time: NaiveTime = Local::now().time();
 
     //let mut msg_list = Vec::new();
     msg_list.push("Starting...".to_string(), None, MessageType::Info);
@@ -286,8 +290,11 @@ fn main() {
     }
 
     print_messages(&mut msg_list);
+    let duration = Local::now().time() - start_time;
+    let time_taken: f32 = duration.num_milliseconds() as f32/1000.0 + duration.num_seconds() as f32;
+
     println!(
-        "Completed with {} error{} and {} waning{}",
+        "Completed with {} error{} and {} waning{} in {} seconds",
         msg_list.number_errors(),
         if msg_list.number_errors() == 1 {
             ""
@@ -300,5 +307,6 @@ fn main() {
         } else {
             "s"
         },
+        time_taken,
     );
 }

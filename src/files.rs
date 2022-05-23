@@ -58,6 +58,8 @@ impl fmt::Display for Opcode {
     }
 }
 
+
+
 /// Parse opcode definition line to opcode
 /// 
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
