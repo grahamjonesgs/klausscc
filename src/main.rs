@@ -38,9 +38,6 @@ fn main() {
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
 
-    //let mut msg_list = Vec::new();
-    msg_list.push("Starting...".to_string(), None, MessageType::Info);
-
     let matches = Command::new("Klauss Assembler")
         .version("0.0.1")
         .author("Graham Jones")
@@ -101,7 +98,6 @@ fn main() {
         + ".code";
 
     // Parse the Opcode file
-    msg_list.push(format!("Opcode file is {}", opcode_file_name), None, MessageType::Info);
     let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name, &mut msg_list);
     if opt_oplist.is_none() {
         println!("Unable to open opcode file {:?}", opcode_file_name);
@@ -126,7 +122,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    msg_list.push("Starting pass 0".to_string(), None, MessageType::Info);
+    msg_list.push("Evaluating macros".to_string(), None, MessageType::Info);
 
     // Pass 0 to add macros
     let mut pass0: Vec<Pass0> = Vec::new();
@@ -175,7 +171,7 @@ fn main() {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
 
-    msg_list.push("Starting pass 1".to_string(), None, MessageType::Info);
+    msg_list.push("Pass 1".to_string(), None, MessageType::Info);
 
     for mut pass in pass0 {
         pass1.push(Pass1 {
@@ -198,8 +194,6 @@ fn main() {
         }
     }
 
-    msg_list.push("Finding labels".to_string(), None, messages::MessageType::Info);
-
     let mut labels: Vec<Label> = pass1
         .iter()
         .filter(|n| label_name_from_string(&n.input).is_some())
@@ -221,7 +215,7 @@ fn main() {
 
     find_duplicate_label(&mut labels, &mut msg_list);
 
-    msg_list.push("Starting pass 2".to_string(), None, MessageType::Info);
+    msg_list.push("Pass 2".to_string(), None, MessageType::Info);
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {

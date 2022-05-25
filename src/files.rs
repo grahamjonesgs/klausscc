@@ -287,7 +287,7 @@ pub fn parse_vh_file(
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some<String>
 pub fn read_file_to_vec(
     msg_list: &mut MsgList,
-    filename: &impl AsRef<Path>,
+    filename: &str,
 ) -> Option<Vec<String>> {
     let file = File::open(filename);
     if file.is_err() {
@@ -298,7 +298,7 @@ pub fn read_file_to_vec(
     let mut lines: Vec<String> = Vec::new();
 
     msg_list.push(
-        "Starting opcode import".to_string(),
+        format!("Evaluating opcode file {}",filename),
         None,
         MessageType::Info,
     );
