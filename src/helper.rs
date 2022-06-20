@@ -1,8 +1,11 @@
 use crate::files::*;
 use crate::messages::*;
+use serialport::*;
+use std::time::Duration;
+
 
 /// Extracts label from string
-/// 
+///
 /// Checks if end of first word is colon if so return label as option string
 pub fn label_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
@@ -14,7 +17,7 @@ pub fn label_name_from_string(line: &str) -> Option<String> {
 }
 
 /// Extracts macro from string
-/// 
+///
 /// Checks if end of first word is colon if so return macro name as option string
 pub fn macro_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
@@ -26,7 +29,7 @@ pub fn macro_name_from_string(line: &str) -> Option<String> {
 }
 
 /// Return program counter for label
-/// 
+///
 /// Return option of progam counter for label if it exists, or None
 pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
@@ -38,7 +41,7 @@ pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
 }
 
 /// Returns Macro from name
-/// 
+///
 /// Return option macro if it exists, or none
 pub fn return_macro(line: &str, macros: &mut [Macro]) -> Option<Macro> {
     let mut words = line.split_whitespace();
@@ -53,7 +56,7 @@ pub fn return_macro(line: &str, macros: &mut [Macro]) -> Option<Macro> {
 }
 
 /// Update variables in a macro
-/// 
+///
 /// Return option all vec string replacing %x with correct value.
 pub fn return_macro_items_replace(
     line: &str,
@@ -97,7 +100,8 @@ pub fn return_macro_items_replace(
                                 Some(input_line_number),
                                 MessageType::Error,
                             );
-                        } else if int_value.clone().unwrap_or(0) > input_line_array.len() as i64 - 1 {
+                        } else if int_value.clone().unwrap_or(0) > input_line_array.len() as i64 - 1
+                        {
                             msg_list.push(
                                 format!(
                                     "Missing argument {} for macro {}",
@@ -128,7 +132,7 @@ pub fn return_macro_items_replace(
 }
 
 /// Multi pass to resolve embedded macros
-/// 
+///
 /// Takes Vector of macros, and embeds macros recursivly, up to 10 passes
 /// Will create errors message for more than 10 passes
 pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
@@ -239,9 +243,9 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
 }
 
 /// Returns hex opcode from name
-/// 
+///
 /// Checks if first word is opcode and if so returns opcode hex value
-pub fn return_opcode( line: &str,opcodes: &mut Vec<Opcode>) -> Option<String> {
+pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -252,9 +256,8 @@ pub fn return_opcode( line: &str,opcodes: &mut Vec<Opcode>) -> Option<String> {
     None
 }
 
-
 /// Returns number of args for opcode
-/// 
+///
 /// From opcode name, option of number of arguments for opcode, or None
 pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     for opcode in opcodes {
@@ -271,7 +274,7 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
 }
 
 //// Returns number of regs for opcode
-/// 
+///
 /// From opcode name, option of number of registers for opcode, or None
 pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     for opcode in opcodes {
@@ -288,13 +291,13 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
 }
 
 /// Returns emum of type of line
-/// 
+///
 /// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error
 pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
     if label_name_from_string(line).is_some() {
         return LineType::Label;
     };
-    if return_opcode(line,opcodes).is_some() {
+    if return_opcode(line, opcodes).is_some() {
         return LineType::Opcode;
     }
     if is_blank(line.to_string()) {
@@ -321,7 +324,7 @@ pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
 }
 
 /// Check if line is blank
-/// 
+///
 /// Returns true if line if just whitespace
 pub fn is_blank(line: String) -> bool {
     let words = line.split_whitespace();
@@ -335,7 +338,7 @@ pub fn is_blank(line: String) -> bool {
 }
 
 /// Check if line is comment
-/// 
+///
 /// Returns true if line if just comment
 pub fn is_comment(word: &mut String) -> bool {
     if word.len() < 2 {
@@ -355,8 +358,8 @@ pub fn is_comment(word: &mut String) -> bool {
     false
 }
 
-/// Register name to hex 
-/// 
+/// Register name to hex
+///
 /// Map the reigter to the hex code for the opcode
 pub fn map_reg_to_hex(input: String) -> String {
     match input.to_uppercase().as_str() {
@@ -381,7 +384,7 @@ pub fn map_reg_to_hex(input: String) -> String {
 }
 
 /// Updates opcode with register
-/// 
+///
 /// Returns the hex code operand from the line, adding regiter values
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
@@ -392,7 +395,7 @@ pub fn add_registers(
     let num_registers = num_registers(opcodes, &mut line.to_string().to_uppercase()).unwrap_or(0);
 
     let mut opcode_found = {
-        let this = return_opcode(&line.to_uppercase(),opcodes);
+        let this = return_opcode(&line.to_uppercase(), opcodes);
         let default = "".to_string();
         match this {
             Some(x) => x,
@@ -421,7 +424,7 @@ pub fn add_registers(
 }
 
 /// Return opcode with formatted arguments
-/// 
+///
 /// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values
 /// Converts label names to hex addresses
 pub fn add_arguments(
@@ -441,11 +444,11 @@ pub fn add_arguments(
             arguments = arguments
                 + &{
                     let this = convert_argument(
-                                word.to_string().to_uppercase(),
-                                msg_list,
-                                line_number,
-                                labels,
-                            );
+                        word.to_string().to_uppercase(),
+                        msg_list,
+                        line_number,
+                        labels,
+                    );
                     let default = " ERROR    ".to_string();
                     match this {
                         Some(x) => x,
@@ -457,11 +460,11 @@ pub fn add_arguments(
             arguments = arguments
                 + &{
                     let this = convert_argument(
-                                word.to_string().to_uppercase(),
-                                msg_list,
-                                line_number,
-                                labels,
-                            );
+                        word.to_string().to_uppercase(),
+                        msg_list,
+                        line_number,
+                        labels,
+                    );
                     let default = " ERROR    ".to_string();
                     match this {
                         Some(x) => x,
@@ -490,7 +493,7 @@ pub fn add_arguments(
 }
 
 /// Gets address from label or absolute values
-/// 
+///
 /// Converts argument to label value or converts to Hex
 pub fn convert_argument(
     argument: String,
@@ -536,13 +539,13 @@ pub fn convert_argument(
                 );
             }
         }
-        Err(_e) => {},
+        Err(_e) => {}
     };
     None
 }
 
 /// Strip trailing comments
-/// 
+///
 ///  Removes comments and starting and training whitespace
 pub fn strip_comments(input: &mut str) -> String {
     match input.find("//") {
@@ -552,7 +555,7 @@ pub fn strip_comments(input: &mut str) -> String {
 }
 
 /// Check if label is duplicate
-/// 
+///
 /// Check if label is duplicate, and output message if duplicate is found
 pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
     let mut local_labels = labels.clone();
@@ -572,11 +575,11 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
 }
 
 /// Find checksum
-/// 
+///
 /// Calculates the checksum from the string of hex values, removing control charaters
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string: String = "".to_string();
-    let mut checksum:u32 = 0;
+    let mut checksum: u32 = 0;
 
     // Remove S, Z and X
     for char in input_string.chars() {
@@ -586,7 +589,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     }
 
     // check if len is divisable by 4
-    if stripped_string.len() % 4 !=0 {
+    if stripped_string.len() % 4 != 0 {
         msg_list.push(
             {
                 format!(
@@ -604,26 +607,54 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 
     for (index, _) in stripped_string.chars().enumerate() {
         if index % 4 == 0 {
-            let int_value = i64::from_str_radix(&stripped_string[index..index +4], 16);
+            let int_value = i64::from_str_radix(&stripped_string[index..index + 4], 16);
             if int_value.is_err() {
                 msg_list.push(
                     {
                         format!(
                             "Error creating opcode for invalid value {}",
-                            &stripped_string[index..index +4],
+                            &stripped_string[index..index + 4],
                         )
                     },
                     None,
                     MessageType::Error,
                 );
-            }
-            else {
-            checksum=(checksum + int_value.unwrap_or(0) as u32)%(0xFFFF+1);
-            possition_index += 1;
-
+            } else {
+                checksum = (checksum + int_value.unwrap_or(0) as u32) % (0xFFFF + 1);
+                possition_index += 1;
             }
         }
     }
-    checksum=(checksum + possition_index -1)%(0xFFFF+1);
-    format!("{:04X}",checksum)
+    checksum = (checksum + possition_index - 1) % (0xFFFF + 1);
+    format!("{:04X}", checksum)
+}
+
+pub fn open_serial() -> bool {
+    let ports = serialport::available_ports().expect("No ports found!");
+    for p in ports {
+        println!("{}", p.port_name);
+    }
+
+    let mut port = serialport::new("/dev/ttyUSB0", 115_200)
+    .timeout(Duration::from_millis(10))
+    .open().expect("Failed to open port");
+
+    port.set_stop_bits(StopBits::One);
+    port.set_data_bits(DataBits::Eight);
+    port.set_parity(Parity::None);
+
+
+    println!("back from sets");
+
+    let output = "This is a test. This is only a test.".as_bytes();
+    port.write(output).expect("Write failed!");
+
+    println!("back from write");
+
+    port.flush();
+
+    println!("back from flush");
+
+    false
+
 }

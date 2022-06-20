@@ -302,5 +302,9 @@ fn main() {
             "s"
         },
         time_taken,
+
+        
+
     );
+    let _ret=open_serial();
 }
