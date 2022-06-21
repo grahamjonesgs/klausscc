@@ -703,9 +703,9 @@ pub fn write_serial(binout: String, port_name: &str,msg_list: &mut MsgList) -> b
 
     let mut port=port_result.unwrap();
 
-    let _ = port.set_stop_bits(StopBits::One);
-    let _ = port.set_data_bits(DataBits::Eight);
-    let _ = port.set_parity(Parity::None);
+    if port.set_stop_bits(StopBits::One).is_err() {return false}
+    if port.set_data_bits(DataBits::Eight).is_err() {return false}
+    if port.set_parity(Parity::None).is_err() {return false}
 
 
     println!("String is {}",binout);
