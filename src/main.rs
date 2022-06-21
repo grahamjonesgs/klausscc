@@ -1,38 +1,12 @@
-
 mod files;
 mod helper;
 mod messages;
-use clap::{Command, Arg};
+use chrono::{Local, NaiveTime};
+use clap::{Arg, Command};
 use files::*;
 use helper::*;
 use messages::*;
 use std::fs;
-use chrono::{Local, NaiveTime};
-
-#[derive(Debug)]
-pub struct Pass0 {
-    pub input: String,
-    pub line_counter: u32,
-}
-
-#[derive(Debug)]
-pub struct Pass1 {
-    pub input: String,
-    pub line_counter: u32,
-    pub program_counter: u32,
-    pub line_type: LineType,
-}
-
-#[derive(Debug)]
-pub struct Pass2 {
-    pub input: String,
-    pub line_counter: u32,
-    pub program_counter: u32,
-    pub line_type: LineType,
-    pub opcode: String,
-}
-
-
 
 fn main() {
     let mut msg_list: MsgList = MsgList::new();
@@ -79,6 +53,13 @@ fn main() {
                 .takes_value(false)
                 .help("Set if verbose"),
         )
+        .arg(
+            Arg::new("serial")
+                .short('s')
+                .long("serial")
+                .takes_value(true)
+                .help("Serial port for output"),
+        )
         .get_matches();
 
     let opcode_file_name = matches
@@ -96,6 +77,7 @@ fn main() {
         .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "")
         + ".code";
+    let ouput_serial_port = matches.value_of("serial").unwrap_or("").replace(' ', "");
 
     // Parse the Opcode file
     let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name, &mut msg_list);
@@ -115,7 +97,11 @@ fn main() {
     let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(), &mut msg_list);
 
     // Parse the input file
-    msg_list.push(format!("Input file is {}", input_file_name), None, MessageType::Info);
+    msg_list.push(
+        format!("Input file is {}", input_file_name),
+        None,
+        MessageType::Info,
+    );
     let input_list = read_file_to_vec(&mut msg_list, &input_file_name);
     if input_list.is_none() {
         println!("Unable to open input file {:?}", input_file_name);
@@ -148,12 +134,16 @@ fn main() {
                                     None => default,
                                 }
                             }
-                                .to_string(),
+                            .to_string(),
                         line_counter: input_line_count,
                     });
                 }
             } else {
-                msg_list.push(format!("Macro not found {}", code_line), None, MessageType::Error);
+                msg_list.push(
+                    format!("Macro not found {}", code_line),
+                    None,
+                    MessageType::Error,
+                );
                 pass0.push(Pass0 {
                     input: code_line,
                     line_counter: input_line_count,
@@ -189,7 +179,7 @@ fn main() {
         }
         let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
         match num_args {
-            Some(p) => program_counter = program_counter + p*2 + 1,
+            Some(p) => program_counter = program_counter + p * 2 + 1,
             None => {}
         }
     }
@@ -259,13 +249,15 @@ fn main() {
         std::process::exit(1);
     }
 
+    let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+
     if msg_list.number_errors() == 0 {
         msg_list.push(
             format!("Writing binary file to {}", binary_file_name),
             None,
             MessageType::Info,
         );
-        if !output_binary(&binary_file_name, &mut pass2,&mut msg_list) {
+        if !output_binary(&binary_file_name, &bin_string) {
             msg_list.push(
                 format!("Unable to write to bincode file {:?}", &binary_file_name),
                 None,
@@ -283,9 +275,29 @@ fn main() {
         };
     }
 
+    if !ouput_serial_port.is_empty() {
+
+        if write_serial(bin_string, &ouput_serial_port, &mut msg_list) {
+            msg_list.push(
+                format!("Wrote to serial port {}",ouput_serial_port),
+                None,
+                MessageType::Info,
+            );
+        }
+        else {
+            msg_list.push(
+                format!("Failed to write to serial port {}",ouput_serial_port),
+                None,
+                MessageType::Error,
+            );
+            
+        }
+    }
+
     print_messages(&mut msg_list);
     let duration = Local::now().time() - start_time;
-    let time_taken: f32 = duration.num_milliseconds() as f32/1000.0 + duration.num_seconds() as f32;
+    let time_taken: f32 =
+        duration.num_milliseconds() as f32 / 1000.0 + duration.num_seconds() as f32;
 
     println!(
         "Completed with {} error{} and {} waning{} in {} seconds",
@@ -302,9 +314,5 @@ fn main() {
             "s"
         },
         time_taken,
-
-        
-
     );
-    let _ret=open_serial();
 }

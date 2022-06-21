@@ -3,6 +3,28 @@ use crate::messages::*;
 use serialport::*;
 use std::time::Duration;
 
+#[derive(Debug)]
+pub struct Pass0 {
+    pub input: String,
+    pub line_counter: u32,
+}
+
+#[derive(Debug)]
+pub struct Pass1 {
+    pub input: String,
+    pub line_counter: u32,
+    pub program_counter: u32,
+    pub line_type: LineType,
+}
+
+#[derive(Debug)]
+pub struct Pass2 {
+    pub input: String,
+    pub line_counter: u32,
+    pub program_counter: u32,
+    pub line_type: LineType,
+    pub opcode: String,
+}
 
 /// Extracts label from string
 ///
@@ -629,32 +651,73 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     format!("{:04X}", checksum)
 }
 
-pub fn open_serial() -> bool {
+/// Return String of bitcodes with start/stop bytes and CRC
+/// 
+/// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control charaters. 
+/// Currently only ever sets the stack to 16 bytes (Z0010)
+pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> String {
+    let mut output_string = "".to_string();
+
+    output_string.push('S'); // Start character
+   
+    for pass in pass2 {
+        output_string.push_str(&pass.opcode);        
+    }
+
+    // Add writing Z0010 and then checksum.
+    output_string.push_str("Z0010"); // Holding for stack of needed
+
+    let checksum:String = calc_checksum(&output_string,msg_list);
+
+    output_string.push_str(&checksum);
+
+    output_string.push('X'); // Stop character
+
+    output_string
+}
+
+
+pub fn write_serial(binout: String, port_name: &str,msg_list: &mut MsgList) -> bool {
     let ports = serialport::available_ports().expect("No ports found!");
     for p in ports {
         println!("{}", p.port_name);
     }
 
-    let mut port = serialport::new("/dev/ttyUSB0", 115_200)
-    .timeout(Duration::from_millis(10))
-    .open().expect("Failed to open port");
+    let port_result = serialport::new(port_name, 115200)
+    .timeout(Duration::from_millis(100))
+    .open();
 
-    port.set_stop_bits(StopBits::One);
-    port.set_data_bits(DataBits::Eight);
-    port.set_parity(Parity::None);
+    if port_result.is_err(){
+        msg_list.push(
+            {
+                format!(
+                    "Error openning serial port {}",
+                    port_name,
+                )
+            },
+            None,
+            MessageType::Error,
+        );
+        return false;
+    }
+
+    let mut port=port_result.unwrap();
+
+    let _ = port.set_stop_bits(StopBits::One);
+    let _ = port.set_data_bits(DataBits::Eight);
+    let _ = port.set_parity(Parity::None);
 
 
-    println!("back from sets");
+    println!("String is {}",binout);
 
-    let output = "This is a test. This is only a test.".as_bytes();
-    port.write(output).expect("Write failed!");
+    println!("write return {:?}",port.write(binout.as_bytes()).expect("Write failed!"));
 
     println!("back from write");
 
-    port.flush();
+    println!("flush return {:?}",port.flush());
 
     println!("back from flush");
 
-    false
+    true
 
 }
