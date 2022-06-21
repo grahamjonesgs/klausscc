@@ -706,13 +706,13 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
 
                 let ports_msg = match max_ports {
                     -1 => {
-                        "no ports found".to_string()
+                        "no ports were found".to_string()
                     }
                     0 => {
-                        format!("only port {} found", all_ports)
+                        format!("only port {} was found", all_ports)
                     }
                     _ => {
-                        format!("for following ports were found {}", all_ports)
+                        format!("the following ports were found {}", all_ports)
                     }
                 };
 
@@ -746,5 +746,54 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
         return false;
     }
 
+    let mut buffer = [0; 1024];
+    let ret_msg_size = port.read(&mut buffer[..]).unwrap_or(0);
+
+    if ret_msg_size==0 {
+        msg_list.push(
+            "No message received from board".to_string(),
+            None,
+            MessageType::Warning,
+        );
+        return true;
+    }
+
+    let ret_msg = String::from_utf8(buffer[..ret_msg_size].to_vec());
+
+    if ret_msg.is_err() {
+        msg_list.push(
+            "Invalid message received from board".to_string(),
+            None,
+            MessageType::Warning,
+        );
+        return true;
+    }
+
+    let mut print_ret_msg=ret_msg.unwrap_or_else(|_| "".to_string());
+
+    trim_newline(&mut print_ret_msg);
+
+    msg_list.push(
+        format!("Message received from board is \"{}\"",print_ret_msg),
+        None,
+        MessageType::Info,
+    );
+
+
     true
+}
+
+fn trim_newline(s: &mut String) {
+    if s.ends_with('\n') {
+        s.pop();
+        if s.ends_with('\r') {
+            s.pop();
+        }
+    }
+    if s.ends_with('\r') {
+        s.pop();
+        if s.ends_with('\n') {
+            s.pop();
+        }
+    }
 }
