@@ -2,9 +2,20 @@
                            -- BEGIN:
 0x00000000: 3071 0000 4321 -- 7SEG1V 0x4321
                            -- 
-0x00000003: F013 0000 0FFF -- DELAYV 0x0FFF // test message
+0x00000003: F013 0000 00FF -- DELAYV 0x00FF // test message
 0x00000006: 3071 0000 1234 -- 7SEG1V 0x1234
-0x00000009: F013 0000 0FFF -- DELAYV 0x0FFF // test message
-0x0000000C: 1000 0000 0000 -- JMP BEGIN:   // Restart if we reached zero
+0x00000009: F013 0000 00FF -- DELAYV 0x00FF // test message
                            -- 
+0x0000000C: 0800 0000 0100 -- SETR A 0x100
+                           -- 
+                           -- LOOP:
+0x0000000F: 3040           -- 7SEGR A 
+0x00000010: 0850           -- DECR A
+0x00000011: 100A 0000 001A -- CALLZ RESET:
+0x00000014: F013 0000 0010 -- DELAYV 0x0010
+0x00000017: 1000 0000 000F -- JMP LOOP:
+                           -- 
+                           -- RESET:
+0x0000001A: 0800 0000 0000 -- SETR A 999999999999999 
+0x0000001D: 1012           -- RET
                            -- 

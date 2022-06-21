@@ -471,7 +471,7 @@ pub fn add_arguments(
                         line_number,
                         labels,
                     );
-                    let default = " ERROR    ".to_string();
+                    let default = "00000000".to_string();
                     match this {
                         Some(x) => x,
                         None => default,
@@ -487,7 +487,7 @@ pub fn add_arguments(
                         line_number,
                         labels,
                     );
-                    let default = " ERROR    ".to_string();
+                    let default = "00000000".to_string();
                     match this {
                         Some(x) => x,
                         None => default,
@@ -495,7 +495,6 @@ pub fn add_arguments(
                 }
         }
         if i as u32 > num_registers + num_arguments {
-            //arguments = " ERROR    ".to_string()
             msg_list.push(
                 format!("Too many arguments found - \"{}\"", line),
                 Some(line_number),
@@ -540,12 +539,22 @@ pub fn convert_argument(
     if argument.len() >= 2 && (argument[0..2] == *"0x" || argument[0..2] == *"0X") {
         let without_prefix = argument.trim_start_matches("0x");
         let without_prefix = without_prefix.trim_start_matches("0X");
-        let int_value = i64::from_str_radix(without_prefix, 16);
-        if int_value.is_err() {
+        let int_value_result = i64::from_str_radix(without_prefix, 16);
+        if int_value_result.is_err() {
             return None;
         }
-        let ret_hex = format!("{:08X}", int_value.unwrap());
-        return Some(ret_hex);
+        let int_value=int_value_result.unwrap_or(0);
+
+        if int_value <= 4294967295 {
+            return Some(format!("{:08X}", int_value));
+        } else {
+            msg_list.push(
+                format!("Hex value out 0x{:08X} of bounds", int_value),
+                Some(line_number),
+                MessageType::Warning,
+            );
+            return None
+        }
     }
 
     match argument.parse::<i64>() {
@@ -557,7 +566,6 @@ pub fn convert_argument(
                     format!("Decimal value out {} of bounds", n),
                     Some(line_number),
                     MessageType::Warning,
-                    //  });
                 );
             }
         }
@@ -615,14 +623,14 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
         msg_list.push(
             {
                 format!(
-                    "Opcode list length not multiple of 4, lenght is {}",
+                    "Opcode list length not multiple of 4, length is {}",
                     stripped_string.len(),
                 )
             },
             None,
             MessageType::Error,
         );
-        "0000".to_string();
+        return "0000".to_string()
     }
 
     let mut possition_index: u32 = 0;
@@ -677,6 +685,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
 }
 
 pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> bool {
+    let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, 115200)
         .timeout(Duration::from_millis(100))
         .open();
@@ -705,9 +714,7 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
                 }
 
                 let ports_msg = match max_ports {
-                    -1 => {
-                        "no ports were found".to_string()
-                    }
+                    -1 => "no ports were found".to_string(),
                     0 => {
                         format!("only port {} was found", all_ports)
                     }
@@ -738,6 +745,9 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
         return false;
     }
 
+    if port.read(&mut buffer[..]).is_err() { //clear any old messages in buffer
+    }
+
     if port.write(binout.as_bytes()).is_err() {
         return false;
     }
@@ -746,10 +756,9 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
         return false;
     }
 
-    let mut buffer = [0; 1024];
     let ret_msg_size = port.read(&mut buffer[..]).unwrap_or(0);
 
-    if ret_msg_size==0 {
+    if ret_msg_size == 0 {
         msg_list.push(
             "No message received from board".to_string(),
             None,
@@ -769,16 +778,15 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
         return true;
     }
 
-    let mut print_ret_msg=ret_msg.unwrap_or_else(|_| "".to_string());
+    let mut print_ret_msg = ret_msg.unwrap_or_else(|_| "".to_string());
 
-    trim_newline(&mut print_ret_msg);
+    trim_newline(&mut print_ret_msg); //Board can send CR/LF messages
 
     msg_list.push(
-        format!("Message received from board is \"{}\"",print_ret_msg),
+        format!("Message received from board is \"{}\"", print_ret_msg),
         None,
         MessageType::Info,
     );
-
 
     true
 }

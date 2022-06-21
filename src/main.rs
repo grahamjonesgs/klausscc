@@ -276,21 +276,27 @@ fn main() {
     }
 
     if !ouput_serial_port.is_empty() {
-
-        if write_serial(bin_string, &ouput_serial_port, &mut msg_list) {
-            msg_list.push(
-                format!("Wrote to serial port {}",ouput_serial_port),
-                None,
-                MessageType::Info,
-            );
+        if msg_list.number_errors() == 0 {
+            if write_serial(bin_string, &ouput_serial_port, &mut msg_list) {
+                msg_list.push(
+                    format!("Wrote to serial port {}", ouput_serial_port),
+                    None,
+                    MessageType::Info,
+                );
+            } else {
+                msg_list.push(
+                    format!("Failed to write to serial port {}", ouput_serial_port),
+                    None,
+                    MessageType::Error,
+                );
+            }
         }
         else {
             msg_list.push(
-                format!("Failed to write to serial port {}",ouput_serial_port),
+                "Not writing to serial port due to assembly errors".to_string(),
                 None,
-                MessageType::Error,
+                MessageType::Warning,
             );
-            
         }
     }
 
@@ -300,7 +306,7 @@ fn main() {
         duration.num_milliseconds() as f32 / 1000.0 + duration.num_seconds() as f32;
 
     println!(
-        "Completed with {} error{} and {} waning{} in {} seconds",
+        "Completed with {} error{} and {} warning{} in {} seconds",
         msg_list.number_errors(),
         if msg_list.number_errors() == 1 {
             ""
