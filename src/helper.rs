@@ -652,22 +652,22 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 }
 
 /// Return String of bitcodes with start/stop bytes and CRC
-/// 
-/// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control charaters. 
+///
+/// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control charaters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
 pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> String {
     let mut output_string = "".to_string();
 
     output_string.push('S'); // Start character
-   
+
     for pass in pass2 {
-        output_string.push_str(&pass.opcode);        
+        output_string.push_str(&pass.opcode);
     }
 
     // Add writing Z0010 and then checksum.
     output_string.push_str("Z0010"); // Holding for stack of needed
 
-    let checksum:String = calc_checksum(&output_string,msg_list);
+    let checksum: String = calc_checksum(&output_string, msg_list);
 
     output_string.push_str(&checksum);
 
@@ -676,48 +676,75 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
     output_string
 }
 
+pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> bool {
+    let port_result = serialport::new(port_name, 115200)
+        .timeout(Duration::from_millis(100))
+        .open();
 
-pub fn write_serial(binout: String, port_name: &str,msg_list: &mut MsgList) -> bool {
-    let ports = serialport::available_ports().expect("No ports found!");
-    for p in ports {
-        println!("{}", p.port_name);
+    if port_result.is_err() {
+        let mut all_ports: String = "".to_string();
+        let ports = serialport::available_ports();
+
+        match ports {
+            Err(_) => {
+                msg_list.push(
+                    "Error openning serial port, no ports found".to_string(),
+                    None,
+                    MessageType::Error,
+                );
+                return false;
+            }
+            Ok(ports) => {
+                let mut max_ports: i32 = -1;
+                for (port_count, p) in (0_u32..).zip(ports.into_iter()) {
+                    if port_count > 0 {
+                        all_ports.push_str(" , ");
+                    }
+                    all_ports.push_str(&p.port_name);
+                    max_ports = port_count as i32;
+                }
+
+                let ports_msg = match max_ports {
+                    -1 => {
+                        "no ports found".to_string()
+                    }
+                    0 => {
+                        format!("only port {} found", all_ports)
+                    }
+                    _ => {
+                        format!("for following ports were found {}", all_ports)
+                    }
+                };
+
+                msg_list.push(
+                    format!("Error openning serial port {}, {}", port_name, ports_msg),
+                    None,
+                    MessageType::Error,
+                );
+                return false;
+            }
+        }
     }
 
-    let port_result = serialport::new(port_name, 115200)
-    .timeout(Duration::from_millis(100))
-    .open();
+    let mut port = port_result.unwrap();
 
-    if port_result.is_err(){
-        msg_list.push(
-            {
-                format!(
-                    "Error openning serial port {}",
-                    port_name,
-                )
-            },
-            None,
-            MessageType::Error,
-        );
+    if port.set_stop_bits(StopBits::One).is_err() {
+        return false;
+    }
+    if port.set_data_bits(DataBits::Eight).is_err() {
+        return false;
+    }
+    if port.set_parity(Parity::None).is_err() {
         return false;
     }
 
-    let mut port=port_result.unwrap();
+    if port.write(binout.as_bytes()).is_err() {
+        return false;
+    }
 
-    if port.set_stop_bits(StopBits::One).is_err() {return false}
-    if port.set_data_bits(DataBits::Eight).is_err() {return false}
-    if port.set_parity(Parity::None).is_err() {return false}
-
-
-    println!("String is {}",binout);
-
-    println!("write return {:?}",port.write(binout.as_bytes()).expect("Write failed!"));
-
-    println!("back from write");
-
-    println!("flush return {:?}",port.flush());
-
-    println!("back from flush");
+    if port.flush().is_err() {
+        return false;
+    }
 
     true
-
 }

@@ -24,7 +24,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-c src/opcode_select.vh","-i src/numbers.kla","-s /dev/ttyUSB1"],
+            "args": ["-c src/opcode_select.vh","-i src/numbers.kla","-s /dev/ttyUSB"],
             "cwd": "${workspaceFolder}"
         },
         {
