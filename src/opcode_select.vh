@@ -1,12 +1,13 @@
 // Can be read by assembler, so format is fixed. Opcode must be first word in comment. If opcode takes variable, it mst be passed as w_var1
 /* Macro definition
+$POPALL POP A / POP B / POP C 
+$PUSHALL PUSH A / PUSH B / PUSH C
+$WAIT DELAYV %1 / DELAYV %2 
+$TESTM NOP / NOP / NOP
+$TESTM2 NOP
+$IMBED1 DELAYV 0xFFFF 
+$IMBED3 $PUSHALL / $IMBED1
 
-$LEVEL1 $LEVEL2 %1 %2 / $LEVEL3 %4 %3 
-$LEVEL2 POP %1 / POP %2
-$LEVEL22 POP %1 / POP %2
-$LEVEL3 PUSH %2 / PUSH %1
-$VARS POP %1 / POP %2 / POP %2 / POP %1 / POP %2
-// Expected level1 pop %1 / push %5
 */
 
 task t_opcode_select;
@@ -92,6 +93,7 @@ task t_opcode_select;
 
             // Coms 5xxxx
             16'h5000: t_test_message;                           // TESTMSG test UART message
+            16'h501?: t_tx_reg;                                 // MSGREG send reg value in message
 
             // CPU Setting 6xxxx
 

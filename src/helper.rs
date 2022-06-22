@@ -569,7 +569,13 @@ pub fn convert_argument(
                 );
             }
         }
-        Err(_e) => {}
+        Err(_e) => {
+            msg_list.push(
+                format!("Decimal value {} incorrect", argument),
+                Some(line_number),
+                MessageType::Warning,
+            );
+        }
     };
     None
 }
