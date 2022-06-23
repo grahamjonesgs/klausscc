@@ -127,7 +127,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     Some(Opcode {
-        opcode: format!("0000{}", input_line[pos_opcode..pos_opcode + 4].to_string()),
+        opcode: format!("CCCC{}", input_line[pos_opcode..pos_opcode + 4].to_string()),
         registers: num_registers,
         variables: num_variables,
         comment: input_line[pos_comment..pos_end_comment].to_string(),

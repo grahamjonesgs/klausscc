@@ -636,7 +636,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
             None,
             MessageType::Error,
         );
-        return "0000".to_string()
+        return "00000000".to_string()
     }
 
     let mut possition_index: u32 = 0;

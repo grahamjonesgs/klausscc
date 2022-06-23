@@ -179,7 +179,7 @@ fn main() {
         }
         let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
         match num_args {
-            Some(p) => program_counter = program_counter + p * 2 + 2,
+            Some(p) => program_counter = program_counter + p + 1,
             None => {}
         }
     }

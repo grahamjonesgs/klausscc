@@ -1,35 +1,35 @@
                               -- 
                               -- BEGIN:
-0x00000000: 00000801 87654321 -- SETR B 0x87654321
+0x00000000: CCCC0801 87654321 -- SETR B 0x87654321
                               -- 
-0x00000004: 00005002 00000FFF -- TXMEM 0x00000FFF
+0x00000002: CCCC5002 FFFFFFFF -- TXMEM 0xFFFFFFFF
                               -- 
-0x00000008: 00000800 00000077 -- SETR A 0x77
+0x00000004: CCCC0800 77777777 -- SETR A 0x77777777
                               -- 
                               -- 
-0x0000000C: 00007201 0000FFFF -- MEMSETR B 0xFFFF
-0x00000010: 00007212 0000FFFF -- MEMREADR C 0xFFFF
+0x00000006: CCCC7201 0000FFFF -- MEMSETR B 0xFFFF
+0x00000008: CCCC7212 0000FFFF -- MEMREADR C 0xFFFF
                               -- 
-0x00000014: 00003042          -- 7SEGR C
+0x0000000A: CCCC3042          -- 7SEGR C
                               -- //DELAYV 0xFFF
-0x00000016: 0000F013 000000FF -- DELAYV 0xFF
+0x0000000B: CCCCF013 000000FF -- DELAYV 0xFF
                               -- 
                               -- LOOP:
-0x0000001A: 00003040          -- 7SEGR A 
-0x0000001C: 00000850          -- DECR A
-0x0000001E: 0000100A 0000002A -- CALLZ RESET:
-0x00000022: 0000F013 00000001 -- DELAYV 0x0001
-0x00000026: 00001000 0000001A -- JMP LOOP:
+0x0000000D: CCCC3040          -- 7SEGR A 
+0x0000000E: CCCC0850          -- DECR A
+0x0000000F: CCCC100A 00000015 -- CALLZ RESET:
+0x00000011: CCCCF013 00000001 -- DELAYV 0x0001
+0x00000013: CCCC1000 0000000D -- JMP LOOP:
                               -- 
                               -- RESET:
-0x0000002A: 00005000          -- TESTMSG
-0x0000002C: 00000800 00001234 -- SETR A 0x0x1234
+0x00000015: CCCC5000          -- TESTMSG
+0x00000016: CCCC0800 00001234 -- SETR A 0x0x1234
                               -- 
-0x00000030: 00005001          -- NEWLINE
+0x00000018: CCCC5001          -- NEWLINE
                               -- 
-0x00000032: 00005002 00000005 -- TXMEM 0x5
+0x00000019: CCCC5002 00000005 -- TXMEM 0x5
                               -- 
-0x00000036: 00005001          -- NEWLINE
+0x0000001B: CCCC5001          -- NEWLINE
                               --  
-0x00000038: 00001012          -- RET
+0x0000001C: CCCC1012          -- RET
                               -- 
