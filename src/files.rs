@@ -1,13 +1,12 @@
+use crate::{helper::return_macro, messages::*, return_opcode, Pass2};
 
-use crate::{messages::*, Pass2,return_opcode, helper::return_macro};
- 
+use std::fmt::Write as _;
 use std::{
     fmt,
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
 };
-use std::fmt::Write as _;
 
 use itertools::Itertools;
 
@@ -58,34 +57,29 @@ impl fmt::Display for Opcode {
     }
 }
 
-
-
 /// Parse opcode definition line to opcode
-/// 
+///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
-    //let pos_opcode: usize;
-    //let pos_name: usize;
-    //let pos_end_name: usize;
     let pos_comment: usize;
     let pos_end_comment: usize;
-    //let num_variables: u32;
     let line_pos_opcode: usize;
 
     // Find the opcode if it exists
     let pos_opcode: usize = match input_line.find("16'h") {
         None => return None,
-        Some(a) =>  { 
-            line_pos_opcode=a;
-            a + 4},
+        Some(a) => {
+            line_pos_opcode = a;
+            a + 4
+        }
     };
 
     // check if the line was commented out
     match input_line.find("//") {
-        None => {},
+        None => {}
         Some(a) => {
             if a < line_pos_opcode {
-                return None
+                return None;
             }
         }
     }
@@ -96,7 +90,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     // Define number of registers from opcode definition
-    let mut num_registers: u32=0;
+    let mut num_registers: u32 = 0;
     if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
         num_registers = 1
     }
@@ -105,20 +99,20 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     // Look for variable, and set flag
-    let num_variables:u32 = if input_line.find("w_var1") == None {
+    let num_variables: u32 = if input_line.find("w_var1") == None {
         0
     } else {
         1
     };
 
     // Look for comment as first word is opcode name
-    let pos_name:usize = match input_line.find("//") {
+    let pos_name: usize = match input_line.find("//") {
         None => return None,
         Some(a) => a + 3,
     };
 
     // Find end of first word after comment as end of opcode name
-    let pos_end_name:usize = match input_line[pos_name..].find(' ') {
+    let pos_end_name: usize = match input_line[pos_name..].find(' ') {
         None => return None,
         Some(a) => a + pos_name,
     };
@@ -133,7 +127,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     Some(Opcode {
-        opcode: input_line[pos_opcode..pos_opcode + 4].to_string(),
+        opcode: format!("0000{}", input_line[pos_opcode..pos_opcode + 4].to_string()),
         registers: num_registers,
         variables: num_variables,
         comment: input_line[pos_comment..pos_end_comment].to_string(),
@@ -142,7 +136,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 }
 
 /// Parse opcode definition line to macro
-/// 
+///
 /// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None
 pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Macro> {
     // Find the macro if it exists
@@ -155,7 +149,6 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     let mut max_variable: i64 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
-    
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -189,7 +182,6 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         items.push(item.to_string());
     }
 
-
     if max_variable != all_found_variables.clone().into_iter().unique().count() as i64 {
         for i in 1..max_variable {
             all_variables.push(i);
@@ -207,7 +199,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
                 missing.push(' ');
             }
             //missing.push_str(&format!("%{}", i));
-            write!(missing,"%{}",i).ok();
+            write!(missing, "%{}", i).ok();
         }
 
         msg_list.push(
@@ -228,7 +220,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
 }
 
 /// Parse file to opcode and macro vectors
-/// 
+///
 /// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some<Opcode>, Some<Macro>
 pub fn parse_vh_file(
     filename: &impl AsRef<Path>,
@@ -249,29 +241,28 @@ pub fn parse_vh_file(
                 match opcode_from_string(&v) {
                     None => (),
                     Some(a) => {
-                        
-                        if return_opcode(&a.name,&mut opcodes,).is_some() {
+                        if return_opcode(&a.name, &mut opcodes).is_some() {
                             msg_list.push(
-                                format!("Duplicate Opcode {} found",a.name),
+                                format!("Duplicate Opcode {} found", a.name),
                                 None,
                                 MessageType::Error,
                             );
                         }
-                        opcodes.push(a) 
-                    },
+                        opcodes.push(a)
+                    }
                 }
                 match macro_from_string(&v, msg_list) {
                     None => (),
                     Some(a) => {
                         if return_macro(&a.name, &mut macros).is_some() {
                             msg_list.push(
-                                format!("Duplicate Macro definition {} found",a.name),
+                                format!("Duplicate Macro definition {} found", a.name),
                                 None,
                                 MessageType::Error,
                             );
                         }
                         macros.push(a)
-                    },
+                    }
                 }
             }
 
@@ -282,12 +273,9 @@ pub fn parse_vh_file(
 }
 
 /// Open text file and return as vector of strings
-/// 
+///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some<String>
-pub fn read_file_to_vec(
-    msg_list: &mut MsgList,
-    filename: &str,
-) -> Option<Vec<String>> {
+pub fn read_file_to_vec(msg_list: &mut MsgList, filename: &str) -> Option<Vec<String>> {
     let file = File::open(filename);
     if file.is_err() {
         return None;
@@ -297,7 +285,7 @@ pub fn read_file_to_vec(
     let mut lines: Vec<String> = Vec::new();
 
     msg_list.push(
-        format!("Evaluating opcode file {}",filename),
+        format!("Evaluating opcode file {}", filename),
         None,
         MessageType::Info,
     );
@@ -313,7 +301,7 @@ pub fn read_file_to_vec(
 }
 
 /// Return the stem of given filename
-/// 
+///
 /// Looks for first dot in the string, and returns the slice before the dot
 pub fn filename_stem(full_name: &String) -> String {
     let dot_pos = full_name.find('.');
@@ -324,8 +312,8 @@ pub fn filename_stem(full_name: &String) -> String {
 }
 
 /// Output the bitcode to given file
-/// 
-/// Based on the bitcode string outputs to file 
+///
+/// Based on the bitcode string outputs to file
 pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
     let rfile = File::create(filename);
 
@@ -343,7 +331,7 @@ pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
 }
 
 /// Output the code details file to given filename
-/// 
+///
 /// Writes all data to the detailed code file
 pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let rfile = File::create(filename);
@@ -356,15 +344,15 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     for pass in pass2 {
         if pass.line_type == LineType::Opcode {
             out_line = format!(
-                "0x{:08X}: {:<8} -- {}\n",
+                "0x{:08X}: {:<16} -- {}\n",
                 pass.program_counter,
                 format_opcodes(&mut pass.opcode),
                 pass.input
             );
         } else if pass.line_type == LineType::Error {
-            out_line = format!("Error                      -- {}\n", pass.input);
+            out_line = format!("Error                         -- {}\n", pass.input);
         } else {
-            out_line = format!("                           -- {}\n", pass.input);
+            out_line = format!("                              -- {}\n", pass.input);
         }
         if file.write(out_line.as_bytes()).is_err() {
             return false;
@@ -373,23 +361,22 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     true
 }
 
-
 /// Format a given string, adding spaces between groups of 4
-/// 
+///
 /// For string of 8 and 12 charters addes spaces between grouops of 4 characters, otherwise returns original string
 pub fn format_opcodes(input: &mut String) -> String {
     if input.len() == 4 {
-        return input.to_string() + "          ";
+        return input.to_string() + "              ";
     }
     if input.len() == 8 {
-        return input[0..4].to_string() + " " + &input[4..8].to_string() + "     ";
+        return input[0..4].to_string() + &input[4..8].to_string() + "         ";
     }
-    if input.len() == 12 {
+    if input.len() == 16 {
         return input[0..4].to_string()
-            + " "
             + &input[4..8].to_string()
             + " "
-            + &input[8..12].to_string();
+            + &input[8..12].to_string()
+            + &input[12..16].to_string();
     }
     input.to_string()
 }

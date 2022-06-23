@@ -425,7 +425,7 @@ pub fn add_registers(
         }
     };
 
-    opcode_found = opcode_found[..(4 - num_registers) as usize].to_string();
+    opcode_found = opcode_found[..(8 - num_registers) as usize].to_string();
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
@@ -434,7 +434,7 @@ pub fn add_registers(
         }
     }
 
-    if opcode_found.len() != 4 || opcode_found.contains('X') {
+    if opcode_found.len() != 8 || opcode_found.contains('X') {
         msg_list.push(
             format!("Incorrect register defintion - \"{}\"", line),
             Some(line_number),
