@@ -203,7 +203,7 @@ fn main() {
         })
         .collect();
 
-    find_duplicate_label(&mut labels, &mut msg_list);
+    find_duplicate_label(&mut labels, &mut msg_list);    
 
     msg_list.push("Pass 2".to_string(), None, MessageType::Info);
     let mut pass2: Vec<Pass2> = Vec::new();
