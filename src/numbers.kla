@@ -13,22 +13,29 @@ SETR D 0x0 // holding memory location to read
 LOOP:
 7SEGR A 
 DECR A
-DELAYV 0x000A
+//DELAYV 0x000A
 CALLZ RESET:
-DELAYV 0x000A
+//DELAYV 0x000A
 JMP LOOP:
 
 RESET:
+SETR A #ADDR
+CALL PRINT_DATA:  // Print add 
+TXR D  // print address from reg
+SETR A #DATA
+CALL PRINT_DATA: // print data word
+TXMEMR D // print memory contects
 NEWLINE
-SETR A #TESTDATA2
-CALL PRINT_DATA:
-NEWLINE
-SETR A 0x123
+INCR D
+SETR A 0x1
 RET
+
+#TESTDATA2 "Test line"
+#ADDR "Address - "
+#DATA " Data - "
 
 // A is address to start, B used to be zero, C used to copy from mem
 PRINT_DATA:  // To print a string from memory to UART
-TESTMSG
 PUSH B  // Save register
 SETR B 0x0
 PRINT_DATA_LOOP:
@@ -42,9 +49,7 @@ PRINT_DATA_EXIT:
 POP B
 RET
 
-#TESTDATA2 "Test line"
-#ADDR "Address "
-#Data "Data"
+
 
 
 

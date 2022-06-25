@@ -95,7 +95,7 @@ task t_opcode_select;
             16'h5000: t_test_message;                           // TESTMSG test UART message
             16'h5001: t_tx_newline;                             // NEWLINE UART newline
             16'h5002: t_tx_char_from_mem_value(w_var1);         // TXMEM send 8 chars hex from mem locaiton
-            16'h501?: t_tx_reg;                                 // TXGR send reg value in message
+            16'h501?: t_tx_reg;                                 // TXR send reg value in message
             16'h502?: t_tx_value_from_reg_value;                // TXMEMR send value at mem from reg value in message
             16'h503?: t_tx_char_from_reg_value;                 // TXCHARMEMR send char at mem from reg value as message
             // CPU Setting 6xxxx
