@@ -2,41 +2,54 @@
                               -- BEGIN:
 0x00000000: 00000801 87654321 -- SETR B 0x87654321
                               -- 
-0x00000002: 00005002 FFFFFFFF -- TXMEM 0xFFFFFFFF
+0x00000002: 00000800 00000100 -- SETR A 0x100
                               -- 
-0x00000004: 00000800 00000100 -- SETR A 0x100
+0x00000004: 00003041          -- 7SEGR B
+0x00000005: 0000F013 00000FFF -- DELAYV 0xFFF
                               -- 
-                              -- 
-0x00000006: 00007201 0000FFFF -- MEMSETR B 0xFFFF
-0x00000008: 00007212 0000FFFF -- MEMREADR C 0xFFFF
-                              -- 
-0x0000000A: 00003042          -- 7SEGR C
-                              -- //DELAYV 0xFFF
-0x0000000B: 0000F013 000000FF -- DELAYV 0xFF
+0x00000007: 00000803 00000000 -- SETR D 0x0 // holding memory location to read
                               -- 
                               -- LOOP:
-0x0000000D: 00003040          -- 7SEGR A 
-0x0000000E: 00000850          -- DECR A
-0x0000000F: 0000F013 0000000A -- DELAYV 0x000A
-0x00000011: 0000100A 00000017 -- CALLZ RESET:
-0x00000013: 0000F013 0000000A -- DELAYV 0x000A
-0x00000015: 00001000 0000000D -- JMP LOOP:
+0x00000009: 00003041          -- 7SEGR B
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- LOOP:
+0x0000000A: 00003040          -- 7SEGR A 
+0x0000000B: 00000850          -- DECR A
+0x0000000C: 0000F013 0000000A -- DELAYV 0x000A
+0x0000000E: 0000100A 00000014 -- CALLZ RESET:
+0x00000010: 0000F013 0000000A -- DELAYV 0x000A
+0x00000012: 00001000 00000009 -- JMP LOOP:
                               -- 
                               -- RESET:
-0x00000017: 00005000          -- TESTMSG
-0x00000018: 00000803 00000120 -- SETR D 0x0x120
-0x0000001A: 00004003          -- PUSH D
-0x0000001B: 00000803 00000430 -- SETR D 0x0x430
-0x0000001D: 00004003          -- PUSH D
+0x00000014: 00005001          -- NEWLINE
+0x00000015: 00000800 00000000 -- SETR A #TESTDATA2
+0x00000017: 00001009 0000001D -- CALL PRINT_DATA:
+0x00000019: 00005001          -- NEWLINE
+0x0000001A: 00000800 00000123 -- SETR A 0x123
+0x0000001C: 00001012          -- RET
                               -- 
-0x0000001E: 00004010          -- POP A
-0x0000001F: 00004012          -- POP C
+                              -- // A is address to start, B used to be zero, C used to copy from mem
+                              -- PRINT_DATA:  // To print a string from memory to UART
+0x0000001D: 00005000          -- TESTMSG
+0x0000001E: 00004001          -- PUSH B  // Save register
+0x0000001F: 00000801 00000000 -- SETR B 0x0
+                              -- PRINT_DATA_LOOP:
+0x00000021: 00007120          -- MEMREADRR C A // check for end of message
+0x00000022: 00000512          -- CMPRR B C  // Check if mem is zero
+0x00000023: 00001003 00000029 -- JMPE PRINT_DATA_EXIT:
+0x00000025: 00005030          -- TXCHARMEMR A // Print char
+0x00000026: 00000840          -- INCR A  // Next Char
+0x00000027: 00001000 00000021 -- JMP PRINT_DATA_LOOP:
+                              -- PRINT_DATA_EXIT:
+0x00000029: 00004011          -- POP B
+0x0000002A: 00001012          -- RET
                               -- 
-0x00000020: 00005001          -- NEWLINE
+                              -- #ADDR "Address"
+                              -- #ADDR "Data"
                               -- 
-0x00000021: 00005002 00FFFFFF -- TXMEM 0xFFFFFF
                               -- 
-0x00000023: 00005001          -- NEWLINE
-                              --  
-0x00000024: 00001012          -- RET
+                              -- 
                               -- 

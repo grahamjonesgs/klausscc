@@ -38,6 +38,18 @@ pub fn label_name_from_string(line: &str) -> Option<String> {
     None
 }
 
+/// Extracts dataname from string
+///
+/// Checks if start of first word is hash if so return dataname as option string
+pub fn data_name_from_string(line: &str) -> Option<String> {
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if first_word.starts_with('#') {
+        return Some(first_word.to_string());
+    }
+    None
+}
+
 /// Extracts macro from string
 ///
 /// Checks if end of first word is colon if so return macro name as option string
@@ -295,6 +307,35 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     None
 }
 
+/// Returns number of bytes for data element
+pub fn data_as_bytes(line: &str) -> Option<String> {
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if first_word.is_empty() {
+        return None;
+    }
+
+    
+
+    let second_word = words.next().unwrap_or("");
+    if second_word.is_empty() {
+        return None;
+    }
+
+    if second_word.starts_with('\"') && second_word.ends_with('\"') {
+        let output = second_word.trim_matches('\"').to_string();
+        let mut output_hex="".to_string();
+        for c in output.as_bytes(){
+            output_hex.push_str(&format!("{:02X}000000", c));
+        }
+        output_hex.push_str("00000000"); // Add null terminator
+        
+        return Some(output_hex)
+    }
+
+    None
+}
+
 //// Returns number of regs for opcode
 ///
 /// From opcode name, option of number of registers for opcode, or None
@@ -318,6 +359,9 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
 pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
     if label_name_from_string(line).is_some() {
         return LineType::Label;
+    };
+    if data_name_from_string(line).is_some() {
+        return LineType::Data;
     };
     if return_opcode(line, opcodes).is_some() {
         return LineType::Opcode;
@@ -536,6 +580,20 @@ pub fn convert_argument(
         };
     }
 
+    if data_name_from_string(&argument).is_some() {
+        match return_label_value(&argument, labels) {
+            Some(n) => return Some(format!("{:08X}", n)),
+            None => {
+                msg_list.push(
+                    format!("Label {} not found - line {}", argument, line_number),
+                    Some(line_number),
+                    MessageType::Warning,
+                );
+                return None;
+            }
+        };
+    }
+
     if argument.len() >= 2 && (argument[0..2] == *"0x" || argument[0..2] == *"0X") {
         let without_prefix = argument.trim_start_matches("0x");
         let without_prefix = without_prefix.trim_start_matches("0X");
@@ -543,7 +601,7 @@ pub fn convert_argument(
         if int_value_result.is_err() {
             return None;
         }
-        let int_value=int_value_result.unwrap_or(0);
+        let int_value = int_value_result.unwrap_or(0);
 
         if int_value <= 4294967295 {
             return Some(format!("{:08X}", int_value));
@@ -553,7 +611,7 @@ pub fn convert_argument(
                 Some(line_number),
                 MessageType::Warning,
             );
-            return None
+            return None;
         }
     }
 
@@ -636,7 +694,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
             None,
             MessageType::Error,
         );
-        return "00000000".to_string()
+        return "00000000".to_string();
     }
 
     let mut possition_index: u32 = 0;

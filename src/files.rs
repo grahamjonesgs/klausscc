@@ -44,6 +44,7 @@ pub enum LineType {
     Blank,
     Label,
     Opcode,
+    Data,
     Error,
 }
 

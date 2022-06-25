@@ -125,7 +125,6 @@ fn main() {
                 for item in Option::unwrap(items) {
                     pass0.push(Pass0 {
                         input: item
-                            + " //-- From macro "
                             + &{
                                 let this = macro_name_from_string(&code_line);
                                 let default = r#""#.to_string();
@@ -177,25 +176,44 @@ fn main() {
                 MessageType::Error,
             );
         }
-        let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
-        match num_args {
-            Some(p) => program_counter = program_counter + p + 1,
-            None => {}
+        if line_type(&mut oplist, &mut pass.input) == LineType::Opcode {
+            let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
+            match num_args {
+                Some(p) => program_counter = program_counter + p + 1,
+                None => {}
+            }
+        }
+
+        if line_type(&mut oplist, &mut pass.input) == LineType::Data {
+            println!(
+                "Found data element{} bytes {:?}",
+                pass.input,
+                data_as_bytes(&pass.input)
+            );
+            program_counter += data_as_bytes(&pass.input).unwrap().len() as u32/8;
         }
     }
 
     let mut labels: Vec<Label> = pass1
         .iter()
-        .filter(|n| label_name_from_string(&n.input).is_some())
+        .filter(|n| {
+            label_name_from_string(&n.input).is_some() || data_name_from_string(&n.input).is_some()
+        })
         .map(|n| -> Label {
             Label {
                 program_counter: n.program_counter,
                 name: {
                     let this = label_name_from_string(&n.input);
-                    let default = "".to_string();
                     match this {
                         Some(x) => x,
-                        None => default,
+                        None => {
+                            let this = data_name_from_string(&n.input);
+                            let default = "".to_string();
+                            match this {
+                                Some(x) => x,
+                                None => default,
+                            }
+                        }
                     }
                 },
                 line_counter: n.line_counter,
@@ -203,7 +221,7 @@ fn main() {
         })
         .collect();
 
-    find_duplicate_label(&mut labels, &mut msg_list);    
+    find_duplicate_label(&mut labels, &mut msg_list);
 
     msg_list.push("Pass 2".to_string(), None, MessageType::Info);
     let mut pass2: Vec<Pass2> = Vec::new();
@@ -222,9 +240,14 @@ fn main() {
                 &mut labels,
             )
             .as_str()
-        } else {
+        } else if line.line_type == LineType::Data {
+            data_as_bytes(line.input.as_str()).unwrap()
+        }
+        else {
             "".to_string()
         };
+
+
 
         pass2.push(Pass2 {
             input: line.input,
@@ -290,8 +313,7 @@ fn main() {
                     MessageType::Error,
                 );
             }
-        }
-        else {
+        } else {
             msg_list.push(
                 "Not writing to serial port due to assembly errors".to_string(),
                 None,
@@ -321,6 +343,4 @@ fn main() {
         },
         time_taken,
     );
-
-
 }

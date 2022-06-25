@@ -2,17 +2,18 @@
 BEGIN:
 SETR B 0x87654321
 
-TXMEM 0xFFFFFFFF
-
 SETR A 0x100
 
+7SEGR B
+DELAYV 0xFFF
 
-MEMSETR B 0xFFFF
-MEMREADR C 0xFFFF
+SETR D 0x0 // holding memory location to read
 
-7SEGR C
-//DELAYV 0xFFF
-DELAYV 0xFF
+LOOP:
+7SEGR B
+
+
+
 
 LOOP:
 7SEGR A 
@@ -23,20 +24,32 @@ DELAYV 0x000A
 JMP LOOP:
 
 RESET:
-TESTMSG
-SETR D 0x0x120
-PUSH D
-SETR D 0x0x430
-PUSH D
-
-POP A
-POP C
-
 NEWLINE
-
-TXMEM 0xFFFFFF
-
+SETR A #TESTDATA2
+CALL PRINT_DATA:
 NEWLINE
- 
+SETR A 0x123
 RET
+
+// A is address to start, B used to be zero, C used to copy from mem
+PRINT_DATA:  // To print a string from memory to UART
+TESTMSG
+PUSH B  // Save register
+SETR B 0x0
+PRINT_DATA_LOOP:
+MEMREADRR C A // check for end of message
+CMPRR B C  // Check if mem is zero
+JMPE PRINT_DATA_EXIT:
+TXCHARMEMR A // Print char
+INCR A  // Next Char
+JMP PRINT_DATA_LOOP:
+PRINT_DATA_EXIT:
+POP B
+RET
+
+#ADDR "Address "
+#Data "Data"
+
+
+
 

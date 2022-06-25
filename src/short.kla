@@ -1,6 +1,5 @@
 
 BEGIN:
-SETR B 0x87654321
 
-
+#TESTDATA "12"
 
