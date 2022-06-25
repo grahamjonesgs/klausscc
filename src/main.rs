@@ -185,11 +185,6 @@ fn main() {
         }
 
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            println!(
-                "Found data element{} bytes {:?}",
-                pass.input,
-                data_as_bytes(&pass.input)
-            );
             program_counter += data_as_bytes(&pass.input).unwrap().len() as u32/8;
         }
     }

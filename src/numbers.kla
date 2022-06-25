@@ -9,11 +9,6 @@ DELAYV 0xFFF
 
 SETR D 0x0 // holding memory location to read
 
-LOOP:
-7SEGR B
-
-
-
 
 LOOP:
 7SEGR A 
@@ -47,6 +42,7 @@ PRINT_DATA_EXIT:
 POP B
 RET
 
+#TESTDATA2 "Test line"
 #ADDR "Address "
 #Data "Data"
 

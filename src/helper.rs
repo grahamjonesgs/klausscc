@@ -322,8 +322,15 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         return None;
     }
 
-    if second_word.starts_with('\"') && second_word.ends_with('\"') {
-        let output = second_word.trim_matches('\"').to_string();
+    // Check if next word starts with quote
+    if !second_word.starts_with('\"') {
+        return None;
+    }
+
+    let remaning_line = line.trim_start_matches(first_word).trim();
+
+    if remaning_line.starts_with('\"') && remaning_line.ends_with('\"') {
+        let output = remaning_line.trim_matches('\"').to_string();
         let mut output_hex="".to_string();
         for c in output.as_bytes(){
             output_hex.push_str(&format!("{:02X}000000", c));

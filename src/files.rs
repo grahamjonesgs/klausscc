@@ -350,6 +350,13 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
                 format_opcodes(&mut pass.opcode),
                 pass.input
             );
+        } else if pass.line_type == LineType::Data || pass.line_type == LineType::Label {
+            out_line = format!(
+                "0x{:08X}:                   -- {}\n",
+                pass.program_counter,
+                pass.input
+            );
+        
         } else if pass.line_type == LineType::Error {
             out_line = format!("Error                         -- {}\n", pass.input);
         } else {
