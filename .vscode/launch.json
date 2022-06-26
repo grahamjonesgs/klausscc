@@ -26,7 +26,7 @@
             },
             "args": ["-c src/opcode_select.vh","-i src/numbers.kla","-s /dev/ttyUSB1"],
             "cwd": "${workspaceFolder}",
-            "env": { "RUST_BACKTRACE": "1" }
+            "env": { "RUST_BACKTRACE": "full" }
         },
         {
             "type": "lldb",
@@ -45,7 +45,9 @@
                 }
             },
             "args": [],
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "full" }
+            
         }
     ]
 }

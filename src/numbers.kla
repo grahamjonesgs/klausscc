@@ -33,6 +33,7 @@ RET
 #TESTDATA2 "Test line"
 #ADDR "Address - "
 #DATA " Data - "
+#DATALONG 0xFF
 
 // A is address to start, B used to be zero, C used to copy from mem
 PRINT_DATA:  // To print a string from memory to UART

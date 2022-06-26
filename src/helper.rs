@@ -307,15 +307,32 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     None
 }
 
-/// Returns number of bytes for data element
+/// Return number of bytes of data
+///
+/// From instruction name, option of number of bytes of data, or 0 is error
+pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32) -> u32 {
+    match data_as_bytes(line) {
+        Some(data) => data.len() as u32,
+        None => {
+            msg_list.push(
+                format!("Error in data definition for {}", line),
+                Some(line_number),
+                MessageType::Error,
+            );
+            0
+        }
+    }
+}
+
+/// Returns bytes for data element
+///
+/// Parses data element and returns data as bytes, or None if error
 pub fn data_as_bytes(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.is_empty() {
         return None;
     }
-
-    
 
     let second_word = words.next().unwrap_or("");
     if second_word.is_empty() {
@@ -324,23 +341,45 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
 
     // Check if next word starts with quote
     if !second_word.starts_with('\"') {
-        return None;
-    }
+        // Check if next word is a number
+        // let int_value: i64;
+        let int_value = if second_word.len() >= 2
+            && (second_word[0..2] == *"0x" || second_word[0..2] == *"0X")
+        {
+            let without_prefix = second_word.trim_start_matches("0x");
+            let without_prefix = without_prefix.trim_start_matches("0X");
+            let int_value_result = i64::from_str_radix(without_prefix, 16);
+            int_value_result.unwrap_or(0)
+        } else {
+            let int_value_result = second_word.parse::<i64>();
+            int_value_result.unwrap_or(0)
+        };
 
-    let remaning_line = line.trim_start_matches(first_word).trim();
-
-    if remaning_line.starts_with('\"') && remaning_line.ends_with('\"') {
-        let output = remaning_line.trim_matches('\"').to_string();
-        let mut output_hex="".to_string();
-        for c in output.as_bytes(){
-            output_hex.push_str(&format!("{:02X}000000", c));
+        if int_value == 0 {
+            None
+        } else {
+            let mut data = String::new();
+            for _ in 0..int_value {
+                data.push_str("00000000");
+            }
+            Some(data)
         }
-        output_hex.push_str("00000000"); // Add null terminator
-        
-        return Some(output_hex)
-    }
+    } else {
+        let remaning_line = line.trim_start_matches(first_word).trim();
 
-    None
+        if remaning_line.starts_with('\"') && remaning_line.ends_with('\"') {
+            let output = remaning_line.trim_matches('\"').to_string();
+            let mut output_hex = "".to_string();
+            for c in output.as_bytes() {
+                output_hex.push_str(&format!("{:02X}000000", c));
+            }
+            output_hex.push_str("00000000"); // Add null terminator
+
+            Some(output_hex)
+        } else {
+            None
+        }
+    }
 }
 
 //// Returns number of regs for opcode

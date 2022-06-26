@@ -185,7 +185,7 @@ fn main() {
         }
 
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            program_counter += data_as_bytes(&pass.input).unwrap().len() as u32/8;
+            program_counter += num_data_bytes(&pass.input,&mut msg_list,input_line_count) as u32/8;
         }
     }
 
@@ -236,7 +236,7 @@ fn main() {
             )
             .as_str()
         } else if line.line_type == LineType::Data {
-            data_as_bytes(line.input.as_str()).unwrap()
+            data_as_bytes(line.input.as_str()).unwrap_or_else(|| "".to_string())
         }
         else {
             "".to_string()
