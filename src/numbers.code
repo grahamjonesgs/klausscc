@@ -11,44 +11,46 @@
                               -- 
                               -- 
 0x00000009:                   -- LOOP:
-0x00000009: 00003040          -- 7SEGR A 
-0x0000000A: 00000850          -- DECR A
+                              -- //7SEGR A 
+0x00000009: 00000850          -- DECR A
                               -- //DELAYV 0x000A
-0x0000000B: 0000100A 0000000F -- CALLZ RESET:
+0x0000000A: 0000100A 0000000E -- CALLZ RESET:
                               -- //DELAYV 0x000A
-0x0000000D: 00001000 00000009 -- JMP LOOP:
+0x0000000C: 00001000 00000009 -- JMP LOOP:
                               -- 
-0x0000000F:                   -- RESET:
-0x0000000F: 00000800 00000028 -- SETR A #ADDR
-0x00000011: 00001009 0000013B -- CALL PRINT_DATA:  // Print add 
-0x00000013: 00005013          -- TXR D  // print address from reg
-0x00000014: 00000800 00000033 -- SETR A #DATA
-0x00000016: 00001009 0000013B -- CALL PRINT_DATA: // print data word
-0x00000018: 00005023          -- TXMEMR D // print memory contects
-0x00000019: 00005001          -- NEWLINE
-0x0000001A: 00000843          -- INCR D
-0x0000001B: 00000800 00000001 -- SETR A 0x1
-0x0000001D: 00001012          -- RET
+0x0000000E:                   -- RESET:
+                              -- //LEDR D
+0x0000000E: 00003043          -- 7SEGR D
+0x0000000F: 00000800 0000001F -- SETR A #ADDR
+                              -- //CALL PRINT_DATA:  // Print add 
+                              -- //TXR D  // print address from reg
+                              -- //SETR A #DATA
+                              -- //CALL PRINT_DATA: // print data word
+                              -- //TXMEMR D // print memory contects
+                              -- //NEWLINE
+0x00000011: 00000843          -- INCR D
+0x00000012: 00000800 00000001 -- SETR A 0x1
+0x00000014: 00001012          -- RET
                               -- 
-0x0000001E:                   -- #TESTDATA2 "Test line"
-0x00000028:                   -- #ADDR "Address - "
-0x00000033:                   -- #DATA " Data - "
-0x0000003C:                   -- #DATALONG 0xFF
+0x00000015:                   -- #TESTDATA2 "Test line"
+0x0000001F:                   -- #ADDR "Address - "
+0x0000002A:                   -- #DATA " Data - "
+0x00000033:                   -- #DATALONG 0xFF
                               -- 
                               -- // A is address to start, B used to be zero, C used to copy from mem
-0x0000013B:                   -- PRINT_DATA:  // To print a string from memory to UART
-0x0000013B: 00004001          -- PUSH B  // Save register
-0x0000013C: 00000801 00000000 -- SETR B 0x0
-0x0000013E:                   -- PRINT_DATA_LOOP:
-0x0000013E: 00007120          -- MEMREADRR C A // check for end of message
-0x0000013F: 00000512          -- CMPRR B C  // Check if mem is zero
-0x00000140: 00001003 00000146 -- JMPE PRINT_DATA_EXIT:
-0x00000142: 00005030          -- TXCHARMEMR A // Print char
-0x00000143: 00000840          -- INCR A  // Next Char
-0x00000144: 00001000 0000013E -- JMP PRINT_DATA_LOOP:
-0x00000146:                   -- PRINT_DATA_EXIT:
-0x00000146: 00004011          -- POP B
-0x00000147: 00001012          -- RET
+0x00000132:                   -- PRINT_DATA:  // To print a string from memory to UART
+0x00000132: 00004001          -- PUSH B  // Save register
+0x00000133: 00000801 00000000 -- SETR B 0x0
+0x00000135:                   -- PRINT_DATA_LOOP:
+0x00000135: 00007120          -- MEMREADRR C A // check for end of message
+0x00000136: 00000512          -- CMPRR B C  // Check if mem is zero
+0x00000137: 00001003 0000013D -- JMPE PRINT_DATA_EXIT:
+0x00000139: 00005030          -- TXCHARMEMR A // Print char
+0x0000013A: 00000840          -- INCR A  // Next Char
+0x0000013B: 00001000 00000135 -- JMP PRINT_DATA_LOOP:
+0x0000013D:                   -- PRINT_DATA_EXIT:
+0x0000013D: 00004011          -- POP B
+0x0000013E: 00001012          -- RET
                               -- 
                               -- 
                               -- 
