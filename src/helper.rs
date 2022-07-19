@@ -371,7 +371,9 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             let output = remaning_line.trim_matches('\"').to_string();
             let mut output_hex = "".to_string();
             for c in output.as_bytes() {
-                output_hex.push_str(&format!("{:02X}000000", c));
+                let hex = format!("{:02X}", c);
+                output_hex.push_str(&hex);
+                output_hex.push_str("000000");
             }
             output_hex.push_str("00000000"); // Add null terminator
 
