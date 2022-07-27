@@ -66,13 +66,13 @@ pub fn print_messages(msg_list: &mut MsgList) {
         let message = if msg.line_number.is_some() {
             format!(
                 "{} {} Line {}. {} ",
-                msg.time,
+                msg.time.format("%H:%M:%S%.3f"),
                 warning,
                 msg.line_number.unwrap(),
                 msg.name
             )
         } else {
-            format!("{} {} {} ", msg.time, warning, msg.name)
+            format!("{} {} {} ", msg.time.format("%H:%M:%S.%3f"), warning, msg.name)
         };
         println!("{}", message);
     }
