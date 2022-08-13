@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 getopts = "0.2.21"
-clap = "3.2.5"
+clap = "3.2.15"
 chrono = "0.4.19"
 colored = "2.0.0"
 itertools = "0.10.3"
