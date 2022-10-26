@@ -7,13 +7,8 @@ edition = "2021"
 
 [dependencies]
 getopts = "0.2.21"
-<<<<<<< HEAD
 clap = "4.0.18"
 chrono = "0.4.22"
-=======
-clap = "3.2.15"
-chrono = "0.4.19"
->>>>>>> master
 colored = "2.0.0"
 itertools = "0.10.5"
 serialport = "4.2.0"
