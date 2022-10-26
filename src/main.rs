@@ -20,7 +20,7 @@ fn main() {
             Arg::new("opcode_file")
                 .short('c')
                 .long("opcode")
-                .takes_value(true)
+                .num_args(1)
                 .required(true)
                 .help("Opcode source file from VHDL"),
         )
@@ -29,55 +29,55 @@ fn main() {
                 .short('i')
                 .long("input")
                 .required(true)
-                .takes_value(true)
+                .num_args(1)
                 .help("Input file to be assembled"),
         )
         .arg(
             Arg::new("output")
                 .short('o')
                 .long("output")
-                .takes_value(true)
+                .num_args(1)
                 .help("Output info file fomr assembled code"),
         )
         .arg(
             Arg::new("bitcode")
                 .short('b')
                 .long("bitcode")
-                .takes_value(true)
+                .num_args(1)
                 .help("Output bitcode file fomr assembled code"),
         )
         .arg(
             Arg::new("verbose")
                 .short('v')
                 .long("verbose")
-                .takes_value(false)
+                .num_args(0)
                 .help("Set if verbose"),
         )
         .arg(
             Arg::new("serial")
                 .short('s')
                 .long("serial")
-                .takes_value(true)
+                .num_args(1)
                 .help("Serial port for output"),
         )
         .get_matches();
 
     let opcode_file_name = matches
-        .value_of("opcode_file")
-        .unwrap_or("opcode_select.vh")
+        .get_one::<String>("opcode_file")
+        .unwrap_or(&"opcode_select.vh".to_string())
         .replace(' ', "");
-    let input_file_name = matches.value_of("input").unwrap_or("").replace(' ', "");
+    let input_file_name = matches.get_one::<String>("input").unwrap_or(&"".to_string()).replace(' ', "");
     let binary_file_name = matches
-        .value_of("bitcode")
+        .get_one::<String>("bitcode")
         .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "")
         + ".kbt";
     let output_file_name = matches
-        .value_of("output")
+        .get_one::<String>("output")
         .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "")
         + ".code";
-    let ouput_serial_port = matches.value_of("serial").unwrap_or("").replace(' ', "");
+    let ouput_serial_port = matches.get_one::<String>("serial").unwrap_or(&"".to_string()).replace(' ', "");
 
     // Parse the Opcode file
     let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name, &mut msg_list);
