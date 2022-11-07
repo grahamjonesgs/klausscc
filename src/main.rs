@@ -6,7 +6,6 @@ use clap::{Arg, Command};
 use files::*;
 use helper::*;
 use messages::*;
-use std::fs;
 
 fn main() { 
     let mut msg_list: MsgList = MsgList::new();
@@ -284,7 +283,7 @@ fn main() {
                 MessageType::Error,
             );
         }
-    } else if let Err(e) = fs::remove_file(&binary_file_name) {
+    } else if let Err(e) = std::fs::remove_file(&binary_file_name) {
         match e.kind() {
             std::io::ErrorKind::NotFound => (),
             _ => msg_list.push(

@@ -1,7 +1,6 @@
+
 use crate::files::*;
 use crate::messages::*;
-use serialport::*;
-use std::time::Duration;
 
 pub struct Pass0 {
     pub input: String,
@@ -796,7 +795,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
 pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> bool {
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, 115200)
-        .timeout(Duration::from_millis(100))
+        .timeout(std::time::Duration::from_millis(100))
         .open();
 
     if port_result.is_err() {
@@ -844,13 +843,13 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
 
     let mut port = port_result.unwrap();
 
-    if port.set_stop_bits(StopBits::One).is_err() {
+    if port.set_stop_bits(serialport::StopBits::One).is_err() {
         return false;
     }
-    if port.set_data_bits(DataBits::Eight).is_err() {
+    if port.set_data_bits(serialport::DataBits::Eight).is_err() {
         return false;
     }
-    if port.set_parity(Parity::None).is_err() {
+    if port.set_parity(serialport::Parity::None).is_err() {
         return false;
     }
 
