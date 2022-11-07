@@ -1,14 +1,13 @@
 use chrono::{Local, NaiveTime};
 use colored::{ColoredString, Colorize};
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(PartialEq)]
 pub enum MessageType {
     Error,
     Warning,
     Info,
 }
 
-#[derive(Debug, Clone)]
 pub struct Message {
     pub name: String,
     pub line_number: Option<u32>,
@@ -56,14 +55,13 @@ impl MsgList {
 /// Prints all the message in passed MsgList vector to terminal with coloured messages
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
-        //let message: String;
         
         let warning: ColoredString = match msg.level {
             MessageType::Info => "I".to_string().green(),
             MessageType::Warning => "W".to_string().yellow(),
             MessageType::Error => "E".to_string().red(),
         };
-        let message = if msg.line_number.is_some() {
+            println!("{}",if msg.line_number.is_some() {
             format!(
                 "{} {} Line {}. {} ",
                 msg.time.format("%H:%M:%S%.3f"),
@@ -73,7 +71,6 @@ pub fn print_messages(msg_list: &mut MsgList) {
             )
         } else {
             format!("{} {} {} ", msg.time.format("%H:%M:%S.%3f"), warning, msg.name)
-        };
-        println!("{}", message);
+        });
     }
 }

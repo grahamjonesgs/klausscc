@@ -10,7 +10,6 @@ use std::{
 
 use itertools::Itertools;
 
-#[derive(Debug)]
 pub struct Opcode {
     pub name: String,
     pub opcode: String,
@@ -19,26 +18,21 @@ pub struct Opcode {
     pub comment: String,
 }
 
-#[derive(Debug)]
-pub struct CodeLine {
-    pub program_counter: u32,
-    pub code: String,
-}
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Label {
     pub program_counter: u32,
     pub name: String,
     pub line_counter: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Macro {
     pub name: String,
     pub variables: u32,
     pub items: Vec<String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(PartialEq)]
 pub enum LineType {
     Comment,
     Blank,
@@ -100,11 +94,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     // Look for variable, and set flag
-    let num_variables: u32 = if input_line.find("w_var1") == None {
-        0
-    } else {
-        1
-    };
+    let num_variables: u32 = u32::from(input_line.contains("w_var1"));
 
     // Look for comment as first word is opcode name
     let pos_name: usize = match input_line.find("//") {
@@ -165,7 +155,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
                 if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                 } else {
                     all_found_variables.push(int_value.clone().unwrap_or(0));
-                    if int_value.clone().unwrap_or(0) > max_variable as i64 {
+                    if int_value.clone().unwrap_or(0) > max_variable {
                         max_variable = int_value.clone().unwrap_or(0);
                     }
                 }
@@ -377,14 +367,14 @@ pub fn format_opcodes(input: &mut String) -> String {
         return input.to_string() + "              ";
     }
     if input.len() == 8 {
-        return input[0..4].to_string() + &input[4..8].to_string() + "         ";
+        return input[0..4].to_string() + &input[4..8] + "         ";
     }
     if input.len() == 16 {
         return input[0..4].to_string()
-            + &input[4..8].to_string()
+            + &input[4..8]
             + " "
-            + &input[8..12].to_string()
-            + &input[12..16].to_string();
+            + &input[8..12]
+            + &input[12..16];
     }
     input.to_string()
 }

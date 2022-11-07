@@ -8,7 +8,7 @@ use helper::*;
 use messages::*;
 use std::fs;
 
-fn main() {
+fn main() { 
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
 
@@ -178,14 +178,16 @@ fn main() {
         }
         if line_type(&mut oplist, &mut pass.input) == LineType::Opcode {
             let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
-            match num_args {
-                Some(p) => program_counter = program_counter + p + 1,
-                None => {}
-            }
+            if let Some(p) = num_args { program_counter = program_counter + p + 1 }
+            
+            //match num_args {
+            //    Some(p) => program_counter = program_counter + p + 1,
+            //    None => {}
+            //}
         }
 
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            program_counter += num_data_bytes(&pass.input,&mut msg_list,input_line_count) as u32/8;
+            program_counter += num_data_bytes(&pass.input,&mut msg_list,input_line_count)/8;
         }
     }
 
@@ -236,7 +238,7 @@ fn main() {
             )
             .as_str()
         } else if line.line_type == LineType::Data {
-            data_as_bytes(line.input.as_str()).unwrap_or_else(|| "".to_string())
+            data_as_bytes(line.input.as_str()).unwrap_or_default()
         }
         else {
             "".to_string()
