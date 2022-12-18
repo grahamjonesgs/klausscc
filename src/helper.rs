@@ -264,7 +264,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
     }
     if changed {
         msg_list.push(
-            format!("Too many macro passes, check {}", last_macro),
+            format!("Too many macro passes, check {last_macro}"),
             None,
             MessageType::Error,
         );
@@ -311,7 +311,7 @@ pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32) -> u
         Some(data) => data.len() as u32,
         None => {
             msg_list.push(
-                format!("Error in data definition for {}", line),
+                format!("Error in data definition for {line}"),
                 Some(line_number),
                 MessageType::Error,
             );
@@ -367,7 +367,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             let output = remaning_line.trim_matches('\"').to_string();
             let mut output_hex = "".to_string();
             for c in output.as_bytes() {
-                let hex = format!("{:02X}", c);
+                let hex = format!("{c:02X}");
                 output_hex.push_str(&hex);
                 output_hex.push_str("000000");
             }
@@ -524,7 +524,7 @@ pub fn add_registers(
 
     if opcode_found.len() != 8 || opcode_found.contains('X') {
         msg_list.push(
-            format!("Incorrect register defintion - \"{}\"", line),
+            format!("Incorrect register defintion - \"{line}\""),
             Some(line_number),
             MessageType::Warning,
         );
@@ -584,7 +584,7 @@ pub fn add_arguments(
         }
         if i as u32 > num_registers + num_arguments {
             msg_list.push(
-                format!("Too many arguments found - \"{}\"", line),
+                format!("Too many arguments found - \"{line}\""),
                 Some(line_number),
                 MessageType::Warning,
             );
@@ -593,7 +593,7 @@ pub fn add_arguments(
 
     if arguments.len() as u32 != 8 * num_arguments {
         msg_list.push(
-            format!("Incorrect argument defintion - \"{}\"", line),
+            format!("Incorrect argument defintion - \"{line}\""),
             Some(line_number),
             MessageType::Error,
         );
@@ -612,10 +612,10 @@ pub fn convert_argument(
 ) -> Option<String> {
     if label_name_from_string(&argument).is_some() {
         match return_label_value(&argument, labels) {
-            Some(n) => return Some(format!("{:08X}", n)),
+            Some(n) => return Some(format!("{n:08X}")),
             None => {
                 msg_list.push(
-                    format!("Label {} not found - line {}", argument, line_number),
+                    format!("Label {argument} not found - line {line_number}"),
                     Some(line_number),
                     MessageType::Warning,
                 );
@@ -626,10 +626,10 @@ pub fn convert_argument(
 
     if data_name_from_string(&argument).is_some() {
         match return_label_value(&argument, labels) {
-            Some(n) => return Some(format!("{:08X}", n)),
+            Some(n) => return Some(format!("{n:08X}")),
             None => {
                 msg_list.push(
-                    format!("Label {} not found - line {}", argument, line_number),
+                    format!("Label {argument} not found - line {line_number}"),
                     Some(line_number),
                     MessageType::Warning,
                 );
@@ -648,10 +648,10 @@ pub fn convert_argument(
         let int_value = int_value_result.unwrap_or(0);
 
         if int_value <= 4294967295 {
-            return Some(format!("{:08X}", int_value));
+            return Some(format!("{int_value:08X}"));
         } else {
             msg_list.push(
-                format!("Hex value out 0x{:08X} of bounds", int_value),
+                format!("Hex value out 0x{int_value:08X} of bounds"),
                 Some(line_number),
                 MessageType::Warning,
             );
@@ -662,10 +662,10 @@ pub fn convert_argument(
     match argument.parse::<i64>() {
         Ok(n) => {
             if n <= 4294967295 {
-                return Some(format!("{:08X}", n));
+                return Some(format!("{n:08X}"));
             } else {
                 msg_list.push(
-                    format!("Decimal value out {} of bounds", n),
+                    format!("Decimal value out {n} of bounds"),
                     Some(line_number),
                     MessageType::Warning,
                 );
@@ -673,7 +673,7 @@ pub fn convert_argument(
         }
         Err(_e) => {
             msg_list.push(
-                format!("Decimal value {} incorrect", argument),
+                format!("Decimal value {argument} incorrect"),
                 Some(line_number),
                 MessageType::Warning,
             );
@@ -764,7 +764,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
         }
     }
     checksum = (checksum + possition_index - 1) % (0xFFFF + 1);
-    format!("{:04X}", checksum)
+    format!("{checksum:04X}")
 }
 
 /// Return String of bitcodes with start/stop bytes and CRC
@@ -824,15 +824,15 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
                 let ports_msg = match max_ports {
                     -1 => "no ports were found".to_string(),
                     0 => {
-                        format!("only port {} was found", all_ports)
+                        format!("only port {all_ports} was found")
                     }
                     _ => {
-                        format!("the following ports were found {}", all_ports)
+                        format!("the following ports were found {all_ports}")
                     }
                 };
 
                 msg_list.push(
-                    format!("Error openning serial port {}, {}", port_name, ports_msg),
+                    format!("Error openning serial port {port_name}, {ports_msg}"),
                     None,
                     MessageType::Error,
                 );
@@ -891,7 +891,7 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
     trim_newline(&mut print_ret_msg); //Board can send CR/LF messages
 
     msg_list.push(
-        format!("Message received from board is \"{}\"", print_ret_msg),
+        format!("Message received from board is \"{print_ret_msg}\""),
         None,
         MessageType::Info,
     );

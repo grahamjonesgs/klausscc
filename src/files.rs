@@ -190,13 +190,12 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
                 missing.push(' ');
             }
             //missing.push_str(&format!("%{}", i));
-            write!(missing, "%{}", i).ok();
+            write!(missing, "%{i}").ok();
         }
 
         msg_list.push(
             format!(
-                "Error in macro variable definition for macro {}, missing {:?}",
-                name, missing,
+                "Error in macro variable definition for macro {name}, missing {missing:?}",
             ),
             None,
             MessageType::Warning,
@@ -257,7 +256,7 @@ pub fn parse_vh_file(
                 }
             }
 
-            Err(e) => println!("Failed parsing opcode file: {:?}", e),
+            Err(e) => println!("Failed parsing opcode file: {e:?}"),
         }
     }
     (Some(opcodes), Some(macros))
@@ -276,7 +275,7 @@ pub fn read_file_to_vec(msg_list: &mut MsgList, filename: &str) -> Option<Vec<St
     let mut lines: Vec<String> = Vec::new();
 
     msg_list.push(
-        format!("Evaluating opcode file {}", filename),
+        format!("Evaluating opcode file {filename}"),
         None,
         MessageType::Info,
     );
@@ -285,7 +284,7 @@ pub fn read_file_to_vec(msg_list: &mut MsgList, filename: &str) -> Option<Vec<St
         match line {
             Ok(v) => lines.push(v),
 
-            Err(e) => println!("Error parsing opcode file: {:?}", e),
+            Err(e) => println!("Error parsing opcode file: {e:?}"),
         }
     }
     Some(lines)

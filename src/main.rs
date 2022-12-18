@@ -81,14 +81,13 @@ fn main() {
     // Parse the Opcode file
     let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name, &mut msg_list);
     if opt_oplist.is_none() {
-        println!("Unable to open opcode file {:?}", opcode_file_name);
+        println!("Unable to open opcode file {opcode_file_name:?}");
         std::process::exit(1);
     }
 
     if opt_macro_list.is_none() || opt_oplist.is_none() {
         println!(
-            "Error parsing opcode file {} to marco and opcode lists",
-            opcode_file_name
+            "Error parsing opcode file {opcode_file_name} to marco and opcode lists"
         );
         std::process::exit(1);
     }
@@ -97,13 +96,13 @@ fn main() {
 
     // Parse the input file
     msg_list.push(
-        format!("Input file is {}", input_file_name),
+        format!("Input file is {input_file_name}"),
         None,
         MessageType::Info,
     );
     let input_list = read_file_to_vec(&mut msg_list, &input_file_name);
     if input_list.is_none() {
-        println!("Unable to open input file {:?}", input_file_name);
+        println!("Unable to open input file {input_file_name:?}");
         std::process::exit(1);
     }
 
@@ -138,7 +137,7 @@ fn main() {
                 }
             } else {
                 msg_list.push(
-                    format!("Macro not found {}", code_line),
+                    format!("Macro not found {code_line}"),
                     None,
                     MessageType::Error,
                 );
@@ -259,7 +258,7 @@ fn main() {
     }
 
     msg_list.push(
-        format!("Writing code file to {}", output_file_name),
+        format!("Writing code file to {output_file_name}"),
         None,
         MessageType::Info,
     );
@@ -272,7 +271,7 @@ fn main() {
 
     if msg_list.number_errors() == 0 {
         msg_list.push(
-            format!("Writing binary file to {}", binary_file_name),
+            format!("Writing binary file to {binary_file_name}"),
             None,
             MessageType::Info,
         );
@@ -298,13 +297,13 @@ fn main() {
         if msg_list.number_errors() == 0 {
             if write_serial(bin_string, &ouput_serial_port, &mut msg_list) {
                 msg_list.push(
-                    format!("Wrote to serial port {}", ouput_serial_port),
+                    format!("Wrote to serial port {ouput_serial_port}"),
                     None,
                     MessageType::Info,
                 );
             } else {
                 msg_list.push(
-                    format!("Failed to write to serial port {}", ouput_serial_port),
+                    format!("Failed to write to serial port {ouput_serial_port}"),
                     None,
                     MessageType::Error,
                 );
