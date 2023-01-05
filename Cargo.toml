@@ -7,8 +7,8 @@ edition = "2021"
 
 [dependencies]
 getopts = "0.2.21"
-clap = "4.0.29"
-chrono = { version = "0.4.22", default-features = false, features = ["std","alloc","clock"] }
+clap = "4.0.32"
+chrono = { version = "0.4.23", default-features = false, features = ["std","alloc","clock"] }
 colored = "2.0.0"
 itertools = "0.10.5"
 serialport = { version = "4.2.0", default-features = false}
