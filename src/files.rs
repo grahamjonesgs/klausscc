@@ -182,7 +182,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         let difference_all_variables: Vec<_> = all_variables
             .into_iter()
             .filter(|item| !all_found_variables.contains(item))
-            .clone()
+            
             .collect();
         let mut missing: String = "".to_string();
         for i in difference_all_variables {

@@ -7,7 +7,7 @@ use files::*;
 use helper::*;
 use messages::*;
 
-fn main() { 
+fn main() {
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
 
@@ -65,7 +65,10 @@ fn main() {
         .get_one::<String>("opcode_file")
         .unwrap_or(&"opcode_select.vh".to_string())
         .replace(' ', "");
-    let input_file_name = matches.get_one::<String>("input").unwrap_or(&"".to_string()).replace(' ', "");
+    let input_file_name = matches
+        .get_one::<String>("input")
+        .unwrap_or(&"".to_string())
+        .replace(' ', "");
     let binary_file_name = matches
         .get_one::<String>("bitcode")
         .unwrap_or(&filename_stem(&input_file_name))
@@ -76,7 +79,10 @@ fn main() {
         .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "")
         + ".code";
-    let ouput_serial_port = matches.get_one::<String>("serial").unwrap_or(&"".to_string()).replace(' ', "");
+    let ouput_serial_port = matches
+        .get_one::<String>("serial")
+        .unwrap_or(&"".to_string())
+        .replace(' ', "");
 
     // Parse the Opcode file
     let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name, &mut msg_list);
@@ -86,9 +92,7 @@ fn main() {
     }
 
     if opt_macro_list.is_none() || opt_oplist.is_none() {
-        println!(
-            "Error parsing opcode file {opcode_file_name} to marco and opcode lists"
-        );
+        println!("Error parsing opcode file {opcode_file_name} to marco and opcode lists");
         std::process::exit(1);
     }
     let mut oplist = opt_oplist.unwrap();
@@ -176,8 +180,10 @@ fn main() {
         }
         if line_type(&mut oplist, &mut pass.input) == LineType::Opcode {
             let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
-            if let Some(p) = num_args { program_counter = program_counter + p + 1 }
-            
+            if let Some(p) = num_args {
+                program_counter = program_counter + p + 1
+            }
+
             //match num_args {
             //    Some(p) => program_counter = program_counter + p + 1,
             //    None => {}
@@ -185,7 +191,7 @@ fn main() {
         }
 
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            program_counter += num_data_bytes(&pass.input,&mut msg_list,input_line_count)/8;
+            program_counter += num_data_bytes(&pass.input, &mut msg_list, input_line_count) / 8;
         }
     }
 
@@ -237,12 +243,9 @@ fn main() {
             .as_str()
         } else if line.line_type == LineType::Data {
             data_as_bytes(line.input.as_str()).unwrap_or_default()
-        }
-        else {
+        } else {
             "".to_string()
         };
-
-
 
         pass2.push(Pass2 {
             input: line.input,
