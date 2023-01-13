@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 getopts = "0.2.21"
-clap = "4.0.32"
+clap = "4.1.0"
 chrono = { version = "0.4.23", default-features = false, features = ["std","alloc","clock"] }
 colored = "2.0.0"
 itertools = "0.10.5"
