@@ -73,7 +73,7 @@ pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
 /// Returns Macro from name
 ///
 /// Return option macro if it exists, or none
-pub fn return_macro(line: &str, macros: &mut [Macro]) -> Option<Macro> {
+pub fn return_macro<'a>(line: &'a str, macros: &'a mut [Macro]) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     macro_name_from_string(first_word)?;
@@ -227,7 +227,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                         msg_list.push(
                                             format!(
                                                 "Missing argument {} for imbedded macro \"{}\" in {}",
-                                                int_value.clone().unwrap_or(0),
+                                                int_value.unwrap_or(0),
                                                 item,
                                                 input_macro_line.name,
                                             ),
