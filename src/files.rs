@@ -211,7 +211,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
 
 /// Parse file to opcode and macro vectors
 ///
-/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some<Opcode>, Some<Macro>
+/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
 pub fn parse_vh_file(
     filename: &impl AsRef<Path>,
     msg_list: &mut MsgList,
@@ -264,7 +264,7 @@ pub fn parse_vh_file(
 
 /// Open text file and return as vector of strings
 ///
-/// Reads any given file by filename, adding the fill line by line into vector and returns None or Some<String>
+/// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String)
 pub fn read_file_to_vec(msg_list: &mut MsgList, filename: &str) -> Option<Vec<String>> {
     let file = File::open(filename);
     if file.is_err() {
