@@ -21,7 +21,7 @@ fn main() {
                 .long("opcode")
                 .num_args(1)
                 .required(true)
-                .help("Opcode source file from VHDL"),
+                .help("Opcode source file from Verilog"),
         )
         .arg(
             Arg::new("input")
@@ -36,14 +36,14 @@ fn main() {
                 .short('o')
                 .long("output")
                 .num_args(1)
-                .help("Output info file fomr assembled code"),
+                .help("Output info file for assembled code"),
         )
         .arg(
             Arg::new("bitcode")
                 .short('b')
                 .long("bitcode")
                 .num_args(1)
-                .help("Output bitcode file fomr assembled code"),
+                .help("Output bitcode file for assembled code"),
         )
         .arg(
             Arg::new("verbose")
@@ -79,7 +79,7 @@ fn main() {
         .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "")
         + ".code";
-    let ouput_serial_port = matches
+    let output_serial_port = matches
         .get_one::<String>("serial")
         .unwrap_or(&"".to_string())
         .replace(' ', "");
@@ -280,7 +280,7 @@ fn main() {
         );
         if !output_binary(&binary_file_name, &bin_string) {
             msg_list.push(
-                format!("Unable to write to bincode file {:?}", &binary_file_name),
+                format!("Unable to write to binary code file {:?}", &binary_file_name),
                 None,
                 MessageType::Error,
             );
@@ -296,17 +296,17 @@ fn main() {
         };
     }
 
-    if !ouput_serial_port.is_empty() {
+    if !output_serial_port.is_empty() {
         if msg_list.number_errors() == 0 {
-            if write_serial(bin_string, &ouput_serial_port, &mut msg_list) {
+            if write_serial(bin_string, &output_serial_port, &mut msg_list) {
                 msg_list.push(
-                    format!("Wrote to serial port {ouput_serial_port}"),
+                    format!("Wrote to serial port {output_serial_port}"),
                     None,
                     MessageType::Info,
                 );
             } else {
                 msg_list.push(
-                    format!("Failed to write to serial port {ouput_serial_port}"),
+                    format!("Failed to write to serial port {output_serial_port}"),
                     None,
                     MessageType::Error,
                 );

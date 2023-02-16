@@ -46,7 +46,7 @@ impl fmt::Display for Opcode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "{} {}, regs {}, vars {} - {}",
+            "{} {}, registers {}, variables {} - {}",
             self.name, self.opcode, self.registers, self.variables, self.comment
         )
     }
@@ -305,13 +305,13 @@ pub fn filename_stem(full_name: &String) -> String {
 ///
 /// Based on the bitcode string outputs to file
 pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
-    let rfile = File::create(filename);
+    let result_file = File::create(filename);
 
-    if rfile.is_err() {
+    if result_file.is_err() {
         return false;
     }
 
-    let mut file = rfile.unwrap();
+    let mut file = result_file.unwrap();
 
     if file.write(output_string.as_bytes()).is_err() {
         return false;
@@ -324,12 +324,12 @@ pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
 ///
 /// Writes all data to the detailed code file
 pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
-    let rfile = File::create(filename);
-    if rfile.is_err() {
+    let result_file = File::create(filename);
+    if result_file.is_err() {
         return false;
     }
     let mut out_line: String;
-    let mut file = rfile.unwrap();
+    let mut file = result_file.unwrap();
 
     for pass in pass2 {
         if pass.line_type == LineType::Opcode {
@@ -360,7 +360,7 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
 
 /// Format a given string, adding spaces between groups of 4
 ///
-/// For string of 8 and 12 charters addes spaces between grouops of 4 characters, otherwise returns original string
+/// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string
 pub fn format_opcodes(input: &mut String) -> String {
     if input.len() == 4 {
         return input.to_string() + "              ";
