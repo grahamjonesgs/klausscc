@@ -34,9 +34,9 @@ pub fn label_name_from_string(line: &str) -> Option<String> {
     None
 }
 
-/// Extracts dataname from string
+/// Extracts data name from string
 ///
-/// Checks if start of first word is hash if so return dataname as option string
+/// Checks if start of first word is hash if so return data name as option string
 pub fn data_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -60,7 +60,7 @@ pub fn macro_name_from_string(line: &str) -> Option<String> {
 
 /// Return program counter for label
 ///
-/// Return option of progam counter for label if it exists, or None
+/// Return option of program counter for label if it exists, or None
 pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
         if label.name == line {
@@ -163,7 +163,7 @@ pub fn return_macro_items_replace(
 
 /// Multi pass to resolve embedded macros
 ///
-/// Takes Vector of macros, and embeds macros recursivly, up to 10 passes
+/// Takes Vector of macros, and embeds macros recursively, up to 10 passes
 /// Will create errors message for more than 10 passes
 pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
@@ -200,7 +200,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
 
                     for new_item in return_macro(&item, &mut input_macros).unwrap().items {
                         if new_item.contains('%') {
-                            // Replace %n in new _tems with the nth value in item
+                            // Replace %n in new items with the nth value in item
 
                             let new_item_words = new_item.split_whitespace();
                             let mut build_line: String = "".to_string();
@@ -361,10 +361,10 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             Some(data)
         }
     } else {
-        let remaning_line = line.trim_start_matches(first_word).trim();
+        let remaining_line = line.trim_start_matches(first_word).trim();
 
-        if remaning_line.starts_with('\"') && remaning_line.ends_with('\"') {
-            let output = remaning_line.trim_matches('\"').to_string();
+        if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
+            let output = remaining_line.trim_matches('\"').to_string();
             let mut output_hex = "".to_string();
             for c in output.as_bytes() {
                 let hex = format!("{c:02X}");
@@ -380,7 +380,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
     }
 }
 
-//// Returns number of regs for opcode
+//// Returns number of registers for opcode
 ///
 /// From opcode name, option of number of registers for opcode, or None
 pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
@@ -397,7 +397,7 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     None
 }
 
-/// Returns emum of type of line
+/// Returns enum of type of line
 ///
 /// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error
 pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
@@ -426,8 +426,8 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
 ///  
 /// Returns true if line is not error
 pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
-    let mut myline: String = line;
-    if line_type(opcodes, &mut myline) == LineType::Error {
+    let mut temp_line: String = line;
+    if line_type(opcodes, &mut temp_line) == LineType::Error {
         return false;
     }
     true
@@ -459,7 +459,7 @@ pub fn is_comment(word: &mut String) -> bool {
 
     for (i, &item) in bytes.iter().enumerate() {
         if item == b'/' && i == 0 {
-            found_first = true
+            found_first = true;
         }
         if item == b'/' && i == 1 && found_first {
             return true;
@@ -470,7 +470,7 @@ pub fn is_comment(word: &mut String) -> bool {
 
 /// Register name to hex
 ///
-/// Map the reigter to the hex code for the opcode
+/// Map the register to the hex code for the opcode
 pub fn map_reg_to_hex(input: String) -> String {
     match input.to_uppercase().as_str() {
         "A" => "0".to_string(),
@@ -495,7 +495,7 @@ pub fn map_reg_to_hex(input: String) -> String {
 
 /// Updates opcode with register
 ///
-/// Returns the hex code operand from the line, adding regiter values
+/// Returns the hex code operand from the line, adding register values
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
     line: &mut String,
@@ -524,7 +524,7 @@ pub fn add_registers(
 
     if opcode_found.len() != 8 || opcode_found.contains('X') {
         msg_list.push(
-            format!("Incorrect register defintion - \"{line}\""),
+            format!("Incorrect register definition - \"{line}\""),
             Some(line_number),
             MessageType::Warning,
         );
@@ -593,7 +593,7 @@ pub fn add_arguments(
 
     if arguments.len() as u32 != 8 * num_arguments {
         msg_list.push(
-            format!("Incorrect argument defintion - \"{line}\""),
+            format!("Incorrect argument definition - \"{line}\""),
             Some(line_number),
             MessageType::Error,
         );
@@ -714,7 +714,7 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
 
 /// Find checksum
 ///
-/// Calculates the checksum from the string of hex values, removing control charaters
+/// Calculates the checksum from the string of hex values, removing control characters
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string: String = "".to_string();
     let mut checksum: u32 = 0;
@@ -726,7 +726,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
         }
     }
 
-    // check if len is divisable by 4
+    // check if len is divisible by 4
     if stripped_string.len() % 4 != 0 {
         msg_list.push(
             {
@@ -741,7 +741,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
         return "00000000".to_string();
     }
 
-    let mut possition_index: u32 = 0;
+    let mut position_index: u32 = 0;
 
     for (index, _) in stripped_string.chars().enumerate() {
         if index % 4 == 0 {
@@ -759,17 +759,17 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
                 );
             } else {
                 checksum = (checksum + int_value.unwrap_or(0) as u32) % (0xFFFF + 1);
-                possition_index += 1;
+                position_index += 1;
             }
         }
     }
-    checksum = (checksum + possition_index - 1) % (0xFFFF + 1);
+    checksum = (checksum + position_index - 1) % (0xFFFF + 1);
     format!("{checksum:04X}")
 }
 
-/// Return String of bitcodes with start/stop bytes and CRC
+/// Return String of bit codes with start/stop bytes and CRC
 ///
-/// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control charaters.
+/// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
 pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> String {
     let mut output_string = "".to_string();
@@ -792,7 +792,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
     output_string
 }
 
-pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> bool {
+pub fn write_serial(binary_output: String, port_name: &str, msg_list: &mut MsgList) -> bool {
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, 115200)
         .timeout(std::time::Duration::from_millis(100))
@@ -805,7 +805,7 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
         match ports {
             Err(_) => {
                 msg_list.push(
-                    "Error openning serial port, no ports found".to_string(),
+                    "Error opening serial port, no ports found".to_string(),
                     None,
                     MessageType::Error,
                 );
@@ -832,7 +832,7 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
                 };
 
                 msg_list.push(
-                    format!("Error openning serial port {port_name}, {ports_msg}"),
+                    format!("Error opening serial port {port_name}, {ports_msg}"),
                     None,
                     MessageType::Error,
                 );
@@ -856,7 +856,7 @@ pub fn write_serial(binout: String, port_name: &str, msg_list: &mut MsgList) -> 
     if port.read(&mut buffer[..]).is_err() { //clear any old messages in buffer
     }
 
-    if port.write(binout.as_bytes()).is_err() {
+    if port.write(binary_output.as_bytes()).is_err() {
         return false;
     }
 

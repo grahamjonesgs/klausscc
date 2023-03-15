@@ -1,9 +1,18 @@
+#![warn(
+    clippy::all,
+    // clippy::restriction,
+     // clippy::pedantic,
+   // clippy::nursery,
+   // clippy::cargo,
+)]
+
+
 mod files;
 mod helper;
 mod messages;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use files::*;
+use files::{Label, LineType, filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec};
 use helper::*;
 use messages::*;
 

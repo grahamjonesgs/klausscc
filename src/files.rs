@@ -1,8 +1,9 @@
-use crate::{helper::return_macro, messages::*, return_opcode, Pass2};
+use crate::{helper::return_macro, messages::{MessageType, MsgList}, return_opcode, Pass2};
 
-use std::fmt::Write as _;
+use core::fmt::Write as _;
+use core::fmt;
 use std::{
-    fmt,
+   // fmt,
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
@@ -87,10 +88,10 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     // Define number of registers from opcode definition
     let mut num_registers: u32 = 0;
     if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
-        num_registers = 1
+        num_registers = 1;
     }
     if &input_line[pos_opcode + 2..pos_opcode + 4] == "??" {
-        num_registers = 2
+        num_registers = 2;
     }
 
     // Look for variable, and set flag
@@ -134,10 +135,10 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     if input_line.find('$').unwrap_or(usize::MAX) != 0 {
         return None;
     }
-    let mut name: String = "".to_string();
-    let mut item: String = "".to_string();
+    let mut name: String = String::new();
+    let mut item: String = String::new();
     let mut items: Vec<String> = Vec::new();
-    let mut max_variable: i64 = 0;
+    let mut max_variable: u32 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
 
@@ -147,7 +148,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
             name = word.to_string();
         } else if word == "/" {
             items.push(item.to_string());
-            item = "".to_string();
+            item = String::new();
         } else {
             if word.contains('%') {
                 let without_prefix = word.trim_start_matches('%');
@@ -155,16 +156,16 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
                 if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                 } else {
                     all_found_variables.push(int_value.clone().unwrap_or(0));
-                    if int_value.clone().unwrap_or(0) > max_variable {
-                        max_variable = int_value.unwrap_or(0);
+                    if int_value.clone().unwrap_or(0) > max_variable.into() {
+                        max_variable = int_value.unwrap_or(0) as u32;
                     }
                 }
             }
 
-            if !item.is_empty() {
-                item = item + " " + word;
-            } else {
+            if item.is_empty() {
                 item += word;
+            } else {
+                item = item + " " + word;
             }
         }
     }
@@ -173,9 +174,9 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         items.push(item.to_string());
     }
 
-    if max_variable != all_found_variables.clone().into_iter().unique().count() as i64 {
+    if max_variable != all_found_variables.clone().into_iter().unique().count() as u32 {
         for i in 1..max_variable {
-            all_variables.push(i);
+            all_variables.push(i.into());
         }
 
         // Find the missing variables and create string
@@ -184,7 +185,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
             .filter(|item| !all_found_variables.contains(item))
             
             .collect();
-        let mut missing: String = "".to_string();
+        let mut missing: String = String::new();
         for i in difference_all_variables {
             if !missing.is_empty() {
                 missing.push(' ');
@@ -204,7 +205,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
 
     Some(Macro {
         name,
-        variables: max_variable as u32,
+        variables: max_variable,
         items,
     })
 }
@@ -238,7 +239,7 @@ pub fn parse_vh_file(
                                 MessageType::Error,
                             );
                         }
-                        opcodes.push(a)
+                        opcodes.push(a);
                     }
                 }
                 match macro_from_string(&v, msg_list) {
@@ -251,7 +252,7 @@ pub fn parse_vh_file(
                                 MessageType::Error,
                             );
                         }
-                        macros.push(a)
+                        macros.push(a);
                     }
                 }
             }
@@ -363,7 +364,7 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
 /// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string
 pub fn format_opcodes(input: &mut String) -> String {
     if input.len() == 4 {
-        return input.to_string() + "              ";
+        return (*input).to_string() + "              ";
     }
     if input.len() == 8 {
         return input[0..4].to_string() + &input[4..8] + "         ";
@@ -375,5 +376,5 @@ pub fn format_opcodes(input: &mut String) -> String {
             + &input[8..12]
             + &input[12..16];
     }
-    input.to_string()
+    (*input).to_string()
 }
