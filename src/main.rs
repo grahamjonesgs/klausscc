@@ -8,7 +8,6 @@
 
 
 #![allow(clippy::cast_possible_truncation)]
-#![allow(clippy::cast_sign_loss)]
 #![allow(clippy::wildcard_imports)]
 #![allow(clippy::single_match_else)]
 

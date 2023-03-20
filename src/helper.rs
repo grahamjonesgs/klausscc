@@ -119,7 +119,7 @@ pub fn return_macro_items_replace(
                 for item_word in item_words {
                     if item_word.contains('%') {
                         let without_prefix = item_word.trim_start_matches('%');
-                        let int_value = without_prefix.parse::<i64>();
+                        let int_value = without_prefix.parse::<u32>();
                         if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                             msg_list.push(
                                 format!(
@@ -129,7 +129,7 @@ pub fn return_macro_items_replace(
                                 Some(input_line_number),
                                 MessageType::Error,
                             );
-                        } else if int_value.clone().unwrap_or(0) > input_line_array.len() as i64 - 1
+                        } else if int_value.clone().unwrap_or(0) > (input_line_array.len() - 1).try_into().unwrap()
                         {
                             msg_list.push(
                                 format!(
@@ -205,7 +205,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                             for item_word in new_item_words {
                                 if item_word.contains('%') {
                                     let without_prefix = item_word.trim_start_matches('%');
-                                    let int_value = without_prefix.parse::<i64>();
+                                    let int_value = without_prefix.parse::<u32>();
                                     if int_value.clone().is_err()
                                         || int_value.clone().unwrap_or(0) < 1
                                     {
@@ -220,7 +220,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                             MessageType::Error,
                                         );
                                     } else if int_value.clone().unwrap_or(0)
-                                        > item_line_array.len() as i64 - 1
+                                        > item_line_array.len() as u32 - 1
                                     {
                                         msg_list.push(
                                             format!(
@@ -621,7 +621,7 @@ pub fn convert_argument(
         };
     }
 
-    if data_name_from_string(argument).is_some() {
+    if data_name_from_string(argument).is_some() { 
         match return_label_value(argument, labels) {
             Some(n) => return Some(format!("{n:08X}")),
             None => {
@@ -740,7 +740,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 
     for (index, _) in stripped_string.chars().enumerate() {
         if index % 4 == 0 {
-            let int_value = i64::from_str_radix(&stripped_string[index..index + 4], 16);
+            let int_value = u32::from_str_radix(&stripped_string[index..index + 4], 16);
             if int_value.is_err() {
                 msg_list.push(
                     {
@@ -753,7 +753,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
                     MessageType::Error,
                 );
             } else {
-                checksum = (checksum + int_value.unwrap_or(0) as u32) % (0xFFFF + 1);
+                checksum = (checksum + int_value.unwrap_or(0)) % (0xFFFF + 1);
                 position_index += 1;
             }
         }

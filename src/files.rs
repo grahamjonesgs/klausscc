@@ -152,12 +152,12 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         } else {
             if word.contains('%') {
                 let without_prefix = word.trim_start_matches('%');
-                let int_value = without_prefix.parse::<i64>();
+                let int_value = without_prefix.parse::<u32>();
                 if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                 } else {
-                    all_found_variables.push(int_value.clone().unwrap_or(0));
-                    if int_value.clone().unwrap_or(0) > max_variable.into() {
-                        max_variable = int_value.unwrap_or(0) as u32;
+                    all_found_variables.push(int_value.clone().unwrap_or(0).into());
+                    if int_value.clone().unwrap_or(0) > max_variable {
+                        max_variable = int_value.unwrap_or(0);
                     }
                 }
             }
