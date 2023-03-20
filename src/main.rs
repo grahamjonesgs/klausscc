@@ -1,10 +1,16 @@
 #![warn(
     clippy::all,
     // clippy::restriction,
-     // clippy::pedantic,
+      clippy::pedantic,
    // clippy::nursery,
    // clippy::cargo,
 )]
+
+
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::wildcard_imports)]
+#![allow(clippy::single_match_else)]
 
 
 mod files;
@@ -16,6 +22,8 @@ use files::{Label, LineType, filename_stem, output_binary, output_code, parse_vh
 use helper::*;
 use messages::*;
 
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::cast_precision_loss)]
 fn main() {
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
@@ -76,7 +84,7 @@ fn main() {
         .replace(' ', "");
     let input_file_name = matches
         .get_one::<String>("input")
-        .unwrap_or(&"".to_string())
+        .unwrap_or(&String::new())
         .replace(' ', "");
     let binary_file_name = matches
         .get_one::<String>("bitcode")
@@ -90,7 +98,7 @@ fn main() {
         + ".code";
     let output_serial_port = matches
         .get_one::<String>("serial")
-        .unwrap_or(&"".to_string())
+        .unwrap_or(&String::new())
         .replace(' ', "");
 
     // Parse the Opcode file
@@ -138,7 +146,7 @@ fn main() {
                         input: item
                             + &{
                                 let this = macro_name_from_string(&code_line);
-                                let default = r#""#.to_string();
+                                let default = String::new();
                                 match this {
                                     Some(x) => x,
                                     None => default,
@@ -157,7 +165,7 @@ fn main() {
                 pass0.push(Pass0 {
                     input: code_line,
                     line_counter: input_line_count,
-                })
+                });
             }
         } else {
             pass0.push(Pass0 {
@@ -190,7 +198,7 @@ fn main() {
         if line_type(&mut oplist, &mut pass.input) == LineType::Opcode {
             let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
             if let Some(p) = num_args {
-                program_counter = program_counter + p + 1
+                program_counter = program_counter + p + 1;
             }
 
             //match num_args {
@@ -218,7 +226,7 @@ fn main() {
                         Some(x) => x,
                         None => {
                             let this = data_name_from_string(&n.input);
-                            let default = "".to_string();
+                            let default = String::new();
                             match this {
                                 Some(x) => x,
                                 None => default,
@@ -253,7 +261,7 @@ fn main() {
         } else if line.line_type == LineType::Data {
             data_as_bytes(line.input.as_str()).unwrap_or_default()
         } else {
-            "".to_string()
+            String::new()
         };
 
         pass2.push(Pass2 {
@@ -307,7 +315,7 @@ fn main() {
 
     if !output_serial_port.is_empty() {
         if msg_list.number_errors() == 0 {
-            if write_serial(bin_string, &output_serial_port, &mut msg_list) {
+            if write_serial(&bin_string, &output_serial_port, &mut msg_list) {
                 msg_list.push(
                     format!("Wrote to serial port {output_serial_port}"),
                     None,
@@ -333,7 +341,6 @@ fn main() {
     let duration = Local::now().time() - start_time;
     let time_taken: f32 =
         duration.num_milliseconds() as f32 / 1000.0 + duration.num_seconds() as f32;
-
     println!(
         "Completed with {} error{} and {} warning{} in {} seconds",
         msg_list.number_errors(),

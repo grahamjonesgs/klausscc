@@ -1,4 +1,3 @@
-
 use crate::files::*;
 use crate::messages::*;
 
@@ -95,7 +94,7 @@ pub fn return_macro_items_replace(
     msg_list: &mut MsgList,
 ) -> Option<Vec<String>> {
     let mut words = line.split_whitespace();
-    let mut return_items: Vec<String> = Vec::new();
+    let return_items: Vec<String> = Vec::new();
     let mut found: bool = false;
 
     let input_line_array: Vec<_> = words.clone().collect();
@@ -116,7 +115,7 @@ pub fn return_macro_items_replace(
 
             for item in &macro_line.items {
                 let item_words = item.split_whitespace();
-                let mut build_line: String = "".to_string();
+                let mut build_line: String = String::new();
                 for item_word in item_words {
                     if item_word.contains('%') {
                         let without_prefix = item_word.trim_start_matches('%');
@@ -147,10 +146,9 @@ pub fn return_macro_items_replace(
                                 + input_line_array[int_value.clone().unwrap_or(0) as usize];
                         }
                     } else {
-                        build_line = build_line + " " + item_word
+                        build_line = build_line + " " + item_word;
                     }
                 }
-                return_items.push(build_line.trim().to_string())
             }
         }
     }
@@ -168,7 +166,7 @@ pub fn return_macro_items_replace(
 pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed: bool = true;
-    let mut last_macro: String = "".to_string();
+    let mut last_macro: String = String::new();
 
     let mut input_macros = macros;
 
@@ -203,7 +201,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                             // Replace %n in new items with the nth value in item
 
                             let new_item_words = new_item.split_whitespace();
-                            let mut build_line: String = "".to_string();
+                            let mut build_line: String = String::new();
                             for item_word in new_item_words {
                                 if item_word.contains('%') {
                                     let without_prefix = item_word.trim_start_matches('%');
@@ -241,7 +239,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                                 [int_value.clone().unwrap_or(0) as usize];
                                     }
                                 } else {
-                                    build_line = build_line + " " + item_word
+                                    build_line = build_line + " " + item_word;
                                 }
                             }
                             output_items.push(build_line);
@@ -257,7 +255,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                 name: input_macro_line.name,
                 variables: input_macro_line.variables,
                 items: output_items,
-            })
+            });
         }
         pass += 1;
         input_macros = output_macros.clone();
@@ -269,7 +267,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
             MessageType::Error,
         );
     }
-    input_macros.to_vec()
+    input_macros.clone()
 }
 
 /// Returns hex opcode from name
@@ -336,7 +334,24 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
     }
 
     // Check if next word starts with quote
-    if !second_word.starts_with('\"') {
+    if second_word.starts_with('\"') {
+        let remaining_line = line.trim_start_matches(first_word).trim();
+
+        if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
+            let output = remaining_line.trim_matches('\"').to_string();
+            let mut output_hex = String::new();
+            for c in output.as_bytes() {
+                let hex = format!("{c:02X}");
+                output_hex.push_str(&hex);
+                output_hex.push_str("000000");
+            }
+            output_hex.push_str("00000000"); // Add null terminator
+
+            Some(output_hex)
+        } else {
+            None
+        }
+    } else {
         // Check if next word is a number
         // let int_value: i64;
         let int_value = if second_word.len() >= 2
@@ -359,23 +374,6 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
                 data.push_str("00000000");
             }
             Some(data)
-        }
-    } else {
-        let remaining_line = line.trim_start_matches(first_word).trim();
-
-        if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
-            let output = remaining_line.trim_matches('\"').to_string();
-            let mut output_hex = "".to_string();
-            for c in output.as_bytes() {
-                let hex = format!("{c:02X}");
-                output_hex.push_str(&hex);
-                output_hex.push_str("000000");
-            }
-            output_hex.push_str("00000000"); // Add null terminator
-
-            Some(output_hex)
-        } else {
-            None
         }
     }
 }
@@ -410,7 +408,7 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
     if return_opcode(line, opcodes).is_some() {
         return LineType::Opcode;
     }
-    if is_blank(line.to_string()) {
+    if is_blank(line) {
         return LineType::Blank;
     }
     let words = line.split_whitespace();
@@ -436,7 +434,7 @@ pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
 /// Check if line is blank
 ///
 /// Returns true if line if just whitespace
-pub fn is_blank(line: String) -> bool {
+pub fn is_blank(line: &str) -> bool {
     let words = line.split_whitespace();
 
     for (_i, word) in words.enumerate() {
@@ -471,7 +469,7 @@ pub fn is_comment(word: &mut String) -> bool {
 /// Register name to hex
 ///
 /// Map the register to the hex code for the opcode
-pub fn map_reg_to_hex(input: String) -> String {
+pub fn map_reg_to_hex(input: &str) -> String {
     match input.to_uppercase().as_str() {
         "A" => "0".to_string(),
         "B" => "1".to_string(),
@@ -502,11 +500,12 @@ pub fn add_registers(
     msg_list: &mut MsgList,
     line_number: u32,
 ) -> String {
-    let num_registers = num_registers(opcodes, &mut line.to_string().to_uppercase()).unwrap_or(0);
+    let num_registers =
+        num_registers(opcodes, &mut (*line).to_string().to_uppercase()).unwrap_or(0);
 
     let mut opcode_found = {
         let this = return_opcode(&line.to_uppercase(), opcodes);
-        let default = "".to_string();
+        let default = String::new();
         match this {
             Some(x) => x,
             None => default,
@@ -518,7 +517,7 @@ pub fn add_registers(
     for (i, word) in words.enumerate() {
         if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
         {
-            opcode_found = opcode_found + &map_reg_to_hex(word.to_string())
+            opcode_found.push_str(&map_reg_to_hex(word));
         }
     }
 
@@ -546,41 +545,39 @@ pub fn add_arguments(
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_uppercase()).unwrap_or(0);
     let num_arguments = num_arguments(opcodes, &mut line.to_uppercase()).unwrap_or(0);
-    let mut arguments = "".to_string();
+    let mut arguments = String::new();
 
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if (i as u32 == num_registers + 1) && (num_arguments == 1) {
-            arguments = arguments
-                + &{
-                    let this = convert_argument(
-                        word.to_string().to_uppercase(),
-                        msg_list,
-                        line_number,
-                        labels,
-                    );
-                    let default = "00000000".to_string();
-                    match this {
-                        Some(x) => x,
-                        None => default,
-                    }
+            arguments.push_str(&{
+                let this = convert_argument(
+                    &word.to_string().to_uppercase(),
+                    msg_list,
+                    line_number,
+                    labels,
+                );
+                let default = "00000000".to_string();
+                match this {
+                    Some(x) => x,
+                    None => default,
                 }
+            });
         }
         if i as u32 == num_registers + 2 && num_arguments == 2 {
-            arguments = arguments
-                + &{
-                    let this = convert_argument(
-                        word.to_string().to_uppercase(),
-                        msg_list,
-                        line_number,
-                        labels,
-                    );
-                    let default = "00000000".to_string();
-                    match this {
-                        Some(x) => x,
-                        None => default,
-                    }
+            arguments.push_str(&{
+                let this = convert_argument(
+                    &word.to_string().to_uppercase(),
+                    msg_list,
+                    line_number,
+                    labels,
+                );
+                let default = "00000000".to_string();
+                match this {
+                    Some(x) => x,
+                    None => default,
                 }
+            });
         }
         if i as u32 > num_registers + num_arguments {
             msg_list.push(
@@ -605,13 +602,13 @@ pub fn add_arguments(
 ///
 /// Converts argument to label value or converts to Hex
 pub fn convert_argument(
-    argument: String,
+    argument: &str,
     msg_list: &mut MsgList,
     line_number: u32,
     labels: &mut Vec<Label>,
 ) -> Option<String> {
-    if label_name_from_string(&argument).is_some() {
-        match return_label_value(&argument, labels) {
+    if label_name_from_string(argument).is_some() {
+        match return_label_value(argument, labels) {
             Some(n) => return Some(format!("{n:08X}")),
             None => {
                 msg_list.push(
@@ -624,8 +621,8 @@ pub fn convert_argument(
         };
     }
 
-    if data_name_from_string(&argument).is_some() {
-        match return_label_value(&argument, labels) {
+    if data_name_from_string(argument).is_some() {
+        match return_label_value(argument, labels) {
             Some(n) => return Some(format!("{n:08X}")),
             None => {
                 msg_list.push(
@@ -647,29 +644,27 @@ pub fn convert_argument(
         }
         let int_value = int_value_result.unwrap_or(0);
 
-        if int_value <= 4294967295 {
+        if int_value <= 4_294_967_295 {
             return Some(format!("{int_value:08X}"));
-        } else {
-            msg_list.push(
-                format!("Hex value out 0x{int_value:08X} of bounds"),
-                Some(line_number),
-                MessageType::Warning,
-            );
-            return None;
         }
+        msg_list.push(
+            format!("Hex value out 0x{int_value:08X} of bounds"),
+            Some(line_number),
+            MessageType::Warning,
+        );
+        return None;
     }
 
     match argument.parse::<i64>() {
         Ok(n) => {
-            if n <= 4294967295 {
+            if n <= 4_294_967_295 {
                 return Some(format!("{n:08X}"));
-            } else {
-                msg_list.push(
-                    format!("Decimal value out {n} of bounds"),
-                    Some(line_number),
-                    MessageType::Warning,
-                );
             }
+            msg_list.push(
+                format!("Decimal value out {n} of bounds"),
+                Some(line_number),
+                MessageType::Warning,
+            );
         }
         Err(_e) => {
             msg_list.push(
@@ -716,7 +711,7 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
 ///
 /// Calculates the checksum from the string of hex values, removing control characters
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
-    let mut stripped_string: String = "".to_string();
+    let mut stripped_string: String = String::new();
     let mut checksum: u32 = 0;
 
     // Remove S, Z and X
@@ -772,7 +767,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
 pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> String {
-    let mut output_string = "".to_string();
+    let mut output_string = String::new();
 
     output_string.push('S'); // Start character
 
@@ -791,15 +786,15 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
 
     output_string
 }
-
-pub fn write_serial(binary_output: String, port_name: &str, msg_list: &mut MsgList) -> bool {
+#[allow(clippy::cast_possible_wrap)]
+pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
     let mut buffer = [0; 1024];
-    let port_result = serialport::new(port_name, 115200)
+    let port_result = serialport::new(port_name, 115_200)
         .timeout(std::time::Duration::from_millis(100))
         .open();
 
     if port_result.is_err() {
-        let mut all_ports: String = "".to_string();
+        let mut all_ports: String = String::new();
         let ports = serialport::available_ports();
 
         match ports {
@@ -886,7 +881,7 @@ pub fn write_serial(binary_output: String, port_name: &str, msg_list: &mut MsgLi
         return true;
     }
 
-    let mut print_ret_msg = ret_msg.unwrap_or_else(|_| "".to_string());
+    let mut print_ret_msg = ret_msg.unwrap_or_else(|_| String::new());
 
     trim_newline(&mut print_ret_msg); //Board can send CR/LF messages
 
