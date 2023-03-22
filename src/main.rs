@@ -1,23 +1,22 @@
 #![warn(
-    clippy::all,
-    // clippy::restriction,
+     clippy::all,
+    //clippy::restriction,
       clippy::pedantic,
-   // clippy::nursery,
-   // clippy::cargo,
+    //clippy::nursery,
+    //clippy::cargo,
 )]
-
-
 #![allow(clippy::cast_possible_truncation)]
 #![allow(clippy::wildcard_imports)]
 #![allow(clippy::single_match_else)]
-
 
 mod files;
 mod helper;
 mod messages;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use files::{Label, LineType, filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec};
+use files::{
+    filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec, Label, LineType,
+};
 use helper::*;
 use messages::*;
 
@@ -296,7 +295,10 @@ fn main() {
         );
         if !output_binary(&binary_file_name, &bin_string) {
             msg_list.push(
-                format!("Unable to write to binary code file {:?}", &binary_file_name),
+                format!(
+                    "Unable to write to binary code file {:?}",
+                    &binary_file_name
+                ),
                 None,
                 MessageType::Error,
             );
@@ -338,8 +340,8 @@ fn main() {
 
     print_messages(&mut msg_list);
     let duration = Local::now().time() - start_time;
-    let time_taken: f32 =
-        duration.num_milliseconds() as f32 / 1000.0 + duration.num_seconds() as f32;
+    let time_taken: f64 =
+        duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
     println!(
         "Completed with {} error{} and {} warning{} in {} seconds",
         msg_list.number_errors(),

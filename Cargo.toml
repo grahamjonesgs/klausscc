@@ -6,8 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = "4.1.6"
-chrono = { version = "0.4.23", default-features = false, features = ["std","alloc","clock"] }
+clap = "4.1.8"
+#chrono = { version = "0.4.24", default-features = false, features = ["std","alloc","clock"] }
+chrono = "0.4.24"
 colored = "2.0.0"
 itertools = "0.10.5"
 serialport = { version = "4.2.0", default-features = false}
