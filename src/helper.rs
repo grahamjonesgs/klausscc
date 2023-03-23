@@ -1,5 +1,5 @@
-use crate::files::*;
-use crate::messages::*;
+use crate::files::{Label, LineType, Macro, Opcode};
+use crate::messages::{MessageType, MsgList};
 
 pub struct Pass0 {
     pub input: String,
@@ -105,7 +105,7 @@ pub fn return_macro_items_replace(
         if macro_line.name == first_word {
             found = true;
 
-            if input_line_array.len() as u32 > macro_line.variables + 1 {
+            if input_line_array.len() > macro_line.variables as usize + 1 {
                 msg_list.push(
                     format!("Too many variables for macro {}", macro_line.name),
                     Some(input_line_number),
@@ -183,8 +183,8 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                         item_line_array.push(item_word.to_string());
                     }
 
-                    if return_macro(&item, &mut input_macros).unwrap().variables
-                        < item_line_array.len() as u32 - 1
+                    if (return_macro(&item, &mut input_macros).unwrap().variables as usize)
+                        < item_line_array.len() - 1
                     {
                         msg_list.push(
                             format!(
@@ -219,8 +219,8 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                             None,
                                             MessageType::Error,
                                         );
-                                    } else if int_value.clone().unwrap_or(0)
-                                        > item_line_array.len() as u32 - 1
+                                    } else if int_value.clone().unwrap_or(0) as usize
+                                        > item_line_array.len() - 1
                                     {
                                         msg_list.push(
                                             format!(
@@ -306,7 +306,7 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
 /// From instruction name, option of number of bytes of data, or 0 is error
 pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32) -> u32 {
     match data_as_bytes(line) {
-        Some(data) => data.len() as u32,
+        Some(data) => data.len().try_into().unwrap(),
         None => {
             msg_list.push(
                 format!("Error in data definition for {line}"),
@@ -549,7 +549,7 @@ pub fn add_arguments(
 
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
-        if (i as u32 == num_registers + 1) && (num_arguments == 1) {
+        if (i == num_registers as usize + 1) && (num_arguments == 1) {
             arguments.push_str(&{
                 let this = convert_argument(
                     &word.to_string().to_uppercase(),
@@ -564,7 +564,7 @@ pub fn add_arguments(
                 }
             });
         }
-        if i as u32 == num_registers + 2 && num_arguments == 2 {
+        if i == num_registers as usize + 2 && num_arguments == 2 {
             arguments.push_str(&{
                 let this = convert_argument(
                     &word.to_string().to_uppercase(),
@@ -579,7 +579,7 @@ pub fn add_arguments(
                 }
             });
         }
-        if i as u32 > num_registers + num_arguments {
+        if i > num_registers as usize + num_arguments as usize {
             msg_list.push(
                 format!("Too many arguments found - \"{line}\""),
                 Some(line_number),
@@ -588,7 +588,7 @@ pub fn add_arguments(
         }
     }
 
-    if arguments.len() as u32 != 8 * num_arguments {
+    if arguments.len() != 8 * num_arguments as usize {
         msg_list.push(
             format!("Incorrect argument definition - \"{line}\""),
             Some(line_number),

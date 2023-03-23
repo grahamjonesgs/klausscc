@@ -86,6 +86,11 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     // Define number of registers from opcode definition
+
+
+
+
+    
     let mut num_registers: u32 = 0;
     if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
         num_registers = 1;
@@ -174,7 +179,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         items.push(item.to_string());
     }
 
-    if max_variable != all_found_variables.clone().into_iter().unique().count() as u32 {
+    if max_variable as usize != all_found_variables.clone().into_iter().unique().count() {
         for i in 1..max_variable {
             all_variables.push(i.into());
         }
