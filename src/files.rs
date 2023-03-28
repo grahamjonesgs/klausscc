@@ -11,6 +11,7 @@ use std::{
 
 use itertools::Itertools;
 
+#[derive(Clone)]
 pub struct Opcode {
     pub name: String,
     pub opcode: String,
@@ -271,7 +272,7 @@ pub fn parse_vh_file(
 /// Open text file and return as vector of strings
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String)
-pub fn read_file_to_vec(msg_list: &mut MsgList, filename: &str) -> Option<Vec<String>> {
+pub fn read_file_to_vec(filename: &str) -> Option<Vec<String>> {
     let file = File::open(filename);
     if file.is_err() {
         return None;
@@ -279,12 +280,6 @@ pub fn read_file_to_vec(msg_list: &mut MsgList, filename: &str) -> Option<Vec<St
 
     let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
-
-    msg_list.push(
-        format!("Evaluating opcode file {filename}"),
-        None,
-        MessageType::Info,
-    );
 
     for line in buf.lines() {
         match line {

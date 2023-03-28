@@ -21,7 +21,7 @@
 0x0000000E:                   -- RESET:
                               -- //LEDR D
 0x0000000E: 00003043          -- 7SEGR D
-0x0000000F: 00000800 0000001F -- SETR A #ADDR
+0x0000000F: 00000800 00000065 -- SETR A #ADDR
                               -- //CALL PRINT_DATA:  // Print add 
                               -- //TXR D  // print address from reg
                               -- //SETR A #DATA
@@ -33,24 +33,24 @@
 0x00000014: 00001012          -- RET
                               -- 
 0x00000015:                   -- #TESTDATA2 "Test line"
-0x0000001F:                   -- #ADDR "Address - "
-0x0000002A:                   -- #DATA " Data - "
-0x00000033:                   -- #DATALONG 0xFF
+0x00000065:                   -- #ADDR "Address - "
+0x000000BD:                   -- #DATA " Data - "
+0x00000105:                   -- #DATALONG 0xFF
                               -- 
                               -- // A is address to start, B used to be zero, C used to copy from mem
-0x00000132:                   -- PRINT_DATA:  // To print a string from memory to UART
-0x00000132: 00004001          -- PUSH B  // Save register
-0x00000133: 00000801 00000000 -- SETR B 0x0
-0x00000135:                   -- PRINT_DATA_LOOP:
-0x00000135: 00007120          -- MEMREADRR C A // check for end of message
-0x00000136: 00000512          -- CMPRR B C  // Check if mem is zero
-0x00000137: 00001003 0000013D -- JMPE PRINT_DATA_EXIT:
-0x00000139: 00005030          -- TXCHARMEMR A // Print char
-0x0000013A: 00000840          -- INCR A  // Next Char
-0x0000013B: 00001000 00000135 -- JMP PRINT_DATA_LOOP:
-0x0000013D:                   -- PRINT_DATA_EXIT:
-0x0000013D: 00004011          -- POP B
-0x0000013E: 00001012          -- RET
+0x000008FD:                   -- PRINT_DATA:  // To print a string from memory to UART
+0x000008FD: 00004001          -- PUSH B  // Save register
+0x000008FE: 00000801 00000000 -- SETR B 0x0
+0x00000900:                   -- PRINT_DATA_LOOP:
+0x00000900: 00007120          -- MEMREADRR C A // check for end of message
+0x00000901: 00000512          -- CMPRR B C  // Check if mem is zero
+0x00000902: 00001003 00000908 -- JMPE PRINT_DATA_EXIT:
+0x00000904: 00005030          -- TXCHARMEMR A // Print char
+0x00000905: 00000840          -- INCR A  // Next Char
+0x00000906: 00001000 00000900 -- JMP PRINT_DATA_LOOP:
+0x00000908:                   -- PRINT_DATA_EXIT:
+0x00000908: 00004011          -- POP B
+0x00000909: 00001012          -- RET
                               -- 
                               -- 
                               -- 
