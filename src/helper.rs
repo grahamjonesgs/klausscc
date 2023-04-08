@@ -246,7 +246,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                     build_line = build_line + " " + item_word;
                                 }
                             }
-                            output_items.push(build_line);
+                            output_items.push(build_line.strip_prefix(' ').unwrap().to_string());
                         }
                     }
                     last_macro = input_macro_line.name.clone();
@@ -1293,15 +1293,15 @@ mod tests {
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
         });
         macros_result.push(Macro {
-            name: String::from("$MACRO1"),
+            name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("OPCODE1 %2"), String::from("OPCODE2 %1"),String::from("OPCODE3")],
         });
 
-
-
         assert_eq!(output, *macros_result);
        
     }
+
+    
 
 }
