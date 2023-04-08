@@ -27,7 +27,7 @@ pub struct Label {
     pub line_counter: u32,
 }
 
-#[derive(Clone)]
+#[derive(Clone,PartialEq,Debug)]
 pub struct Macro {
     pub name: String,
     pub variables: u32,

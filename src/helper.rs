@@ -75,7 +75,7 @@ pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
 pub fn return_macro<'a>(line: &'a str, macros: &'a mut [Macro]) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
-    macro_name_from_string(first_word)?;
+
     for macro_line in macros {
         if macro_line.name == first_word {
             return Some(macro_line.clone());
@@ -94,7 +94,7 @@ pub fn return_macro_items_replace(
     msg_list: &mut MsgList,
 ) -> Option<Vec<String>> {
     let mut words = line.split_whitespace();
-    let return_items: Vec<String> = Vec::new();
+    let mut return_items: Vec<String> = Vec::new();
     let mut found: bool = false;
 
     let input_line_array: Vec<_> = words.clone().collect();
@@ -150,7 +150,9 @@ pub fn return_macro_items_replace(
                         build_line = build_line + " " + item_word;
                     }
                 }
+                return_items.push(build_line.trim_start().to_string());
             }
+            
         }
     }
     if found {
@@ -164,6 +166,7 @@ pub fn return_macro_items_replace(
 ///
 /// Takes Vector of macros, and embeds macros recursively, up to 10 passes
 /// Will create errors message for more than 10 passes
+#[allow(clippy::too_many_lines)]
 pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed: bool = true;
@@ -268,7 +271,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
             MessageType::Error,
         );
     }
-    input_macros.clone()
+    input_macros
 }
 
 /// Returns hex opcode from name
@@ -912,6 +915,8 @@ fn trim_newline(s: &mut String) {
 
 #[cfg(test)]
 mod tests {
+    use crate::messages::print_messages;
+
     use super::*;
 
     #[test]
@@ -1122,4 +1127,181 @@ mod tests {
         let output = data_as_bytes(&input);
         assert_eq!(output, None);
     }
+
+    #[test]
+    fn test_label_name_from_string1() {
+        let input = String::from("LOOP:");
+        let output = label_name_from_string(&input);
+        assert_eq!(output, Some("LOOP:".to_string()));
+    }
+
+    #[test]
+    fn test_label_name_from_string2() {
+        let input = String::from("LOOP");
+        let output = label_name_from_string(&input);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_data_name_from_string1() {
+        let input = String::from("#TEST");
+        let output = data_name_from_string(&input);
+        assert_eq!(output, Some("#TEST".to_string()));
+    }
+
+    #[test]
+    fn test_data_name_from_string2() {
+        let input = String::from("TEST");
+        let output = data_name_from_string(&input);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_macro_name_from_string1() {
+        let input = String::from("$TEST");
+        let output = macro_name_from_string(&input);
+        assert_eq!(output, Some("$TEST".to_string()));
+    }
+
+    #[test]
+    fn test_macro_name_from_string2() {
+        let input = String::from("TEST");
+        let output = macro_name_from_string(&input);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_return_label_value1() {
+        let labels = &mut Vec::<Label>::new();
+        labels.push(Label {
+            program_counter: 42,
+            line_counter: 0,
+            name: String::from("LOOP:"),
+        });
+        let input = String::from("LOOP:");
+        let output = return_label_value(&input, labels);
+        assert_eq!(output, Some(42));
+    }
+
+    #[test]
+    fn test_return_label_value2() {
+        let labels = &mut Vec::<Label>::new();
+        labels.push(Label {
+            program_counter: 42,
+            line_counter: 0,
+            name: String::from("LOOP1:"),
+        });
+        let input = String::from("LOOP2:");
+        let output = return_label_value(&input, labels);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_return_macro_value1() {
+        let macros = &mut Vec::<Macro>::new();
+        macros.push(Macro {
+            name: String::from("$TEST"),
+            variables: 0,
+            items: Vec::new(),
+        });
+        let input = String::from("$TEST");
+        let output = return_macro(&input, macros);
+        assert_eq!(output, Some(Macro {
+            name: String::from("$TEST"),
+            variables: 0,
+            items: Vec::new(),
+        }));
+    }
+        #[test]
+    fn test_return_macro_value2() {
+        let macros = &mut Vec::<Macro>::new();
+        macros.push(Macro {
+            name: String::from("$TEST1"),
+            variables: 0,
+            items: Vec::new(),
+        });
+        let input = String::from("$TEST2");
+        let output = return_macro(&input, macros);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_return_macro_items_replace1() {
+        let macros = &mut Vec::<Macro>::new();
+        let msg_list = &mut MsgList::new();
+        macros.push(Macro {
+            name: String::from("$DELAY"),
+            variables: 2,
+            items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %1")],
+        });
+        let input = String::from("$DELAY ARG_A  ARG_B");
+        let output = return_macro_items_replace(&input, macros, 0,msg_list);
+        print_messages(msg_list);
+        assert_eq!(output, Some(vec![String::from("DELAYV ARG_A"),String::from("DELAYV ARG_B"), String::from("PUSH ARG_A")]));
+    }
+
+    #[test]
+    fn test_return_macro_items_replace2() {
+        let macros = &mut Vec::<Macro>::new();
+        let msg_list = &mut MsgList::new();
+        macros.push(Macro {
+            name: String::from("$DELAY"),
+            variables: 3,
+            items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
+        });
+        let input = String::from("$DELAY %MACRO1  ARG_B ARG_C");
+        let output = return_macro_items_replace(&input, macros, 0,msg_list);
+        assert_eq!(output, Some(vec![String::from("DELAYV %MACRO1"),String::from("DELAYV ARG_B"), String::from("PUSH ARG_C")]));
+    }
+
+    #[test]
+    fn test_return_macro_items_replace3() {
+        let macros = &mut Vec::<Macro>::new();
+        let msg_list = &mut MsgList::new();
+        macros.push(Macro {
+            name: String::from("$DELAY1"),
+            variables: 3,
+            items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
+        });
+        let input = String::from("$DELAY2 %MACRO1  ARG_B ARG_C");
+        let output = return_macro_items_replace(&input, macros, 0,msg_list);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_expand_macros_multi1() {
+        let macros = &mut Vec::<Macro>::new();
+        
+        let msg_list = &mut MsgList::new();
+        macros.push(Macro {
+            name: String::from("$MACRO1"),
+            variables: 2,
+            items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
+        });
+        macros.push(Macro {
+            name: String::from("$MACRO2"),
+            variables: 2,
+            items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
+        });
+        
+        let output = expand_macros_multi(macros.clone(),msg_list);
+        print_messages(msg_list);
+        let macros_result = &mut Vec::<Macro>::new();
+        macros_result.push(Macro {
+            name: String::from("$MACRO1"),
+            variables: 2,
+            items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
+        });
+        macros_result.push(Macro {
+            name: String::from("$MACRO1"),
+            variables: 2,
+            items: vec![String::from("OPCODE1 %2"), String::from("OPCODE2 %1"),String::from("OPCODE3")],
+        });
+
+
+
+        assert_eq!(output, *macros_result);
+       
+    }
+
 }
