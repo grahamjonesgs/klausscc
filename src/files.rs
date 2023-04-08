@@ -34,7 +34,7 @@ pub struct Macro {
     pub items: Vec<String>,
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq,Debug)]
 pub enum LineType {
     Comment,
     Blank,

@@ -129,7 +129,8 @@ pub fn return_macro_items_replace(
                                 Some(input_line_number),
                                 MessageType::Error,
                             );
-                        } else if int_value.clone().unwrap_or(0) > (input_line_array.len() - 1).try_into().unwrap()
+                        } else if int_value.clone().unwrap_or(0)
+                            > (input_line_array.len() - 1).try_into().unwrap()
                         {
                             msg_list.push(
                                 format!(
@@ -621,7 +622,7 @@ pub fn convert_argument(
         };
     }
 
-    if data_name_from_string(argument).is_some() { 
+    if data_name_from_string(argument).is_some() {
         match return_label_value(argument, labels) {
             Some(n) => return Some(format!("{n:08X}")),
             None => {
@@ -906,5 +907,219 @@ fn trim_newline(s: &mut String) {
         if s.ends_with('\n') {
             s.pop();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calc_checksum() {
+        let mut msg_list = MsgList::new();
+        let checksum = calc_checksum("S0000Z0010", &mut msg_list);
+        assert_eq!(checksum, "0011");
+    }
+
+    #[test]
+    fn test_calc_checksum2() {
+        let mut msg_list = MsgList::new();
+        let checksum = calc_checksum("S00000000Z0010", &mut msg_list);
+        assert_eq!(checksum, "0012");
+    }
+
+    #[test]
+    fn test_calc_checksum3() {
+        let mut msg_list = MsgList::new();
+        let checksum = calc_checksum("S00009999Z0010", &mut msg_list);
+        assert_eq!(checksum, "99AB");
+    }
+
+    #[test]
+    fn test_trim_newline() {
+        let mut s = String::from("Hello\n");
+        trim_newline(&mut s);
+        assert_eq!(s, "Hello");
+    }
+    #[test]
+
+    fn test_create_bin_string() {
+        let mut pass2 = Vec::new();
+        pass2.push(Pass2 {
+            opcode: String::from("1234"),
+            input: String::new(),
+            line_counter: 0,
+            program_counter: 0,
+            line_type: LineType::Data,
+        });
+        pass2.push(Pass2 {
+            opcode: String::from("4321"),
+            input: String::new(),
+            line_counter: 0,
+            program_counter: 0,
+            line_type: LineType::Data,
+        });
+        pass2.push(Pass2 {
+            opcode: String::from("9999"),
+            input: String::new(),
+            line_counter: 0,
+            program_counter: 0,
+            line_type: LineType::Data,
+        });
+        let mut msg_list = MsgList::new();
+        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+        assert_eq!(bin_string, "S123443219999Z0010EF01X");
+    }
+
+    #[test]
+    fn test_strip_comments() {
+        let mut input = String::from("Hello, world! //This is a comment");
+        let output = strip_comments(&mut input);
+        assert_eq!(output, "Hello, world!");
+    }
+
+    #[test]
+    fn test_is_comment() {
+        let mut input = String::from("//This is a comment");
+        let output = is_comment(&mut input);
+        assert!(output);
+    }
+    #[test]
+    fn test_is_comment2() {
+        let mut input = String::from("Hello //This is a comment");
+        let output = is_comment(&mut input);
+        assert!(!output);
+    }
+
+    #[test]
+    fn test_is_comment3() {
+        let mut input = String::from(" ");
+        let output = is_comment(&mut input);
+        assert!(!output);
+    }
+
+    #[test]
+    fn test_is_blank1() {
+        let input = String::from(" ");
+        let output = is_blank(&input);
+        assert!(output);
+    }
+
+    #[test]
+    fn test_is_blank2() {
+        let input = String::from("1234");
+        let output = is_blank(&input);
+        assert!(!output);
+    }
+
+    #[test]
+    fn test_is_valid_line() {
+        let input = String::from("PUSH");
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            name: String::from("PUSH"),
+            opcode: String::from("1234"),
+            comment: String::new(),
+            variables: 0,
+            registers: 0,
+        });
+        let output = is_valid_line(opcodes, input);
+        assert!(output);
+    }
+
+    #[test]
+    fn test_line_type1() {
+        let mut input = String::from("PUSH");
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            name: String::from("PUSH"),
+            opcode: String::from("1234"),
+            comment: String::new(),
+            variables: 0,
+            registers: 0,
+        });
+        let output = line_type(opcodes, &mut input);
+        assert_eq!(output, LineType::Opcode);
+    }
+    #[test]
+    fn test_line_type2() {
+        let mut input = String::from("LOOP:");
+        let opcodes = &mut Vec::<Opcode>::new();
+        let output = line_type(opcodes, &mut input);
+        assert_eq!(output, LineType::Label);
+    }
+    #[test]
+    fn test_line_type3() {
+        let mut input = String::from("#Dataname");
+        let opcodes = &mut Vec::<Opcode>::new();
+        let output = line_type(opcodes, &mut input);
+        assert_eq!(output, LineType::Data);
+    }
+
+    #[test]
+    fn test_line_type4() {
+        let mut input = String::new();
+        let opcodes = &mut Vec::<Opcode>::new();
+        let output = line_type(opcodes, &mut input);
+        assert_eq!(output, LineType::Blank);
+    }
+
+    #[test]
+    fn test_line_type5() {
+        let mut input = String::from("//This is a comment");
+        let opcodes = &mut Vec::<Opcode>::new();
+        let output = line_type(opcodes, &mut input);
+        assert_eq!(output, LineType::Comment);
+    }
+
+    #[test]
+    fn test_line_type6() {
+        let mut input = String::from("1234");
+        let opcodes = &mut Vec::<Opcode>::new();
+        let output = line_type(opcodes, &mut input);
+        assert_eq!(output, LineType::Error);
+    }
+
+    #[test]
+    fn test_num_registers1() {
+        let mut input = String::from("PUSH");
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            name: String::from("PUSH"),
+            opcode: String::from("1234"),
+            comment: String::new(),
+            variables: 0,
+            registers: 1,
+        });
+        let output = num_registers(opcodes,&mut input);
+        assert_eq!(output, Some(1));
+    }
+
+    #[test]
+    fn test_num_registers2() {
+        let mut input = String::from("PULL");
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            name: String::from("PUSH"),
+            opcode: String::from("1234"),
+            comment: String::new(),
+            variables: 0,
+            registers: 1,
+        });
+        let output = num_registers(opcodes,&mut input);
+        assert_eq!(output, None);
+    }
+    #[test]
+    fn test_data_as_bytes1() {
+        let input = String::from("TEST 3");
+        let output = data_as_bytes(&input);
+        assert_eq!(output, Some("000000000000000000000000".to_string()));
+    }
+
+    #[test]
+    fn test_data_as_bytes2() {
+        let input = String::from("TEST");
+        let output = data_as_bytes(&input);
+        assert_eq!(output, None);
     }
 }
