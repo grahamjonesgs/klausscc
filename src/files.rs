@@ -1,4 +1,6 @@
-use crate::{helper::return_macro, messages::{MessageType, MsgList}, return_opcode};
+use crate::{messages::{MessageType, MsgList}, return_opcode};
+use crate::macros::*;
+use crate::helper::*;
 
 use core::fmt::Write as _;
 use core::fmt;
@@ -43,13 +45,6 @@ pub struct Label {
     pub program_counter: u32,
     pub name: String,
     pub line_counter: u32,
-}
-
-#[derive(Clone,PartialEq,Debug)]
-pub struct Macro {
-    pub name: String,
-    pub variables: u32,
-    pub items: Vec<String>,
 }
 
 #[derive(PartialEq,Debug)]
@@ -395,4 +390,112 @@ pub fn format_opcodes(input: &mut String) -> String {
             + &input[12..16];
     }
     (*input).to_string()
+}
+
+#[allow(clippy::cast_possible_wrap)]
+pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
+    let mut buffer = [0; 1024];
+    let port_result = serialport::new(port_name, 115_200)
+        .timeout(std::time::Duration::from_millis(100))
+        .open();
+
+    if port_result.is_err() {
+        let mut all_ports: String = String::new();
+        let ports = serialport::available_ports();
+
+        match ports {
+            Err(_) => {
+                msg_list.push(
+                    "Error opening serial port, no ports found".to_string(),
+                    None,
+                    MessageType::Error,
+                );
+                return false;
+            }
+            Ok(ports) => {
+                let mut max_ports: i32 = -1;
+                for (port_count, p) in (0_u32..).zip(ports.into_iter()) {
+                    if port_count > 0 {
+                        all_ports.push_str(" , ");
+                    }
+                    all_ports.push_str(&p.port_name);
+                    max_ports = port_count as i32;
+                }
+
+                let ports_msg = match max_ports {
+                    -1 => "no ports were found".to_string(),
+                    0 => {
+                        format!("only port {all_ports} was found")
+                    }
+                    _ => {
+                        format!("the following ports were found {all_ports}")
+                    }
+                };
+
+                msg_list.push(
+                    format!("Error opening serial port {port_name}, {ports_msg}"),
+                    None,
+                    MessageType::Error,
+                );
+                return false;
+            }
+        }
+    }
+
+    let mut port = port_result.unwrap();
+
+    if port.set_stop_bits(serialport::StopBits::One).is_err() {
+        return false;
+    }
+    if port.set_data_bits(serialport::DataBits::Eight).is_err() {
+        return false;
+    }
+    if port.set_parity(serialport::Parity::None).is_err() {
+        return false;
+    }
+
+    if port.read(&mut buffer[..]).is_err() { //clear any old messages in buffer
+    }
+
+    if port.write(binary_output.as_bytes()).is_err() {
+        return false;
+    }
+
+    if port.flush().is_err() {
+        return false;
+    }
+
+    let ret_msg_size = port.read(&mut buffer[..]).unwrap_or(0);
+
+    if ret_msg_size == 0 {
+        msg_list.push(
+            "No message received from board".to_string(),
+            None,
+            MessageType::Warning,
+        );
+        return true;
+    }
+
+    let ret_msg = String::from_utf8(buffer[..ret_msg_size].to_vec());
+
+    if ret_msg.is_err() {
+        msg_list.push(
+            "Invalid message received from board".to_string(),
+            None,
+            MessageType::Warning,
+        );
+        return true;
+    }
+
+    let mut print_ret_msg = ret_msg.unwrap_or_else(|_| String::new());
+
+    trim_newline(&mut print_ret_msg); //Board can send CR/LF messages
+
+    msg_list.push(
+        format!("Message received from board is \"{print_ret_msg}\""),
+        None,
+        MessageType::Info,
+    );
+
+    true
 }
