@@ -1,6 +1,7 @@
-use crate::{messages::{MessageType, MsgList}, return_opcode};
+use crate::{messages::{MessageType, MsgList}};
 use crate::macros::*;
 use crate::helper::*;
+use crate::opcodes::*;
 
 use core::fmt::Write as _;
 use core::fmt;
@@ -30,14 +31,6 @@ pub struct Pass2 {
     pub program_counter: u32,
     pub line_type: LineType,
     pub opcode: String,
-}
-#[derive(Clone)]
-pub struct Opcode {
-    pub name: String,
-    pub opcode: String,
-    pub registers: u32,
-    pub variables: u32,
-    pub comment: String,
 }
 
 #[derive(Clone)]

@@ -12,14 +12,13 @@ mod files;
 mod helper;
 mod messages;
 mod macros;
+mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-#[allow(clippy::wildcard_imports)]
 use files::*;
-#[allow(clippy::wildcard_imports)]
 use helper::*;
-#[allow(clippy::wildcard_imports)]
 use crate::macros::*;
+use crate::opcodes::*;
 use messages::{print_messages, MessageType, MsgList};
 
 fn main() {

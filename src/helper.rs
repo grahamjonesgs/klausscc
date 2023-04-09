@@ -1,6 +1,6 @@
-use crate::files::{Label, LineType, Opcode, Pass2};
+use crate::files::{Label, LineType, Pass2};
 use crate::messages::{MessageType, MsgList};
-
+use crate::opcodes::*;
 
 /// Extracts label from string
 ///
@@ -26,8 +26,6 @@ pub fn data_name_from_string(line: &str) -> Option<String> {
     None
 }
 
-
-
 /// Return program counter for label
 ///
 /// Return option of program counter for label if it exists, or None
@@ -35,38 +33,6 @@ pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
         if label.name == line {
             return Some(label.program_counter);
-        }
-    }
-    None
-}
-
-
-/// Returns hex opcode from name
-///
-/// Checks if first word is opcode and if so returns opcode hex value
-pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
-    for opcode in opcodes {
-        let mut words = line.split_whitespace();
-        let first_word = words.next().unwrap_or("");
-        if first_word.to_uppercase() == opcode.name {
-            return Some(opcode.opcode.to_string().to_uppercase());
-        }
-    }
-    None
-}
-
-/// Returns number of args for opcode
-///
-/// From opcode name, option of number of arguments for opcode, or None
-pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
-    for opcode in opcodes {
-        let mut words = line.split_whitespace();
-        let first_word = words.next().unwrap_or("");
-        if first_word.is_empty() {
-            return None;
-        }
-        if first_word.to_uppercase() == opcode.name {
-            return Some(opcode.variables);
         }
     }
     None
@@ -149,23 +115,6 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
     }
 }
 
-//// Returns number of registers for opcode
-///
-/// From opcode name, option of number of registers for opcode, or None
-pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
-    for opcode in opcodes {
-        let mut words = line.split_whitespace();
-        let first_word = words.next().unwrap_or("");
-        if first_word.is_empty() {
-            return None;
-        }
-        if first_word == opcode.name {
-            return Some(opcode.registers);
-        }
-    }
-    None
-}
-
 /// Returns enum of type of line
 ///
 /// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error
@@ -235,138 +184,6 @@ pub fn is_comment(word: &mut String) -> bool {
         }
     }
     false
-}
-
-/// Register name to hex
-///
-/// Map the register to the hex code for the opcode
-pub fn map_reg_to_hex(input: &str) -> String {
-    match input.to_uppercase().as_str() {
-        "A" => "0".to_string(),
-        "B" => "1".to_string(),
-        "C" => "2".to_string(),
-        "D" => "3".to_string(),
-        "E" => "4".to_string(),
-        "F" => "5".to_string(),
-        "G" => "6".to_string(),
-        "H" => "7".to_string(),
-        "I" => "8".to_string(),
-        "J" => "9".to_string(),
-        "K" => "A".to_string(),
-        "L" => "B".to_string(),
-        "M" => "C".to_string(),
-        "N" => "D".to_string(),
-        "O" => "E".to_string(),
-        "P" => "F".to_string(),
-        _ => "X".to_string(),
-    }
-}
-
-/// Updates opcode with register
-///
-/// Returns the hex code operand from the line, adding register values
-pub fn add_registers(
-    opcodes: &mut Vec<Opcode>,
-    line: &mut String,
-    msg_list: &mut MsgList,
-    line_number: u32,
-) -> String {
-    let num_registers =
-        num_registers(opcodes, &mut (*line).to_string().to_uppercase()).unwrap_or(0);
-
-    let mut opcode_found = {
-        let this = return_opcode(&line.to_uppercase(), opcodes);
-        let default = String::new();
-        match this {
-            Some(x) => x,
-            None => default,
-        }
-    };
-
-    opcode_found = opcode_found[..(8 - num_registers) as usize].to_string();
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
-        {
-            opcode_found.push_str(&map_reg_to_hex(word));
-        }
-    }
-
-    if opcode_found.len() != 8 || opcode_found.contains('X') {
-        msg_list.push(
-            format!("Incorrect register definition - \"{line}\""),
-            Some(line_number),
-            MessageType::Warning,
-        );
-        return "ERR ".to_string();
-    }
-    opcode_found
-}
-
-/// Return opcode with formatted arguments
-///
-/// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values
-/// Converts label names to hex addresses
-pub fn add_arguments(
-    opcodes: &mut Vec<Opcode>,
-    line: &mut String,
-    msg_list: &mut MsgList,
-    line_number: u32,
-    labels: &mut Vec<Label>,
-) -> String {
-    let num_registers = num_registers(opcodes, &mut line.to_uppercase()).unwrap_or(0);
-    let num_arguments = num_arguments(opcodes, &mut line.to_uppercase()).unwrap_or(0);
-    let mut arguments = String::new();
-
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if (i == num_registers as usize + 1) && (num_arguments == 1) {
-            arguments.push_str(&{
-                let this = convert_argument(
-                    &word.to_string().to_uppercase(),
-                    msg_list,
-                    line_number,
-                    labels,
-                );
-                let default = "00000000".to_string();
-                match this {
-                    Some(x) => x,
-                    None => default,
-                }
-            });
-        }
-        if i == num_registers as usize + 2 && num_arguments == 2 {
-            arguments.push_str(&{
-                let this = convert_argument(
-                    &word.to_string().to_uppercase(),
-                    msg_list,
-                    line_number,
-                    labels,
-                );
-                let default = "00000000".to_string();
-                match this {
-                    Some(x) => x,
-                    None => default,
-                }
-            });
-        }
-        if i > num_registers as usize + num_arguments as usize {
-            msg_list.push(
-                format!("Too many arguments found - \"{line}\""),
-                Some(line_number),
-                MessageType::Warning,
-            );
-        }
-    }
-
-    if arguments.len() != 8 * num_arguments as usize {
-        msg_list.push(
-            format!("Incorrect argument definition - \"{line}\""),
-            Some(line_number),
-            MessageType::Error,
-        );
-    }
-    arguments
 }
 
 /// Gets address from label or absolute values
@@ -558,7 +375,6 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
     output_string
 }
 
-
 pub fn trim_newline(s: &mut String) {
     if s.ends_with('\n') {
         s.pop();
@@ -574,277 +390,236 @@ pub fn trim_newline(s: &mut String) {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[test]
+fn test_calc_checksum() {
+    let mut msg_list = MsgList::new();
+    let checksum = calc_checksum("S0000Z0010", &mut msg_list);
+    assert_eq!(checksum, "0011");
+}
 
-    use super::*;
+#[test]
+fn test_calc_checksum2() {
+    let mut msg_list = MsgList::new();
+    let checksum = calc_checksum("S00000000Z0010", &mut msg_list);
+    assert_eq!(checksum, "0012");
+}
 
-    #[test]
-    fn test_calc_checksum() {
-        let mut msg_list = MsgList::new();
-        let checksum = calc_checksum("S0000Z0010", &mut msg_list);
-        assert_eq!(checksum, "0011");
-    }
+#[test]
+fn test_calc_checksum3() {
+    let mut msg_list = MsgList::new();
+    let checksum = calc_checksum("S00009999Z0010", &mut msg_list);
+    assert_eq!(checksum, "99AB");
+}
 
-    #[test]
-    fn test_calc_checksum2() {
-        let mut msg_list = MsgList::new();
-        let checksum = calc_checksum("S00000000Z0010", &mut msg_list);
-        assert_eq!(checksum, "0012");
-    }
+#[test]
+fn test_trim_newline() {
+    let mut s = String::from("Hello\n");
+    trim_newline(&mut s);
+    assert_eq!(s, "Hello");
+}
+#[test]
 
-    #[test]
-    fn test_calc_checksum3() {
-        let mut msg_list = MsgList::new();
-        let checksum = calc_checksum("S00009999Z0010", &mut msg_list);
-        assert_eq!(checksum, "99AB");
-    }
+fn test_create_bin_string() {
+    let mut pass2 = Vec::new();
+    pass2.push(Pass2 {
+        opcode: String::from("1234"),
+        input: String::new(),
+        line_counter: 0,
+        program_counter: 0,
+        line_type: LineType::Data,
+    });
+    pass2.push(Pass2 {
+        opcode: String::from("4321"),
+        input: String::new(),
+        line_counter: 0,
+        program_counter: 0,
+        line_type: LineType::Data,
+    });
+    pass2.push(Pass2 {
+        opcode: String::from("9999"),
+        input: String::new(),
+        line_counter: 0,
+        program_counter: 0,
+        line_type: LineType::Data,
+    });
+    let mut msg_list = MsgList::new();
+    let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+    assert_eq!(bin_string, "S123443219999Z0010EF01X");
+}
 
-    #[test]
-    fn test_trim_newline() {
-        let mut s = String::from("Hello\n");
-        trim_newline(&mut s);
-        assert_eq!(s, "Hello");
-    }
-    #[test]
+#[test]
+fn test_strip_comments() {
+    let mut input = String::from("Hello, world! //This is a comment");
+    let output = strip_comments(&mut input);
+    assert_eq!(output, "Hello, world!");
+}
 
-    fn test_create_bin_string() {
-        let mut pass2 = Vec::new();
-        pass2.push(Pass2 {
-            opcode: String::from("1234"),
-            input: String::new(),
-            line_counter: 0,
-            program_counter: 0,
-            line_type: LineType::Data,
-        });
-        pass2.push(Pass2 {
-            opcode: String::from("4321"),
-            input: String::new(),
-            line_counter: 0,
-            program_counter: 0,
-            line_type: LineType::Data,
-        });
-        pass2.push(Pass2 {
-            opcode: String::from("9999"),
-            input: String::new(),
-            line_counter: 0,
-            program_counter: 0,
-            line_type: LineType::Data,
-        });
-        let mut msg_list = MsgList::new();
-        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
-        assert_eq!(bin_string, "S123443219999Z0010EF01X");
-    }
+#[test]
+fn test_is_comment() {
+    let mut input = String::from("//This is a comment");
+    let output = is_comment(&mut input);
+    assert!(output);
+}
+#[test]
+fn test_is_comment2() {
+    let mut input = String::from("Hello //This is a comment");
+    let output = is_comment(&mut input);
+    assert!(!output);
+}
 
-    #[test]
-    fn test_strip_comments() {
-        let mut input = String::from("Hello, world! //This is a comment");
-        let output = strip_comments(&mut input);
-        assert_eq!(output, "Hello, world!");
-    }
+#[test]
+fn test_is_comment3() {
+    let mut input = String::from(" ");
+    let output = is_comment(&mut input);
+    assert!(!output);
+}
 
-    #[test]
-    fn test_is_comment() {
-        let mut input = String::from("//This is a comment");
-        let output = is_comment(&mut input);
-        assert!(output);
-    }
-    #[test]
-    fn test_is_comment2() {
-        let mut input = String::from("Hello //This is a comment");
-        let output = is_comment(&mut input);
-        assert!(!output);
-    }
+#[test]
+fn test_is_blank1() {
+    let input = String::from(" ");
+    let output = is_blank(&input);
+    assert!(output);
+}
 
-    #[test]
-    fn test_is_comment3() {
-        let mut input = String::from(" ");
-        let output = is_comment(&mut input);
-        assert!(!output);
-    }
+#[test]
+fn test_is_blank2() {
+    let input = String::from("1234");
+    let output = is_blank(&input);
+    assert!(!output);
+}
 
-    #[test]
-    fn test_is_blank1() {
-        let input = String::from(" ");
-        let output = is_blank(&input);
-        assert!(output);
-    }
+#[test]
+fn test_is_valid_line() {
+    let input = String::from("PUSH");
+    let opcodes = &mut Vec::<Opcode>::new();
+    opcodes.push(Opcode {
+        name: String::from("PUSH"),
+        opcode: String::from("1234"),
+        comment: String::new(),
+        variables: 0,
+        registers: 0,
+    });
+    let output = is_valid_line(opcodes, input);
+    assert!(output);
+}
 
-    #[test]
-    fn test_is_blank2() {
-        let input = String::from("1234");
-        let output = is_blank(&input);
-        assert!(!output);
-    }
+#[test]
+fn test_line_type1() {
+    let mut input = String::from("PUSH");
+    let opcodes = &mut Vec::<Opcode>::new();
+    opcodes.push(Opcode {
+        name: String::from("PUSH"),
+        opcode: String::from("1234"),
+        comment: String::new(),
+        variables: 0,
+        registers: 0,
+    });
+    let output = line_type(opcodes, &mut input);
+    assert_eq!(output, LineType::Opcode);
+}
+#[test]
+fn test_line_type2() {
+    let mut input = String::from("LOOP:");
+    let opcodes = &mut Vec::<Opcode>::new();
+    let output = line_type(opcodes, &mut input);
+    assert_eq!(output, LineType::Label);
+}
+#[test]
+fn test_line_type3() {
+    let mut input = String::from("#Dataname");
+    let opcodes = &mut Vec::<Opcode>::new();
+    let output = line_type(opcodes, &mut input);
+    assert_eq!(output, LineType::Data);
+}
 
-    #[test]
-    fn test_is_valid_line() {
-        let input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("1234"),
-            comment: String::new(),
-            variables: 0,
-            registers: 0,
-        });
-        let output = is_valid_line(opcodes, input);
-        assert!(output);
-    }
+#[test]
+fn test_line_type4() {
+    let mut input = String::new();
+    let opcodes = &mut Vec::<Opcode>::new();
+    let output = line_type(opcodes, &mut input);
+    assert_eq!(output, LineType::Blank);
+}
 
-    #[test]
-    fn test_line_type1() {
-        let mut input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("1234"),
-            comment: String::new(),
-            variables: 0,
-            registers: 0,
-        });
-        let output = line_type(opcodes, &mut input);
-        assert_eq!(output, LineType::Opcode);
-    }
-    #[test]
-    fn test_line_type2() {
-        let mut input = String::from("LOOP:");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
-        assert_eq!(output, LineType::Label);
-    }
-    #[test]
-    fn test_line_type3() {
-        let mut input = String::from("#Dataname");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
-        assert_eq!(output, LineType::Data);
-    }
+#[test]
+fn test_line_type5() {
+    let mut input = String::from("//This is a comment");
+    let opcodes = &mut Vec::<Opcode>::new();
+    let output = line_type(opcodes, &mut input);
+    assert_eq!(output, LineType::Comment);
+}
 
-    #[test]
-    fn test_line_type4() {
-        let mut input = String::new();
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
-        assert_eq!(output, LineType::Blank);
-    }
+#[test]
+fn test_line_type6() {
+    let mut input = String::from("1234");
+    let opcodes = &mut Vec::<Opcode>::new();
+    let output = line_type(opcodes, &mut input);
+    assert_eq!(output, LineType::Error);
+}
 
-    #[test]
-    fn test_line_type5() {
-        let mut input = String::from("//This is a comment");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
-        assert_eq!(output, LineType::Comment);
-    }
+#[test]
+fn test_data_as_bytes1() {
+    let input = String::from("TEST 3");
+    let output = data_as_bytes(&input);
+    assert_eq!(output, Some("000000000000000000000000".to_string()));
+}
 
-    #[test]
-    fn test_line_type6() {
-        let mut input = String::from("1234");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
-        assert_eq!(output, LineType::Error);
-    }
+#[test]
+fn test_data_as_bytes2() {
+    let input = String::from("TEST");
+    let output = data_as_bytes(&input);
+    assert_eq!(output, None);
+}
 
-    #[test]
-    fn test_num_registers1() {
-        let mut input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("1234"),
-            comment: String::new(),
-            variables: 0,
-            registers: 1,
-        });
-        let output = num_registers(opcodes,&mut input);
-        assert_eq!(output, Some(1));
-    }
+#[test]
+fn test_label_name_from_string1() {
+    let input = String::from("LOOP:");
+    let output = label_name_from_string(&input);
+    assert_eq!(output, Some("LOOP:".to_string()));
+}
 
-    #[test]
-    fn test_num_registers2() {
-        let mut input = String::from("PULL");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("1234"),
-            comment: String::new(),
-            variables: 0,
-            registers: 1,
-        });
-        let output = num_registers(opcodes,&mut input);
-        assert_eq!(output, None);
-    }
-    #[test]
-    fn test_data_as_bytes1() {
-        let input = String::from("TEST 3");
-        let output = data_as_bytes(&input);
-        assert_eq!(output, Some("000000000000000000000000".to_string()));
-    }
+#[test]
+fn test_label_name_from_string2() {
+    let input = String::from("LOOP");
+    let output = label_name_from_string(&input);
+    assert_eq!(output, None);
+}
 
-    #[test]
-    fn test_data_as_bytes2() {
-        let input = String::from("TEST");
-        let output = data_as_bytes(&input);
-        assert_eq!(output, None);
-    }
+#[test]
+fn test_data_name_from_string1() {
+    let input = String::from("#TEST");
+    let output = data_name_from_string(&input);
+    assert_eq!(output, Some("#TEST".to_string()));
+}
 
-    #[test]
-    fn test_label_name_from_string1() {
-        let input = String::from("LOOP:");
-        let output = label_name_from_string(&input);
-        assert_eq!(output, Some("LOOP:".to_string()));
-    }
+#[test]
+fn test_data_name_from_string2() {
+    let input = String::from("TEST");
+    let output = data_name_from_string(&input);
+    assert_eq!(output, None);
+}
 
-    #[test]
-    fn test_label_name_from_string2() {
-        let input = String::from("LOOP");
-        let output = label_name_from_string(&input);
-        assert_eq!(output, None);
-    }
+#[test]
+fn test_return_label_value1() {
+    let labels = &mut Vec::<Label>::new();
+    labels.push(Label {
+        program_counter: 42,
+        line_counter: 0,
+        name: String::from("LOOP:"),
+    });
+    let input = String::from("LOOP:");
+    let output = return_label_value(&input, labels);
+    assert_eq!(output, Some(42));
+}
 
-    #[test]
-    fn test_data_name_from_string1() {
-        let input = String::from("#TEST");
-        let output = data_name_from_string(&input);
-        assert_eq!(output, Some("#TEST".to_string()));
-    }
-
-    #[test]
-    fn test_data_name_from_string2() {
-        let input = String::from("TEST");
-        let output = data_name_from_string(&input);
-        assert_eq!(output, None);
-    }
-
-    
-
-    #[test]
-    fn test_return_label_value1() {
-        let labels = &mut Vec::<Label>::new();
-        labels.push(Label {
-            program_counter: 42,
-            line_counter: 0,
-            name: String::from("LOOP:"),
-        });
-        let input = String::from("LOOP:");
-        let output = return_label_value(&input, labels);
-        assert_eq!(output, Some(42));
-    }
-
-    #[test]
-    fn test_return_label_value2() {
-        let labels = &mut Vec::<Label>::new();
-        labels.push(Label {
-            program_counter: 42,
-            line_counter: 0,
-            name: String::from("LOOP1:"),
-        });
-        let input = String::from("LOOP2:");
-        let output = return_label_value(&input, labels);
-        assert_eq!(output, None);
-    }
-
-    
-    
-
+#[test]
+fn test_return_label_value2() {
+    let labels = &mut Vec::<Label>::new();
+    labels.push(Label {
+        program_counter: 42,
+        line_counter: 0,
+        name: String::from("LOOP1:"),
+    });
+    let input = String::from("LOOP2:");
+    let output = return_label_value(&input, labels);
+    assert_eq!(output, None);
 }
