@@ -378,6 +378,9 @@ pub fn format_opcodes(input: &mut String) -> String {
     (*input).to_string()
 }
 
+/// Output the code details file to given serial port
+///
+/// Will send the program to the serial port, and wait for the response
 #[allow(clippy::cast_possible_wrap)]
 pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
     let mut buffer = [0; 1024];
