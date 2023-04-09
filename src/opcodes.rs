@@ -1,6 +1,6 @@
-use crate::files::*;
-use crate::helper::*;
-use crate::messages::*;
+use crate::labels::Label;
+use crate::labels::convert_argument;
+use crate::messages::{MessageType, MsgList};
 
 #[derive(Clone)]
 pub struct Opcode {
@@ -45,7 +45,7 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
 //// Returns number of registers for opcode
 ///
 /// From opcode name, option of number of registers for opcode, or None
-pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
+fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -61,7 +61,7 @@ pub fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
 /// Register name to hex
 ///
 /// Map the register to the hex code for the opcode
-pub fn map_reg_to_hex(input: &str) -> String {
+fn map_reg_to_hex(input: &str) -> String {
     match input.to_uppercase().as_str() {
         "A" => "0".to_string(),
         "B" => "1".to_string(),

@@ -6,21 +6,26 @@
     //clippy::cargo,
 )]
 #![allow(clippy::single_match_else)]
-#![allow(clippy::wildcard_imports)]
+//#![allow(clippy::wildcard_imports)]
 
 mod files;
 mod helper;
 mod messages;
 mod macros;
 mod opcodes;
+mod labels;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use files::*;
-use helper::*;
-use crate::macros::*;
-use crate::opcodes::*;
+use files::{LineType, Pass0, Pass1, Pass2, filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec, write_serial};
+use helper::{create_bin_string, data_as_bytes, data_name_from_string, is_valid_line, line_type, num_data_bytes, strip_comments};
+use labels::{Label, find_duplicate_label, label_name_from_string};
+use macros::{Macro, expand_macros_multi, macro_name_from_string, return_macro_items_replace};
+use opcodes::{Opcode, add_arguments, add_registers, num_arguments};
 use messages::{print_messages, MessageType, MsgList};
 
+/// Main function for Klausscc
+///
+/// Main funation to read CLI and call other functions
 fn main() {
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
@@ -258,7 +263,7 @@ pub fn expand_macros(
 
 /// Returns pass1 from pass0
 ///
-/// Takes the macro expanded pass0 and returns vector of pass1, with line numbers
+/// Takes the macro expanded pass0 and returns vector of pass1, with the program counter
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
@@ -324,6 +329,9 @@ fn get_labels(pass1: &[Pass1]) -> Vec<Label> {
     labels
 }
 
+/// Returns pass2 from pass1
+///
+/// Pass1 with program counters and returns vector of pass2, with final values
 pub fn get_pass2(
     msg_list: &mut MsgList,
     pass1: Vec<Pass1>,

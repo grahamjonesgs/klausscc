@@ -1,7 +1,7 @@
 use crate::{messages::{MessageType, MsgList}};
-use crate::macros::*;
-use crate::helper::*;
-use crate::opcodes::*;
+use crate::macros::{Macro, return_macro};
+use crate::helper::trim_newline;
+use crate::opcodes::{Opcode, return_opcode};
 
 use core::fmt::Write as _;
 use core::fmt;
@@ -31,13 +31,6 @@ pub struct Pass2 {
     pub program_counter: u32,
     pub line_type: LineType,
     pub opcode: String,
-}
-
-#[derive(Clone)]
-pub struct Label {
-    pub program_counter: u32,
-    pub name: String,
-    pub line_counter: u32,
 }
 
 #[derive(PartialEq,Debug)]
