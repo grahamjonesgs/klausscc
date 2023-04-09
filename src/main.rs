@@ -12,16 +12,10 @@ mod helper;
 mod messages;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use files::{
-    filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec, Label, LineType,
-    Macro, Opcode,
-};
-use helper::{
-    add_arguments, add_registers, create_bin_string, data_as_bytes, data_name_from_string,
-    expand_macros_multi, find_duplicate_label, is_valid_line, label_name_from_string, line_type,
-    macro_name_from_string, num_arguments, num_data_bytes, return_macro_items_replace,
-    return_opcode, strip_comments, write_serial, Pass0, Pass1, Pass2,
-};
+#[allow(clippy::wildcard_imports)]
+use files::*;
+#[allow(clippy::wildcard_imports)]
+use helper::*;
 use messages::{print_messages, MessageType, MsgList};
 
 fn main() {

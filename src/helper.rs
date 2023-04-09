@@ -1,25 +1,6 @@
-use crate::files::{Label, LineType, Macro, Opcode};
+use crate::files::{Label, LineType, Macro, Opcode, Pass2};
 use crate::messages::{MessageType, MsgList};
 
-pub struct Pass0 {
-    pub input: String,
-    pub line_counter: u32,
-}
-
-pub struct Pass1 {
-    pub input: String,
-    pub line_counter: u32,
-    pub program_counter: u32,
-    pub line_type: LineType,
-}
-
-pub struct Pass2 {
-    pub input: String,
-    pub line_counter: u32,
-    pub program_counter: u32,
-    pub line_type: LineType,
-    pub opcode: String,
-}
 
 /// Extracts label from string
 ///

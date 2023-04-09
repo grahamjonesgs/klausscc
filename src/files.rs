@@ -1,16 +1,34 @@
-use crate::{helper::return_macro, messages::{MessageType, MsgList}, return_opcode, Pass2};
+use crate::{helper::return_macro, messages::{MessageType, MsgList}, return_opcode};
 
 use core::fmt::Write as _;
 use core::fmt;
 use std::{
-   // fmt,
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
 };
-
 use itertools::Itertools;
 
+
+pub struct Pass0 {
+    pub input: String,
+    pub line_counter: u32,
+}
+
+pub struct Pass1 {
+    pub input: String,
+    pub line_counter: u32,
+    pub program_counter: u32,
+    pub line_type: LineType,
+}
+
+pub struct Pass2 {
+    pub input: String,
+    pub line_counter: u32,
+    pub program_counter: u32,
+    pub line_type: LineType,
+    pub opcode: String,
+}
 #[derive(Clone)]
 pub struct Opcode {
     pub name: String,
