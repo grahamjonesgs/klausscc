@@ -1,5 +1,5 @@
-use crate::labels::Label;
 use crate::labels::convert_argument;
+use crate::labels::Label;
 use crate::messages::{MessageType, MsgList};
 
 #[derive(Clone)]
@@ -190,32 +190,37 @@ pub fn add_arguments(
     arguments
 }
 
-#[test]
-fn test_num_registers1() {
-    let mut input = String::from("PUSH");
-    let opcodes = &mut Vec::<Opcode>::new();
-    opcodes.push(Opcode {
-        name: String::from("PUSH"),
-        opcode: String::from("1234"),
-        comment: String::new(),
-        variables: 0,
-        registers: 1,
-    });
-    let output = num_registers(opcodes, &mut input);
-    assert_eq!(output, Some(1));
-}
+#[cfg(test)]
+mod tests {
+    use crate::opcodes::{Opcode, num_registers};
 
-#[test]
-fn test_num_registers2() {
-    let mut input = String::from("PULL");
-    let opcodes = &mut Vec::<Opcode>::new();
-    opcodes.push(Opcode {
-        name: String::from("PUSH"),
-        opcode: String::from("1234"),
-        comment: String::new(),
-        variables: 0,
-        registers: 1,
-    });
-    let output = num_registers(opcodes, &mut input);
-    assert_eq!(output, None);
+    #[test]
+    fn test_num_registers1() {
+        let mut input = String::from("PUSH");
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            name: String::from("PUSH"),
+            opcode: String::from("1234"),
+            comment: String::new(),
+            variables: 0,
+            registers: 1,
+        });
+        let output = num_registers(opcodes, &mut input);
+        assert_eq!(output, Some(1));
+    }
+
+    #[test]
+    fn test_num_registers2() {
+        let mut input = String::from("PULL");
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            name: String::from("PUSH"),
+            opcode: String::from("1234"),
+            comment: String::new(),
+            variables: 0,
+            registers: 1,
+        });
+        let output = num_registers(opcodes, &mut input);
+        assert_eq!(output, None);
+    }
 }

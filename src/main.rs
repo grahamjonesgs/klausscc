@@ -6,7 +6,6 @@
     //clippy::cargo,
 )]
 #![allow(clippy::single_match_else)]
-//#![allow(clippy::wildcard_imports)]
 
 mod files;
 mod helper;
