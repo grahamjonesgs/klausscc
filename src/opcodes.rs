@@ -1,3 +1,4 @@
+use crate::files::LineType;
 use crate::labels::convert_argument;
 use crate::labels::Label;
 use crate::messages::{MessageType, MsgList};
@@ -9,6 +10,27 @@ pub struct Opcode {
     pub registers: u32,
     pub variables: u32,
     pub comment: String,
+}
+
+
+pub struct Pass0 {
+    pub input: String,
+    pub line_counter: u32,
+}
+
+pub struct Pass1 {
+    pub input: String,
+    pub line_counter: u32,
+    pub program_counter: u32,
+    pub line_type: LineType,
+}
+
+pub struct Pass2 {
+    pub input: String,
+    pub line_counter: u32,
+    pub program_counter: u32,
+    pub line_type: LineType,
+    pub opcode: String,
 }
 
 /// Returns number of args for opcode

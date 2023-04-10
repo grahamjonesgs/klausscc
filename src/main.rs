@@ -15,11 +15,11 @@ mod opcodes;
 mod labels;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use files::{LineType, Pass0, Pass1, Pass2, filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec, write_serial};
+use files::{LineType,  filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec, write_serial};
 use helper::{create_bin_string, data_as_bytes, data_name_from_string, is_valid_line, line_type, num_data_bytes, strip_comments};
 use labels::{Label, find_duplicate_label, label_name_from_string};
 use macros::{Macro, expand_macros_multi, macro_name_from_string, return_macro_items_replace};
-use opcodes::{Opcode, add_arguments, add_registers, num_arguments};
+use opcodes::{Opcode, Pass0, Pass1, Pass2, add_arguments, add_registers, num_arguments};
 use messages::{print_messages, MessageType, MsgList};
 
 /// Main function for Klausscc

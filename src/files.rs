@@ -1,4 +1,4 @@
-use crate::{messages::{MessageType, MsgList}};
+use crate::{messages::{MessageType, MsgList}, opcodes::Pass2};
 use crate::macros::{Macro, return_macro};
 use crate::helper::trim_newline;
 use crate::opcodes::{Opcode, return_opcode};
@@ -13,25 +13,6 @@ use std::{
 use itertools::Itertools;
 
 
-pub struct Pass0 {
-    pub input: String,
-    pub line_counter: u32,
-}
-
-pub struct Pass1 {
-    pub input: String,
-    pub line_counter: u32,
-    pub program_counter: u32,
-    pub line_type: LineType,
-}
-
-pub struct Pass2 {
-    pub input: String,
-    pub line_counter: u32,
-    pub program_counter: u32,
-    pub line_type: LineType,
-    pub opcode: String,
-}
 
 #[derive(PartialEq,Debug)]
 pub enum LineType {

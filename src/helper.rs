@@ -1,7 +1,7 @@
-use crate::files::{LineType, Pass2};
+use crate::files::{LineType};
 use crate::labels::label_name_from_string;
 use crate::messages::{MessageType, MsgList};
-use crate::opcodes::{return_opcode, Opcode};
+use crate::opcodes::{return_opcode, Opcode, Pass2};
 
 /// Extracts data name from string
 ///
@@ -270,14 +270,14 @@ pub fn trim_newline(s: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use crate::files::{LineType, Pass2};
+    use crate::files::{LineType};
     use crate::helper::{
         calc_checksum, create_bin_string, data_as_bytes, data_name_from_string, is_blank,
         is_comment, is_valid_line, label_name_from_string, line_type, strip_comments, trim_newline,
         MsgList,
     };
     use crate::labels::{return_label_value, Label};
-    use crate::opcodes::Opcode;
+    use crate::opcodes::{Opcode, Pass2};
 
     #[test]
     fn test_calc_checksum() {
