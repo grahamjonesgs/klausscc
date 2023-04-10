@@ -1,4 +1,5 @@
-use crate::{messages::{MessageType, MsgList}, helper::data_name_from_string};
+use crate::messages::{MessageType, MsgList};
+use crate::helper::data_name_from_string;
 
 #[derive(Clone)]
 pub struct Label {

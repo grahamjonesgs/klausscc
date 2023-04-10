@@ -280,6 +280,7 @@ mod tests {
     use crate::opcodes::{Opcode, Pass2};
 
     #[test]
+    // Test that correct checksum is calculated
     fn test_calc_checksum() {
         let mut msg_list = MsgList::new();
         let checksum = calc_checksum("S0000Z0010", &mut msg_list);
@@ -287,6 +288,7 @@ mod tests {
     }
 
     #[test]
+    // Test that correct checksum is calculated
     fn test_calc_checksum2() {
         let mut msg_list = MsgList::new();
         let checksum = calc_checksum("S00000000Z0010", &mut msg_list);
@@ -294,6 +296,7 @@ mod tests {
     }
 
     #[test]
+    // Test that correct checksum is calculated
     fn test_calc_checksum3() {
         let mut msg_list = MsgList::new();
         let checksum = calc_checksum("S00009999Z0010", &mut msg_list);
@@ -301,12 +304,14 @@ mod tests {
     }
 
     #[test]
+    // Test that line is trimmed of newline
     fn test_trim_newline() {
         let mut s = String::from("Hello\n");
         trim_newline(&mut s);
         assert_eq!(s, "Hello");
     }
     #[test]
+    // Test that the bin_string is created correctly
 
     fn test_create_bin_string() {
         let mut pass2 = Vec::new();
@@ -337,6 +342,7 @@ mod tests {
     }
 
     #[test]
+    // Test that comment is stripped
     fn test_strip_comments() {
         let mut input = String::from("Hello, world! //This is a comment");
         let output = strip_comments(&mut input);
@@ -344,6 +350,7 @@ mod tests {
     }
 
     #[test]
+    // Test true is returned for comment
     fn test_is_comment() {
         let mut input = String::from("//This is a comment");
         let output = is_comment(&mut input);
@@ -357,6 +364,7 @@ mod tests {
     }
 
     #[test]
+    // Test false is returned for non-comment
     fn test_is_comment3() {
         let mut input = String::from(" ");
         let output = is_comment(&mut input);
@@ -364,6 +372,7 @@ mod tests {
     }
 
     #[test]
+    // Test for blank line returns true
     fn test_is_blank1() {
         let input = String::from(" ");
         let output = is_blank(&input);
@@ -371,6 +380,7 @@ mod tests {
     }
 
     #[test]
+    // Test for non-blank line returns false
     fn test_is_blank2() {
         let input = String::from("1234");
         let output = is_blank(&input);
@@ -378,6 +388,7 @@ mod tests {
     }
 
     #[test]
+    // Test for valid line returns true is opcode is found
     fn test_is_valid_line() {
         let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
@@ -393,6 +404,7 @@ mod tests {
     }
 
     #[test]
+    // Test for opcode line type
     fn test_line_type1() {
         let mut input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
@@ -407,6 +419,7 @@ mod tests {
         assert_eq!(output, LineType::Opcode);
     }
     #[test]
+    // Test for label line type
     fn test_line_type2() {
         let mut input = String::from("LOOP:");
         let opcodes = &mut Vec::<Opcode>::new();
@@ -414,6 +427,7 @@ mod tests {
         assert_eq!(output, LineType::Label);
     }
     #[test]
+    // Test for data line type
     fn test_line_type3() {
         let mut input = String::from("#Dataname");
         let opcodes = &mut Vec::<Opcode>::new();
@@ -422,6 +436,7 @@ mod tests {
     }
 
     #[test]
+    // Test for blank line type
     fn test_line_type4() {
         let mut input = String::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -430,6 +445,7 @@ mod tests {
     }
 
     #[test]
+    // Test for comment line type
     fn test_line_type5() {
         let mut input = String::from("//This is a comment");
         let opcodes = &mut Vec::<Opcode>::new();
@@ -438,6 +454,7 @@ mod tests {
     }
 
     #[test]
+    // Test for error line type
     fn test_line_type6() {
         let mut input = String::from("1234");
         let opcodes = &mut Vec::<Opcode>::new();
@@ -446,6 +463,7 @@ mod tests {
     }
 
     #[test]
+    // Test for correct output from dats
     fn test_data_as_bytes1() {
         let input = String::from("TEST 3");
         let output = data_as_bytes(&input);
@@ -453,6 +471,7 @@ mod tests {
     }
 
     #[test]
+    // Test for correct output from invalid data line
     fn test_data_as_bytes2() {
         let input = String::from("TEST");
         let output = data_as_bytes(&input);
@@ -460,6 +479,7 @@ mod tests {
     }
 
     #[test]
+    // Test for coorect label name
     fn test_label_name_from_string1() {
         let input = String::from("LOOP:");
         let output = label_name_from_string(&input);
@@ -467,6 +487,7 @@ mod tests {
     }
 
     #[test]
+    // Test for invalid label name
     fn test_label_name_from_string2() {
         let input = String::from("LOOP");
         let output = label_name_from_string(&input);
@@ -474,6 +495,7 @@ mod tests {
     }
 
     #[test]
+    // Test for correct data name
     fn test_data_name_from_string1() {
         let input = String::from("#TEST");
         let output = data_name_from_string(&input);
@@ -481,6 +503,7 @@ mod tests {
     }
 
     #[test]
+    // Test for invalid data name
     fn test_data_name_from_string2() {
         let input = String::from("TEST");
         let output = data_name_from_string(&input);
@@ -488,6 +511,7 @@ mod tests {
     }
 
     #[test]
+    // Test for correct label returned
     fn test_return_label_value1() {
         let labels = &mut Vec::<Label>::new();
         labels.push(Label {
@@ -501,6 +525,7 @@ mod tests {
     }
 
     #[test]
+    // Test for no label returned
     fn test_return_label_value2() {
         let labels = &mut Vec::<Label>::new();
         labels.push(Label {
