@@ -1,13 +1,14 @@
 use chrono::{Local, NaiveTime};
 use colored::{ColoredString, Colorize};
 
-#[derive(PartialEq)]
+#[derive(PartialEq,Debug)]
 pub enum MessageType {
     Error,
     Warning,
     Info,
 }
 
+#[derive(Debug)]
 pub struct Message {
     pub name: String,
     pub line_number: Option<u32>,
@@ -73,5 +74,41 @@ pub fn print_messages(msg_list: &mut MsgList) {
         } else {
             format!("{} {} {} ", msg.time.format("%H:%M:%S.%3f"), warning, msg.name)
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    // Test that the message list is created correctly
+    fn test_msg_list() {
+        let mut msg_list = MsgList::new();
+        msg_list.push("Test".to_string(), None, MessageType::Info);
+        assert_eq!(msg_list.list.len(), 1);
+        assert_eq!(msg_list.list[0].name, "Test");
+        assert_eq!(msg_list.list[0].level, MessageType::Info);
+        assert_eq!(msg_list.list[0].line_number, None);
+    }
+
+    #[test]
+    // Test that the number of errors is correct
+    fn test_number_errors() {
+        let mut msg_list = MsgList::new();
+        msg_list.push("Test".to_string(), None, MessageType::Info);
+        msg_list.push("Test".to_string(), None, MessageType::Warning);
+        msg_list.push("Test".to_string(), None, MessageType::Error);
+        assert_eq!(msg_list.number_errors(), 1);
+    }
+
+    #[test]
+    // Test number of warnings
+    fn test_number_warnings() {
+        let mut msg_list = MsgList::new();
+        msg_list.push("Test".to_string(), None, MessageType::Info);
+        msg_list.push("Test".to_string(), None, MessageType::Warning);
+        msg_list.push("Test".to_string(), None, MessageType::Error);
+        assert_eq!(msg_list.number_warnings(), 1);
     }
 }
