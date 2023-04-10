@@ -1,7 +1,8 @@
 use crate::messages::{MessageType, MsgList};
 use crate::helper::data_name_from_string;
+use crate::opcodes::Pass1;
 
-#[derive(Clone)]
+#[derive(Clone,Debug,PartialEq)]
 pub struct Label {
     pub program_counter: u32,
     pub name: String,
@@ -132,8 +133,44 @@ pub fn convert_argument(
     None
 }
 
+/// Create the vector of labels
+///
+/// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels
+#[allow(clippy::module_name_repetitions)]
+pub fn get_labels(pass1: &[Pass1]) -> Vec<Label> {
+    let labels: Vec<Label> = pass1
+        .iter()
+        .filter(|n| {
+            label_name_from_string(&n.input).is_some() || data_name_from_string(&n.input).is_some()
+        })
+        .map(|n| -> Label {
+            Label {
+                program_counter: n.program_counter,
+                name: {
+                    let this = label_name_from_string(&n.input);
+                    match this {
+                        Some(x) => x,
+                        None => {
+                            let this = data_name_from_string(&n.input);
+                            let default = String::new();
+                            match this {
+                                Some(x) => x,
+                                None => default,
+                            }
+                        }
+                    }
+                },
+                line_counter: n.line_counter,
+            }
+        })
+        .collect();
+    labels
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::files::LineType;
+
     use super::*;
 
     #[test]
@@ -226,4 +263,19 @@ mod tests {
         assert_eq!(convert_argument("label2:", &mut msg_list, 14, &mut labels), Some("00000002".to_string()));
 
     }
+
+    #[test]
+    // Test that the labels are correctly extracted from the pass1 list
+    fn test_get_labels() {
+        let pass1 = vec![
+            Pass1 {program_counter:0,line_counter:0,input:"label1:".to_string(), line_type:LineType::Label },
+            Pass1 {program_counter:2,line_counter:0,input:"xxxx".to_string(), line_type:LineType::Opcode },
+            Pass1 {program_counter:4,line_counter:1,input:"label2:".to_string(), line_type:LineType::Label },
+            Pass1 {program_counter:6,line_counter:2,input:"label3:".to_string(), line_type:LineType::Label }];
+        let labels = get_labels(&pass1);
+        assert_eq!(labels[0], Label { program_counter: 0, name: "label1:".to_string(), line_counter: 0 });
+        assert_eq!(labels[1], Label { program_counter: 4, name: "label2:".to_string(), line_counter: 1 });
+        assert_eq!(labels[2], Label { program_counter: 6, name: "label3:".to_string(), line_counter: 2 });
+    }
+            
 }

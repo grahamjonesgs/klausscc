@@ -1,4 +1,4 @@
-use crate::messages::{MessageType, MsgList};
+use crate::{messages::{MessageType, MsgList}, opcodes::Pass0};
 
 #[derive(Clone,PartialEq,Debug)]
 pub struct Macro {
@@ -225,10 +225,69 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
     input_macros
 }
 
+/// Expands the input lines by expanding all macros
+///
+/// Takes the input list of all lines and macro vector and expands
+#[allow(clippy::module_name_repetitions)]
+pub fn expand_macros(
+    msg_list: &mut MsgList,
+    input_list: Vec<String>,
+    macro_list: &mut [Macro],
+) -> Vec<Pass0> {
+    let mut pass0: Vec<Pass0> = Vec::new();
+    let mut input_line_count: u32 = 1;
+    for code_line in input_list {
+        if macro_name_from_string(&code_line).is_some() {
+            let items = return_macro_items_replace(
+                code_line.trim(),
+                macro_list,
+                input_line_count,
+                msg_list,
+            );
+            if items.is_some() {
+                for item in Option::unwrap(items) {
+                    pass0.push(Pass0 {
+                        input: item + " // Macro expansion from "
+                             + &{
+                                let this = macro_name_from_string(&code_line);
+                                let default = String::new();
+                                match this {
+                                    Some(x) => x,
+                                    None => default,
+                                }
+                            }
+                            .to_string(),
+                        line_counter: input_line_count,
+                    });
+                }
+            } else {
+                msg_list.push(
+                    format!("Macro not found {code_line}"),
+                    None,
+                    MessageType::Error,
+                );
+                pass0.push(Pass0 {
+                    input: code_line,
+                    line_counter: input_line_count,
+                });
+            }
+        } else {
+            pass0.push(Pass0 {
+                input: code_line,
+                line_counter: input_line_count,
+            });
+        }
+        input_line_count += 1;
+    }
+    pass0
+}
 
+#[cfg(test)]
 mod tests {
+    
     #[allow(unused_imports)]
-    use super::*;
+    use crate::helper::strip_comments;
+    use crate::{macros::{macro_name_from_string, return_macro, Macro, return_macro_items_replace, expand_macros_multi}, messages::MsgList};
 
     #[test]
     fn test_macro_name_from_string1() {
@@ -347,5 +406,78 @@ mod tests {
         assert_eq!(output, *macros_result);
        
     }
+    #[test]
+    // Test expand macros, to make sure it expands the macros correctly
+    fn test_expand_macros1() {
+        use super::*;
+        let mut msg_list = MsgList::new();
+        let macros = &mut Vec::<Macro>::new();
+        macros.push(Macro {
+            name: String::from("$MACRO1"),
+            variables: 2,
+            items: vec![String::from("MOV %1"), String::from("RET %2")],
+        });
+        macros.push(Macro {
+            name: String::from("$MACRO2"),
+            variables: 2,
+            items: vec![String::from("PUSH %2"), String::from("POP %1")],
+        });
+        let input = vec![String::from("$MACRO1 A B"),String::from("$MACRO2 C D")];
+        let mut pass0= expand_macros(&mut msg_list,input , macros);
+        assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
+        assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
+        assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
+        assert_eq!(strip_comments(&mut pass0[3].input), "POP C");
+    }
 
+    #[test]
+    // Test expand macros, with too few variables, gives error
+    fn test_expand_macros2() {
+        use super::*;
+        let mut msg_list = MsgList::new();
+        let macros = &mut Vec::<Macro>::new();
+        macros.push(Macro {
+            name: String::from("$MACRO1"),
+            variables: 2,
+            items: vec![String::from("MOV %1"), String::from("RET %2")],
+        });
+        macros.push(Macro {
+            name: String::from("$MACRO2"),
+            variables: 2,
+            items: vec![String::from("PUSH %2"), String::from("POP %1")],
+        });
+        let input = vec![String::from("$MACRO1 A B"),String::from("$MACRO2 C")];
+        let mut pass0= expand_macros(&mut msg_list,input , macros);
+        assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
+        assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
+        assert_eq!(strip_comments(&mut pass0[2].input), "PUSH");
+        assert_eq!(strip_comments(&mut pass0[3].input), "POP C");
+        assert_eq!(msg_list.number_errors(), 1);
+        assert_eq!(msg_list.list[0].name, "Missing argument 2 for macro $MACRO2");
+    }
+
+    #[test]
+    // Test expand macros, passing too many variables, gives warning
+    fn test_expand_macros3() {
+        use super::*;
+        let mut msg_list = MsgList::new();
+        let macros = &mut Vec::<Macro>::new();
+        macros.push(Macro {
+            name: String::from("$MACRO1"),
+            variables: 2,
+            items: vec![String::from("MOV %1"), String::from("RET %2")],
+        });
+        macros.push(Macro {
+            name: String::from("$MACRO2"),
+            variables: 1,
+            items: vec![String::from("PUSH %2")],
+        });
+        let input = vec![String::from("$MACRO1 A B"),String::from("$MACRO2 C D")];
+        let mut pass0= expand_macros(&mut msg_list,input , macros);
+        assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
+        assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
+        assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
+        assert_eq!(msg_list.number_warnings(), 1);
+        assert_eq!(msg_list.list[0].name, "Too many variables for macro $MACRO2");
+    }
 }

@@ -16,9 +16,9 @@ mod labels;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{LineType,  filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec, write_serial};
-use helper::{create_bin_string, data_as_bytes, data_name_from_string, is_valid_line, line_type, num_data_bytes, strip_comments};
-use labels::{Label, find_duplicate_label, label_name_from_string};
-use macros::{Macro, expand_macros_multi, macro_name_from_string, return_macro_items_replace};
+use helper::{create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments};
+use labels::{Label, find_duplicate_label, get_labels};
+use macros::{expand_macros_multi, expand_macros};
 use opcodes::{Opcode, Pass0, Pass1, Pass2, add_arguments, add_registers, num_arguments};
 use messages::{print_messages, MessageType, MsgList};
 
@@ -79,7 +79,7 @@ fn main() {
         std::process::exit(1);
     }
     // Pass 0 to add macros
-    let pass0 = expand_macros(&mut msg_list, input_list, &mut macro_list);
+    let pass0 = expand_macros(&mut msg_list, input_list.unwrap_or([].to_vec()), &mut macro_list);
 
     // Pass 1 to get line numbers and labels
     //msg_list.push("Pass 1".to_string(), None, MessageType::Info);
@@ -204,61 +204,6 @@ pub fn print_results(msg_list: &mut MsgList, start_time: NaiveTime) {
     );
 }
 
-/// Expands the input lines by expanding all macros
-///
-/// Takes the input list of all lines and macro vector and expands
-pub fn expand_macros(
-    msg_list: &mut MsgList,
-    input_list: Option<Vec<String>>,
-    macro_list: &mut [Macro],
-) -> Vec<Pass0> {
-    let mut pass0: Vec<Pass0> = Vec::new();
-    let mut input_line_count: u32 = 1;
-    for code_line in input_list.unwrap_or([].to_vec()) {
-        if macro_name_from_string(&code_line).is_some() {
-            let items = return_macro_items_replace(
-                code_line.trim(),
-                macro_list,
-                input_line_count,
-                msg_list,
-            );
-            if items.is_some() {
-                for item in Option::unwrap(items) {
-                    pass0.push(Pass0 {
-                        input: item
-                            + &{
-                                let this = macro_name_from_string(&code_line);
-                                let default = String::new();
-                                match this {
-                                    Some(x) => x,
-                                    None => default,
-                                }
-                            }
-                            .to_string(),
-                        line_counter: input_line_count,
-                    });
-                }
-            } else {
-                msg_list.push(
-                    format!("Macro not found {code_line}"),
-                    None,
-                    MessageType::Error,
-                );
-                pass0.push(Pass0 {
-                    input: code_line,
-                    line_counter: input_line_count,
-                });
-            }
-        } else {
-            pass0.push(Pass0 {
-                input: code_line,
-                line_counter: input_line_count,
-            });
-        }
-        input_line_count += 1;
-    }
-    pass0
-}
 
 /// Returns pass1 from pass0
 ///
@@ -295,38 +240,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
     pass1
 }
 
-/// Create the vector of labels
-///
-/// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels
-fn get_labels(pass1: &[Pass1]) -> Vec<Label> {
-    let labels: Vec<Label> = pass1
-        .iter()
-        .filter(|n| {
-            label_name_from_string(&n.input).is_some() || data_name_from_string(&n.input).is_some()
-        })
-        .map(|n| -> Label {
-            Label {
-                program_counter: n.program_counter,
-                name: {
-                    let this = label_name_from_string(&n.input);
-                    match this {
-                        Some(x) => x,
-                        None => {
-                            let this = data_name_from_string(&n.input);
-                            let default = String::new();
-                            match this {
-                                Some(x) => x,
-                                None => default,
-                            }
-                        }
-                    }
-                },
-                line_counter: n.line_counter,
-            }
-        })
-        .collect();
-    labels
-}
+
 
 /// Returns pass2 from pass1
 ///
@@ -422,3 +336,4 @@ pub fn write_binary_file(msg_list: &mut MsgList,binary_file_name: &str, bin_stri
         );
     }
 }
+

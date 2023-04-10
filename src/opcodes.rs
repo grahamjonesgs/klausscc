@@ -12,7 +12,7 @@ pub struct Opcode {
     pub comment: String,
 }
 
-
+#[derive(Debug)]
 pub struct Pass0 {
     pub input: String,
     pub line_counter: u32,

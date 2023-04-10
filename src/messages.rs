@@ -111,4 +111,6 @@ mod tests {
         msg_list.push("Test".to_string(), None, MessageType::Error);
         assert_eq!(msg_list.number_warnings(), 1);
     }
+    
+    
 }
