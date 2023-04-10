@@ -16,7 +16,7 @@ pub struct Message {
 }
 
 pub struct MsgList {
-    list: Vec<Message>,
+    pub list: Vec<Message>,
 }
 
 impl MsgList {

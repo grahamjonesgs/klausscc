@@ -61,8 +61,9 @@ pub fn convert_argument(
     line_number: u32,
     labels: &mut Vec<Label>,
 ) -> Option<String> {
-    if label_name_from_string(argument).is_some() {
-        match return_label_value(argument, labels) {
+    let argument_trim = argument.trim();
+    if label_name_from_string(argument_trim).is_some() {
+        match return_label_value(argument_trim, labels) {
             Some(n) => return Some(format!("{n:08X}")),
             None => {
                 msg_list.push(
@@ -75,8 +76,8 @@ pub fn convert_argument(
         };
     }
 
-    if data_name_from_string(argument).is_some() {
-        match return_label_value(argument, labels) {
+    if data_name_from_string(argument_trim).is_some() {
+        match return_label_value(argument_trim, labels) {
             Some(n) => return Some(format!("{n:08X}")),
             None => {
                 msg_list.push(
@@ -89,8 +90,8 @@ pub fn convert_argument(
         };
     }
 
-    if argument.len() >= 2 && (argument[0..2] == *"0x" || argument[0..2] == *"0X") {
-        let without_prefix = argument.trim_start_matches("0x");
+    if argument_trim.len() >= 2 && (argument_trim[0..2] == *"0x" || argument_trim[0..2] == *"0X") {
+        let without_prefix = argument_trim.trim_start_matches("0x");
         let without_prefix = without_prefix.trim_start_matches("0X");
         let int_value_result = i64::from_str_radix(without_prefix, 16);
         if int_value_result.is_err() {
@@ -109,7 +110,7 @@ pub fn convert_argument(
         return None;
     }
 
-    match argument.parse::<i64>() {
+    match argument_trim.parse::<i64>() {
         Ok(n) => {
             if n <= 4_294_967_295 {
                 return Some(format!("{n:08X}"));
@@ -131,3 +132,98 @@ pub fn convert_argument(
     None
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_label_name_from_string() {
+        assert_eq!(label_name_from_string("label:"), Some("label:".to_string()));
+        assert_eq!(label_name_from_string("label: "), Some("label:".to_string()));
+        assert_eq!(label_name_from_string("label :"), None);
+        assert_eq!(label_name_from_string("label : "), None);
+        assert_eq!(label_name_from_string("label"), None);
+        assert_eq!(label_name_from_string("label "), None);
+        assert_eq!(label_name_from_string(" label"), None);
+        assert_eq!(label_name_from_string(" label "), None);
+    }
+
+    #[test]
+    fn test_return_label_value() {
+        let mut labels = vec![
+            Label {
+                program_counter: 0,
+                name: "label1".to_string(),
+                line_counter: 0,
+            },
+            Label {
+                program_counter: 1,
+                name: "label2".to_string(),
+                line_counter: 0,
+            },
+        ];
+        assert_eq!(return_label_value("label1", &mut labels), Some(0));
+        assert_eq!(return_label_value("label2", &mut labels), Some(1));
+        assert_eq!(return_label_value("label3", &mut labels), None);
+    }
+
+    #[test]
+    fn test_find_duplicate_label() {
+        let mut labels = vec![
+            Label {
+                program_counter: 0,
+                name: "label1".to_string(),
+                line_counter: 0,
+            },
+            Label {
+                program_counter: 1,
+                name: "label2".to_string(),
+                line_counter: 0,
+            },
+            Label {
+                program_counter: 2,
+                name: "label1".to_string(),
+                line_counter: 3,
+            },
+        ];
+        let mut msg_list = MsgList::new();
+        find_duplicate_label(&mut labels, &mut msg_list);
+        assert_eq!(msg_list.number_errors()   , 1);
+        assert_eq!(msg_list.number_warnings() , 0);
+       
+       assert_eq!(msg_list.list[0].name, "Duplicate label label1 found, with differing values");
+        }
+
+    #[test]
+    fn test_convert_argument() {
+        let mut labels = vec![
+            Label {
+                program_counter: 1,
+                name: "label1:".to_string(),
+                line_counter: 1,
+            },
+            Label {
+                program_counter: 2,
+                name: "label2:".to_string(),
+                line_counter: 2,
+            },
+        ];
+        let mut msg_list = MsgList::new();
+        assert_eq!(convert_argument("label1", &mut msg_list, 0, &mut labels), None);
+        assert_eq!(convert_argument("label2", &mut msg_list, 1, &mut labels), None);
+        assert_eq!(convert_argument("label3", &mut msg_list, 2, &mut labels), None);
+        assert_eq!(convert_argument("0x1234", &mut msg_list, 3, &mut labels), Some("00001234".to_string()));
+        assert_eq!(convert_argument("0x123456789", &mut msg_list, 4, &mut labels), None);
+        assert_eq!(convert_argument("1234", &mut msg_list, 5, &mut labels), Some("000004D2".to_string()));
+        assert_eq!(convert_argument("123456789", &mut msg_list, 6, &mut labels), Some("075BCD15".to_string()));
+        assert_eq!(convert_argument("label1:", &mut msg_list, 7, &mut labels), Some("00000001".to_string()));
+        assert_eq!(convert_argument("label1: ", &mut msg_list, 8, &mut labels), Some("00000001".to_string()));
+        assert_eq!(convert_argument("label1 :", &mut msg_list, 9, &mut labels), None);
+        assert_eq!(convert_argument("label1 : ", &mut msg_list, 10, &mut labels), None);
+        assert_eq!(convert_argument("label1", &mut msg_list, 11, &mut labels), None);
+        assert_eq!(convert_argument("label1 ", &mut msg_list, 12, &mut labels), None);
+        assert_eq!(convert_argument(" label1", &mut msg_list, 13, &mut labels), None);
+        assert_eq!(convert_argument("label2:", &mut msg_list, 14, &mut labels), Some("00000002".to_string()));
+
+    }
+}
