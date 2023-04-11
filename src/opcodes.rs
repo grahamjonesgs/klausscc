@@ -18,6 +18,7 @@ pub struct Pass0 {
     pub line_counter: u32,
 }
 
+#[derive(Debug)]
 pub struct Pass1 {
     pub input: String,
     pub line_counter: u32,
@@ -25,6 +26,7 @@ pub struct Pass1 {
     pub line_type: LineType,
 }
 
+#[derive(Debug)]
 pub struct Pass2 {
     pub input: String,
     pub line_counter: u32,
