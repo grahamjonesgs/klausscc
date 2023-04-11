@@ -78,11 +78,15 @@ fn main() {
         None,
         MessageType::Info,
     );
-    let input_list = read_file_to_vec(&input_file_name);
+    let mut opened_files: Vec<String> = Vec::new();
+    let input_list = read_file_to_vec(&input_file_name, &mut msg_list,&mut opened_files);
+    println!("Input list is {input_list:#?}");
     if input_list.is_none() {
-        println!("Unable to open input file {input_file_name:?}");
+        //println!("Unable to open input file {input_file_name:?}");
+        print_messages(&mut msg_list);
         std::process::exit(1);
     }
+    
     // Pass 0 to add macros
     let pass0 = expand_macros(
         &mut msg_list,
@@ -397,7 +401,7 @@ mod tests {
         assert_eq!(pass1[2].program_counter, 4);
         assert_eq!(pass1[3].program_counter, 5);
     }
-
+    #[allow(clippy::too_many_lines)]
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
     fn test_get_pass2_1() {
@@ -448,50 +452,55 @@ mod tests {
             registers: 2,
         });
 
-        let pass2=get_pass2(&mut msg_list, vec![
-            Pass1 {
-                input: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_string(),
-                line_counter: 1,
-                program_counter: 0,
-                line_type: LineType::Opcode,
-            },
-            Pass1 {
-                input: "DELAY 0x7".to_string(),
-                line_counter: 1,
-                program_counter: 1,
-                line_type: LineType::Opcode,
-            },
-            Pass1 {
-                input: "PUSH A".to_string(),
-                line_counter: 2,
-                program_counter: 3,
-                line_type: LineType::Opcode,
-            },
-            Pass1 {
-                input: "RET".to_string(),
-                line_counter: 3,
-                program_counter: 4,
-                line_type: LineType::Opcode,
-            },
-            Pass1 {
-                input: "RET".to_string(),
-                line_counter: 3,
-                program_counter: 5,
-                line_type: LineType::Opcode,
-            },
-            Pass1 {
-                input: "MOVR C 0xAAAA".to_string(),
-                line_counter: 3,
-                program_counter: 5,
-                line_type: LineType::Opcode,
-            },
-            Pass1 {
-                input: "DMOV D E 0xA 0xB".to_string(),
-                line_counter: 3,
-                program_counter: 5,
-                line_type: LineType::Opcode,
-            },
-        ], opcodes.clone(), labels);
+        let pass2 = get_pass2(
+            &mut msg_list,
+            vec![
+                Pass1 {
+                    input: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_string(),
+                    line_counter: 1,
+                    program_counter: 0,
+                    line_type: LineType::Opcode,
+                },
+                Pass1 {
+                    input: "DELAY 0x7".to_string(),
+                    line_counter: 1,
+                    program_counter: 1,
+                    line_type: LineType::Opcode,
+                },
+                Pass1 {
+                    input: "PUSH A".to_string(),
+                    line_counter: 2,
+                    program_counter: 3,
+                    line_type: LineType::Opcode,
+                },
+                Pass1 {
+                    input: "RET".to_string(),
+                    line_counter: 3,
+                    program_counter: 4,
+                    line_type: LineType::Opcode,
+                },
+                Pass1 {
+                    input: "RET".to_string(),
+                    line_counter: 3,
+                    program_counter: 5,
+                    line_type: LineType::Opcode,
+                },
+                Pass1 {
+                    input: "MOVR C 0xAAAA".to_string(),
+                    line_counter: 3,
+                    program_counter: 5,
+                    line_type: LineType::Opcode,
+                },
+                Pass1 {
+                    input: "DMOV D E 0xA 0xB".to_string(),
+                    line_counter: 3,
+                    program_counter: 5,
+                    line_type: LineType::Opcode,
+                },
+            ],
+            opcodes.clone(),
+            labels,
+        );
         print_messages(&mut msg_list);
         assert_eq!(pass2[0].opcode, "00000020EEEEEEEEFFFFFFFF");
         assert_eq!(pass2[1].opcode, "0000004000000007");
@@ -515,14 +524,17 @@ mod tests {
             variables: 0,
             registers: 1,
         });
-        let pass2=get_pass2(&mut msg_list, vec![
-            Pass1 {
+        let pass2 = get_pass2(
+            &mut msg_list,
+            vec![Pass1 {
                 input: "TEST".to_string(),
                 line_counter: 1,
                 program_counter: 0,
                 line_type: LineType::Opcode,
-            },
-        ], opcodes.clone(), labels);
-        assert_eq!(pass2[0].opcode, "ERR     ");    
+            }],
+            opcodes.clone(),
+            labels,
+        );
+        assert_eq!(pass2[0].opcode, "ERR     ");
     }
 }

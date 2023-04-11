@@ -1,20 +1,21 @@
-use crate::{messages::{MessageType, MsgList}, opcodes::Pass2};
-use crate::macros::{Macro, return_macro};
 use crate::helper::trim_newline;
-use crate::opcodes::{Opcode, return_opcode};
+use crate::macros::{return_macro, Macro};
+use crate::opcodes::{return_opcode, Opcode};
+use crate::{
+    messages::{MessageType, MsgList},
+    opcodes::Pass2,
+};
 
-use core::fmt::Write as _;
 use core::fmt;
+use core::fmt::Write as _;
+use itertools::Itertools;
 use std::{
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
 };
-use itertools::Itertools;
 
-
-
-#[derive(PartialEq,Debug)]
+#[derive(PartialEq, Debug)]
 pub enum LineType {
     Comment,
     Blank,
@@ -23,6 +24,7 @@ pub enum LineType {
     Data,
     Error,
 }
+
 
 impl fmt::Display for Opcode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -67,11 +69,6 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     // Define number of registers from opcode definition
-
-
-
-
-    
     let mut num_registers: u32 = 0;
     if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
         num_registers = 1;
@@ -105,7 +102,10 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     Some(Opcode {
-        opcode: format!("0000{}", &input_line[pos_opcode..pos_opcode + 4].to_string()),
+        opcode: format!(
+            "0000{}",
+            &input_line[pos_opcode..pos_opcode + 4].to_string()
+        ),
         registers: num_registers,
         variables: num_variables,
         comment: input_line[pos_comment..pos_end_comment].to_string(),
@@ -169,7 +169,6 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         let difference_all_variables: Vec<_> = all_variables
             .into_iter()
             .filter(|item| !all_found_variables.contains(item))
-            
             .collect();
         let mut missing: String = String::new();
         for i in difference_all_variables {
@@ -181,9 +180,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         }
 
         msg_list.push(
-            format!(
-                "Error in macro variable definition for macro {name}, missing {missing:?}",
-            ),
+            format!("Error in macro variable definition for macro {name}, missing {missing:?}",),
             None,
             MessageType::Warning,
         );
@@ -251,24 +248,99 @@ pub fn parse_vh_file(
 
 /// Open text file and return as vector of strings
 ///
-/// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String)
-pub fn read_file_to_vec(filename: &str) -> Option<Vec<String>> {
+/// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
+pub fn read_file_to_vec(
+    filename: &str,
+    msg_list: &mut MsgList,
+    opened_files: &mut Vec<String>,
+) -> Option<Vec<String>> {
     let file = File::open(filename);
     if file.is_err() {
+        msg_list.push(
+            format!("Unable to open file {filename}"),
+            None,
+            MessageType::Error,
+        );
         return None;
     }
+
+    for file in opened_files.clone() {
+        if file == filename {
+            msg_list.push(
+                format!("Recursive include of file {filename}"),
+                None,
+                MessageType::Error,
+            );
+            return None;
+        }
+    }
+
+    opened_files.push(filename.to_string());
 
     let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
 
     for line in buf.lines() {
         match line {
-            Ok(v) => lines.push(v),
-
+            Ok(v) => {
+                if is_include(&v) {
+                    let include_file = get_include_filename(&v);
+                    if include_file.is_none() {
+                        msg_list.push(
+                            format!("Unable to parse include file {v}"),
+                            None,
+                            MessageType::Error,
+                        );
+                        return None;
+                    }
+                    let include_file = include_file.unwrap();
+                    let include_lines =
+                        read_file_to_vec(&include_file, msg_list, opened_files);
+                    if include_lines.is_none() {
+                        msg_list.push(
+                            format!("Unable to open include file {include_file}"),
+                            None,
+                            MessageType::Error,
+                        );
+                        return None;
+                    }
+                    let include_lines = include_lines.unwrap();
+                    for line in include_lines {
+                        lines.push(line);
+                    }
+                } else {
+                    lines.push(v);
+                }
+            }
             Err(e) => println!("Error parsing opcode file: {e:?}"),
         }
     }
+    opened_files.pop();
     Some(lines)
+}
+
+/// Return true if string is !include
+///
+/// Checks if the string is include and returns true if it is
+pub fn is_include(line: &str) -> bool {
+    let line = line.trim();
+    if line.starts_with("!include") {
+        return true;
+    }
+    false
+}
+
+/// Return the filename from include string
+///
+/// Returns the filename from include string
+pub fn get_include_filename(line: &str) -> Option<String> {
+    let line = line.trim();
+    if !line.starts_with("!include") {
+        return None;
+    }
+    let line = line.replace("!include", "");
+    let line = line.trim();
+    Some(line.to_string())
 }
 
 /// Return the stem of given filename
@@ -323,10 +395,8 @@ pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
         } else if pass.line_type == LineType::Data || pass.line_type == LineType::Label {
             out_line = format!(
                 "0x{:08X}:                   -- {}\n",
-                pass.program_counter,
-                pass.input
+                pass.program_counter, pass.input
             );
-        
         } else if pass.line_type == LineType::Error {
             out_line = format!("Error                         -- {}\n", pass.input);
         } else {
@@ -350,11 +420,7 @@ pub fn format_opcodes(input: &mut String) -> String {
         return input[0..4].to_string() + &input[4..8] + "         ";
     }
     if input.len() == 16 {
-        return input[0..4].to_string()
-            + &input[4..8]
-            + " "
-            + &input[8..12]
-            + &input[12..16];
+        return input[0..4].to_string() + &input[4..8] + " " + &input[8..12] + &input[12..16];
     }
     (*input).to_string()
 }
