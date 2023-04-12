@@ -2,8 +2,9 @@ use crate::files::LineType;
 use crate::labels::convert_argument;
 use crate::labels::Label;
 use crate::messages::{MessageType, MsgList};
+use core::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Opcode {
     pub name: String,
     pub opcode: String,
@@ -11,6 +12,17 @@ pub struct Opcode {
     pub variables: u32,
     pub comment: String,
 }
+
+impl fmt::Display for Opcode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "{} {}, registers {}, variables {} - {}",
+            self.name, self.opcode, self.registers, self.variables, self.comment
+        )
+    }
+}
+
 
 #[derive(Debug)]
 pub struct Pass0 {
@@ -33,6 +45,89 @@ pub struct Pass2 {
     pub program_counter: u32,
     pub line_type: LineType,
     pub opcode: String,
+}
+/// Parse opcode definition line to opcode
+///
+/// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
+pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
+    let pos_comment: usize;
+    let pos_end_comment: usize;
+    let line_pos_opcode: usize;
+
+    // Find the opcode if it exists
+    let pos_opcode: usize = match input_line.find("16'h") {
+        None => return None,
+        Some(a) => {
+            line_pos_opcode = a;
+            a + 4
+        }
+    };
+
+    // check if the line was commented out
+    match input_line.find("//") {
+        None => {}
+        Some(a) => {
+            if a < line_pos_opcode {
+                return None;
+            }
+        }
+    }
+
+    // Check for length of opcode
+    if input_line.len() < (pos_opcode + 4) {
+        return None;
+    }
+
+    // Define number of registers from opcode definition
+    let mut num_registers: u32 = 0;
+    if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
+        num_registers = 1;
+    }
+    if &input_line[pos_opcode + 2..pos_opcode + 4] == "??" {
+        num_registers = 2;
+    }
+
+    // Look for variable, and set flag
+    let mut num_variables: u32 = 0;
+    if input_line.contains("w_var1") {
+        if input_line.contains("w_var2") {
+            num_variables = 2;
+        } else {
+            num_variables = 1;
+        }
+    }
+    
+    // Look for comment as first word is opcode name
+    let pos_name: usize = match input_line.find("//") {
+        None => return None,
+        Some(a) => a + 3,
+    };
+
+    // Find end of first word after comment as end of opcode name
+    let pos_end_name: usize = match input_line[pos_name..].find(' ') {
+        None => return None,
+        Some(a) => a + pos_name,
+    };
+
+    // Set comments filed, or none if missing
+    if input_line.len() > pos_end_name + 1 {
+        pos_comment = pos_end_name + 1;
+        pos_end_comment = input_line.len();
+    } else {
+        pos_comment = 0;
+        pos_end_comment = 0;
+    }
+
+    Some(Opcode {
+        opcode: format!(
+            "0000{}",
+            &input_line[pos_opcode..pos_opcode + 4].to_string()
+        ),
+        registers: num_registers,
+        variables: num_variables,
+        comment: input_line[pos_comment..pos_end_comment].to_string(),
+        name: input_line[pos_name..pos_end_name].to_string(),
+    })
 }
 
 /// Returns number of args for opcode
@@ -225,7 +320,7 @@ pub fn add_arguments(
 
 #[cfg(test)]
 mod tests {
-    use crate::{opcodes::{Opcode, num_registers, return_opcode, add_registers, add_arguments}, labels, messages::print_messages};
+    use crate::{opcodes::{Opcode, num_registers, return_opcode, add_registers, add_arguments, opcode_from_string}, labels, messages::print_messages};
 
     #[test]
     // Test that the correct number of registers is returned
@@ -461,5 +556,66 @@ mod tests {
         print_messages(&mut msg_list);
         assert_eq!(output, String::from("000000010000000F"));
     }
+
+    #[test]
+    // Test import with two registers
+    fn test_opcode_from_string1() {
+        let input = "16'h01??: t_copy_regs;                              // COPY Copy register";
+        let output = opcode_from_string(input);
+        assert_eq!(
+            output,
+            Some(Opcode {
+                name: "COPY".to_string(),
+                opcode: "000001??".to_string(),
+                registers: 2,
+                variables: 0,
+                comment: "Copy register".to_string()
+            })
+        );
+    }
+    #[test]
+    // Test import with one argument and one register
+    fn test_opcode_from_string2() {
+        let input =
+            "16'h086?: t_and_reg_value(w_var1);                  // ANDV AND register with value";
+        let output = opcode_from_string(input);
+        assert_eq!(
+            output,
+            Some(Opcode {
+                name: "ANDV".to_string(),
+                opcode: "0000086?".to_string(),
+                registers: 1,
+                variables: 1,
+                comment: "AND register with value".to_string()
+            })
+        );
+    }
+
+    #[test]
+    // Test import with two arguments
+    fn test_opcode_from_string3() {
+        let input =
+            "16'h0864: t_and_reg_value(w_var1,w_var2);        // MOV Move from addr to addr";
+        let output = opcode_from_string(input);
+        assert_eq!(
+            output,
+            Some(Opcode {
+                name: "MOV".to_string(),
+                opcode: "00000864".to_string(),
+                registers: 0,
+                variables: 2,
+                comment: "Move from addr to addr".to_string()
+            })
+        );
+    }
+
+    #[test]
+    // Test import if failed
+    fn test_opcode_from_string4() {
+        let input = "xxxxx";
+        let output = opcode_from_string(input);
+        assert_eq!(output, None);
+    }
+
 
 }

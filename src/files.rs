@@ -1,14 +1,13 @@
 use crate::helper::trim_newline;
-use crate::macros::{return_macro, Macro};
-use crate::opcodes::{return_opcode, Opcode};
+use crate::macros::{return_macro, Macro, macro_from_string};
+use crate::opcodes::{return_opcode, Opcode, opcode_from_string};
 use crate::{
     messages::{MessageType, MsgList},
     opcodes::Pass2,
 };
 
-use core::fmt;
-use core::fmt::Write as _;
-use itertools::Itertools;
+
+
 use std::{
     fs::File,
     io::{prelude::*, BufReader},
@@ -26,172 +25,9 @@ pub enum LineType {
 }
 
 
-impl fmt::Display for Opcode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{} {}, registers {}, variables {} - {}",
-            self.name, self.opcode, self.registers, self.variables, self.comment
-        )
-    }
-}
 
-/// Parse opcode definition line to opcode
-///
-/// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
-pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
-    let pos_comment: usize;
-    let pos_end_comment: usize;
-    let line_pos_opcode: usize;
 
-    // Find the opcode if it exists
-    let pos_opcode: usize = match input_line.find("16'h") {
-        None => return None,
-        Some(a) => {
-            line_pos_opcode = a;
-            a + 4
-        }
-    };
 
-    // check if the line was commented out
-    match input_line.find("//") {
-        None => {}
-        Some(a) => {
-            if a < line_pos_opcode {
-                return None;
-            }
-        }
-    }
-
-    // Check for length of opcode
-    if input_line.len() < (pos_opcode + 4) {
-        return None;
-    }
-
-    // Define number of registers from opcode definition
-    let mut num_registers: u32 = 0;
-    if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
-        num_registers = 1;
-    }
-    if &input_line[pos_opcode + 2..pos_opcode + 4] == "??" {
-        num_registers = 2;
-    }
-
-    // Look for variable, and set flag
-    let num_variables: u32 = u32::from(input_line.contains("w_var1"));
-
-    // Look for comment as first word is opcode name
-    let pos_name: usize = match input_line.find("//") {
-        None => return None,
-        Some(a) => a + 3,
-    };
-
-    // Find end of first word after comment as end of opcode name
-    let pos_end_name: usize = match input_line[pos_name..].find(' ') {
-        None => return None,
-        Some(a) => a + pos_name,
-    };
-
-    // Set comments filed, or none if missing
-    if input_line.len() > pos_end_name + 1 {
-        pos_comment = pos_end_name + 1;
-        pos_end_comment = input_line.len();
-    } else {
-        pos_comment = 0;
-        pos_end_comment = 0;
-    }
-
-    Some(Opcode {
-        opcode: format!(
-            "0000{}",
-            &input_line[pos_opcode..pos_opcode + 4].to_string()
-        ),
-        registers: num_registers,
-        variables: num_variables,
-        comment: input_line[pos_comment..pos_end_comment].to_string(),
-        name: input_line[pos_name..pos_end_name].to_string(),
-    })
-}
-
-/// Parse opcode definition line to macro
-///
-/// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None
-pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Macro> {
-    // Find the macro if it exists
-    if input_line.find('$').unwrap_or(usize::MAX) != 0 {
-        return None;
-    }
-    let mut name: String = String::new();
-    let mut item: String = String::new();
-    let mut items: Vec<String> = Vec::new();
-    let mut max_variable: u32 = 0;
-    let mut all_found_variables: Vec<i64> = Vec::new();
-    let mut all_variables: Vec<i64> = Vec::new();
-
-    let words = input_line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if i == 0 {
-            name = word.to_string();
-        } else if word == "/" {
-            items.push(item.to_string());
-            item = String::new();
-        } else {
-            if word.contains('%') {
-                let without_prefix = word.trim_start_matches('%');
-                let int_value = without_prefix.parse::<u32>();
-                if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
-                } else {
-                    all_found_variables.push(int_value.clone().unwrap_or(0).into());
-                    if int_value.clone().unwrap_or(0) > max_variable {
-                        max_variable = int_value.unwrap_or(0);
-                    }
-                }
-            }
-
-            if item.is_empty() {
-                item += word;
-            } else {
-                item = item + " " + word;
-            }
-        }
-    }
-
-    if !item.is_empty() {
-        items.push(item.to_string());
-    }
-
-    if max_variable as usize != all_found_variables.clone().into_iter().unique().count() {
-        for i in 1..max_variable {
-            all_variables.push(i.into());
-        }
-
-        // Find the missing variables and create string
-        let difference_all_variables: Vec<_> = all_variables
-            .into_iter()
-            .filter(|item| !all_found_variables.contains(item))
-            .collect();
-        let mut missing: String = String::new();
-        for i in difference_all_variables {
-            if !missing.is_empty() {
-                missing.push(' ');
-            }
-            //missing.push_str(&format!("%{}", i));
-            write!(missing, "%{i}").ok();
-        }
-
-        msg_list.push(
-            format!("Error in macro variable definition for macro {name}, missing {missing:?}",),
-            None,
-            MessageType::Warning,
-        );
-    }
-
-    Some(Macro {
-        name,
-        variables: max_variable,
-        items,
-    })
-}
 
 /// Parse file to opcode and macro vectors
 ///
@@ -294,8 +130,7 @@ pub fn read_file_to_vec(
                         return None;
                     }
                     let include_file = include_file.unwrap();
-                    let include_lines =
-                        read_file_to_vec(&include_file, msg_list, opened_files);
+                    let include_lines = read_file_to_vec(&include_file, msg_list, opened_files);
                     if include_lines.is_none() {
                         msg_list.push(
                             format!("Unable to open include file {include_file}"),
@@ -341,6 +176,40 @@ pub fn get_include_filename(line: &str) -> Option<String> {
     let line = line.replace("!include", "");
     let line = line.trim();
     Some(line.to_string())
+}
+
+/// Remove comments from vector of strings
+///
+/// Checks for /* */ and removes them from the vector of strings
+pub fn remove_block_comments(lines: Vec<String>) -> Vec<String> {
+    let mut in_comment = false;
+    let mut new_lines: Vec<String> = Vec::new();
+    for line in lines {
+        let mut new_line = String::new();
+        let mut in_char = false; // If in normal last was / or if in comment last was *
+        for c in line.chars() {
+            if in_comment {
+                if c == '/' && in_char {
+                    in_comment = false;
+                } else if c == '*' {
+                    in_char = true;
+                } else {
+                    in_char = false;
+                }
+            } else if c == '*' && in_char {
+                in_comment = true;
+                new_line.pop();
+            } else if c == '/' {
+                in_char = true;
+                new_line.push(c);
+            } else {
+                in_char = false;
+                new_line.push(c);
+            }
+        }
+        new_lines.push(new_line);
+    }
+    new_lines
 }
 
 /// Return the stem of given filename
@@ -534,4 +403,68 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
     );
 
     true
+}
+
+#[cfg(test)]
+mod test {
+    use crate::{
+        files::{remove_block_comments},
+    };
+
+    #[test]
+    // Test remove of commnets in single line
+    fn test_remove_block_comments1() {
+        let input = vec!["abc/* This is a comment */def".to_string()];
+        let output = remove_block_comments(input);
+        assert_eq!(output, vec!["abcdef"]);
+    }
+
+    #[test]
+    // Test remove of commnets in two lines
+    fn test_remove_block_comments2() {
+        let input = vec![
+            "abc/* This is a comment */def".to_string(),
+            "abc/* This is a comment */defg".to_string(),
+        ];
+        let output = remove_block_comments(input);
+        assert_eq!(output, vec!["abcdef", "abcdefg"]);
+    }
+
+    #[test]
+    // Test remove of commnets in across two lines
+    fn test_remove_block_comments3() {
+        let input = vec![
+            "abc/* This is a comment ".to_string(),
+            "so is this */defg".to_string(),
+        ];
+        let output = remove_block_comments(input);
+        assert_eq!(output, vec!["abc", "defg"]);
+    }
+
+    #[test]
+    // Test remove of commnets in across three line with blank line left
+    fn test_remove_block_comments4() {
+        let input = vec![
+            "abc/* This is a comment ".to_string(),
+            "so is this defg".to_string(),
+            "*/def".to_string(),
+        ];
+        let output = remove_block_comments(input);
+        assert_eq!(output, vec!["abc", "", "def"]);
+    }
+
+    #[test]
+    // Test restart comments
+    fn test_remove_block_comments5() {
+        let input = vec![
+            "abc/* This is a /* /*comment ".to_string(),
+            "so is this defg".to_string(),
+            "*/def".to_string(),
+        ];
+        let output = remove_block_comments(input);
+        assert_eq!(output, vec!["abc", "", "def"]);
+    }
+
+   
+    
 }

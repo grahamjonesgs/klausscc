@@ -27,6 +27,8 @@ use macros::{expand_macros, expand_macros_multi};
 use messages::{print_messages, MessageType, MsgList};
 use opcodes::{add_arguments, add_registers, num_arguments, Opcode, Pass0, Pass1, Pass2};
 
+use crate::files::remove_block_comments;
+
 /// Main function for Klausscc
 ///
 /// Main funation to read CLI and call other functions
@@ -78,19 +80,17 @@ fn main() {
         None,
         MessageType::Info,
     );
-    let mut opened_files: Vec<String> = Vec::new();
-    let input_list = read_file_to_vec(&input_file_name, &mut msg_list,&mut opened_files);
-    println!("Input list is {input_list:#?}");
+    let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
+    let input_list = read_file_to_vec(&input_file_name, &mut msg_list, &mut opened_files);
     if input_list.is_none() {
-        //println!("Unable to open input file {input_file_name:?}");
         print_messages(&mut msg_list);
         std::process::exit(1);
     }
-    
+
     // Pass 0 to add macros
     let pass0 = expand_macros(
         &mut msg_list,
-        input_list.unwrap_or([].to_vec()),
+        remove_block_comments(input_list.unwrap_or([].to_vec())),
         &mut macro_list,
     );
 
