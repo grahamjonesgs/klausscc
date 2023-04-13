@@ -16,7 +16,7 @@ mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{
-    filename_stem, output_binary, output_code, parse_vh_file, read_file_to_vec, write_serial,
+    filename_stem, output_binary, output_code, read_file_to_vec, write_serial,
     LineType,
 };
 use helper::{
@@ -25,7 +25,7 @@ use helper::{
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_macros, expand_macros_multi};
 use messages::{print_messages, MessageType, MsgList};
-use opcodes::{add_arguments, add_registers, num_arguments, Opcode, Pass0, Pass1, Pass2};
+use opcodes::{add_arguments, add_registers,  parse_vh_file, num_arguments, Opcode, Pass0, Pass1, Pass2};
 
 use crate::files::remove_block_comments;
 

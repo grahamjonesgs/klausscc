@@ -1,11 +1,8 @@
-use crate::helper::trim_newline;
-use crate::macros::{return_macro, Macro, macro_from_string};
-use crate::opcodes::{return_opcode, Opcode, opcode_from_string};
+use crate::helper::{trim_newline, strip_comments};
 use crate::{
     messages::{MessageType, MsgList},
     opcodes::Pass2,
 };
-
 
 
 use std::{
@@ -25,62 +22,6 @@ pub enum LineType {
 }
 
 
-
-
-
-
-/// Parse file to opcode and macro vectors
-///
-/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
-pub fn parse_vh_file(
-    filename: &impl AsRef<Path>,
-    msg_list: &mut MsgList,
-) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
-    let file = File::open(filename);
-    if file.is_err() {
-        return (None, None);
-    }
-
-    let buf = BufReader::new(file.unwrap());
-    let mut opcodes: Vec<Opcode> = Vec::new();
-    let mut macros: Vec<Macro> = Vec::new();
-
-    for line in buf.lines() {
-        match line {
-            Ok(v) => {
-                match opcode_from_string(&v) {
-                    None => (),
-                    Some(a) => {
-                        if return_opcode(&a.name, &mut opcodes).is_some() {
-                            msg_list.push(
-                                format!("Duplicate Opcode {} found", a.name),
-                                None,
-                                MessageType::Error,
-                            );
-                        }
-                        opcodes.push(a);
-                    }
-                }
-                match macro_from_string(&v, msg_list) {
-                    None => (),
-                    Some(a) => {
-                        if return_macro(&a.name, &mut macros).is_some() {
-                            msg_list.push(
-                                format!("Duplicate Macro definition {} found", a.name),
-                                None,
-                                MessageType::Error,
-                            );
-                        }
-                        macros.push(a);
-                    }
-                }
-            }
-
-            Err(e) => println!("Failed parsing opcode file: {e:?}"),
-        }
-    }
-    (Some(opcodes), Some(macros))
-}
 
 /// Open text file and return as vector of strings
 ///
@@ -116,15 +57,25 @@ pub fn read_file_to_vec(
     let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
 
+    let mut line_number=0;
     for line in buf.lines() {
         match line {
             Ok(v) => {
+                line_number+=1;
                 if is_include(&v) {
                     let include_file = get_include_filename(&v);
                     if include_file.is_none() {
                         msg_list.push(
-                            format!("Unable to parse include file {v}"),
-                            None,
+                            format!("Unable to parse include file {v} in {filename}"),
+                            Some(line_number),
+                            MessageType::Error,
+                        );
+                        return None;
+                    }
+                    if include_file.clone().unwrap_or(String::new())==String::new() {
+                        msg_list.push(
+                            format!("Missing include file name in {filename}"),
+                            Some(line_number),
                             MessageType::Error,
                         );
                         return None;
@@ -133,8 +84,8 @@ pub fn read_file_to_vec(
                     let include_lines = read_file_to_vec(&include_file, msg_list, opened_files);
                     if include_lines.is_none() {
                         msg_list.push(
-                            format!("Unable to open include file {include_file}"),
-                            None,
+                            format!("Unable to open include file {include_file} in {filename}"),
+                            Some(line_number),
                             MessageType::Error,
                         );
                         return None;
@@ -173,9 +124,10 @@ pub fn get_include_filename(line: &str) -> Option<String> {
     if !line.starts_with("!include") {
         return None;
     }
-    let line = line.replace("!include", "");
-    let line = line.trim();
-    Some(line.to_string())
+    let mut line = line.replace("!include", "");
+    let line=strip_comments(&mut line);
+    let mut words = line.split_whitespace();
+    Some(words.next().unwrap_or("").to_owned())
 }
 
 /// Remove comments from vector of strings
@@ -408,7 +360,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 #[cfg(test)]
 mod test {
     use crate::{
-        files::{remove_block_comments},
+        files::{remove_block_comments, is_include, get_include_filename, filename_stem, format_opcodes},
     };
 
     #[test]
@@ -464,6 +416,41 @@ mod test {
         let output = remove_block_comments(input);
         assert_eq!(output, vec!["abc", "", "def"]);
     }
+
+   #[test]
+   // Tests for the is_include to check if there is a !include as fiorst non white-space
+   fn test_is_include () {
+    assert!(is_include("!include file.type"));
+    assert!(!is_include("include file.type"));
+    assert!(is_include("!include"));
+    assert!(!is_include("!!include"));
+    assert!(is_include("    !include   123 234 456"));
+   }
+
+   #[test]
+   // Checkl funtions returns correct filename from !include
+   fn test_get_include_filename() {
+    assert_eq!(get_include_filename("!include myfile.name"),Some("myfile.name".to_string()));
+    assert_eq!(get_include_filename("testline"),None);
+    assert_eq!(get_include_filename("!include myfile.name extra words"),Some("myfile.name".to_string()));
+    assert_eq!(get_include_filename("!include"),Some(String::new()));
+    assert_eq!(get_include_filename("!include //test comment"),Some(String::new()));
+   }
+
+   #[test]
+   // Check correct filename stem is returned
+   fn test_filename_stem () {
+    assert_eq!(filename_stem(&"file.type".to_string()),"file");
+    assert_eq!(filename_stem(&"file".to_string()),"file"); 
+   }
+
+   #[test]
+   // Check for formatting of codes used for debug file
+   fn test_format_opcodes () {
+    assert_eq!(format_opcodes(&mut "0000000000000000".to_string()),"00000000 00000000");
+    assert_eq!(format_opcodes(&mut "0000".to_string()),"0000              ");
+    assert_eq!(format_opcodes(&mut "0123456789ABCDEF".to_string()),"01234567 89ABCDEF");
+   }
 
    
     

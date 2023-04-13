@@ -1,8 +1,16 @@
 use crate::files::LineType;
 use crate::labels::convert_argument;
 use crate::labels::Label;
+use crate::macros::Macro;
+use crate::macros::macro_from_string;
+use crate::macros::return_macro;
 use crate::messages::{MessageType, MsgList};
 use core::fmt;
+use std::{
+    fs::File,
+    io::{prelude::*, BufReader},
+    path::Path,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Opcode {
@@ -46,6 +54,61 @@ pub struct Pass2 {
     pub line_type: LineType,
     pub opcode: String,
 }
+
+
+/// Parse file to opcode and macro vectors
+///
+/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
+pub fn parse_vh_file(
+    filename: &impl AsRef<Path>,
+    msg_list: &mut MsgList,
+) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+    let file = File::open(filename);
+    if file.is_err() {
+        return (None, None);
+    }
+
+    let buf = BufReader::new(file.unwrap());
+    let mut opcodes: Vec<Opcode> = Vec::new();
+    let mut macros: Vec<Macro> = Vec::new();
+
+    for line in buf.lines() {
+        match line {
+            Ok(v) => {
+                match opcode_from_string(&v) {
+                    None => (),
+                    Some(a) => {
+                        if return_opcode(&a.name, &mut opcodes).is_some() {
+                            msg_list.push(
+                                format!("Duplicate Opcode {} found", a.name),
+                                None,
+                                MessageType::Error,
+                            );
+                        }
+                        opcodes.push(a);
+                    }
+                }
+                match macro_from_string(&v, msg_list) {
+                    None => (),
+                    Some(a) => {
+                        if return_macro(&a.name, &mut macros).is_some() {
+                            msg_list.push(
+                                format!("Duplicate Macro definition {} found", a.name),
+                                None,
+                                MessageType::Error,
+                            );
+                        }
+                        macros.push(a);
+                    }
+                }
+            }
+
+            Err(e) => println!("Failed parsing opcode file: {e:?}"),
+        }
+    }
+    (Some(opcodes), Some(macros))
+}
+
 /// Parse opcode definition line to opcode
 ///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
