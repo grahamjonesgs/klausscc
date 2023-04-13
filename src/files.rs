@@ -21,8 +21,6 @@ pub enum LineType {
     Error,
 }
 
-
-
 /// Open text file and return as vector of strings
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
@@ -452,6 +450,6 @@ mod test {
     assert_eq!(format_opcodes(&mut "0123456789ABCDEF".to_string()),"01234567 89ABCDEF");
    }
 
-   
+
     
 }

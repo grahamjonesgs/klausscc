@@ -1,4 +1,4 @@
-use crate::files::{LineType};
+use crate::files::LineType;
 use crate::labels::label_name_from_string;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{return_opcode, Opcode, Pass2};
@@ -199,7 +199,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
             None,
             MessageType::Error,
         );
-        return "00000000".to_string();
+        return "0000".to_string();
     }
 
     let mut position_index: u32 = 0;
@@ -270,26 +270,35 @@ pub fn trim_newline(s: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use crate::files::{LineType};
+    use crate::files::LineType;
     use crate::helper::{
         calc_checksum, create_bin_string, data_as_bytes, data_name_from_string, is_blank,
-        is_comment, is_valid_line, label_name_from_string, line_type, strip_comments, trim_newline,
-        MsgList,
+        is_comment, is_valid_line, label_name_from_string, line_type, num_data_bytes,
+        strip_comments, trim_newline, MsgList,
     };
     use crate::labels::{return_label_value, Label};
+    use crate::messages::print_messages;
     use crate::opcodes::{Opcode, Pass2};
 
     #[test]
     // Test that correct checksum is calculated
-    fn test_calc_checksum() {
+    fn test_calc_checksum1() {
         let mut msg_list = MsgList::new();
         let checksum = calc_checksum("S0000Z0010", &mut msg_list);
         assert_eq!(checksum, "0011");
     }
+    #[test]
+    // Test for invalid length
+    fn test_calc_checksum2() {
+        let mut msg_list = MsgList::new();
+        let checksum = calc_checksum("S00001Z0010", &mut msg_list);
+        assert_eq!(checksum, "0000");
+        assert_eq!(msg_list.list[0].name,"Opcode list length not multiple of 4, length is 9");
+    }
 
     #[test]
     // Test that correct checksum is calculated
-    fn test_calc_checksum2() {
+    fn test_calc_checksum3() {
         let mut msg_list = MsgList::new();
         let checksum = calc_checksum("S00000000Z0010", &mut msg_list);
         assert_eq!(checksum, "0012");
@@ -297,7 +306,7 @@ mod tests {
 
     #[test]
     // Test that correct checksum is calculated
-    fn test_calc_checksum3() {
+    fn test_calc_checksum4() {
         let mut msg_list = MsgList::new();
         let checksum = calc_checksum("S00009999Z0010", &mut msg_list);
         assert_eq!(checksum, "99AB");
@@ -463,6 +472,24 @@ mod tests {
     }
 
     #[test]
+    fn test_num_data_bytes1() {
+        let mut msg_list = MsgList::new();
+        let input = String::from("TEST 3");
+        let output = num_data_bytes(&input, &mut msg_list, 0);
+        assert_eq!(output, 24);
+    }
+
+    #[test]
+    fn test_num_data_bytes2() {
+        let mut msg_list = MsgList::new();
+        let input = String::from("TEST");
+        let output = num_data_bytes(&input, &mut msg_list, 0);
+        print_messages(&mut msg_list);
+        assert_eq!(output, 0);
+        assert_eq!(msg_list.list[0].name, "Error in data definition for TEST");
+    }
+
+    #[test]
     // Test for correct output from dats
     fn test_data_as_bytes1() {
         let input = String::from("TEST 3");
@@ -476,6 +503,34 @@ mod tests {
         let input = String::from("TEST");
         let output = data_as_bytes(&input);
         assert_eq!(output, None);
+    }
+
+    #[test]
+    // Test for correct output from invalid data line
+    fn test_data_as_bytes3() {
+        let input = String::new();
+        let output = data_as_bytes(&input);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_data_as_bytes4() {
+        let input = String::from("TEST \"Hello\"");
+        let output = data_as_bytes(&input);
+        assert_eq!(
+            output,
+            Some("48000000650000006C0000006C0000006F00000000000000".to_string()),
+        );
+    }
+
+    #[test]
+    fn test_data_as_bytes5() {
+        let input = String::from("TEST 0x1");
+        let output = data_as_bytes(&input);
+        assert_eq!(
+            output,
+            Some("00000000".to_string()),
+        );
     }
 
     #[test]
