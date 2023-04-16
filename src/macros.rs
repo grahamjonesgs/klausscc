@@ -245,7 +245,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                 if item_word.contains('%') {
                                     let without_prefix = item_word.trim_start_matches('%');
                                     let int_value = without_prefix.parse::<u32>();
-                                    if int_value.clone().is_err()
+                                    if int_value.is_err()
                                         || int_value.clone().unwrap_or(0) < 1
                                     {
                                         msg_list.push(
@@ -707,7 +707,18 @@ mod tests {
             assert_eq!(
                 msglist.list[0].name,
                 "Error in macro variable definition for macro $POPALL, missing \"%1\""
-            );
+            );     
         
     }
+
+    #[test]
+        // Convert string to macro with variables
+        fn test_macro_from_string4() {
+            let mut msglist = MsgList::new();
+            let input_line = String::from("POPALL POP %1 / POP %2");
+            let macro_result = macro_from_string(&input_line, &mut msglist);
+            assert_eq!(
+                macro_result,None);
+            
+        }
 }
