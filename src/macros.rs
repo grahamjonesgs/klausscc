@@ -531,6 +531,33 @@ mod tests {
 
         assert_eq!(output, *macros_result);
     }
+
+    #[test]
+    fn test_expand_macros_multi2() {
+        let macros = &mut Vec::<Macro>::new();
+
+        let msg_list = &mut MsgList::new();
+        macros.push(Macro {
+            name: String::from("$MACRO1"),
+            variables: 2,
+            items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE2 %2")],
+        });
+       /*  macros.push(Macro {
+            name: String::from("$MACRO2"),
+            variables: 2,
+            items: vec![String::from("$MACRO1 %2 %1"), String::from("$MACRO1 %2 %1")],
+        });
+        macros.push(Macro {
+            name: String::from("$MACRO3"),
+            variables: 2,
+            items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
+        }); */
+
+        let _output = expand_macros_multi(macros.clone(), msg_list);
+
+       assert_eq!(msg_list.list[0].name, "Too many macro passes, check $MACRO1");
+    }
+
     #[test]
     // Test expand macros, to make sure it expands the macros correctly
     fn test_expand_macros1() {

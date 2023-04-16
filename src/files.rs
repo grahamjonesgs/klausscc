@@ -358,8 +358,10 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 #[cfg(test)]
 mod test {
     use crate::{
-        files::{remove_block_comments, is_include, get_include_filename, filename_stem, format_opcodes},
+        files::{remove_block_comments, is_include, get_include_filename, filename_stem, format_opcodes}, messages::MsgList,
     };
+
+    use super::read_file_to_vec;
 
     #[test]
     // Test remove of commnets in single line
@@ -450,6 +452,12 @@ mod test {
     assert_eq!(format_opcodes(&mut "0123456789ABCDEF".to_string()),"01234567 89ABCDEF");
    }
 
+   #[test]
+   fn test_read_file_to_vec() {
+    let mut msg_list = MsgList::new();
+    let mut opened_files: Vec<String> = Vec::new();
+    read_file_to_vec("////xxxxxxx",&mut msg_list, &mut opened_files);
+    assert_eq!(msg_list.list[0].name,"Unable to open file ////xxxxxxx");
 
-    
+   }
 }

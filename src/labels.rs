@@ -261,7 +261,8 @@ mod tests {
         assert_eq!(convert_argument("label1 ", &mut msg_list, 12, &mut labels), None);
         assert_eq!(convert_argument(" label1", &mut msg_list, 13, &mut labels), None);
         assert_eq!(convert_argument("label2:", &mut msg_list, 14, &mut labels), Some("00000002".to_string()));
-
+        assert_eq!(convert_argument("label3:", &mut msg_list, 14, &mut labels), None);
+        assert_eq!(msg_list.list[msg_list.list.len()-1].name, "Label label3: not found - line 14".to_string());
     }
 
     #[test]
