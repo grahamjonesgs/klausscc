@@ -176,9 +176,10 @@ pub fn strip_comments(input: &mut str) -> String {
 /// Find checksum
 ///
 /// Calculates the checksum from the string of hex values, removing control characters
+#[allow(clippy::cast_possible_wrap)]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string: String = String::new();
-    let mut checksum: u32 = 0;
+    let mut checksum: i32 = 0;
 
     // Remove S, Z and X
     for char in input_string.chars() {
@@ -206,7 +207,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 
     for (index, _) in stripped_string.chars().enumerate() {
         if index % 4 == 0 {
-            let int_value = u32::from_str_radix(&stripped_string[index..index + 4], 16);
+            let int_value = i32::from_str_radix(&stripped_string[index..index + 4], 16);
             if int_value.is_err() {
                 msg_list.push(
                     {
@@ -224,7 +225,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
             }
         }
     }
-    checksum = (checksum + position_index - 1) % (0xFFFF + 1);
+    checksum = (checksum + position_index as i32 - 1).abs() % (0xFFFF + 1);
     format!("{checksum:04X}")
 }
 
@@ -313,9 +314,32 @@ mod tests {
     }
 
     #[test]
+    // Test that correct checksum is calculated
+    fn test_calc_checksum5() {
+        let mut msg_list = MsgList::new();
+        let checksum = calc_checksum("____", &mut msg_list);
+        assert_eq!(checksum, "0001");
+        assert_eq!(msg_list.list[0].name,"Error creating opcode for invalid value ____");
+    }
+
+    #[test]
     // Test that line is trimmed of newline
-    fn test_trim_newline() {
+    fn test_trim_newline1() {
         let mut s = String::from("Hello\n");
+        trim_newline(&mut s);
+        assert_eq!(s, "Hello");
+    }
+    #[test]
+    // Test that line is trimmed of newline
+    fn test_trim_newline2() {
+        let mut s = String::from("Hello\r\n");
+        trim_newline(&mut s);
+        assert_eq!(s, "Hello");
+    }
+    #[test]
+    // Test that line is trimmed of newline
+    fn test_trim_newline3() {
+        let mut s = String::from("Hello\n\r");
         trim_newline(&mut s);
         assert_eq!(s, "Hello");
     }
@@ -398,7 +422,7 @@ mod tests {
 
     #[test]
     // Test for valid line returns true is opcode is found
-    fn test_is_valid_line() {
+    fn test_is_valid_line1() {
         let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -410,6 +434,21 @@ mod tests {
         });
         let output = is_valid_line(opcodes, input);
         assert!(output);
+    }
+
+    #[test]
+    fn test_is_valid_line2() {
+        let input = String::from("PUSH");
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            name: String::from("PULL"),
+            opcode: String::from("1234"),
+            comment: String::new(),
+            variables: 0,
+            registers: 0,
+        });
+        let output = is_valid_line(opcodes, input);
+        assert!(!output);
     }
 
     #[test]
@@ -531,6 +570,20 @@ mod tests {
             output,
             Some("00000000".to_string()),
         );
+    }
+
+    #[test]
+    fn test_data_as_bytes6() {
+        let input = String::from("TEST \"Hello");
+        let output = data_as_bytes(&input);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_data_as_bytes7() {
+        let input = String::from("TEST FFFF");
+        let output = data_as_bytes(&input);
+        assert_eq!(output, None);
     }
 
     #[test]

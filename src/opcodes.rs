@@ -383,7 +383,7 @@ pub fn add_arguments(
 
 #[cfg(test)]
 mod tests {
-    use crate::{opcodes::{Opcode, num_registers, return_opcode, add_registers, add_arguments, opcode_from_string}, labels, messages::print_messages};
+    use crate::{opcodes::{Opcode, num_registers, return_opcode, add_registers, add_arguments, opcode_from_string, map_reg_to_hex}, labels, messages::print_messages};
 
     #[test]
     // Test that the correct number of registers is returned
@@ -678,6 +678,13 @@ mod tests {
         let input = "xxxxx";
         let output = opcode_from_string(input);
         assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_map_reg_to_hex() {
+        assert_eq!(map_reg_to_hex("B"), "1");
+        assert_eq!(map_reg_to_hex("P"), "F");
+        assert_eq!(map_reg_to_hex("Z"), "X");
     }
 
 

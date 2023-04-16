@@ -542,152 +542,172 @@ mod tests {
             variables: 2,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE2 %2")],
         });
-       /*  macros.push(Macro {
-            name: String::from("$MACRO2"),
-            variables: 2,
-            items: vec![String::from("$MACRO1 %2 %1"), String::from("$MACRO1 %2 %1")],
-        });
-        macros.push(Macro {
-            name: String::from("$MACRO3"),
-            variables: 2,
-            items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
-        }); */
 
         let _output = expand_macros_multi(macros.clone(), msg_list);
 
-       assert_eq!(msg_list.list[0].name, "Too many macro passes, check $MACRO1");
-    }
-
-    #[test]
-    // Test expand macros, to make sure it expands the macros correctly
-    fn test_expand_macros1() {
-        use super::*;
-        let mut msg_list = MsgList::new();
-        let macros = &mut Vec::<Macro>::new();
-        macros.push(Macro {
-            name: String::from("$MACRO1"),
-            variables: 2,
-            items: vec![String::from("MOV %1"), String::from("RET %2")],
-        });
-        macros.push(Macro {
-            name: String::from("$MACRO2"),
-            variables: 2,
-            items: vec![String::from("PUSH %2"), String::from("POP %1")],
-        });
-        let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
-        let mut pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
-        assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
-        assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
-        assert_eq!(strip_comments(&mut pass0[3].input), "POP C");
-    }
-
-    #[test]
-    // Test expand macros, with too few variables, gives error
-    fn test_expand_macros2() {
-        use super::*;
-        let mut msg_list = MsgList::new();
-        let macros = &mut Vec::<Macro>::new();
-        macros.push(Macro {
-            name: String::from("$MACRO1"),
-            variables: 2,
-            items: vec![String::from("MOV %1"), String::from("RET %2")],
-        });
-        macros.push(Macro {
-            name: String::from("$MACRO2"),
-            variables: 2,
-            items: vec![String::from("PUSH %2"), String::from("POP %1")],
-        });
-        let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
-        let mut pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
-        assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
-        assert_eq!(strip_comments(&mut pass0[2].input), "PUSH");
-        assert_eq!(strip_comments(&mut pass0[3].input), "POP C");
-        assert_eq!(msg_list.number_errors(), 1);
         assert_eq!(
             msg_list.list[0].name,
-            "Missing argument 2 for macro $MACRO2"
+            "Too many macro passes, check $MACRO1"
         );
     }
 
     #[test]
-    // Test expand macros, passing too many variables, gives warning
-    fn test_expand_macros3() {
-        use super::*;
-        let mut msg_list = MsgList::new();
+    fn test_expand_macros_multi3() {
         let macros = &mut Vec::<Macro>::new();
+
+        let msg_list = &mut MsgList::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
-            variables: 2,
-            items: vec![String::from("MOV %1"), String::from("RET %2")],
+            variables: 1,
+            items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
-            items: vec![String::from("PUSH %2")],
+            items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
         });
-        let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
-        let mut pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
-        assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
-        assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
-        assert_eq!(msg_list.number_warnings(), 1);
+
+        let _output = expand_macros_multi(macros.clone(), msg_list);
         assert_eq!(
             msg_list.list[0].name,
-            "Too many variables for macro $MACRO2"
+            "Too many variables in imbedded macro \"$MACRO1 %2 %1\" in macro $MACRO2"
         );
     }
 
-    #[test]
-    // Convert string to macro with no variables
-    fn test_macro_from_string1() {
-        let mut msglist = MsgList::new();
-        let input_line = String::from("$POPALL POP A / POP B");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
-        print_messages(&mut msglist);
-        assert_eq!(
-            macro_result,
-            Some(Macro {
-                name: String::from("$POPALL"),
-                variables: 0,
-                items: vec!["POP A".to_string(), "POP B".to_string()]
-            })
-        );
-    }
-
-    #[test]
-    // Convert string to macro with variables
-    fn test_macro_from_string2() {
-        let mut msglist = MsgList::new();
-        let input_line = String::from("$POPALL POP %1 / POP %2");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
-        print_messages(&mut msglist);
-        assert_eq!(
-            macro_result,
-            Some(Macro {
-                name: String::from("$POPALL"),
+        #[test]
+        // Test expand macros, to make sure it expands the macros correctly
+        fn test_expand_macros1() {
+            use super::*;
+            let mut msg_list = MsgList::new();
+            let macros = &mut Vec::<Macro>::new();
+            macros.push(Macro {
+                name: String::from("$MACRO1"),
                 variables: 2,
-                items: vec!["POP %1".to_string(), "POP %2".to_string()]
-            })
-        );
-    }
+                items: vec![String::from("MOV %1"), String::from("RET %2")],
+            });
+            macros.push(Macro {
+                name: String::from("$MACRO2"),
+                variables: 2,
+                items: vec![String::from("PUSH %2"), String::from("POP %1")],
+            });
+            let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
+            let mut pass0 = expand_macros(&mut msg_list, input, macros);
+            assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
+            assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
+            assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
+            assert_eq!(strip_comments(&mut pass0[3].input), "POP C");
+        }
 
-    #[test]
-    // Convert string to macro with missng variables
-    fn test_macro_from_string3() {
-        let mut msglist = MsgList::new();
-        let input_line = String::from("$POPALL POP %3 / POP %2");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
-        print_messages(&mut msglist);
-        assert_eq!(
-            macro_result,
-            Some(Macro {
-                name: String::from("$POPALL"),
-                variables: 3,
-                items: vec!["POP %3".to_string(), "POP %2".to_string()]
-            })
-        );
-        assert_eq!(msglist.list[0].name,"Error in macro variable definition for macro $POPALL, missing \"%1\"");
+        #[test]
+        // Test expand macros, with too few variables, gives error
+        fn test_expand_macros2() {
+            use super::*;
+            let mut msg_list = MsgList::new();
+            let macros = &mut Vec::<Macro>::new();
+            macros.push(Macro {
+                name: String::from("$MACRO1"),
+                variables: 2,
+                items: vec![String::from("MOV %1"), String::from("RET %2")],
+            });
+            macros.push(Macro {
+                name: String::from("$MACRO2"),
+                variables: 2,
+                items: vec![String::from("PUSH %2"), String::from("POP %1")],
+            });
+            let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
+            let mut pass0 = expand_macros(&mut msg_list, input, macros);
+            assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
+            assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
+            assert_eq!(strip_comments(&mut pass0[2].input), "PUSH");
+            assert_eq!(strip_comments(&mut pass0[3].input), "POP C");
+            assert_eq!(msg_list.number_errors(), 1);
+            assert_eq!(
+                msg_list.list[0].name,
+                "Missing argument 2 for macro $MACRO2"
+            );
+        }
+
+        #[test]
+        // Test expand macros, passing too many variables, gives warning
+        fn test_expand_macros3() {
+            use super::*;
+            let mut msg_list = MsgList::new();
+            let macros = &mut Vec::<Macro>::new();
+            macros.push(Macro {
+                name: String::from("$MACRO1"),
+                variables: 2,
+                items: vec![String::from("MOV %1"), String::from("RET %2")],
+            });
+            macros.push(Macro {
+                name: String::from("$MACRO2"),
+                variables: 1,
+                items: vec![String::from("PUSH %2")],
+            });
+            let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
+            let mut pass0 = expand_macros(&mut msg_list, input, macros);
+            assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
+            assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
+            assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
+            assert_eq!(msg_list.number_warnings(), 1);
+            assert_eq!(
+                msg_list.list[0].name,
+                "Too many variables for macro $MACRO2"
+            );
+        }
+
+        #[test]
+        // Convert string to macro with no variables
+        fn test_macro_from_string1() {
+            let mut msglist = MsgList::new();
+            let input_line = String::from("$POPALL POP A / POP B");
+            let macro_result = macro_from_string(&input_line, &mut msglist);
+            print_messages(&mut msglist);
+            assert_eq!(
+                macro_result,
+                Some(Macro {
+                    name: String::from("$POPALL"),
+                    variables: 0,
+                    items: vec!["POP A".to_string(), "POP B".to_string()]
+                })
+            );
+        }
+
+        #[test]
+        // Convert string to macro with variables
+        fn test_macro_from_string2() {
+            let mut msglist = MsgList::new();
+            let input_line = String::from("$POPALL POP %1 / POP %2");
+            let macro_result = macro_from_string(&input_line, &mut msglist);
+            print_messages(&mut msglist);
+            assert_eq!(
+                macro_result,
+                Some(Macro {
+                    name: String::from("$POPALL"),
+                    variables: 2,
+                    items: vec!["POP %1".to_string(), "POP %2".to_string()]
+                })
+            );
+        }
+
+        #[test]
+        // Convert string to macro with missng variables
+        fn test_macro_from_string3() {
+            let mut msglist = MsgList::new();
+            let input_line = String::from("$POPALL POP %3 / POP %2");
+            let macro_result = macro_from_string(&input_line, &mut msglist);
+            print_messages(&mut msglist);
+            assert_eq!(
+                macro_result,
+                Some(Macro {
+                    name: String::from("$POPALL"),
+                    variables: 3,
+                    items: vec!["POP %3".to_string(), "POP %2".to_string()]
+                })
+            );
+            assert_eq!(
+                msglist.list[0].name,
+                "Error in macro variable definition for macro $POPALL, missing \"%1\""
+            );
+        
     }
 }

@@ -5,6 +5,7 @@
     //clippy::nursery,
     //clippy::cargo,
 )]
+
 #![allow(clippy::single_match_else)]
 
 mod files;
@@ -32,6 +33,7 @@ use crate::files::remove_block_comments;
 /// Main function for Klausscc
 ///
 /// Main funation to read CLI and call other functions
+#[cfg(not(tarpaulin_include))]
 fn main() {
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
@@ -301,6 +303,7 @@ pub fn get_pass2(
 /// Send machine code to device
 ///
 /// Sends the resultant code on the serial device defined if no errors were found
+
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
     if msg_list.number_errors() == 0 {
         if write_serial(bin_string, output_serial_port, msg_list) {

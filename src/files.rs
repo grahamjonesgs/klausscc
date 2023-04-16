@@ -24,6 +24,7 @@ pub enum LineType {
 /// Open text file and return as vector of strings
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
+#[cfg(not(tarpaulin_include))]
 pub fn read_file_to_vec(
     filename: &str,
     msg_list: &mut MsgList,
@@ -176,6 +177,7 @@ pub fn filename_stem(full_name: &String) -> String {
 /// Output the bitcode to given file
 ///
 /// Based on the bitcode string outputs to file
+#[cfg(not(tarpaulin_include))]
 pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
     let result_file = File::create(filename);
 
@@ -195,6 +197,7 @@ pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
 /// Output the code details file to given filename
 ///
 /// Writes all data to the detailed code file
+#[cfg(not(tarpaulin_include))]
 pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let result_file = File::create(filename);
     if result_file.is_err() {
@@ -248,6 +251,7 @@ pub fn format_opcodes(input: &mut String) -> String {
 ///
 /// Will send the program to the serial port, and wait for the response
 #[allow(clippy::cast_possible_wrap)]
+#[cfg(not(tarpaulin_include))]
 pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, 115_200)
@@ -357,10 +361,11 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 
 #[cfg(test)]
 mod test {
+    
     use crate::{
         files::{remove_block_comments, is_include, get_include_filename, filename_stem, format_opcodes}, messages::MsgList,
     };
-
+    
     use super::read_file_to_vec;
 
     #[test]
@@ -450,6 +455,8 @@ mod test {
     assert_eq!(format_opcodes(&mut "0000000000000000".to_string()),"00000000 00000000");
     assert_eq!(format_opcodes(&mut "0000".to_string()),"0000              ");
     assert_eq!(format_opcodes(&mut "0123456789ABCDEF".to_string()),"01234567 89ABCDEF");
+    assert_eq!(format_opcodes(&mut "12345678".to_string()),"12345678         ");
+    assert_eq!(format_opcodes(&mut "123".to_string()),"123");
    }
 
    #[test]
@@ -460,4 +467,6 @@ mod test {
     assert_eq!(msg_list.list[0].name,"Unable to open file ////xxxxxxx");
 
    }
+
+   
 }
