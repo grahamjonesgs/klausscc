@@ -5,7 +5,6 @@ use crate::macros::Macro;
 use crate::macros::macro_from_string;
 use crate::macros::return_macro;
 use crate::messages::{MessageType, MsgList};
-use core::fmt;
 use std::{
     fs::File,
     io::{prelude::*, BufReader},
@@ -19,16 +18,6 @@ pub struct Opcode {
     pub registers: u32,
     pub variables: u32,
     pub comment: String,
-}
-
-impl fmt::Display for Opcode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{} {}, registers {}, variables {} - {}",
-            self.name, self.opcode, self.registers, self.variables, self.comment
-        )
-    }
 }
 
 
@@ -59,6 +48,7 @@ pub struct Pass2 {
 /// Parse file to opcode and macro vectors
 ///
 /// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
+#[cfg(not(tarpaulin_include))]
 pub fn parse_vh_file(
     filename: &impl AsRef<Path>,
     msg_list: &mut MsgList,
@@ -383,7 +373,8 @@ pub fn add_arguments(
 
 #[cfg(test)]
 mod tests {
-    use crate::{opcodes::{Opcode, num_registers, return_opcode, add_registers, add_arguments, opcode_from_string, map_reg_to_hex}, labels, messages::print_messages};
+    use crate::{labels, messages::print_messages};
+    use super::*;
 
     #[test]
     // Test that the correct number of registers is returned

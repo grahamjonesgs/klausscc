@@ -362,11 +362,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 #[cfg(test)]
 mod test {
     
-    use crate::{
-        files::{remove_block_comments, is_include, get_include_filename, filename_stem, format_opcodes}, messages::MsgList,
-    };
-    
-    use super::read_file_to_vec;
+    use super::*;
 
     #[test]
     // Test remove of commnets in single line

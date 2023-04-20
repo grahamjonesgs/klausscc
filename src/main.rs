@@ -141,7 +141,8 @@ fn main() {
 /// Manages the CLI
 ///
 /// Uses the Command from Clap to expand the CLI
-#[must_use]
+#[cfg(not(tarpaulin_include))]
+#[allow(clippy::must_use_candidate)]
 pub fn set_matches() -> Command {
     Command::new("Klauss Assembler")
         .version("0.0.1")
@@ -196,6 +197,7 @@ pub fn set_matches() -> Command {
 ///
 /// Takes the message list and start time and prints the results to the users
 #[allow(clippy::cast_precision_loss)]
+#[cfg(not(tarpaulin_include))]
 pub fn print_results(msg_list: &mut MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
     let duration = Local::now().time() - start_time;
@@ -303,7 +305,7 @@ pub fn get_pass2(
 /// Send machine code to device
 ///
 /// Sends the resultant code on the serial device defined if no errors were found
-
+#[cfg(not(tarpaulin_include))]
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
     if msg_list.number_errors() == 0 {
         if write_serial(bin_string, output_serial_port, msg_list) {
@@ -352,7 +354,6 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
 #[cfg(test)]
 mod tests {
     use super::*;
-
     // Test get_pass1 for correct vector returned, woth correct program counters
     #[test]
     fn test_get_pass1() {

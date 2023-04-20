@@ -272,11 +272,7 @@ pub fn trim_newline(s: &mut String) {
 #[cfg(test)]
 mod tests {
     use crate::files::LineType;
-    use crate::helper::{
-        calc_checksum, create_bin_string, data_as_bytes, data_name_from_string, is_blank,
-        is_comment, is_valid_line, label_name_from_string, line_type, num_data_bytes,
-        strip_comments, trim_newline, MsgList,
-    };
+    use super::*;
     use crate::labels::{return_label_value, Label};
     use crate::messages::print_messages;
     use crate::opcodes::{Opcode, Pass2};
