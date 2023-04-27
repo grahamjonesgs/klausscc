@@ -274,7 +274,6 @@ mod tests {
     use crate::files::LineType;
     use super::*;
     use crate::labels::{return_label_value, Label};
-    use crate::messages::print_messages;
     use crate::opcodes::{Opcode, Pass2};
 
     #[test]
@@ -519,7 +518,6 @@ mod tests {
         let mut msg_list = MsgList::new();
         let input = String::from("TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0);
-        print_messages(&mut msg_list);
         assert_eq!(output, 0);
         assert_eq!(msg_list.list[0].name, "Error in data definition for TEST");
     }

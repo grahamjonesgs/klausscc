@@ -373,7 +373,7 @@ pub fn add_arguments(
 
 #[cfg(test)]
 mod tests {
-    use crate::{labels, messages::print_messages};
+    use crate::{labels};
     use super::*;
 
     #[test]
@@ -550,7 +550,6 @@ mod tests {
             registers: 0,
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list,1,&mut labels);
-        print_messages(&mut msg_list);
         assert_eq!(output, String::from("0000FFFF"));
     }
 
@@ -569,7 +568,6 @@ mod tests {
             registers: 0,
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list,1,&mut labels);
-        print_messages(&mut msg_list);
         assert_eq!(output, String::from("000004D2"));
     }
 
@@ -588,7 +586,6 @@ mod tests {
             registers: 0,
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list,1,&mut labels);
-        print_messages(&mut msg_list);
         assert_eq!(output, String::from("00000000"));
     }
 
@@ -607,7 +604,6 @@ mod tests {
             registers: 0,
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list,1,&mut labels);
-        print_messages(&mut msg_list);
         assert_eq!(output, String::from("000000010000000F"));
     }
 
