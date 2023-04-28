@@ -250,7 +250,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
 
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            program_counter += num_data_bytes(&pass.input, msg_list, pass.line_counter);
+            program_counter += num_data_bytes(&pass.input, msg_list, pass.line_counter)/8;
         }
     }
     pass1
@@ -333,6 +333,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
 /// Writes the binary file
 ///
 /// If not errors are found, write the binary output file
+#[cfg(not(tarpaulin_include))]
 pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) {
     msg_list.push(
         format!("Writing binary file to {binary_file_name}"),
@@ -354,28 +355,29 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
 #[cfg(test)]
 mod tests {
     use super::*;
-    // Test get_pass1 for correct vector returned, woth correct program counters
+    
     #[test]
-    fn test_get_pass1() {
+    // Test get_pass1 for correct vector returned, woth correct program counters
+    fn test_get_pass1_1() {
         let mut msg_list = MsgList::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("0000001X"),
+            text_name: String::from("PUSH"),
+            hex_opcode: String::from("0000001X"),
             comment: String::new(),
             variables: 0,
             registers: 1,
         });
         opcodes.push(Opcode {
-            name: String::from("MOV"),
-            opcode: String::from("00000020"),
+            text_name: String::from("MOV"),
+            hex_opcode: String::from("00000020"),
             comment: String::new(),
             variables: 2,
             registers: 0,
         });
         opcodes.push(Opcode {
-            name: String::from("RET"),
-            opcode: String::from("00000030"),
+            text_name: String::from("RET"),
+            hex_opcode: String::from("00000030"),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -395,6 +397,18 @@ mod tests {
                 line_counter: 3,
             },
             Pass0 {
+                input: "#DATA1 0x2".to_string(),
+                line_counter: 3,
+            },
+            Pass0 {
+                input: "RET".to_string(),
+                line_counter: 3,
+            },
+            Pass0 {
+                input: "#DATA1 \"HELLO\"".to_string(),
+                line_counter: 3,
+            },
+            Pass0 {
                 input: "RET".to_string(),
                 line_counter: 3,
             },
@@ -404,7 +418,34 @@ mod tests {
         assert_eq!(pass1[1].program_counter, 3);
         assert_eq!(pass1[2].program_counter, 4);
         assert_eq!(pass1[3].program_counter, 5);
+        assert_eq!(pass1[4].program_counter, 7);
+        assert_eq!(pass1[5].program_counter, 8);
+        assert_eq!(pass1[6].program_counter, 14);
     }
+
+    #[test]
+    // Test get_pass1 for correct vector returned, woth correct program counters
+    fn test_get_pass1_2() {
+        let mut msg_list = MsgList::new();
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            text_name: String::from("PUSH"),
+            hex_opcode: String::from("0000001X"),
+            comment: String::new(),
+            variables: 0,
+            registers: 1,
+        });
+
+        let pass0 = vec![
+            Pass0 {
+                input: "Test_not_code_line".to_string(),
+                line_counter: 1,
+            },
+        ];
+        let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
+        assert_eq!(msg_list.list[0].name, "Opcode error Test_not_code_line");
+    }
+
     #[allow(clippy::too_many_lines)]
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
@@ -413,44 +454,44 @@ mod tests {
         let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("0000001X"),
+            text_name: String::from("PUSH"),
+            hex_opcode: String::from("0000001X"),
             comment: String::new(),
             variables: 0,
             registers: 1,
         });
         opcodes.push(Opcode {
-            name: String::from("MOVR"),
-            opcode: String::from("0000007X"),
+            text_name: String::from("MOVR"),
+            hex_opcode: String::from("0000007X"),
             comment: String::new(),
             variables: 1,
             registers: 1,
         });
         opcodes.push(Opcode {
-            name: String::from("MOV"),
-            opcode: String::from("00000020"),
+            text_name: String::from("MOV"),
+            hex_opcode: String::from("00000020"),
             comment: String::new(),
             variables: 2,
             registers: 0,
         });
         opcodes.push(Opcode {
-            name: String::from("RET"),
-            opcode: String::from("00000030"),
+            text_name: String::from("RET"),
+            hex_opcode: String::from("00000030"),
             comment: String::new(),
             variables: 0,
             registers: 0,
         });
         opcodes.push(Opcode {
-            name: String::from("DELAY"),
-            opcode: String::from("00000040"),
+            text_name: String::from("DELAY"),
+            hex_opcode: String::from("00000040"),
             comment: String::new(),
             variables: 1,
             registers: 0,
         });
 
         opcodes.push(Opcode {
-            name: String::from("DMOV"),
-            opcode: String::from("00000AXX"),
+            text_name: String::from("DMOV"),
+            hex_opcode: String::from("00000AXX"),
             comment: String::new(),
             variables: 2,
             registers: 2,
@@ -501,11 +542,22 @@ mod tests {
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
+                Pass1 {
+                    input: "#DATA1 \"HELLO\"".to_string(),
+                    line_counter: 3,
+                    program_counter: 5,
+                    line_type: LineType::Data,
+                },
+                Pass1 {
+                    input: "xxx".to_string(),
+                    line_counter: 3,
+                    program_counter: 5,
+                    line_type: LineType::Error,
+                },
             ],
             opcodes.clone(),
             labels,
         );
-        print_messages(&mut msg_list);
         assert_eq!(pass2[0].opcode, "00000020EEEEEEEEFFFFFFFF");
         assert_eq!(pass2[1].opcode, "0000004000000007");
         assert_eq!(pass2[2].opcode, "00000010");
@@ -513,6 +565,8 @@ mod tests {
         assert_eq!(pass2[4].opcode, "00000030");
         assert_eq!(pass2[5].opcode, "000000720000AAAA");
         assert_eq!(pass2[6].opcode, "00000A340000000A0000000B");
+        assert_eq!(pass2[7].opcode, "48000000450000004C0000004C0000004F00000000000000");
+        assert_eq!(pass2[8].opcode, "");
     }
 
     #[test]
@@ -522,8 +576,8 @@ mod tests {
         let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("0000001X"),
+            text_name: String::from("PUSH"),
+            hex_opcode: String::from("0000001X"),
             comment: String::new(),
             variables: 0,
             registers: 1,

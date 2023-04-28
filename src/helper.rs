@@ -421,8 +421,8 @@ mod tests {
         let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("1234"),
+            text_name: String::from("PUSH"),
+            hex_opcode: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -436,8 +436,8 @@ mod tests {
         let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
-            name: String::from("PULL"),
-            opcode: String::from("1234"),
+            text_name: String::from("PULL"),
+            hex_opcode: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -452,8 +452,8 @@ mod tests {
         let mut input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
-            name: String::from("PUSH"),
-            opcode: String::from("1234"),
+            text_name: String::from("PUSH"),
+            hex_opcode: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 0,

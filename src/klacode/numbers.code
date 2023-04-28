@@ -1,56 +1,63 @@
                               -- 
 0x00000000:                   -- BEGIN:
-0x00000000: 00000801 87654321 -- SETR B 0x87654321
+0x00000000: 00000201          -- AND A B
+0x00000001: 00000201          -- AND A B
+0x00000002: 00000201          -- AND A B
+0x00000003: 00004000          -- PUSH A
+0x00000004: 00001012          -- RET
+0x00000005:                   -- #DATA1 0x2
+0x00000007: 00001012          -- RET
+0x00000008:                   -- #DATA2 "H"
+0x0000000A: 00001012          -- RET
                               -- 
-0x00000002: 00000800 00000100 -- SETR A 0x100
-                              -- 
-0x00000004: 00003041          -- 7SEGR B
-0x00000005: 0000F013 00000FFF -- DELAYV 0xFFF
-                              -- 
-0x00000007: 00000803 00000000 -- SETR D 0x0 // holding memory location to read
                               -- 
                               -- 
-0x00000009:                   -- LOOP:
-                              -- //7SEGR A 
-0x00000009: 00000850          -- DECR A
-                              -- //DELAYV 0x000A
-0x0000000A: 0000100A 0000000E -- CALLZ RESET:
-                              -- //DELAYV 0x000A
-0x0000000C: 00001000 00000009 -- JMP LOOP:
                               -- 
-0x0000000E:                   -- RESET:
-                              -- //LEDR D
-0x0000000E: 00003043          -- 7SEGR D
-0x0000000F: 00000800 00000065 -- SETR A #ADDR
-                              -- //CALL PRINT_DATA:  // Print add 
-                              -- //TXR D  // print address from reg
-                              -- //SETR A #DATA
-                              -- //CALL PRINT_DATA: // print data word
-                              -- //TXMEMR D // print memory contects
-                              -- //NEWLINE
-0x00000011: 00000843          -- INCR D
-0x00000012: 00000800 00000001 -- SETR A 0x1
-0x00000014: 00001012          -- RET
                               -- 
-0x00000015:                   -- #TESTDATA2 "Test line"
-0x00000065:                   -- #ADDR "Address - "
-0x000000BD:                   -- #DATA " Data - "
-0x00000105:                   -- #DATALONG 0xFF
                               -- 
-                              -- // A is address to start, B used to be zero, C used to copy from mem
-0x000008FD:                   -- PRINT_DATA:  // To print a string from memory to UART
-0x000008FD: 00004001          -- PUSH B  // Save register
-0x000008FE: 00000801 00000000 -- SETR B 0x0
-0x00000900:                   -- PRINT_DATA_LOOP:
-0x00000900: 00007120          -- MEMREADRR C A // check for end of message
-0x00000901: 00000512          -- CMPRR B C  // Check if mem is zero
-0x00000902: 00001003 00000908 -- JMPE PRINT_DATA_EXIT:
-0x00000904: 00005030          -- TXCHARMEMR A // Print char
-0x00000905: 00000840          -- INCR A  // Next Char
-0x00000906: 00001000 00000900 -- JMP PRINT_DATA_LOOP:
-0x00000908:                   -- PRINT_DATA_EXIT:
-0x00000908: 00004011          -- POP B
-0x00000909: 00001012          -- RET
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
+                              -- 
                               -- 
                               -- 
                               -- 

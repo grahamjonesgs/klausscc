@@ -1,12 +1,19 @@
 
 BEGIN:
-SETR B 0x87654321
-/* test comment*/
+AND A B
+AND A B
+AND A B
+PUSH A
+RET
+#DATA1 0x2
+RET
+#DATA2 "H"
+RET
+
+/* test comment
 SETR A 0x100
-!include
 7SEGR B
 DELAYV 0xFFF
-
 SETR D 0x0 // holding memory location to read
 
 
@@ -50,7 +57,7 @@ INCR A  // Next Char
 JMP PRINT_DATA_LOOP:
 PRINT_DATA_EXIT:
 POP B
-RET
+RET */
 
 
 

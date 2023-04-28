@@ -55,6 +55,7 @@ impl MsgList {
 /// 
 /// Prints all the message in passed `MsgList` vector to terminal with coloured messages
 #[allow(clippy::module_name_repetitions)]
+#[cfg(not(tarpaulin_include))]
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
         
