@@ -271,8 +271,8 @@ pub fn trim_newline(s: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    use crate::files::LineType;
     use super::*;
+    use crate::files::LineType;
     use crate::labels::{return_label_value, Label};
     use crate::opcodes::{Opcode, Pass2};
 
@@ -289,7 +289,10 @@ mod tests {
         let mut msg_list = MsgList::new();
         let checksum = calc_checksum("S00001Z0010", &mut msg_list);
         assert_eq!(checksum, "0000");
-        assert_eq!(msg_list.list[0].name,"Opcode list length not multiple of 4, length is 9");
+        assert_eq!(
+            msg_list.list[0].name,
+            "Opcode list length not multiple of 4, length is 9"
+        );
     }
 
     #[test]
@@ -314,7 +317,10 @@ mod tests {
         let mut msg_list = MsgList::new();
         let checksum = calc_checksum("____", &mut msg_list);
         assert_eq!(checksum, "0001");
-        assert_eq!(msg_list.list[0].name,"Error creating opcode for invalid value ____");
+        assert_eq!(
+            msg_list.list[0].name,
+            "Error creating opcode for invalid value ____"
+        );
     }
 
     #[test]
@@ -560,10 +566,7 @@ mod tests {
     fn test_data_as_bytes5() {
         let input = String::from("TEST 0x1");
         let output = data_as_bytes(&input);
-        assert_eq!(
-            output,
-            Some("00000000".to_string()),
-        );
+        assert_eq!(output, Some("00000000".to_string()),);
     }
 
     #[test]

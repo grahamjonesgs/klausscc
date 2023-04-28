@@ -61,7 +61,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     }
 
     if max_variable as usize != all_found_variables.clone().into_iter().unique().count() {
-         for i in 1..max_variable {
+        for i in 1..max_variable {
             all_variables.push(i.into());
         }
 
@@ -71,7 +71,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
             .filter(|item| !all_found_variables.contains(item))
             .collect();
         let mut missing: String = String::new();
-        
+
         for i in difference_all_variables {
             if !missing.is_empty() {
                 missing.push(' ');
@@ -363,7 +363,7 @@ mod tests {
     #[allow(unused_imports)]
     use super::*;
     use crate::helper::strip_comments;
-    use crate::messages::{MsgList};
+    use crate::messages::MsgList;
 
     #[test]
     fn test_macro_name_from_string1() {
@@ -774,10 +774,7 @@ mod tests {
         });
         let input = vec![String::from("$MACRO7 A B"), String::from("$MACRO2 C D")];
         let _pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(
-            msg_list.list[0].name,
-            "Macro not found $MACRO7 A B"
-        );
+        assert_eq!(msg_list.list[0].name, "Macro not found $MACRO7 A B");
     }
 
     #[test]
@@ -799,7 +796,6 @@ mod tests {
         let input = vec![String::from("OPCODE1 A B")];
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&mut pass0[0].input), "OPCODE1 A B");
-        
     }
 
     #[test]

@@ -5,7 +5,6 @@
     //clippy::nursery,
     //clippy::cargo,
 )]
-
 #![allow(clippy::single_match_else)]
 
 mod files;
@@ -16,24 +15,23 @@ mod messages;
 mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use files::{
-    filename_stem, output_binary, output_code, read_file_to_vec, write_serial,
-    LineType,
-};
+use files::{filename_stem, output_binary, output_code, read_file_to_vec, write_serial, LineType};
 use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
 };
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_macros, expand_macros_multi};
 use messages::{print_messages, MessageType, MsgList};
-use opcodes::{add_arguments, add_registers,  parse_vh_file, num_arguments, Opcode, Pass0, Pass1, Pass2};
+use opcodes::{
+    add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
+};
 
 use crate::files::remove_block_comments;
 
 /// Main function for Klausscc
 ///
 /// Main funation to read CLI and call other functions
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn main() {
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
@@ -141,7 +139,7 @@ fn main() {
 /// Manages the CLI
 ///
 /// Uses the Command from Clap to expand the CLI
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Can not test CLI in tarpaulin
 #[allow(clippy::must_use_candidate)]
 pub fn set_matches() -> Command {
     Command::new("Klauss Assembler")
@@ -197,7 +195,7 @@ pub fn set_matches() -> Command {
 ///
 /// Takes the message list and start time and prints the results to the users
 #[allow(clippy::cast_precision_loss)]
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &mut MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
     let duration = Local::now().time() - start_time;
@@ -250,7 +248,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
 
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            program_counter += num_data_bytes(&pass.input, msg_list, pass.line_counter)/8;
+            program_counter += num_data_bytes(&pass.input, msg_list, pass.line_counter) / 8;
         }
     }
     pass1
@@ -305,7 +303,7 @@ pub fn get_pass2(
 /// Send machine code to device
 ///
 /// Sends the resultant code on the serial device defined if no errors were found
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test device write in trarpaulin
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
     if msg_list.number_errors() == 0 {
         if write_serial(bin_string, output_serial_port, msg_list) {
@@ -333,7 +331,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
 /// Writes the binary file
 ///
 /// If not errors are found, write the binary output file
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannnot test device write in tarpaulin
 pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) {
     msg_list.push(
         format!("Writing binary file to {binary_file_name}"),
@@ -355,7 +353,7 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     // Test get_pass1 for correct vector returned, woth correct program counters
     fn test_get_pass1_1() {
@@ -436,12 +434,10 @@ mod tests {
             registers: 1,
         });
 
-        let pass0 = vec![
-            Pass0 {
-                input: "Test_not_code_line".to_string(),
-                line_counter: 1,
-            },
-        ];
+        let pass0 = vec![Pass0 {
+            input: "Test_not_code_line".to_string(),
+            line_counter: 1,
+        }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
         assert_eq!(msg_list.list[0].name, "Opcode error Test_not_code_line");
     }
@@ -565,7 +561,10 @@ mod tests {
         assert_eq!(pass2[4].opcode, "00000030");
         assert_eq!(pass2[5].opcode, "000000720000AAAA");
         assert_eq!(pass2[6].opcode, "00000A340000000A0000000B");
-        assert_eq!(pass2[7].opcode, "48000000450000004C0000004C0000004F00000000000000");
+        assert_eq!(
+            pass2[7].opcode,
+            "48000000450000004C0000004C0000004F00000000000000"
+        );
         assert_eq!(pass2[8].opcode, "");
     }
 

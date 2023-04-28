@@ -1,7 +1,7 @@
 use chrono::{Local, NaiveTime};
 use colored::{ColoredString, Colorize};
 
-#[derive(PartialEq,Debug)]
+#[derive(PartialEq, Debug)]
 pub enum MessageType {
     Error,
     Warning,
@@ -52,29 +52,36 @@ impl MsgList {
 }
 
 /// Print out all messages
-/// 
+///
 /// Prints all the message in passed `MsgList` vector to terminal with coloured messages
 #[allow(clippy::module_name_repetitions)]
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
-        
         let warning: ColoredString = match msg.level {
             MessageType::Info => "I".to_string().green(),
             MessageType::Warning => "W".to_string().yellow(),
             MessageType::Error => "E".to_string().red(),
         };
-            println!("{}",if msg.line_number.is_some() {
-            format!(
-                "{} {} Line {}. {} ",
-                msg.time.format("%H:%M:%S%.3f"),
-                warning,
-                msg.line_number.unwrap(),
-                msg.name
-            )
-        } else {
-            format!("{} {} {} ", msg.time.format("%H:%M:%S.%3f"), warning, msg.name)
-        });
+        println!(
+            "{}",
+            if msg.line_number.is_some() {
+                format!(
+                    "{} {} Line {}. {} ",
+                    msg.time.format("%H:%M:%S%.3f"),
+                    warning,
+                    msg.line_number.unwrap(),
+                    msg.name
+                )
+            } else {
+                format!(
+                    "{} {} {} ",
+                    msg.time.format("%H:%M:%S.%3f"),
+                    warning,
+                    msg.name
+                )
+            }
+        );
     }
 }
 
@@ -112,6 +119,4 @@ mod tests {
         msg_list.push("Test".to_string(), None, MessageType::Error);
         assert_eq!(msg_list.number_warnings(), 1);
     }
-    
-    
 }

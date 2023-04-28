@@ -1,9 +1,8 @@
-use crate::helper::{trim_newline, strip_comments};
+use crate::helper::{strip_comments, trim_newline};
 use crate::{
     messages::{MessageType, MsgList},
     opcodes::Pass2,
 };
-
 
 use std::{
     fs::File,
@@ -24,7 +23,7 @@ pub enum LineType {
 /// Open text file and return as vector of strings
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test reading file in tarpaulin
 pub fn read_file_to_vec(
     filename: &str,
     msg_list: &mut MsgList,
@@ -56,11 +55,11 @@ pub fn read_file_to_vec(
     let buf = BufReader::new(file.unwrap());
     let mut lines: Vec<String> = Vec::new();
 
-    let mut line_number=0;
+    let mut line_number = 0;
     for line in buf.lines() {
         match line {
             Ok(v) => {
-                line_number+=1;
+                line_number += 1;
                 if is_include(&v) {
                     let include_file = get_include_filename(&v);
                     if include_file.is_none() {
@@ -71,7 +70,7 @@ pub fn read_file_to_vec(
                         );
                         return None;
                     }
-                    if include_file.clone().unwrap_or(String::new())==String::new() {
+                    if include_file.clone().unwrap_or(String::new()) == String::new() {
                         msg_list.push(
                             format!("Missing include file name in {filename}"),
                             Some(line_number),
@@ -124,7 +123,7 @@ pub fn get_include_filename(line: &str) -> Option<String> {
         return None;
     }
     let mut line = line.replace("!include", "");
-    let line=strip_comments(&mut line);
+    let line = strip_comments(&mut line);
     let mut words = line.split_whitespace();
     Some(words.next().unwrap_or("").to_owned())
 }
@@ -177,7 +176,7 @@ pub fn filename_stem(full_name: &String) -> String {
 /// Output the bitcode to given file
 ///
 /// Based on the bitcode string outputs to file
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
 pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
     let result_file = File::create(filename);
 
@@ -197,7 +196,7 @@ pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
 /// Output the code details file to given filename
 ///
 /// Writes all data to the detailed code file
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
 pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let result_file = File::create(filename);
     if result_file.is_err() {
@@ -251,7 +250,7 @@ pub fn format_opcodes(input: &mut String) -> String {
 ///
 /// Will send the program to the serial port, and wait for the response
 #[allow(clippy::cast_possible_wrap)]
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, 115_200)
@@ -361,7 +360,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 
 #[cfg(test)]
 mod test {
-    
+
     use super::*;
 
     #[test]
@@ -418,51 +417,69 @@ mod test {
         assert_eq!(output, vec!["abc", "", "def"]);
     }
 
-   #[test]
-   // Tests for the is_include to check if there is a !include as fiorst non white-space
-   fn test_is_include () {
-    assert!(is_include("!include file.type"));
-    assert!(!is_include("include file.type"));
-    assert!(is_include("!include"));
-    assert!(!is_include("!!include"));
-    assert!(is_include("    !include   123 234 456"));
-   }
+    #[test]
+    // Tests for the is_include to check if there is a !include as fiorst non white-space
+    fn test_is_include() {
+        assert!(is_include("!include file.type"));
+        assert!(!is_include("include file.type"));
+        assert!(is_include("!include"));
+        assert!(!is_include("!!include"));
+        assert!(is_include("    !include   123 234 456"));
+    }
 
-   #[test]
-   // Checkl funtions returns correct filename from !include
-   fn test_get_include_filename() {
-    assert_eq!(get_include_filename("!include myfile.name"),Some("myfile.name".to_string()));
-    assert_eq!(get_include_filename("testline"),None);
-    assert_eq!(get_include_filename("!include myfile.name extra words"),Some("myfile.name".to_string()));
-    assert_eq!(get_include_filename("!include"),Some(String::new()));
-    assert_eq!(get_include_filename("!include //test comment"),Some(String::new()));
-   }
+    #[test]
+    // Checkl funtions returns correct filename from !include
+    fn test_get_include_filename() {
+        assert_eq!(
+            get_include_filename("!include myfile.name"),
+            Some("myfile.name".to_string())
+        );
+        assert_eq!(get_include_filename("testline"), None);
+        assert_eq!(
+            get_include_filename("!include myfile.name extra words"),
+            Some("myfile.name".to_string())
+        );
+        assert_eq!(get_include_filename("!include"), Some(String::new()));
+        assert_eq!(
+            get_include_filename("!include //test comment"),
+            Some(String::new())
+        );
+    }
 
-   #[test]
-   // Check correct filename stem is returned
-   fn test_filename_stem () {
-    assert_eq!(filename_stem(&"file.type".to_string()),"file");
-    assert_eq!(filename_stem(&"file".to_string()),"file"); 
-   }
+    #[test]
+    // Check correct filename stem is returned
+    fn test_filename_stem() {
+        assert_eq!(filename_stem(&"file.type".to_string()), "file");
+        assert_eq!(filename_stem(&"file".to_string()), "file");
+    }
 
-   #[test]
-   // Check for formatting of codes used for debug file
-   fn test_format_opcodes () {
-    assert_eq!(format_opcodes(&mut "0000000000000000".to_string()),"00000000 00000000");
-    assert_eq!(format_opcodes(&mut "0000".to_string()),"0000              ");
-    assert_eq!(format_opcodes(&mut "0123456789ABCDEF".to_string()),"01234567 89ABCDEF");
-    assert_eq!(format_opcodes(&mut "12345678".to_string()),"12345678         ");
-    assert_eq!(format_opcodes(&mut "123".to_string()),"123");
-   }
+    #[test]
+    // Check for formatting of codes used for debug file
+    fn test_format_opcodes() {
+        assert_eq!(
+            format_opcodes(&mut "0000000000000000".to_string()),
+            "00000000 00000000"
+        );
+        assert_eq!(
+            format_opcodes(&mut "0000".to_string()),
+            "0000              "
+        );
+        assert_eq!(
+            format_opcodes(&mut "0123456789ABCDEF".to_string()),
+            "01234567 89ABCDEF"
+        );
+        assert_eq!(
+            format_opcodes(&mut "12345678".to_string()),
+            "12345678         "
+        );
+        assert_eq!(format_opcodes(&mut "123".to_string()), "123");
+    }
 
-   #[test]
-   fn test_read_file_to_vec() {
-    let mut msg_list = MsgList::new();
-    let mut opened_files: Vec<String> = Vec::new();
-    read_file_to_vec("////xxxxxxx",&mut msg_list, &mut opened_files);
-    assert_eq!(msg_list.list[0].name,"Unable to open file ////xxxxxxx");
-
-   }
-
-   
+    #[test]
+    fn test_read_file_to_vec() {
+        let mut msg_list = MsgList::new();
+        let mut opened_files: Vec<String> = Vec::new();
+        read_file_to_vec("////xxxxxxx", &mut msg_list, &mut opened_files);
+        assert_eq!(msg_list.list[0].name, "Unable to open file ////xxxxxxx");
+    }
 }

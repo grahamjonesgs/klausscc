@@ -46,7 +46,7 @@ pub struct Pass2 {
 /// Parse file to opcode and macro vectors
 ///
 /// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
-#[cfg(not(tarpaulin_include))]
+#[cfg(not(tarpaulin_include))] // Cannot test this parsing of VH file
 pub fn parse_vh_file(
     filename: &impl AsRef<Path>,
     msg_list: &mut MsgList,
@@ -197,7 +197,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
-        let first_word = words.next().unwrap_or("");  
+        let first_word = words.next().unwrap_or("");
         if first_word.to_uppercase() == opcode.text_name {
             return Some(opcode.variables);
         }
@@ -365,7 +365,7 @@ pub fn add_arguments(
             );
         }
     }
-    
+
     if arguments.len() != 8 * num_arguments as usize {
         #[cfg(not(tarpaulin_include))] // Needs eerors in previous funtions to produce wrong length
         msg_list.push(
@@ -679,7 +679,10 @@ mod tests {
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, &mut labels);
         assert_eq!(output, String::from("00000001"));
-        assert_eq!(msg_list.list[0].name, "Too many arguments found - \"PUSH 1 0xF\"");
+        assert_eq!(
+            msg_list.list[0].name,
+            "Too many arguments found - \"PUSH 1 0xF\""
+        );
     }
 
     #[test]
