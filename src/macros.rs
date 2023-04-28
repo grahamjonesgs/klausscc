@@ -3,7 +3,7 @@ use itertools::Itertools;
 
 use crate::{
     messages::{MessageType, MsgList},
-    opcodes::Pass0,
+    opcodes::{Pass0, InputData},
 };
 
 #[derive(Clone, PartialEq, Debug)]
@@ -82,6 +82,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         msg_list.push(
             format!("Error in macro variable definition for macro {name}, missing {missing:?}",),
             None,
+            None,
             MessageType::Warning,
         );
     }
@@ -127,6 +128,7 @@ pub fn return_macro_items_replace(
     line: &str,
     macros: &mut [Macro],
     input_line_number: u32,
+    filename: &str,
     msg_list: &mut MsgList,
 ) -> Option<Vec<String>> {
     let mut words = line.split_whitespace();
@@ -145,6 +147,7 @@ pub fn return_macro_items_replace(
                 msg_list.push(
                     format!("Too many variables for macro {}", macro_line.name),
                     Some(input_line_number),
+                    Some(filename.to_owned()),
                     MessageType::Warning,
                 );
             }
@@ -163,6 +166,7 @@ pub fn return_macro_items_replace(
                                     without_prefix, macro_line.name
                                 ),
                                 Some(input_line_number),
+                                Some(filename.to_owned()),
                                 MessageType::Error,
                             );
                         } else if int_value.clone().unwrap_or(0)
@@ -175,6 +179,7 @@ pub fn return_macro_items_replace(
                                     macro_line.name
                                 ),
                                 Some(input_line_number),
+                                Some(filename.to_owned()),
                                 MessageType::Error,
                             );
                         } else {
@@ -231,6 +236,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                 item, input_macro_line.name,
                             ),
                             None,
+                            None,
                             MessageType::Warning,
                         );
                     }
@@ -254,6 +260,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                             input_macro_line.name,
                                         ),
                                             None,
+                                            None,
                                             MessageType::Error,
                                         );
                                     } else if int_value.clone().unwrap_or(0) as usize
@@ -266,6 +273,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
                                                 item,
                                                 input_macro_line.name,
                                             ),
+                                            None,
                                             None,
                                             MessageType::Error,
                                         );
@@ -301,6 +309,7 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
         msg_list.push(
             format!("Too many macro passes, check {last_macro}"),
             None,
+            None,
             MessageType::Error,
         );
     }
@@ -313,17 +322,18 @@ pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Ma
 #[allow(clippy::module_name_repetitions)]
 pub fn expand_macros(
     msg_list: &mut MsgList,
-    input_list: Vec<String>,
+    input_list: Vec<InputData>,
     macro_list: &mut [Macro],
 ) -> Vec<Pass0> {
     let mut pass0: Vec<Pass0> = Vec::new();
     let mut input_line_count: u32 = 1;
     for code_line in input_list {
-        if macro_name_from_string(&code_line).is_some() {
+        if macro_name_from_string(&code_line.input).is_some() {
             let items = return_macro_items_replace(
-                code_line.trim(),
+                code_line.input.trim(),
                 macro_list,
                 input_line_count,
+                &code_line.file_name,
                 msg_list,
             );
             if items.is_some() {
@@ -331,24 +341,28 @@ pub fn expand_macros(
                     pass0.push(Pass0 {
                         input: item
                             + " // Macro expansion from "
-                            + &macro_name_from_string(&code_line).unwrap_or_default(),
+                            + &macro_name_from_string(&code_line.input).unwrap_or_default(),
+                            file_name: String::new(),
                         line_counter: input_line_count,
                     });
                 }
             } else {
                 msg_list.push(
-                    format!("Macro not found {code_line}"),
+                    format!("Macro not found {}", code_line.input),
+                    None,
                     None,
                     MessageType::Error,
                 );
                 pass0.push(Pass0 {
-                    input: code_line,
+                    file_name: String::new(),
+                    input: code_line.input,
                     line_counter: input_line_count,
                 });
             }
         } else {
             pass0.push(Pass0 {
-                input: code_line,
+                file_name: String::new(),
+                input: code_line.input,
                 line_counter: input_line_count,
             });
         }
@@ -426,7 +440,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY ARG_A  ARG_B");
-        let output = return_macro_items_replace(&input, macros, 0, msg_list);
+        let output = return_macro_items_replace(&input, macros, 0,"test", msg_list);
         assert_eq!(
             output,
             Some(vec![
@@ -452,7 +466,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY %MACRO1  ARG_B ARG_C");
-        let output = return_macro_items_replace(&input, macros, 0, msg_list);
+        let output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
         assert_eq!(
             output,
             Some(vec![
@@ -478,7 +492,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY2 %MACRO1  ARG_B ARG_C");
-        let output = return_macro_items_replace(&input, macros, 0, msg_list);
+        let output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
         assert_eq!(output, None);
     }
 
@@ -497,7 +511,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C ARG_D ARG_E");
-        let _output = return_macro_items_replace(&input, macros, 0, msg_list);
+        let _output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Too many variables for macro $DELAY1".to_string()
@@ -519,7 +533,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C");
-        let _output = return_macro_items_replace(&input, macros, 0, msg_list);
+        let _output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Invalid macro argument number xyz, in macro $DELAY1".to_string()
@@ -541,7 +555,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY1  ARG_A");
-        let _output = return_macro_items_replace(&input, macros, 0, msg_list);
+        let _output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Missing argument 2 for macro $DELAY1".to_string()
@@ -691,7 +705,13 @@ mod tests {
             variables: 2,
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
         });
-        let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
+        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
+        input.push( InputData{  
+            input: String::from("$MACRO1 A B"),
+            file_name: "File1".to_owned() });
+        input.push( InputData{  
+                input: String::from("$MACRO2 C D"),
+                file_name: "File1".to_owned() });
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
         assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
@@ -715,7 +735,15 @@ mod tests {
             variables: 2,
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
         });
-        let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
+       // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
+        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
+        input.push( InputData{  
+            input: String::from("$MACRO1 A B"),
+            file_name: "File1".to_owned() });
+        input.push( InputData{  
+                input: String::from("$MACRO2 C"),
+                file_name: "File1".to_owned() });
+       
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
         assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
@@ -744,8 +772,19 @@ mod tests {
             variables: 1,
             items: vec![String::from("PUSH %2")],
         });
-        let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
+       // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
+        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
+        input.push( InputData{  
+            input: String::from("$MACRO1 A B"),
+            file_name: "File1".to_owned() });
+        input.push( InputData{  
+                input: String::from("$MACRO2 C D"),
+                file_name: "File1".to_owned() });
+       
+       
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
+        
+       
         assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
         assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
         assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
@@ -772,7 +811,15 @@ mod tests {
             variables: 1,
             items: vec![String::from("PUSH %2")],
         });
-        let input = vec![String::from("$MACRO7 A B"), String::from("$MACRO2 C D")];
+       // let input = vec![String::from("$MACRO7 A B"), String::from("$MACRO2 C D")];
+        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
+        input.push( InputData{  
+            input: String::from("$MACRO7 A B"),
+            file_name: "File1".to_owned() });
+        input.push( InputData{  
+                input: String::from("$MACRO2 C D"),
+                file_name: "File1".to_owned() });
+      
         let _pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(msg_list.list[0].name, "Macro not found $MACRO7 A B");
     }
@@ -793,7 +840,13 @@ mod tests {
             variables: 1,
             items: vec![String::from("PUSH %2")],
         });
-        let input = vec![String::from("OPCODE1 A B")];
+      //  let input = vec![String::from("OPCODE1 A B")];
+        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
+        input.push( InputData{  
+            input: String::from("OPCODE1 A B"),
+            file_name: "File1".to_owned() });
+       
+       
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&mut pass0[0].input), "OPCODE1 A B");
     }

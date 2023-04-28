@@ -46,7 +46,8 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
                     "Duplicate label {} found, with differing values",
                     label.name
                 ),
-                Some(label.line_counter),
+                None,
+                None,
                 MessageType::Error,
             );
         }
@@ -60,6 +61,7 @@ pub fn convert_argument(
     argument: &str,
     msg_list: &mut MsgList,
     line_number: u32,
+    filename: String,
     labels: &mut Vec<Label>,
 ) -> Option<String> {
     let argument_trim = argument.trim();
@@ -70,6 +72,7 @@ pub fn convert_argument(
                 msg_list.push(
                     format!("Label {argument} not found - line {line_number}"),
                     Some(line_number),
+                    Some(filename),
                     MessageType::Warning,
                 );
                 return None;
@@ -84,6 +87,7 @@ pub fn convert_argument(
                 msg_list.push(
                     format!("Label {argument} not found"),
                     Some(line_number),
+                    Some(filename),
                     MessageType::Warning,
                 );
                 return None;
@@ -106,6 +110,7 @@ pub fn convert_argument(
         msg_list.push(
             format!("Hex value out 0x{int_value:08X} of bounds"),
             Some(line_number),
+            Some(filename),
             MessageType::Warning,
         );
         return None;
@@ -119,6 +124,7 @@ pub fn convert_argument(
             msg_list.push(
                 format!("Decimal value out {n} of bounds"),
                 Some(line_number),
+                Some(filename),
                 MessageType::Warning,
             );
         }
@@ -126,6 +132,7 @@ pub fn convert_argument(
             msg_list.push(
                 format!("Decimal value {argument} incorrect"),
                 Some(line_number),
+                Some(filename),
                 MessageType::Warning,
             );
         }
@@ -252,67 +259,67 @@ mod tests {
         ];
         let mut msg_list = MsgList::new();
         assert_eq!(
-            convert_argument("label1", &mut msg_list, 0, &mut labels),
+            convert_argument("label1", &mut msg_list, 0, "test".to_string(),&mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label2", &mut msg_list, 1, &mut labels),
+            convert_argument("label2", &mut msg_list, 1,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label3", &mut msg_list, 2, &mut labels),
+            convert_argument("label3", &mut msg_list, 2,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("0x1234", &mut msg_list, 3, &mut labels),
+            convert_argument("0x1234", &mut msg_list, 3,"test".to_string(), &mut labels),
             Some("00001234".to_string())
         );
         assert_eq!(
-            convert_argument("0x123456789", &mut msg_list, 4, &mut labels),
+            convert_argument("0x123456789", &mut msg_list, 4, "test".to_string(),&mut labels),
             None
         );
         assert_eq!(
-            convert_argument("1234", &mut msg_list, 5, &mut labels),
+            convert_argument("1234", &mut msg_list, 5,"test".to_string(), &mut labels),
             Some("000004D2".to_string())
         );
         assert_eq!(
-            convert_argument("123456789", &mut msg_list, 6, &mut labels),
+            convert_argument("123456789", &mut msg_list, 6, "test".to_string(),&mut labels),
             Some("075BCD15".to_string())
         );
         assert_eq!(
-            convert_argument("label1:", &mut msg_list, 7, &mut labels),
+            convert_argument("label1:", &mut msg_list, 7,"test".to_string(), &mut labels),
             Some("00000001".to_string())
         );
         assert_eq!(
-            convert_argument("label1: ", &mut msg_list, 8, &mut labels),
+            convert_argument("label1: ", &mut msg_list, 8,"test".to_string(), &mut labels),
             Some("00000001".to_string())
         );
         assert_eq!(
-            convert_argument("label1 :", &mut msg_list, 9, &mut labels),
+            convert_argument("label1 :", &mut msg_list, 9,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label1 : ", &mut msg_list, 10, &mut labels),
+            convert_argument("label1 : ", &mut msg_list, 10,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label1", &mut msg_list, 11, &mut labels),
+            convert_argument("label1", &mut msg_list, 11,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label1 ", &mut msg_list, 12, &mut labels),
+            convert_argument("label1 ", &mut msg_list, 12,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument(" label1", &mut msg_list, 13, &mut labels),
+            convert_argument(" label1", &mut msg_list, 13, "test".to_string(),&mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label2:", &mut msg_list, 14, &mut labels),
+            convert_argument("label2:", &mut msg_list, 14,"test".to_string(), &mut labels),
             Some("00000002".to_string())
         );
         assert_eq!(
-            convert_argument("label3:", &mut msg_list, 14, &mut labels),
+            convert_argument("label3:", &mut msg_list, 14,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
@@ -320,7 +327,7 @@ mod tests {
             "Label label3: not found - line 14".to_string()
         );
         assert_eq!(
-            convert_argument("xxxx", &mut msg_list, 14, &mut labels),
+            convert_argument("xxxx", &mut msg_list, 14,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
@@ -328,7 +335,7 @@ mod tests {
             "Decimal value xxxx incorrect".to_string()
         );
         assert_eq!(
-            convert_argument("4294967296", &mut msg_list, 14, &mut labels),
+            convert_argument("4294967296", &mut msg_list, 14,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
@@ -336,11 +343,11 @@ mod tests {
             "Decimal value out 4294967296 of bounds".to_string()
         );
         assert_eq!(
-            convert_argument("#data1", &mut msg_list, 14, &mut labels),
+            convert_argument("#data1", &mut msg_list, 14,"test".to_string(), &mut labels),
             Some("0000001E".to_string())
         );
         assert_eq!(
-            convert_argument("#data2", &mut msg_list, 15, &mut labels),
+            convert_argument("#data2", &mut msg_list, 15,"test".to_string(), &mut labels),
             None
         );
         assert_eq!(
@@ -348,7 +355,7 @@ mod tests {
             "Label #data2 not found".to_string()
         );
         assert_eq!(
-            convert_argument("0xGGG", &mut msg_list, 14, &mut labels),
+            convert_argument("0xGGG", &mut msg_list, 14,"test".to_string(), &mut labels),
             None
         );
     }
@@ -359,36 +366,42 @@ mod tests {
         let pass1 = vec![
             Pass1 {
                 program_counter: 0,
+                file_name: String::from("test"),
                 line_counter: 0,
                 input: "label1:".to_string(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 2,
+                file_name: String::from("test"),
                 line_counter: 0,
                 input: "xxxx".to_string(),
                 line_type: LineType::Opcode,
             },
             Pass1 {
                 program_counter: 4,
+                file_name: String::from("test"),
                 line_counter: 1,
                 input: "label2:".to_string(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 6,
+                file_name: String::from("test"),
                 line_counter: 2,
                 input: "label3:".to_string(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 7,
+                file_name: String::from("test"),
                 line_counter: 3,
                 input: "#data1".to_string(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 7,
+                file_name: String::from("test"),
                 line_counter: 4,
                 input: "test".to_string(),
                 line_type: LineType::Label,

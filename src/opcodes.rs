@@ -20,15 +20,23 @@ pub struct Opcode {
     pub comment: String,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct InputData {
+    pub input: String,
+    pub file_name: String,
+}
+
 #[derive(Debug)]
 pub struct Pass0 {
     pub input: String,
+    pub file_name: String,
     pub line_counter: u32,
 }
 
 #[derive(Debug)]
 pub struct Pass1 {
     pub input: String,
+    pub file_name: String,
     pub line_counter: u32,
     pub program_counter: u32,
     pub line_type: LineType,
@@ -37,6 +45,7 @@ pub struct Pass1 {
 #[derive(Debug)]
 pub struct Pass2 {
     pub input: String,
+    pub file_name: String,
     pub line_counter: u32,
     pub program_counter: u32,
     pub line_type: LineType,
@@ -70,6 +79,7 @@ pub fn parse_vh_file(
                             msg_list.push(
                                 format!("Duplicate Opcode {} found", a.text_name),
                                 None,
+                                None,
                                 MessageType::Error,
                             );
                         }
@@ -82,6 +92,7 @@ pub fn parse_vh_file(
                         if return_macro(&a.name, &mut macros).is_some() {
                             msg_list.push(
                                 format!("Duplicate Macro definition {} found", a.name),
+                                None,
                                 None,
                                 MessageType::Error,
                             );
@@ -266,6 +277,7 @@ fn map_reg_to_hex(input: &str) -> String {
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
     line: &mut String,
+    filename: String,
     msg_list: &mut MsgList,
     line_number: u32,
 ) -> String {
@@ -285,6 +297,7 @@ pub fn add_registers(
         msg_list.push(
             format!("Incorrect register definition - \"{line}\""),
             Some(line_number),
+            Some(filename),
             MessageType::Warning,
         );
         return "ERR     ".to_string();
@@ -303,6 +316,7 @@ pub fn add_registers(
         msg_list.push(
             format!("Incorrect register definition - \"{line}\""),
             Some(line_number),
+            Some(filename),
             MessageType::Warning,
         );
         return "ERR     ".to_string();
@@ -319,6 +333,7 @@ pub fn add_arguments(
     line: &mut String,
     msg_list: &mut MsgList,
     line_number: u32,
+    filename: &str,
     labels: &mut Vec<Label>,
 ) -> String {
     let num_registers = num_registers(opcodes, &mut line.to_uppercase()).unwrap_or(0);
@@ -333,6 +348,7 @@ pub fn add_arguments(
                     &word.to_string().to_uppercase(),
                     msg_list,
                     line_number,
+                    filename.to_string(),
                     labels,
                 );
                 let default = "00000000".to_string();
@@ -348,6 +364,7 @@ pub fn add_arguments(
                     &word.to_string().to_uppercase(),
                     msg_list,
                     line_number,
+                    filename.to_owned(),
                     labels,
                 );
                 let default = "00000000".to_string();
@@ -361,6 +378,7 @@ pub fn add_arguments(
             msg_list.push(
                 format!("Too many arguments found - \"{line}\""),
                 Some(line_number),
+                Some((filename).to_owned()),
                 MessageType::Warning,
             );
         }
@@ -371,6 +389,7 @@ pub fn add_arguments(
         msg_list.push(
             format!("Incorrect argument definition - \"{line}\""),
             Some(line_number),
+            Some(filename.to_owned()),
             MessageType::Error,
         );
     }
@@ -537,7 +556,7 @@ mod tests {
             variables: 0,
             registers: 2,
         });
-        let output = add_registers(opcodes, &mut input, &mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_string(),&mut msg_list, 1);
         assert_eq!(output, String::from("00005601"));
     }
 
@@ -554,7 +573,7 @@ mod tests {
             variables: 0,
             registers: 1,
         });
-        let output = add_registers(opcodes, &mut input, &mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_string(),&mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
@@ -570,7 +589,7 @@ mod tests {
             variables: 0,
             registers: 1,
         });
-        let output = add_registers(opcodes, &mut input, &mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_string(),&mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
@@ -587,7 +606,7 @@ mod tests {
             variables: 1,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, &mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
         assert_eq!(output, String::from("0000FFFF"));
     }
 
@@ -605,7 +624,7 @@ mod tests {
             variables: 1,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, &mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
         assert_eq!(output, String::from("000004D2"));
     }
 
@@ -623,7 +642,7 @@ mod tests {
             variables: 1,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, &mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1,"test", &mut labels);
         assert_eq!(output, String::from("00000000"));
     }
 
@@ -641,7 +660,7 @@ mod tests {
             variables: 2,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, &mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
         assert_eq!(output, String::from("0000000F00000000"));
     }
 
@@ -659,7 +678,7 @@ mod tests {
             variables: 2,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, &mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
         assert_eq!(output, String::from("000000010000000F"));
     }
 
@@ -677,7 +696,7 @@ mod tests {
             variables: 1,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, &mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(
             msg_list.list[0].name,

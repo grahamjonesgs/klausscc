@@ -18,13 +18,14 @@ pub fn data_name_from_string(line: &str) -> Option<String> {
 /// Return number of bytes of data
 ///
 /// From instruction name, option of number of bytes of data, or 0 is error
-pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32) -> u32 {
+pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: String) -> u32 {
     match data_as_bytes(line) {
         Some(data) => data.len().try_into().unwrap(),
         None => {
             msg_list.push(
                 format!("Error in data definition for {line}"),
                 Some(line_number),
+                Some(filename),
                 MessageType::Error,
             );
             0
@@ -198,6 +199,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
                 )
             },
             None,
+            None,
             MessageType::Error,
         );
         return "0000".to_string();
@@ -216,6 +218,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
                             &stripped_string[index..index + 4],
                         )
                     },
+                    None,
                     None,
                     MessageType::Error,
                 );
@@ -351,6 +354,7 @@ mod tests {
         let mut pass2 = Vec::new();
         pass2.push(Pass2 {
             opcode: String::from("1234"),
+            file_name: String::from("test"),
             input: String::new(),
             line_counter: 0,
             program_counter: 0,
@@ -359,6 +363,7 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::from("4321"),
             input: String::new(),
+            file_name: String::from("test"),
             line_counter: 0,
             program_counter: 0,
             line_type: LineType::Data,
@@ -366,6 +371,7 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::from("9999"),
             input: String::new(),
+            file_name: String::from("test"),
             line_counter: 0,
             program_counter: 0,
             line_type: LineType::Data,
@@ -515,7 +521,7 @@ mod tests {
     fn test_num_data_bytes1() {
         let mut msg_list = MsgList::new();
         let input = String::from("TEST 3");
-        let output = num_data_bytes(&input, &mut msg_list, 0);
+        let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_string());
         assert_eq!(output, 24);
     }
 
@@ -523,7 +529,7 @@ mod tests {
     fn test_num_data_bytes2() {
         let mut msg_list = MsgList::new();
         let input = String::from("TEST");
-        let output = num_data_bytes(&input, &mut msg_list, 0);
+        let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_string());
         assert_eq!(output, 0);
         assert_eq!(msg_list.list[0].name, "Error in data definition for TEST");
     }

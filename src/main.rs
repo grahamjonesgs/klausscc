@@ -78,6 +78,7 @@ fn main() {
     msg_list.push(
         format!("Input file is {input_file_name}"),
         None,
+        None,
         MessageType::Info,
     );
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
@@ -90,7 +91,7 @@ fn main() {
     // Pass 0 to add macros
     let pass0 = expand_macros(
         &mut msg_list,
-        remove_block_comments(input_list.unwrap_or([].to_vec())),
+        input_list.unwrap(),
         &mut macro_list,
     );
 
@@ -106,6 +107,7 @@ fn main() {
 
     msg_list.push(
         format!("Writing code file to {output_file_name}"),
+        None,
         None,
         MessageType::Info,
     );
@@ -123,6 +125,7 @@ fn main() {
             std::io::ErrorKind::NotFound => (),
             _ => msg_list.push(
                 format!("Removing binary file {}, error {}", &binary_file_name, e),
+                None,
                 None,
                 MessageType::Info,
             ),
@@ -229,6 +232,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
     for mut pass in pass0 {
         pass1.push(Pass1 {
             input: pass.input.to_string(),
+            file_name: pass.file_name.to_string(),
             line_counter: pass.line_counter,
             program_counter,
             line_type: line_type(&mut oplist, &mut pass.input),
@@ -237,6 +241,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             msg_list.push(
                 format!("Opcode error {}", pass.input),
                 Some(pass.line_counter),
+                Some(pass.file_name.to_string()),
                 MessageType::Error,
             );
         }
@@ -248,7 +253,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
 
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            program_counter += num_data_bytes(&pass.input, msg_list, pass.line_counter) / 8;
+            program_counter += num_data_bytes(&pass.input, msg_list, pass.line_counter, pass.file_name) / 8;
         }
     }
     pass1
@@ -269,6 +274,7 @@ pub fn get_pass2(
             add_registers(
                 &mut oplist,
                 &mut strip_comments(&mut line.input.clone()),
+                line.file_name.clone(),
                 msg_list,
                 line.line_counter,
             ) + add_arguments(
@@ -276,6 +282,7 @@ pub fn get_pass2(
                 &mut strip_comments(&mut line.input.clone()),
                 msg_list,
                 line.line_counter,
+                &line.file_name,
                 &mut labels,
             )
             .as_str()
@@ -287,6 +294,7 @@ pub fn get_pass2(
 
         pass2.push(Pass2 {
             input: line.input,
+            file_name: line.file_name.clone(),
             line_counter: line.line_counter,
             program_counter: line.program_counter,
             line_type: if new_opcode.contains("ERR") {
@@ -310,11 +318,13 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
             msg_list.push(
                 format!("Wrote to serial port {output_serial_port}"),
                 None,
+                None,
                 MessageType::Info,
             );
         } else {
             msg_list.push(
                 format!("Failed to write to serial port {output_serial_port}"),
+                None,
                 None,
                 MessageType::Error,
             );
@@ -322,6 +332,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
     } else {
         msg_list.push(
             "Not writing to serial port due to assembly errors".to_string(),
+            None,
             None,
             MessageType::Warning,
         );
@@ -336,6 +347,7 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
     msg_list.push(
         format!("Writing binary file to {binary_file_name}"),
         None,
+        None,
         MessageType::Info,
     );
     if !output_binary(&binary_file_name, bin_string) {
@@ -344,6 +356,7 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
                 "Unable to write to binary code file {:?}",
                 &binary_file_name
             ),
+            None,
             None,
             MessageType::Error,
         );
@@ -384,30 +397,37 @@ mod tests {
         let pass0 = vec![
             Pass0 {
                 input: "MOV A B".to_string(),
+                file_name: String::new(),
                 line_counter: 1,
             },
             Pass0 {
                 input: "PUSH A".to_string(),
+                file_name: String::new(),
                 line_counter: 2,
             },
             Pass0 {
                 input: "RET".to_string(),
+                file_name: String::new(),
                 line_counter: 3,
             },
             Pass0 {
                 input: "#DATA1 0x2".to_string(),
+                file_name: String::new(),
                 line_counter: 3,
             },
             Pass0 {
                 input: "RET".to_string(),
+                file_name: String::new(),
                 line_counter: 3,
             },
             Pass0 {
                 input: "#DATA1 \"HELLO\"".to_string(),
+                file_name: String::new(),
                 line_counter: 3,
             },
             Pass0 {
                 input: "RET".to_string(),
+                file_name: String::new(),
                 line_counter: 3,
             },
         ];
@@ -436,6 +456,7 @@ mod tests {
 
         let pass0 = vec![Pass0 {
             input: "Test_not_code_line".to_string(),
+            file_name: String::new(),
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
@@ -498,54 +519,63 @@ mod tests {
             vec![
                 Pass1 {
                     input: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 1,
                     program_counter: 0,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
                     input: "DELAY 0x7".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 1,
                     program_counter: 1,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
                     input: "PUSH A".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 2,
                     program_counter: 3,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
                     input: "RET".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 4,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
                     input: "RET".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
                     input: "MOVR C 0xAAAA".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
                     input: "DMOV D E 0xA 0xB".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
                     input: "#DATA1 \"HELLO\"".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Data,
                 },
                 Pass1 {
                     input: "xxx".to_string(),
+                    file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Error,
@@ -585,6 +615,7 @@ mod tests {
             &mut msg_list,
             vec![Pass1 {
                 input: "TEST".to_string(),
+                file_name: String::from("test"),
                 line_counter: 1,
                 program_counter: 0,
                 line_type: LineType::Opcode,

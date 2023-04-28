@@ -11,6 +11,7 @@ pub enum MessageType {
 #[derive(Debug)]
 pub struct Message {
     pub name: String,
+    pub file_name: Option<String>,
     pub line_number: Option<u32>,
     pub level: MessageType,
     pub time: NaiveTime,
@@ -25,10 +26,11 @@ impl MsgList {
         Self { list: Vec::new() }
     }
 
-    pub fn push(&mut self, name: String, line_number: Option<u32>, msg_type: MessageType) {
+    pub fn push(&mut self, name: String, line_number: Option<u32>, file_name: Option<String>, msg_type: MessageType) {
         let _ = &mut self.list.push(Message {
             name,
             line_number,
+            file_name,
             level: msg_type,
             time: Local::now().time(),
         });
@@ -93,7 +95,7 @@ mod tests {
     // Test that the message list is created correctly
     fn test_msg_list() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None, MessageType::Info);
+        msg_list.push("Test".to_string(), None,Some("test".to_string()), MessageType::Info);
         assert_eq!(msg_list.list.len(), 1);
         assert_eq!(msg_list.list[0].name, "Test");
         assert_eq!(msg_list.list[0].level, MessageType::Info);
@@ -104,9 +106,9 @@ mod tests {
     // Test that the number of errors is correct
     fn test_number_errors() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None, MessageType::Info);
-        msg_list.push("Test".to_string(), None, MessageType::Warning);
-        msg_list.push("Test".to_string(), None, MessageType::Error);
+        msg_list.push("Test".to_string(), None, None, MessageType::Info);
+        msg_list.push("Test".to_string(), None, None, MessageType::Warning);
+        msg_list.push("Test".to_string(), None, None, MessageType::Error);
         assert_eq!(msg_list.number_errors(), 1);
     }
 
@@ -114,9 +116,9 @@ mod tests {
     // Test number of warnings
     fn test_number_warnings() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None, MessageType::Info);
-        msg_list.push("Test".to_string(), None, MessageType::Warning);
-        msg_list.push("Test".to_string(), None, MessageType::Error);
+        msg_list.push("Test".to_string(), None,None,  MessageType::Info);
+        msg_list.push("Test".to_string(), None, None, MessageType::Warning);
+        msg_list.push("Test".to_string(), None,None,  MessageType::Error);
         assert_eq!(msg_list.number_warnings(), 1);
     }
 }

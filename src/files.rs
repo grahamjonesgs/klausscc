@@ -3,6 +3,7 @@ use crate::{
     messages::{MessageType, MsgList},
     opcodes::Pass2,
 };
+use crate::opcodes::InputData;
 
 use std::{
     fs::File,
@@ -28,11 +29,14 @@ pub fn read_file_to_vec(
     filename: &str,
     msg_list: &mut MsgList,
     opened_files: &mut Vec<String>,
-) -> Option<Vec<String>> {
+) -> Option<Vec<InputData>> {
+
+
     let file = File::open(filename);
     if file.is_err() {
         msg_list.push(
             format!("Unable to open file {filename}"),
+            None,
             None,
             MessageType::Error,
         );
@@ -44,6 +48,7 @@ pub fn read_file_to_vec(
             msg_list.push(
                 format!("Recursive include of file {filename}"),
                 None,
+                None,
                 MessageType::Error,
             );
             return None;
@@ -53,7 +58,7 @@ pub fn read_file_to_vec(
     opened_files.push(filename.to_string());
 
     let buf = BufReader::new(file.unwrap());
-    let mut lines: Vec<String> = Vec::new();
+    let mut lines: Vec<InputData> = Vec::new();
 
     let mut line_number = 0;
     for line in buf.lines() {
@@ -66,6 +71,7 @@ pub fn read_file_to_vec(
                         msg_list.push(
                             format!("Unable to parse include file {v} in {filename}"),
                             Some(line_number),
+                            Some(filename.to_string()),
                             MessageType::Error,
                         );
                         return None;
@@ -74,6 +80,7 @@ pub fn read_file_to_vec(
                         msg_list.push(
                             format!("Missing include file name in {filename}"),
                             Some(line_number),
+                            Some(filename.to_string()),
                             MessageType::Error,
                         );
                         return None;
@@ -84,6 +91,7 @@ pub fn read_file_to_vec(
                         msg_list.push(
                             format!("Unable to open include file {include_file} in {filename}"),
                             Some(line_number),
+                            Some(filename.to_string()),
                             MessageType::Error,
                         );
                         return None;
@@ -93,7 +101,10 @@ pub fn read_file_to_vec(
                         lines.push(line);
                     }
                 } else {
-                    lines.push(v);
+                    lines.push(InputData {
+                        input: v,
+                        file_name: filename.to_string(),
+                    });
                 }
             }
             Err(e) => println!("Error parsing opcode file: {e:?}"),
@@ -266,6 +277,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
                 msg_list.push(
                     "Error opening serial port, no ports found".to_string(),
                     None,
+                    None,
                     MessageType::Error,
                 );
                 return false;
@@ -292,6 +304,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 
                 msg_list.push(
                     format!("Error opening serial port {port_name}, {ports_msg}"),
+                    None,
                     None,
                     MessageType::Error,
                 );
@@ -329,6 +342,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
         msg_list.push(
             "No message received from board".to_string(),
             None,
+            None,
             MessageType::Warning,
         );
         return true;
@@ -339,6 +353,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
     if ret_msg.is_err() {
         msg_list.push(
             "Invalid message received from board".to_string(),
+            None,
             None,
             MessageType::Warning,
         );
@@ -351,6 +366,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 
     msg_list.push(
         format!("Message received from board is \"{print_ret_msg}\""),
+        None,
         None,
         MessageType::Info,
     );
