@@ -99,8 +99,6 @@ fn main() {
         &mut macro_list,
     );
 
-    println!("Paas0: {pass0:#?}");
-
     // Pass 1 to get line numbers and labels
     //msg_list.push("Pass 1".to_string(), None, MessageType::Info);
     let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, oplist.clone());

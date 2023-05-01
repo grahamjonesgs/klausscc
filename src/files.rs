@@ -5,11 +5,14 @@ use crate::{
     opcodes::Pass2,
 };
 
+use std::path::MAIN_SEPARATOR_STR;
 use std::{
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
+    ffi::OsStr,
 };
+
 
 #[derive(PartialEq, Debug)]
 pub enum LineType {
@@ -30,6 +33,7 @@ pub fn read_file_to_vec(
     msg_list: &mut MsgList,
     opened_files: &mut Vec<String>,
 ) -> Option<Vec<InputData>> {
+
     let file = File::open(filename);
     if file.is_err() {
         msg_list.push(
@@ -83,7 +87,15 @@ pub fn read_file_to_vec(
                         );
                         return None;
                     }
-                    let include_file = include_file.unwrap();
+
+                    // Get the include file from the same directory as the previous file
+                    let include_file = format!(
+                        "{}{}{}",
+                        Path::new(filename).parent().unwrap().to_str().unwrap(),
+                        MAIN_SEPARATOR_STR,
+                        include_file.unwrap()
+                    );
+
                     let include_lines = read_file_to_vec(&include_file, msg_list, opened_files);
                     if include_lines.is_none() {
                         msg_list.push(
@@ -180,11 +192,17 @@ pub fn remove_block_comments(lines: Vec<InputData>) -> Vec<InputData> {
 ///
 /// Looks for first dot in the string, and returns the slice before the dot
 pub fn filename_stem(full_name: &String) -> String {
-    let dot_pos = full_name.find('.');
-    if dot_pos.is_none() {
-        return full_name.to_string();
-    }
-    full_name[..dot_pos.unwrap_or(0)].to_string()
+    let path = Path::new(full_name);
+    let stem = path.file_stem();
+    let parent = path.parent();
+
+    parent
+        .unwrap_or(Path::new(""))
+        .to_str()
+        .unwrap()
+        .to_string()
+        + MAIN_SEPARATOR_STR
+        + stem.unwrap_or(OsStr::new("")).to_str().unwrap()
 }
 
 /// Output the bitcode to given file
