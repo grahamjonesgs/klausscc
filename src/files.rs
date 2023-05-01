@@ -102,6 +102,7 @@ pub fn read_file_to_vec(
                     lines.push(InputData {
                         input: v,
                         file_name: filename.to_string(),
+                        line_counter: line_number,
                     });
                 }
             }
@@ -169,6 +170,7 @@ pub fn remove_block_comments(lines: Vec<InputData>) -> Vec<InputData> {
         new_lines.push(InputData {
             input: new_line,
             file_name: line.file_name,
+            line_counter: line.line_counter,
         });
     }
     new_lines
@@ -386,13 +388,15 @@ mod test {
         let input = vec![InputData {
             input: "abc/* This is a comment */def".to_string(),
             file_name: "test.kla".to_string(),
+            line_counter: 1,
         }];
         let output = remove_block_comments(input);
         assert_eq!(
             output,
             vec![InputData {
                 input: "abcdef".to_string(),
-                file_name: "test.kla".to_string()
+                file_name: "test.kla".to_string(),
+                line_counter: 1,
             }]
         );
     }
@@ -404,10 +408,12 @@ mod test {
             InputData {
                 input: "abc/* This is a comment */def".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 1,
             },
             InputData {
                 input: "abc/* This is a comment */defg".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 2,
             },
         ];
         let output = remove_block_comments(input);
@@ -416,11 +422,13 @@ mod test {
             vec![
                 InputData {
                     input: "abcdef".to_string(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 1,
                 },
                 InputData {
                     input: "abcdefg".to_string(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 2
                 },
             ]
         );
@@ -433,10 +441,12 @@ mod test {
             InputData {
                 input: "abc/* This is a comment ".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 1,
             },
             InputData {
                 input: "so is this */defg".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 2,
             },
         ];
         let output = remove_block_comments(input);
@@ -445,11 +455,13 @@ mod test {
             vec![
                 InputData {
                     input: "abc".to_string(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 1,
                 },
                 InputData {
                     input: "defg".to_string(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 2,
                 },
             ]
         );
@@ -462,14 +474,17 @@ mod test {
             InputData {
                 input: "abc/* This is a comment ".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 1,
             },
             InputData {
                 input: "so is this defg".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 2,
             },
             InputData {
                 input: "*/def".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 3,
             },
         ];
         let output = remove_block_comments(input);
@@ -478,15 +493,18 @@ mod test {
             vec![
                 InputData {
                     input: "abc".to_string(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 1,
                 },
                 InputData {
                     input: String::new(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 2,
                 },
                 InputData {
                     input: "def".to_string(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 3,
                 },
             ]
         );
@@ -499,14 +517,17 @@ mod test {
             InputData {
                 input: "abc/* This is a /* /*comment ".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 1,
             },
             InputData {
                 input: "so is this defg".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 2,
             },
             InputData {
                 input: "*/def".to_string(),
                 file_name: "test.kla".to_string(),
+                line_counter: 3,
             },
         ];
         let output = remove_block_comments(input);
@@ -515,15 +536,18 @@ mod test {
             vec![
                 InputData {
                     input: "abc".to_string(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 1,
                 },
                 InputData {
                     input: String::new(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 2,
                 },
                 InputData {
                     input: "def".to_string(),
-                    file_name: "test.kla".to_string()
+                    file_name: "test.kla".to_string(),
+                    line_counter: 3,
                 },
             ]
         );

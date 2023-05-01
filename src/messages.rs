@@ -26,7 +26,13 @@ impl MsgList {
         Self { list: Vec::new() }
     }
 
-    pub fn push(&mut self, name: String, line_number: Option<u32>, file_name: Option<String>, msg_type: MessageType) {
+    pub fn push(
+        &mut self,
+        name: String,
+        line_number: Option<u32>,
+        file_name: Option<String>,
+        msg_type: MessageType,
+    ) {
         let _ = &mut self.list.push(Message {
             name,
             line_number,
@@ -60,7 +66,7 @@ impl MsgList {
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
-        let warning: ColoredString = match msg.level {
+        let message_level: ColoredString = match msg.level {
             MessageType::Info => "I".to_string().green(),
             MessageType::Warning => "W".to_string().yellow(),
             MessageType::Error => "E".to_string().red(),
@@ -68,18 +74,39 @@ pub fn print_messages(msg_list: &mut MsgList) {
         println!(
             "{}",
             if msg.line_number.is_some() {
+                if msg.file_name.is_some() {
+                    format!(
+                        "{} {} Line {} in file {}. {} ",
+                        msg.time.format("%H:%M:%S%.3f"),
+                        message_level,
+                        msg.line_number.unwrap(),
+                        msg.file_name.as_ref().unwrap(),
+                        msg.name
+                    )
+                }
+                else {
+                    format!(
+                        "{} {} Line {}. {} ",
+                        msg.time.format("%H:%M:%S%.3f"),
+                        message_level,
+                        msg.line_number.unwrap(),
+                        msg.name
+                    )
+                }
+            } else if msg.file_name.is_some() {
                 format!(
-                    "{} {} Line {}. {} ",
+                    "{} {} In file {}. {} ",
                     msg.time.format("%H:%M:%S%.3f"),
-                    warning,
-                    msg.line_number.unwrap(),
+                    message_level,
+                    msg.file_name.as_ref().unwrap(),
                     msg.name
                 )
-            } else {
+            }
+            else {
                 format!(
                     "{} {} {} ",
-                    msg.time.format("%H:%M:%S.%3f"),
-                    warning,
+                    msg.time.format("%H:%M:%S%.3f"),
+                    message_level,
                     msg.name
                 )
             }
@@ -95,7 +122,12 @@ mod tests {
     // Test that the message list is created correctly
     fn test_msg_list() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None,Some("test".to_string()), MessageType::Info);
+        msg_list.push(
+            "Test".to_string(),
+            None,
+            Some("test".to_string()),
+            MessageType::Info,
+        );
         assert_eq!(msg_list.list.len(), 1);
         assert_eq!(msg_list.list[0].name, "Test");
         assert_eq!(msg_list.list[0].level, MessageType::Info);
@@ -116,9 +148,9 @@ mod tests {
     // Test number of warnings
     fn test_number_warnings() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None,None,  MessageType::Info);
+        msg_list.push("Test".to_string(), None, None, MessageType::Info);
         msg_list.push("Test".to_string(), None, None, MessageType::Warning);
-        msg_list.push("Test".to_string(), None,None,  MessageType::Error);
+        msg_list.push("Test".to_string(), None, None, MessageType::Error);
         assert_eq!(msg_list.number_warnings(), 1);
     }
 }

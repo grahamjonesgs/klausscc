@@ -207,7 +207,8 @@ pub fn return_macro_items_replace(
 /// Takes Vector of macros, and embeds macros recursively, up to 10 passes
 /// Will create errors message for more than 10 passes
 #[allow(clippy::too_many_lines)]
-pub fn expand_macros_multi(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
+#[allow(clippy::module_name_repetitions)]
+pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed: bool = true;
     let mut last_macro: String = String::new();
@@ -326,13 +327,12 @@ pub fn expand_macros(
     macro_list: &mut [Macro],
 ) -> Vec<Pass0> {
     let mut pass0: Vec<Pass0> = Vec::new();
-    let mut input_line_count: u32 = 1;
     for code_line in input_list {
         if macro_name_from_string(&code_line.input).is_some() {
             let items = return_macro_items_replace(
                 code_line.input.trim(),
                 macro_list,
-                input_line_count,
+                code_line.line_counter,
                 &code_line.file_name,
                 msg_list,
             );
@@ -342,8 +342,8 @@ pub fn expand_macros(
                         input: item
                             + " // Macro expansion from "
                             + &macro_name_from_string(&code_line.input).unwrap_or_default(),
-                        file_name: String::new(),
-                        line_counter: input_line_count,
+                        file_name: code_line.file_name.clone(),
+                        line_counter: code_line.line_counter,
                     });
                 }
             } else {
@@ -354,19 +354,18 @@ pub fn expand_macros(
                     MessageType::Error,
                 );
                 pass0.push(Pass0 {
-                    file_name: String::new(),
+                    file_name: code_line.file_name,
                     input: code_line.input,
-                    line_counter: input_line_count,
+                    line_counter: code_line.line_counter,
                 });
             }
         } else {
             pass0.push(Pass0 {
-                file_name: String::new(),
+                file_name: code_line.file_name,
                 input: code_line.input,
-                line_counter: input_line_count,
+                line_counter: code_line.line_counter,
             });
         }
-        input_line_count += 1;
     }
     pass0
 }
@@ -563,7 +562,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expand_macros_multi1() {
+    fn test_expand_embedded_macros1() {
         let macros = &mut Vec::<Macro>::new();
 
         let msg_list = &mut MsgList::new();
@@ -578,7 +577,7 @@ mod tests {
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
         });
 
-        let output = expand_macros_multi(macros.clone(), msg_list);
+        let output = expand_embedded_macros(macros.clone(), msg_list);
         let macros_result = &mut Vec::<Macro>::new();
         macros_result.push(Macro {
             name: String::from("$MACRO1"),
@@ -599,7 +598,7 @@ mod tests {
     }
 
     #[test]
-    fn test_expand_macros_multi2() {
+    fn test_expand_embedded_macros2() {
         let macros = &mut Vec::<Macro>::new();
 
         let msg_list = &mut MsgList::new();
@@ -609,7 +608,7 @@ mod tests {
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE2 %2")],
         });
 
-        let _output = expand_macros_multi(macros.clone(), msg_list);
+        let _output = expand_embedded_macros(macros.clone(), msg_list);
 
         assert_eq!(
             msg_list.list[0].name,
@@ -619,7 +618,7 @@ mod tests {
 
     #[test]
     // Test expand macros, to look for too many variables in imbedded macro
-    fn test_expand_macros_multi3() {
+    fn test_expand_embedded_macros3() {
         let macros = &mut Vec::<Macro>::new();
 
         let msg_list = &mut MsgList::new();
@@ -634,7 +633,7 @@ mod tests {
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
         });
 
-        let _output = expand_macros_multi(macros.clone(), msg_list);
+        let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Too many variables in imbedded macro \"$MACRO1 %2 %1\" in macro $MACRO2"
@@ -643,7 +642,7 @@ mod tests {
 
     #[test]
     // Test expand macros, to look for too invalid varibale in imbedded macro
-    fn test_expand_macros_multi4() {
+    fn test_expand_embedded_macros4() {
         let macros = &mut Vec::<Macro>::new();
 
         let msg_list = &mut MsgList::new();
@@ -658,7 +657,7 @@ mod tests {
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
         });
 
-        let _output = expand_macros_multi(macros.clone(), msg_list);
+        let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Invalid macro argument number y, in imbedded macro \"$MACRO1 %2 %1\" in $MACRO2"
@@ -667,7 +666,7 @@ mod tests {
 
     #[test]
     // Test expand macros, to look for missing variable in imbedded macro
-    fn test_expand_macros_multi5() {
+    fn test_expand_embedded_macros5() {
         let macros = &mut Vec::<Macro>::new();
 
         let msg_list = &mut MsgList::new();
@@ -682,7 +681,7 @@ mod tests {
             items: vec![String::from("$MACRO1 %2"), String::from("OPCODE3")],
         });
 
-        let _output = expand_macros_multi(macros.clone(), msg_list);
+        let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Missing argument 2 for imbedded macro \"$MACRO1 %2\" in $MACRO2"
@@ -711,17 +710,22 @@ mod tests {
             InputData {
                 input: String::from("$MACRO1 A B"),
                 file_name: "File1".to_owned(),
+                line_counter: 1,
             },
             InputData {
                 input: String::from("$MACRO2 C D"),
-                file_name: "File1".to_owned(),
+                file_name: "File2".to_owned(),
+                line_counter: 2,
             },
         ];
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
+        assert_eq!(strip_comments(&mut pass0[0].file_name), "File1");
         assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
         assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
         assert_eq!(strip_comments(&mut pass0[3].input), "POP C");
+        assert_eq!(strip_comments(&mut pass0[3].file_name), "File2");
+      //  assert_eq!(&mut pass0[3].line_counter, 1);
     }
 
     #[test]
@@ -745,10 +749,12 @@ mod tests {
             InputData {
                 input: String::from("$MACRO1 A B"),
                 file_name: "File1".to_owned(),
+                line_counter: 1,
             },
             InputData {
                 input: String::from("$MACRO2 C"),
                 file_name: "File1".to_owned(),
+                line_counter: 2,
             },
         ];
 
@@ -785,10 +791,12 @@ mod tests {
             InputData {
                 input: String::from("$MACRO1 A B"),
                 file_name: "File1".to_owned(),
+                line_counter: 1,
             },
             InputData {
                 input: String::from("$MACRO2 C D"),
                 file_name: "File1".to_owned(),
+                line_counter: 2,
             },
         ];
 
@@ -825,10 +833,12 @@ mod tests {
             InputData {
                 input: String::from("$MACRO7 A B"),
                 file_name: "File1".to_owned(),
+                line_counter: 1,
             },
             InputData {
                 input: String::from("$MACRO2 C D"),
                 file_name: "File1".to_owned(),
+                line_counter: 1,
             },
         ];
 
@@ -856,6 +866,7 @@ mod tests {
         let input: Vec<InputData> = vec![InputData {
             input: String::from("OPCODE1 A B"),
             file_name: "File1".to_owned(),
+            line_counter: 1,
         }];
 
         let mut pass0 = expand_macros(&mut msg_list, input, macros);

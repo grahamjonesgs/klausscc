@@ -9,6 +9,7 @@ RET
 RET
 #DATA2 "H"
 RET
+!include src/klacode/hello.kla
 
 /* test comment
 SETR A 0x100

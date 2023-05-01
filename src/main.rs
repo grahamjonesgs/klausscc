@@ -20,7 +20,7 @@ use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
 };
 use labels::{find_duplicate_label, get_labels, Label};
-use macros::{expand_macros, expand_macros_multi};
+use macros::{expand_macros, expand_embedded_macros};
 use messages::{print_messages, MessageType, MsgList};
 use opcodes::{
     add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
@@ -72,7 +72,7 @@ fn main() {
         std::process::exit(1);
     }
     let oplist = opt_oplist.unwrap_or([].to_vec());
-    let mut macro_list = expand_macros_multi(opt_macro_list.unwrap(), &mut msg_list);
+    let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
 
     // Parse the input file
     msg_list.push(
@@ -88,6 +88,8 @@ fn main() {
         std::process::exit(1);
     }
 
+   
+
     let input_list = Some(remove_block_comments(input_list.unwrap()));
 
     // Pass 0 to add macros
@@ -97,9 +99,11 @@ fn main() {
         &mut macro_list,
     );
 
+    println!("Paas0: {pass0:#?}");
+
     // Pass 1 to get line numbers and labels
     //msg_list.push("Pass 1".to_string(), None, MessageType::Info);
-    let pass1 = get_pass1(&mut msg_list, pass0, oplist.clone());
+    let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, oplist.clone());
     let mut labels = get_labels(&pass1);
     find_duplicate_label(&mut labels, &mut msg_list);
 

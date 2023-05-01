@@ -24,6 +24,7 @@ pub struct Opcode {
 pub struct InputData {
     pub input: String,
     pub file_name: String,
+    pub line_counter: u32,
 }
 
 #[derive(Debug)]
