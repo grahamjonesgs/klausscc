@@ -3,7 +3,7 @@ use itertools::Itertools;
 
 use crate::{
     messages::{MessageType, MsgList},
-    opcodes::{Pass0, InputData},
+    opcodes::{InputData, Pass0},
 };
 
 #[derive(Clone, PartialEq, Debug)]
@@ -342,7 +342,7 @@ pub fn expand_macros(
                         input: item
                             + " // Macro expansion from "
                             + &macro_name_from_string(&code_line.input).unwrap_or_default(),
-                            file_name: String::new(),
+                        file_name: String::new(),
                         line_counter: input_line_count,
                     });
                 }
@@ -440,7 +440,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY ARG_A  ARG_B");
-        let output = return_macro_items_replace(&input, macros, 0,"test", msg_list);
+        let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             output,
             Some(vec![
@@ -466,7 +466,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY %MACRO1  ARG_B ARG_C");
-        let output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
+        let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             output,
             Some(vec![
@@ -492,7 +492,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY2 %MACRO1  ARG_B ARG_C");
-        let output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
+        let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(output, None);
     }
 
@@ -511,7 +511,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C ARG_D ARG_E");
-        let _output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
+        let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Too many variables for macro $DELAY1".to_string()
@@ -533,7 +533,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C");
-        let _output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
+        let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Invalid macro argument number xyz, in macro $DELAY1".to_string()
@@ -555,7 +555,7 @@ mod tests {
             ],
         });
         let input = String::from("$DELAY1  ARG_A");
-        let _output = return_macro_items_replace(&input, macros, 0, "test",msg_list);
+        let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             msg_list.list[0].name,
             "Missing argument 2 for macro $DELAY1".to_string()
@@ -705,13 +705,18 @@ mod tests {
             variables: 2,
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
         });
-        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
-        input.push( InputData{  
-            input: String::from("$MACRO1 A B"),
-            file_name: "File1".to_owned() });
-        input.push( InputData{  
+        //  let mut input: Vec<InputData> = Vec::<InputData>::new();
+
+        let input: Vec<InputData> = vec![
+            InputData {
+                input: String::from("$MACRO1 A B"),
+                file_name: "File1".to_owned(),
+            },
+            InputData {
                 input: String::from("$MACRO2 C D"),
-                file_name: "File1".to_owned() });
+                file_name: "File1".to_owned(),
+            },
+        ];
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
         assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
@@ -735,15 +740,18 @@ mod tests {
             variables: 2,
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
         });
-       // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
-        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
-        input.push( InputData{  
-            input: String::from("$MACRO1 A B"),
-            file_name: "File1".to_owned() });
-        input.push( InputData{  
+        // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
+        let input: Vec<InputData> = vec![
+            InputData {
+                input: String::from("$MACRO1 A B"),
+                file_name: "File1".to_owned(),
+            },
+            InputData {
                 input: String::from("$MACRO2 C"),
-                file_name: "File1".to_owned() });
-       
+                file_name: "File1".to_owned(),
+            },
+        ];
+
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
         assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
@@ -772,19 +780,20 @@ mod tests {
             variables: 1,
             items: vec![String::from("PUSH %2")],
         });
-       // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
-        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
-        input.push( InputData{  
-            input: String::from("$MACRO1 A B"),
-            file_name: "File1".to_owned() });
-        input.push( InputData{  
+        // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
+        let input: Vec<InputData> = vec![
+            InputData {
+                input: String::from("$MACRO1 A B"),
+                file_name: "File1".to_owned(),
+            },
+            InputData {
                 input: String::from("$MACRO2 C D"),
-                file_name: "File1".to_owned() });
-       
-       
+                file_name: "File1".to_owned(),
+            },
+        ];
+
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
-        
-       
+
         assert_eq!(strip_comments(&mut pass0[0].input), "MOV A");
         assert_eq!(strip_comments(&mut pass0[1].input), "RET B");
         assert_eq!(strip_comments(&mut pass0[2].input), "PUSH D");
@@ -811,15 +820,18 @@ mod tests {
             variables: 1,
             items: vec![String::from("PUSH %2")],
         });
-       // let input = vec![String::from("$MACRO7 A B"), String::from("$MACRO2 C D")];
-        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
-        input.push( InputData{  
-            input: String::from("$MACRO7 A B"),
-            file_name: "File1".to_owned() });
-        input.push( InputData{  
+        // let input = vec![String::from("$MACRO7 A B"), String::from("$MACRO2 C D")];
+        let input: Vec<InputData> = vec![
+            InputData {
+                input: String::from("$MACRO7 A B"),
+                file_name: "File1".to_owned(),
+            },
+            InputData {
                 input: String::from("$MACRO2 C D"),
-                file_name: "File1".to_owned() });
-      
+                file_name: "File1".to_owned(),
+            },
+        ];
+
         let _pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(msg_list.list[0].name, "Macro not found $MACRO7 A B");
     }
@@ -840,13 +852,12 @@ mod tests {
             variables: 1,
             items: vec![String::from("PUSH %2")],
         });
-      //  let input = vec![String::from("OPCODE1 A B")];
-        let mut input: Vec<InputData> = Vec::<InputData>::new(); 
-        input.push( InputData{  
+
+        let input: Vec<InputData> = vec![InputData {
             input: String::from("OPCODE1 A B"),
-            file_name: "File1".to_owned() });
-       
-       
+            file_name: "File1".to_owned(),
+        }];
+
         let mut pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&mut pass0[0].input), "OPCODE1 A B");
     }

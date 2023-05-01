@@ -1,9 +1,9 @@
 use crate::helper::{strip_comments, trim_newline};
+use crate::opcodes::InputData;
 use crate::{
     messages::{MessageType, MsgList},
     opcodes::Pass2,
 };
-use crate::opcodes::InputData;
 
 use std::{
     fs::File,
@@ -30,8 +30,6 @@ pub fn read_file_to_vec(
     msg_list: &mut MsgList,
     opened_files: &mut Vec<String>,
 ) -> Option<Vec<InputData>> {
-
-
     let file = File::open(filename);
     if file.is_err() {
         msg_list.push(
@@ -142,13 +140,13 @@ pub fn get_include_filename(line: &str) -> Option<String> {
 /// Remove comments from vector of strings
 ///
 /// Checks for /* */ and removes them from the vector of strings
-pub fn remove_block_comments(lines: Vec<String>) -> Vec<String> {
+pub fn remove_block_comments(lines: Vec<InputData>) -> Vec<InputData> {
     let mut in_comment = false;
-    let mut new_lines: Vec<String> = Vec::new();
+    let mut new_lines: Vec<InputData> = Vec::new();
     for line in lines {
         let mut new_line = String::new();
         let mut in_char = false; // If in normal last was / or if in comment last was *
-        for c in line.chars() {
+        for c in line.input.chars() {
             if in_comment {
                 if c == '/' && in_char {
                     in_comment = false;
@@ -168,7 +166,10 @@ pub fn remove_block_comments(lines: Vec<String>) -> Vec<String> {
                 new_line.push(c);
             }
         }
-        new_lines.push(new_line);
+        new_lines.push(InputData {
+            input: new_line,
+            file_name: line.file_name,
+        });
     }
     new_lines
 }
@@ -382,55 +383,150 @@ mod test {
     #[test]
     // Test remove of commnets in single line
     fn test_remove_block_comments1() {
-        let input = vec!["abc/* This is a comment */def".to_string()];
+        let input = vec![InputData {
+            input: "abc/* This is a comment */def".to_string(),
+            file_name: "test.kla".to_string(),
+        }];
         let output = remove_block_comments(input);
-        assert_eq!(output, vec!["abcdef"]);
+        assert_eq!(
+            output,
+            vec![InputData {
+                input: "abcdef".to_string(),
+                file_name: "test.kla".to_string()
+            }]
+        );
     }
 
     #[test]
     // Test remove of commnets in two lines
     fn test_remove_block_comments2() {
         let input = vec![
-            "abc/* This is a comment */def".to_string(),
-            "abc/* This is a comment */defg".to_string(),
+            InputData {
+                input: "abc/* This is a comment */def".to_string(),
+                file_name: "test.kla".to_string(),
+            },
+            InputData {
+                input: "abc/* This is a comment */defg".to_string(),
+                file_name: "test.kla".to_string(),
+            },
         ];
         let output = remove_block_comments(input);
-        assert_eq!(output, vec!["abcdef", "abcdefg"]);
+        assert_eq!(
+            output,
+            vec![
+                InputData {
+                    input: "abcdef".to_string(),
+                    file_name: "test.kla".to_string()
+                },
+                InputData {
+                    input: "abcdefg".to_string(),
+                    file_name: "test.kla".to_string()
+                },
+            ]
+        );
     }
 
     #[test]
     // Test remove of commnets in across two lines
     fn test_remove_block_comments3() {
         let input = vec![
-            "abc/* This is a comment ".to_string(),
-            "so is this */defg".to_string(),
+            InputData {
+                input: "abc/* This is a comment ".to_string(),
+                file_name: "test.kla".to_string(),
+            },
+            InputData {
+                input: "so is this */defg".to_string(),
+                file_name: "test.kla".to_string(),
+            },
         ];
         let output = remove_block_comments(input);
-        assert_eq!(output, vec!["abc", "defg"]);
+        assert_eq!(
+            output,
+            vec![
+                InputData {
+                    input: "abc".to_string(),
+                    file_name: "test.kla".to_string()
+                },
+                InputData {
+                    input: "defg".to_string(),
+                    file_name: "test.kla".to_string()
+                },
+            ]
+        );
     }
 
     #[test]
     // Test remove of commnets in across three line with blank line left
     fn test_remove_block_comments4() {
         let input = vec![
-            "abc/* This is a comment ".to_string(),
-            "so is this defg".to_string(),
-            "*/def".to_string(),
+            InputData {
+                input: "abc/* This is a comment ".to_string(),
+                file_name: "test.kla".to_string(),
+            },
+            InputData {
+                input: "so is this defg".to_string(),
+                file_name: "test.kla".to_string(),
+            },
+            InputData {
+                input: "*/def".to_string(),
+                file_name: "test.kla".to_string(),
+            },
         ];
         let output = remove_block_comments(input);
-        assert_eq!(output, vec!["abc", "", "def"]);
+        assert_eq!(
+            output,
+            vec![
+                InputData {
+                    input: "abc".to_string(),
+                    file_name: "test.kla".to_string()
+                },
+                InputData {
+                    input: String::new(),
+                    file_name: "test.kla".to_string()
+                },
+                InputData {
+                    input: "def".to_string(),
+                    file_name: "test.kla".to_string()
+                },
+            ]
+        );
     }
 
     #[test]
     // Test restart comments
     fn test_remove_block_comments5() {
         let input = vec![
-            "abc/* This is a /* /*comment ".to_string(),
-            "so is this defg".to_string(),
-            "*/def".to_string(),
+            InputData {
+                input: "abc/* This is a /* /*comment ".to_string(),
+                file_name: "test.kla".to_string(),
+            },
+            InputData {
+                input: "so is this defg".to_string(),
+                file_name: "test.kla".to_string(),
+            },
+            InputData {
+                input: "*/def".to_string(),
+                file_name: "test.kla".to_string(),
+            },
         ];
         let output = remove_block_comments(input);
-        assert_eq!(output, vec!["abc", "", "def"]);
+        assert_eq!(
+            output,
+            vec![
+                InputData {
+                    input: "abc".to_string(),
+                    file_name: "test.kla".to_string()
+                },
+                InputData {
+                    input: String::new(),
+                    file_name: "test.kla".to_string()
+                },
+                InputData {
+                    input: "def".to_string(),
+                    file_name: "test.kla".to_string()
+                },
+            ]
+        );
     }
 
     #[test]

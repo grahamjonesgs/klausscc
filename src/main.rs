@@ -88,6 +88,8 @@ fn main() {
         std::process::exit(1);
     }
 
+    let input_list = Some(remove_block_comments(input_list.unwrap()));
+
     // Pass 0 to add macros
     let pass0 = expand_macros(
         &mut msg_list,
