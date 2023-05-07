@@ -15,12 +15,14 @@ mod messages;
 mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use files::{filename_stem, output_binary, output_code, read_file_to_vec, write_serial, LineType};
+use files::{
+    filename_stem, output_binary, output_code, read_file_to_vector, write_serial, LineType,
+};
 use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
 };
 use labels::{find_duplicate_label, get_labels, Label};
-use macros::{expand_macros, expand_embedded_macros};
+use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use opcodes::{
     add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
@@ -30,7 +32,7 @@ use crate::files::remove_block_comments;
 
 /// Main function for Klausscc
 ///
-/// Main funation to read CLI and call other functions
+/// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn main() {
     let mut msg_list: MsgList = MsgList::new();
@@ -60,8 +62,10 @@ fn main() {
         .unwrap_or(&String::new())
         .replace(' ', "");
 
-    // Parse the Opcode file
-    let (opt_oplist, opt_macro_list) = parse_vh_file(&opcode_file_name, &mut msg_list);
+    // Parse the opcode file
+    let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
+    let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
+    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list.unwrap_or(vec![]), &mut msg_list);
     if opt_oplist.is_none() {
         println!("Unable to open opcode file {opcode_file_name:?}");
         std::process::exit(1);
@@ -82,22 +86,16 @@ fn main() {
         MessageType::Info,
     );
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
-    let input_list = read_file_to_vec(&input_file_name, &mut msg_list, &mut opened_files);
+    let input_list = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_files);
     if input_list.is_none() {
         print_messages(&mut msg_list);
         std::process::exit(1);
     }
 
-   
-
-    let input_list = Some(remove_block_comments(input_list.unwrap()));
+    let input_list = Some(remove_block_comments(input_list.unwrap(),&mut msg_list));
 
     // Pass 0 to add macros
-    let pass0 = expand_macros(
-        &mut msg_list,
-        input_list.unwrap(),
-        &mut macro_list,
-    );
+    let pass0 = expand_macros(&mut msg_list, input_list.unwrap(), &mut macro_list);
 
     // Pass 1 to get line numbers and labels
     //msg_list.push("Pass 1".to_string(), None, MessageType::Info);
@@ -257,7 +255,8 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
 
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            program_counter += num_data_bytes(&pass.input, msg_list, pass.line_counter, pass.file_name) / 8;
+            program_counter +=
+                num_data_bytes(&pass.input, msg_list, pass.line_counter, pass.file_name) / 8;
         }
     }
     pass1
@@ -315,7 +314,7 @@ pub fn get_pass2(
 /// Send machine code to device
 ///
 /// Sends the resultant code on the serial device defined if no errors were found
-#[cfg(not(tarpaulin_include))] // Cannot test device write in trarpaulin
+#[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
     if msg_list.number_errors() == 0 {
         if write_serial(bin_string, output_serial_port, msg_list) {
@@ -346,7 +345,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
 /// Writes the binary file
 ///
 /// If not errors are found, write the binary output file
-#[cfg(not(tarpaulin_include))] // Cannnot test device write in tarpaulin
+#[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) {
     msg_list.push(
         format!("Writing binary file to {binary_file_name}"),
@@ -372,7 +371,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Test get_pass1 for correct vector returned, woth correct program counters
+    // Test get_pass1 for correct vector returned, with correct program counters
     fn test_get_pass1_1() {
         let mut msg_list = MsgList::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -446,7 +445,7 @@ mod tests {
     }
 
     #[test]
-    // Test get_pass1 for correct vector returned, woth correct program counters
+    // Test get_pass1 for correct vector returned, with correct program counters
     fn test_get_pass1_2() {
         let mut msg_list = MsgList::new();
         let opcodes = &mut Vec::<Opcode>::new();

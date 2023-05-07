@@ -7,12 +7,11 @@ use crate::{
 
 use std::path::MAIN_SEPARATOR_STR;
 use std::{
+    ffi::OsStr,
     fs::File,
     io::{prelude::*, BufReader},
     path::Path,
-    ffi::OsStr,
 };
-
 
 #[derive(PartialEq, Debug)]
 pub enum LineType {
@@ -28,12 +27,11 @@ pub enum LineType {
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
 #[cfg(not(tarpaulin_include))] // Cannot test reading file in tarpaulin
-pub fn read_file_to_vec(
+pub fn read_file_to_vector(
     filename: &str,
     msg_list: &mut MsgList,
     opened_files: &mut Vec<String>,
 ) -> Option<Vec<InputData>> {
-
     let file = File::open(filename);
     if file.is_err() {
         msg_list.push(
@@ -96,7 +94,7 @@ pub fn read_file_to_vec(
                         include_file.unwrap()
                     );
 
-                    let include_lines = read_file_to_vec(&include_file, msg_list, opened_files);
+                    let include_lines = read_file_to_vector(&include_file, msg_list, opened_files);
                     if include_lines.is_none() {
                         msg_list.push(
                             format!("Unable to open include file {include_file} in {filename}"),
@@ -153,21 +151,31 @@ pub fn get_include_filename(line: &str) -> Option<String> {
 /// Remove comments from vector of strings
 ///
 /// Checks for /* */ and removes them from the vector of strings
-pub fn remove_block_comments(lines: Vec<InputData>) -> Vec<InputData> {
+pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> Vec<InputData> {
     let mut in_comment = false;
     let mut new_lines: Vec<InputData> = Vec::new();
+    let mut old_file_name = String::new();
     for line in lines {
+        if old_file_name != line.file_name {
+            if in_comment {
+                msg_list.push(
+                    format!("Comment not terminated in file {old_file_name}"),
+                    Some(line.line_counter),
+                    Some(line.file_name.clone()),
+                    MessageType::Error,
+                );
+            }
+            in_comment = false;
+        }
+
+        old_file_name = line.file_name.clone();
         let mut new_line = String::new();
         let mut in_char = false; // If in normal last was / or if in comment last was *
         for c in line.input.chars() {
             if in_comment {
                 if c == '/' && in_char {
                     in_comment = false;
-                } else if c == '*' {
-                    in_char = true;
-                } else {
-                    in_char = false;
-                }
+                } else {in_char = c == '*'}; // Sets to true if c == '*'
             } else if c == '*' && in_char {
                 in_comment = true;
                 new_line.pop();
@@ -194,15 +202,8 @@ pub fn remove_block_comments(lines: Vec<InputData>) -> Vec<InputData> {
 pub fn filename_stem(full_name: &String) -> String {
     let path = Path::new(full_name);
     let stem = path.file_stem();
-    let parent = path.parent();
 
-    parent
-        .unwrap_or(Path::new(""))
-        .to_str()
-        .unwrap()
-        .to_string()
-        + MAIN_SEPARATOR_STR
-        + stem.unwrap_or(OsStr::new("")).to_str().unwrap()
+    return stem.unwrap_or(OsStr::new("")).to_str().unwrap().to_owned();
 }
 
 /// Output the bitcode to given file
@@ -401,14 +402,14 @@ mod test {
     use super::*;
 
     #[test]
-    // Test remove of commnets in single line
+    // Test remove of comments in single line
     fn test_remove_block_comments1() {
         let input = vec![InputData {
             input: "abc/* This is a comment */def".to_string(),
             file_name: "test.kla".to_string(),
             line_counter: 1,
         }];
-        let output = remove_block_comments(input);
+        let output = remove_block_comments(input, &mut MsgList::new());
         assert_eq!(
             output,
             vec![InputData {
@@ -420,7 +421,7 @@ mod test {
     }
 
     #[test]
-    // Test remove of commnets in two lines
+    // Test remove of comments in two lines
     fn test_remove_block_comments2() {
         let input = vec![
             InputData {
@@ -429,12 +430,12 @@ mod test {
                 line_counter: 1,
             },
             InputData {
-                input: "abc/* This is a comment */defg".to_string(),
+                input: "abc/* This is a comment */def".to_string(),
                 file_name: "test.kla".to_string(),
                 line_counter: 2,
             },
         ];
-        let output = remove_block_comments(input);
+        let output = remove_block_comments(input, &mut MsgList::new());
         assert_eq!(
             output,
             vec![
@@ -444,7 +445,7 @@ mod test {
                     line_counter: 1,
                 },
                 InputData {
-                    input: "abcdefg".to_string(),
+                    input: "abcdef".to_string(),
                     file_name: "test.kla".to_string(),
                     line_counter: 2
                 },
@@ -453,7 +454,7 @@ mod test {
     }
 
     #[test]
-    // Test remove of commnets in across two lines
+    // Test remove of comments in across two lines
     fn test_remove_block_comments3() {
         let input = vec![
             InputData {
@@ -462,12 +463,12 @@ mod test {
                 line_counter: 1,
             },
             InputData {
-                input: "so is this */defg".to_string(),
+                input: "so is this */def".to_string(),
                 file_name: "test.kla".to_string(),
                 line_counter: 2,
             },
         ];
-        let output = remove_block_comments(input);
+        let output = remove_block_comments(input, &mut MsgList::new());
         assert_eq!(
             output,
             vec![
@@ -477,7 +478,7 @@ mod test {
                     line_counter: 1,
                 },
                 InputData {
-                    input: "defg".to_string(),
+                    input: "def".to_string(),
                     file_name: "test.kla".to_string(),
                     line_counter: 2,
                 },
@@ -486,7 +487,7 @@ mod test {
     }
 
     #[test]
-    // Test remove of commnets in across three line with blank line left
+    // Test remove of comments in across three line with blank line left
     fn test_remove_block_comments4() {
         let input = vec![
             InputData {
@@ -495,7 +496,7 @@ mod test {
                 line_counter: 1,
             },
             InputData {
-                input: "so is this defg".to_string(),
+                input: "so is this def".to_string(),
                 file_name: "test.kla".to_string(),
                 line_counter: 2,
             },
@@ -505,7 +506,7 @@ mod test {
                 line_counter: 3,
             },
         ];
-        let output = remove_block_comments(input);
+        let output = remove_block_comments(input, &mut MsgList::new());
         assert_eq!(
             output,
             vec![
@@ -538,7 +539,7 @@ mod test {
                 line_counter: 1,
             },
             InputData {
-                input: "so is this defg".to_string(),
+                input: "so is this def".to_string(),
                 file_name: "test.kla".to_string(),
                 line_counter: 2,
             },
@@ -548,7 +549,7 @@ mod test {
                 line_counter: 3,
             },
         ];
-        let output = remove_block_comments(input);
+        let output = remove_block_comments(input, &mut MsgList::new());
         assert_eq!(
             output,
             vec![
@@ -572,7 +573,52 @@ mod test {
     }
 
     #[test]
-    // Tests for the is_include to check if there is a !include as fiorst non white-space
+    // Test comments are closed at end of file
+    fn test_remove_block_comments6() {
+        let msg_list = &mut MsgList::new();
+        let input = vec![
+            InputData {
+                input: "abc/* This is a /* /*comment ".to_string(),
+                file_name: "test1.kla".to_string(),
+                line_counter: 1,
+            },
+            InputData {
+                input: "so is this def".to_string(),
+                file_name: "test1.kla".to_string(),
+                line_counter: 2,
+            },
+            InputData {
+                input: "def".to_string(),
+                file_name: "test2.kla".to_string(),
+                line_counter: 3,
+            },
+        ];
+        let output = remove_block_comments(input, msg_list);
+        assert_eq!(
+            output,
+            vec![
+                InputData {
+                    input: "abc".to_string(),
+                    file_name: "test1.kla".to_string(),
+                    line_counter: 1,
+                },
+                InputData {
+                    input: String::new(),
+                    file_name: "test1.kla".to_string(),
+                    line_counter: 2,
+                },
+                InputData {
+                    input: "def".to_string(),
+                    file_name: "test2.kla".to_string(),
+                    line_counter: 3,
+                },
+            ]
+        );
+        assert_eq!(msg_list.list[0].name, "Comment not terminated in file test1.kla");
+    }
+
+    #[test]
+    // Tests for the is_include to check if there is a !include as first non white-space
     fn test_is_include() {
         assert!(is_include("!include file.type"));
         assert!(!is_include("include file.type"));
@@ -582,13 +628,13 @@ mod test {
     }
 
     #[test]
-    // Checkl funtions returns correct filename from !include
+    // Check functions returns correct filename from !include
     fn test_get_include_filename() {
         assert_eq!(
             get_include_filename("!include myfile.name"),
             Some("myfile.name".to_string())
         );
-        assert_eq!(get_include_filename("testline"), None);
+        assert_eq!(get_include_filename("test_line"), None);
         assert_eq!(
             get_include_filename("!include myfile.name extra words"),
             Some("myfile.name".to_string())
@@ -605,6 +651,14 @@ mod test {
     fn test_filename_stem() {
         assert_eq!(filename_stem(&"file.type".to_string()), "file");
         assert_eq!(filename_stem(&"file".to_string()), "file");
+        assert_eq!(
+            filename_stem(&"\\my_path\\file.kla".to_string()),
+            "\\my_path\\file"
+        );
+        assert_eq!(
+            filename_stem(&"relative_path\\file.kla".to_string()),
+            "relative_path\\file"
+        );
     }
 
     #[test]
@@ -633,7 +687,7 @@ mod test {
     fn test_read_file_to_vec() {
         let mut msg_list = MsgList::new();
         let mut opened_files: Vec<String> = Vec::new();
-        read_file_to_vec("////xxxxxxx", &mut msg_list, &mut opened_files);
+        read_file_to_vector("////xxxxxxx", &mut msg_list, &mut opened_files);
         assert_eq!(msg_list.list[0].name, "Unable to open file ////xxxxxxx");
     }
 }

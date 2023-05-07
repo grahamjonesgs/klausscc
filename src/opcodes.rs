@@ -5,11 +5,6 @@ use crate::macros::macro_from_string;
 use crate::macros::return_macro;
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
-use std::{
-    fs::File,
-    io::{prelude::*, BufReader},
-    path::Path,
-};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Opcode {
@@ -56,54 +51,45 @@ pub struct Pass2 {
 /// Parse file to opcode and macro vectors
 ///
 /// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
-#[cfg(not(tarpaulin_include))] // Cannot test this parsing of VH file
 pub fn parse_vh_file(
-    filename: &impl AsRef<Path>,
+    input_list: Vec<InputData>,
     msg_list: &mut MsgList,
 ) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
-    let file = File::open(filename);
-    if file.is_err() {
+    if input_list.is_empty() {
         return (None, None);
     }
 
-    let buf = BufReader::new(file.unwrap());
     let mut opcodes: Vec<Opcode> = Vec::new();
     let mut macros: Vec<Macro> = Vec::new();
 
-    for line in buf.lines() {
-        match line {
-            Ok(v) => {
-                match opcode_from_string(&v) {
-                    None => (),
-                    Some(a) => {
-                        if return_opcode(&a.text_name, &mut opcodes).is_some() {
-                            msg_list.push(
-                                format!("Duplicate Opcode {} found", a.text_name),
-                                None,
-                                None,
-                                MessageType::Error,
-                            );
-                        }
-                        opcodes.push(a);
-                    }
+    for line in input_list {
+        match opcode_from_string(&line.input) {
+            None => (),
+            Some(a) => {
+                if return_opcode(&a.text_name, &mut opcodes).is_some() {
+                    msg_list.push(
+                        format!("Duplicate Opcode {} found", a.text_name),
+                        Some(line.line_counter),
+                        Some(line.file_name.clone()),
+                        MessageType::Error,
+                    );
                 }
-                match macro_from_string(&v, msg_list) {
-                    None => (),
-                    Some(a) => {
-                        if return_macro(&a.name, &mut macros).is_some() {
-                            msg_list.push(
-                                format!("Duplicate Macro definition {} found", a.name),
-                                None,
-                                None,
-                                MessageType::Error,
-                            );
-                        }
-                        macros.push(a);
-                    }
-                }
+                opcodes.push(a);
             }
-
-            Err(e) => println!("Failed parsing opcode file: {e:?}"),
+        }
+        match macro_from_string(&line.input, msg_list) {
+            None => (),
+            Some(a) => {
+                if return_macro(&a.name, &mut macros).is_some() {
+                    msg_list.push(
+                        format!("Duplicate Macro definition {} found", a.name),
+                        Some(line.line_counter),
+                        Some(line.file_name),
+                        MessageType::Error,
+                    );
+                }
+                macros.push(a);
+            }
         }
     }
     (Some(opcodes), Some(macros))
@@ -384,9 +370,8 @@ pub fn add_arguments(
             );
         }
     }
-
-    if arguments.len() != 8 * num_arguments as usize {
-        #[cfg(not(tarpaulin_include))] // Needs eerors in previous funtions to produce wrong length
+    if arguments.len() != 8 * num_arguments as usize {   
+        #[cfg(not(tarpaulin_include))] // Needs errors in previous functions to produce wrong length
         msg_list.push(
             format!("Incorrect argument definition - \"{line}\""),
             Some(line_number),
@@ -557,7 +542,7 @@ mod tests {
             variables: 0,
             registers: 2,
         });
-        let output = add_registers(opcodes, &mut input, "test".to_string(),&mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
         assert_eq!(output, String::from("00005601"));
     }
 
@@ -574,7 +559,7 @@ mod tests {
             variables: 0,
             registers: 1,
         });
-        let output = add_registers(opcodes, &mut input, "test".to_string(),&mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
@@ -590,7 +575,7 @@ mod tests {
             variables: 0,
             registers: 1,
         });
-        let output = add_registers(opcodes, &mut input, "test".to_string(),&mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
@@ -607,7 +592,7 @@ mod tests {
             variables: 1,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("0000FFFF"));
     }
 
@@ -625,12 +610,12 @@ mod tests {
             variables: 1,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("000004D2"));
     }
 
     #[test]
-    // Test invald argument
+    // Test invalid argument
     fn test_add_arguments3() {
         let mut msg_list = crate::messages::MsgList::new();
         let mut input = String::from("PUSH HELLO");
@@ -643,12 +628,12 @@ mod tests {
             variables: 1,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1,"test", &mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000000"));
     }
 
     #[test]
-    // Test invald second argument
+    // Test invalid second argument
     fn test_add_arguments4() {
         let mut msg_list = crate::messages::MsgList::new();
         let mut input = String::from("PUSH 0xF RRR");
@@ -661,7 +646,7 @@ mod tests {
             variables: 2,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("0000000F00000000"));
     }
 
@@ -679,7 +664,7 @@ mod tests {
             variables: 2,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("000000010000000F"));
     }
 
@@ -697,7 +682,7 @@ mod tests {
             variables: 1,
             registers: 0,
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test",&mut labels);
+        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(
             msg_list.list[0].name,
@@ -830,3 +815,116 @@ mod tests {
         assert_eq!(map_reg_to_hex("Z"), "X");
     }
 }
+
+#[test]
+// Test no marco or opcodes
+fn test_parse_vh_file1() {
+    let mut msg_list: MsgList = MsgList::new();
+    let vh_list = vec![
+        InputData {
+            input: "abc/* This is a comment */def".to_string(),
+            file_name: "test.kla".to_string(),
+            line_counter: 1,
+        },
+        InputData {
+            input: "abc/* This is a comment */def".to_string(),
+            file_name: "test.kla".to_string(),
+            line_counter: 2,
+        },
+    ];
+
+    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+    assert!(opt_oplist.unwrap().is_empty());
+    assert!(opt_macro_list.unwrap().is_empty());
+}
+
+#[test]
+// Test normal macro and opcode
+fn test_parse_vh_file2() {
+    let mut msg_list: MsgList = MsgList::new();
+    let vh_list = vec![
+        InputData {
+            input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
+            file_name: "test.kla".to_string(),
+            line_counter: 1,
+        },
+        InputData {
+            input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
+            file_name: "test.kla".to_string(),
+            line_counter: 2,
+        },
+    ];
+
+    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+    assert_eq!(
+        opt_oplist.unwrap(),
+        vec![Opcode {
+            text_name: "CMPRR".to_string(),
+            hex_opcode: "000005??".to_string(),
+            registers: 2,
+            variables: 0,
+            comment: "Compare registers".to_string()
+        }]
+    );
+    assert_eq!(
+        opt_macro_list.unwrap(),
+        vec![Macro {
+            name: "$WAIT".to_string(),
+            variables: 2,
+            items: ["DELAYV %1".to_string(), "DELAYV %2".to_string()].to_vec()
+        }]
+    );
+}
+
+#[test]
+// Test duplicate macro
+fn test_parse_vh_file3() {
+    let mut msg_list: MsgList = MsgList::new();
+    let vh_list = vec![
+        InputData {
+            input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
+            file_name: "test.kla".to_string(),
+            line_counter: 1,
+        },
+        InputData {
+            input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
+            file_name: "test.kla".to_string(),
+            line_counter: 2,
+        },
+        InputData {
+            input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
+            file_name: "test.kla".to_string(),
+            line_counter: 3,
+        },
+        InputData {
+            input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
+            file_name: "test.kla".to_string(),
+            line_counter: 4,
+        },
+    ];
+
+    let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+    assert_eq!(
+        msg_list.list[0].name,
+        "Duplicate Macro definition $WAIT found"
+    );
+    assert_eq!(msg_list.list[0].line_number, Some(3));
+    assert_eq!(msg_list.list[1].name, "Duplicate Opcode CMPRR found");
+    assert_eq!(msg_list.list[1].line_number, Some(4));
+}
+#[test]
+// Test empty list
+fn test_parse_vh_file4() {
+    let mut msg_list: MsgList = MsgList::new();
+    let vh_list = vec![];
+
+    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+    assert_eq!(opt_oplist, None);
+    assert_eq!(opt_macro_list, None);
+}
+
+

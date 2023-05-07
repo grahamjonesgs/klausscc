@@ -174,6 +174,7 @@ mod tests {
     use super::*;
 
     #[test]
+    // Check that labels are correctly extracted from strings
     fn test_label_name_from_string() {
         assert_eq!(label_name_from_string("label:"), Some("label:".to_string()));
         assert_eq!(
