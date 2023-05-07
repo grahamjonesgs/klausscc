@@ -1,9 +1,6 @@
 use crate::files::LineType;
-use crate::labels::convert_argument;
-use crate::labels::Label;
-use crate::macros::macro_from_string;
-use crate::macros::return_macro;
-use crate::macros::Macro;
+use crate::labels::{convert_argument,Label};
+use crate::macros::{macro_from_string,return_macro,Macro};
 use crate::messages::{MessageType, MsgList};
 
 #[derive(Clone, Debug, PartialEq)]

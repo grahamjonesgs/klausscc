@@ -170,7 +170,6 @@ pub fn get_labels(pass1: &[Pass1]) -> Vec<Label> {
 #[cfg(test)]
 mod tests {
     use crate::files::LineType;
-
     use super::*;
 
     #[test]

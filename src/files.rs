@@ -1,16 +1,12 @@
 use crate::helper::{strip_comments, trim_newline};
-use crate::opcodes::InputData;
-use crate::{
-    messages::{MessageType, MsgList},
-    opcodes::Pass2,
-};
+use crate::messages::{MessageType, MsgList};
+use crate::opcodes::{InputData, Pass2};
 
-use std::path::MAIN_SEPARATOR_STR;
 use std::{
     ffi::OsStr,
     fs::File,
     io::{prelude::*, BufReader},
-    path::Path,
+    path::{Path, MAIN_SEPARATOR_STR},
 };
 
 #[derive(PartialEq, Debug)]
@@ -26,7 +22,7 @@ pub enum LineType {
 /// Open text file and return as vector of strings
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-#[cfg(not(tarpaulin_include))] // Cannot test reading file in tarpaulin
+// #[cfg(not(tarpaulin_include))] // Cannot test reading file in tarpaulin
 pub fn read_file_to_vector(
     filename: &str,
     msg_list: &mut MsgList,
@@ -67,15 +63,6 @@ pub fn read_file_to_vector(
                 line_number += 1;
                 if is_include(&v) {
                     let include_file = get_include_filename(&v);
-                    if include_file.is_none() {
-                        msg_list.push(
-                            format!("Unable to parse include file {v} in {filename}"),
-                            Some(line_number),
-                            Some(filename.to_string()),
-                            MessageType::Error,
-                        );
-                        return None;
-                    }
                     if include_file.clone().unwrap_or(String::new()) == String::new() {
                         msg_list.push(
                             format!("Missing include file name in {filename}"),
@@ -102,7 +89,8 @@ pub fn read_file_to_vector(
                             Some(filename.to_string()),
                             MessageType::Error,
                         );
-                        return None;
+                        //return None;
+                        return Some(lines)
                     }
                     let include_lines = include_lines.unwrap();
                     for line in include_lines {
@@ -116,6 +104,7 @@ pub fn read_file_to_vector(
                     });
                 }
             }
+            #[cfg(not(tarpaulin_include))] // Cannot test error reading file line in tarpaulin
             Err(e) => println!("Error parsing opcode file: {e:?}"),
         }
     }
@@ -175,7 +164,9 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
             if in_comment {
                 if c == '/' && in_char {
                     in_comment = false;
-                } else {in_char = c == '*'}; // Sets to true if c == '*'
+                } else {
+                    in_char = c == '*';
+                }; // Sets to true if c == '*'
             } else if c == '*' && in_char {
                 in_comment = true;
                 new_line.pop();
@@ -210,7 +201,7 @@ pub fn filename_stem(full_name: &String) -> String {
 ///
 /// Based on the bitcode string outputs to file
 #[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
-pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
+pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str) -> bool {
     let result_file = File::create(filename);
 
     if result_file.is_err() {
@@ -230,7 +221,7 @@ pub fn output_binary(filename: &impl AsRef<Path>, output_string: &str) -> bool {
 ///
 /// Writes all data to the detailed code file
 #[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
-pub fn output_code(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
+pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let result_file = File::create(filename);
     if result_file.is_err() {
         return false;
@@ -400,6 +391,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 mod test {
 
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     // Test remove of comments in single line
@@ -614,7 +606,10 @@ mod test {
                 },
             ]
         );
-        assert_eq!(msg_list.list[0].name, "Comment not terminated in file test1.kla");
+        assert_eq!(
+            msg_list.list[0].name,
+            "Comment not terminated in file test1.kla"
+        );
     }
 
     #[test]
@@ -684,10 +679,212 @@ mod test {
     }
 
     #[test]
-    fn test_read_file_to_vec() {
+    // Test for missing file
+    fn test_read_file_to_vec1() {
         let mut msg_list = MsgList::new();
         let mut opened_files: Vec<String> = Vec::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list, &mut opened_files);
         assert_eq!(msg_list.list[0].name, "Unable to open file ////xxxxxxx");
     }
+
+    #[test]
+    // Test for simple file added
+    fn test_write_file_to_vec2() {
+        let mut msg_list = MsgList::new();
+        let mut opened_files: Vec<String> = Vec::new();
+
+        let tmp_dir = TempDir::new().unwrap();
+
+        let file_path1 = tmp_dir.path().join("test1.kla");
+        let binding = file_path1.clone();
+        let file_name1: &str = binding.to_str().unwrap();
+        let mut tmp_file1: File = File::create(file_path1).unwrap();
+        let _ = writeln!(tmp_file1, "Testline in file");
+        let _ = writeln!(tmp_file1, "Testline in file 1");
+        let _ = writeln!(tmp_file1, "Testline in file 2");
+        let _ = writeln!(tmp_file1, "Testline in file 4");
+
+        let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        assert_eq!(lines.clone().unwrap()[0].input, "Testline in file");
+        assert_eq!(lines.unwrap().len(), 4);
+
+        drop(tmp_file1);
+        let _ = tmp_dir.close();
+    }
+
+    #[test]
+    // Test for included file
+    fn test_write_file_to_vec3() {
+        let mut msg_list = MsgList::new();
+        let mut opened_files: Vec<String> = Vec::new();
+
+        let tmp_dir = TempDir::new().unwrap();
+
+        let file_path1 = tmp_dir.path().join("test1.kla");
+        let binding = file_path1.clone();
+        let file_name1: &str = binding.to_str().unwrap();
+        let mut tmp_file1: File = File::create(file_path1).unwrap();
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 0");
+        let _ = writeln!(tmp_file1, "!include test2.kla");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+
+        let file_path2 = tmp_dir.path().join("test2.kla");
+        let mut tmp_file2: File = File::create(file_path2).unwrap();
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 0");
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 1");
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 2");
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 4");
+
+        let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        assert_eq!(lines.clone().unwrap()[0].input, "Testline in file 1 line 0");
+        assert_eq!(lines.clone().unwrap()[2].input, "Testline in file 2 line 1");
+        assert_eq!(lines.clone().unwrap()[6].input, "Testline in file 1 line 2");
+        assert_eq!(lines.unwrap().len(), 7);
+
+        drop(tmp_file1);
+        drop(tmp_file2);
+        let _ = tmp_dir.close();
+    }
+
+    #[test]
+    // Test for recursive file includes
+    fn test_write_file_to_vec4() {
+        let mut msg_list = MsgList::new();
+        let mut opened_files: Vec<String> = Vec::new();
+
+        let tmp_dir = TempDir::new().unwrap();
+
+        let file_path1 = tmp_dir.path().join("test1.kla");
+        let binding = file_path1.clone();
+        let file_name1: &str = binding.to_str().unwrap();
+        let mut tmp_file1: File = File::create(file_path1).unwrap();
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 0");
+        let _ = writeln!(tmp_file1, "!include test2.kla");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+
+        let file_path2 = tmp_dir.path().join("test2.kla");
+        let mut tmp_file2: File = File::create(file_path2).unwrap();
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 0");
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 1");
+        let _ = writeln!(tmp_file2, "!include test1.kla");
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 4");
+
+        let _lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        assert_eq!(
+            msg_list.list[0].name,
+            format!("Recursive include of file {file_name1}")
+        );
+
+        drop(tmp_file1);
+        drop(tmp_file2);
+        let _ = tmp_dir.close();
+    }
+
+    #[test]
+    // Test for missind included file
+    fn test_write_file_to_vec5() {
+        let mut msg_list = MsgList::new();
+        let mut opened_files: Vec<String> = Vec::new();
+
+        let tmp_dir = TempDir::new().unwrap();
+
+        let file_path1 = tmp_dir.path().join("test1.kla");
+        let binding = file_path1.clone();
+        let file_name1: &str = binding.to_str().unwrap();
+        let file_path2 = tmp_dir.path().join("test2.kla");
+        let binding = file_path2;
+        let file_name2: &str = binding.to_str().unwrap();
+        let mut tmp_file1: File = File::create(file_path1).unwrap();
+        let _ = writeln!(tmp_file1, "!include test2.kla");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+
+        let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        assert_eq!(
+            msg_list.list[0].name,
+            format!("Unable to open file {file_name2}")
+        );
+        assert_eq!(
+            msg_list.list[1].name,
+            format!("Unable to open include file {file_name2} in {file_name1}")
+        );
+        assert_eq!(lines, Some(vec![]));
+
+        drop(tmp_file1);
+        let _ = tmp_dir.close();
+    }
+    #[test]
+    // Test for missind included file name
+    fn test_write_file_to_vec6() {
+        let mut msg_list = MsgList::new();
+        let mut opened_files: Vec<String> = Vec::new();
+
+        let tmp_dir = TempDir::new().unwrap();
+
+        let file_path1 = tmp_dir.path().join("test1.kla");
+        let binding = file_path1.clone();
+        let file_name1: &str = binding.to_str().unwrap();
+        let mut tmp_file1: File = File::create(file_path1).unwrap();
+        let _ = writeln!(tmp_file1, "!include");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+
+        let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        assert_eq!(
+            msg_list.list[0].name,
+            format!("Missing include file name in {file_name1}")
+        );
+        assert_eq!(lines, None);
+
+        drop(tmp_file1);
+        let _ = tmp_dir.close();
+    }
+
+    #[test]
+    // Test for double included file
+    fn test_write_file_to_vec7() {
+        let mut msg_list = MsgList::new();
+        let mut opened_files: Vec<String> = Vec::new();
+
+        let tmp_dir = TempDir::new().unwrap();
+
+        let file_path1 = tmp_dir.path().join("test1.kla");
+        let binding = file_path1.clone();
+        let file_name1: &str = binding.to_str().unwrap();
+        let mut tmp_file1: File = File::create(file_path1).unwrap();
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 0");
+        let _ = writeln!(tmp_file1, "!include test2.kla");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+    
+        let file_path2 = tmp_dir.path().join("test2.kla");
+        let mut tmp_file2: File = File::create(file_path2.clone()).unwrap();
+        let binding = file_path2;
+        let file_name2: &str = binding.to_str().unwrap();
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 0");
+        let _ = writeln!(tmp_file2, "!include test3.kla");
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 2");
+        let _ = writeln!(tmp_file2, "Testline in file 2 line 4");
+
+        let file_path3 = tmp_dir.path().join("test3.kla");
+        let binding = file_path3;
+        let file_name3: &str = binding.to_str().unwrap();
+
+        let _lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        assert_eq!(
+            msg_list.list[0].name,
+            format!("Unable to open file {file_name3}")
+        );
+        assert_eq!(
+            msg_list.list[1].name,
+            format!("Unable to open include file {file_name3} in {file_name2}")
+        );
+
+        drop(tmp_file1);
+        drop(tmp_file2);
+        let _ = tmp_dir.close();
+    }
+
 }

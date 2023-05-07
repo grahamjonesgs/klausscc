@@ -17,6 +17,7 @@ pub struct Message {
     pub time: NaiveTime,
 }
 
+#[derive(Debug)]
 pub struct MsgList {
     pub list: Vec<Message>,
 }

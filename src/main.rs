@@ -16,7 +16,8 @@ mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{
-    filename_stem, output_binary, output_code, read_file_to_vector, write_serial, LineType,
+    filename_stem, write_binary_output_file, write_code_output_file, read_file_to_vector, remove_block_comments,
+    write_serial, LineType,
 };
 use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
@@ -27,8 +28,6 @@ use messages::{print_messages, MessageType, MsgList};
 use opcodes::{
     add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
 };
-
-use crate::files::remove_block_comments;
 
 /// Main function for Klausscc
 ///
@@ -92,7 +91,7 @@ fn main() {
         std::process::exit(1);
     }
 
-    let input_list = Some(remove_block_comments(input_list.unwrap(),&mut msg_list));
+    let input_list = Some(remove_block_comments(input_list.unwrap(), &mut msg_list));
 
     // Pass 0 to add macros
     let pass0 = expand_macros(&mut msg_list, input_list.unwrap(), &mut macro_list);
@@ -113,7 +112,7 @@ fn main() {
         None,
         MessageType::Info,
     );
-    if !output_code(&output_file_name, &mut pass2) {
+    if !write_code_output_file(&output_file_name, &mut pass2) {
         println!("Unable to write to code file {:?}", &output_file_name);
         std::process::exit(1);
     }
@@ -353,7 +352,7 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
         None,
         MessageType::Info,
     );
-    if !output_binary(&binary_file_name, bin_string) {
+    if !write_binary_output_file(&binary_file_name, bin_string) {
         msg_list.push(
             format!(
                 "Unable to write to binary code file {:?}",

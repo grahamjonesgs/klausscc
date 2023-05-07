@@ -1,10 +1,7 @@
 use core::fmt::Write as _;
 use itertools::Itertools;
-
-use crate::{
-    messages::{MessageType, MsgList},
-    opcodes::{InputData, Pass0},
-};
+use crate::messages::{MessageType, MsgList};
+use crate::opcodes::{InputData, Pass0};
 
 #[derive(Clone, PartialEq, Debug)]
 pub struct Macro {
@@ -373,7 +370,6 @@ pub fn expand_macros(
 #[cfg(test)]
 mod tests {
 
-    #[allow(unused_imports)]
     use super::*;
     use crate::helper::strip_comments;
     use crate::messages::MsgList;
