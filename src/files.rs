@@ -3,7 +3,6 @@ use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Pass2};
 
 use std::{
-    ffi::OsStr,
     fs::File,
     io::{prelude::*, BufReader},
     path::{Path, MAIN_SEPARATOR_STR},
@@ -193,8 +192,9 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
 pub fn filename_stem(full_name: &String) -> String {
     let path = Path::new(full_name);
     let stem = path.file_stem();
+    let parent = path.parent().unwrap().join(stem.unwrap());
 
-    return stem.unwrap_or(OsStr::new("")).to_str().unwrap().to_owned();
+    return parent.to_str().unwrap().to_owned();
 }
 
 /// Output the bitcode to given file
