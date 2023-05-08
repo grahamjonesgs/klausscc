@@ -34,7 +34,7 @@ impl MsgList {
         file_name: Option<String>,
         msg_type: MessageType,
     ) {
-        let _ = &mut self.list.push(Message {
+        self.list.push(Message {
             name,
             line_number,
             file_name,
