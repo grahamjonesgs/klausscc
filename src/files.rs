@@ -647,12 +647,12 @@ mod test {
         assert_eq!(filename_stem(&"file.type".to_string()), "file");
         assert_eq!(filename_stem(&"file".to_string()), "file");
         assert_eq!(
-            filename_stem(&"\\my_path\\file.kla".to_string()),
-            "\\my_path\\file"
+            filename_stem(&format!("{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file.kla")),
+            format!("{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file")
         );
         assert_eq!(
-            filename_stem(&"relative_path\\file.kla".to_string()),
-            "relative_path\\file"
+            filename_stem(&format!("relative_path{MAIN_SEPARATOR_STR}file.kla")),
+            format!("relative_path{MAIN_SEPARATOR_STR}file")
         );
     }
 
