@@ -34,6 +34,8 @@ use opcodes::{
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn main() {
+    use helper::print_all_opcodes;
+
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
 
@@ -76,6 +78,8 @@ fn main() {
     }
     let oplist = opt_oplist.unwrap_or([].to_vec());
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
+
+    print_all_opcodes(oplist.clone());
 
     // Parse the input file
     msg_list.push(

@@ -254,6 +254,7 @@ pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>
     true
 }
 
+
 /// Format a given string, adding spaces between groups of 4
 ///
 /// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string

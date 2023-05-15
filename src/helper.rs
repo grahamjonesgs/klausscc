@@ -18,7 +18,12 @@ pub fn data_name_from_string(line: &str) -> Option<String> {
 /// Return number of bytes of data
 ///
 /// From instruction name, option of number of bytes of data, or 0 is error
-pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: String) -> u32 {
+pub fn num_data_bytes(
+    line: &str,
+    msg_list: &mut MsgList,
+    line_number: u32,
+    filename: String,
+) -> u32 {
     match data_as_bytes(line) {
         Some(data) => data.len().try_into().unwrap(),
         None => {
@@ -270,6 +275,44 @@ pub fn trim_newline(s: &mut String) {
             s.pop();
         }
     }
+}
+
+pub fn print_all_opcodes(opcodes: Vec<Opcode>) {
+    println!("All opcodes:");
+    for opcode in opcodes.clone() {
+        print!("{}|", opcode.text_name);
+    }
+    println!();
+
+    println!("Markdown:");
+    println!("# All Opcodes");
+    let mut sorted_opcodes: Vec<Opcode>=opcodes;
+    sorted_opcodes.sort_by(|a, b| a.text_name.cmp(&b.text_name));
+    for opcode in sorted_opcodes {
+        println!("## {}", opcode.text_name);
+        println!("Hex Value: {}", opcode.hex_opcode);
+        println!();
+        if opcode.registers == 1 {
+            println!("The function takes **1** register");
+        }
+        else {
+        println!("The function takes **{}** registers", opcode.registers);
+        }
+        println!();
+        if opcode.variables == 1 {
+            println!("The function takes **1** variable");
+        }
+        else {
+        println!("The function takes **{}** variable", opcode.variables);
+        }
+        println!();
+        println!("Function: {}", opcode.comment);
+        println!();
+        println!();
+
+    }
+    println!();
+
 }
 
 #[cfg(test)]
