@@ -1,5 +1,6 @@
 use core::fmt::Write as _;
 use itertools::Itertools;
+use crate::helper::{strip_comments, return_comments};
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Pass0};
 
@@ -8,6 +9,7 @@ pub struct Macro {
     pub name: String,
     pub variables: u32,
     pub items: Vec<String>,
+    pub comment: String
 }
 
 /// Parse opcode definition line to macro
@@ -24,6 +26,8 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     let mut max_variable: u32 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
+    let comment = return_comments(&mut input_line.clone().to_string());
+    let input_line = &strip_comments(&mut input_line.clone().to_string());
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -88,6 +92,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         name,
         variables: max_variable,
         items,
+        comment
     })
 }
 
@@ -298,6 +303,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                 name: input_macro_line.name,
                 variables: input_macro_line.variables,
                 items: output_items,
+                comment: input_macro_line.comment
             });
         }
         pass += 1;
@@ -371,7 +377,6 @@ pub fn expand_macros(
 mod tests {
 
     use super::*;
-    use crate::helper::strip_comments;
     use crate::messages::MsgList;
 
     #[test]
@@ -395,6 +400,7 @@ mod tests {
             name: String::from("$TEST"),
             variables: 0,
             items: Vec::new(),
+            comment: String::new()
         });
         let input = String::from("$TEST");
         let output = return_macro(&input, macros);
@@ -404,6 +410,7 @@ mod tests {
                 name: String::from("$TEST"),
                 variables: 0,
                 items: Vec::new(),
+                comment: String::new()
             })
         );
     }
@@ -414,6 +421,7 @@ mod tests {
             name: String::from("$TEST1"),
             variables: 0,
             items: Vec::new(),
+            comment: String::new()
         });
         let input = String::from("$TEST2");
         let output = return_macro(&input, macros);
@@ -433,6 +441,7 @@ mod tests {
                 String::from("DELAYV %2"),
                 String::from("PUSH %1"),
             ],
+            comment: String::new()
         });
         let input = String::from("$DELAY ARG_A  ARG_B");
         let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -459,6 +468,7 @@ mod tests {
                 String::from("DELAYV %2"),
                 String::from("PUSH %3"),
             ],
+            comment: String::new()
         });
         let input = String::from("$DELAY %MACRO1  ARG_B ARG_C");
         let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -485,6 +495,7 @@ mod tests {
                 String::from("DELAYV %2"),
                 String::from("PUSH %3"),
             ],
+            comment: String::new()
         });
         let input = String::from("$DELAY2 %MACRO1  ARG_B ARG_C");
         let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -504,6 +515,7 @@ mod tests {
                 String::from("DELAYV %2"),
                 String::from("PUSH %3"),
             ],
+            comment: String::new()
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C ARG_D ARG_E");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -526,6 +538,7 @@ mod tests {
                 String::from("DELAYV %2"),
                 String::from("PUSH %3"),
             ],
+            comment: String::new()
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -548,6 +561,7 @@ mod tests {
                 String::from("DELAYV %2"),
                 String::from("PUSH %3"),
             ],
+            comment: String::new()
         });
         let input = String::from("$DELAY1  ARG_A");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -566,11 +580,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
+            comment: String::new()
         });
 
         let output = expand_embedded_macros(macros.clone(), msg_list);
@@ -579,6 +595,7 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
+            comment: String::new()
         });
         macros_result.push(Macro {
             name: String::from("$MACRO2"),
@@ -588,6 +605,7 @@ mod tests {
                 String::from("OPCODE2 %1"),
                 String::from("OPCODE3"),
             ],
+            comment: String::new()
         });
 
         assert_eq!(output, *macros_result);
@@ -602,6 +620,7 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE2 %2")],
+            comment: String::new()
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
@@ -622,11 +641,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 1,
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
+            comment: String::new()
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
@@ -646,11 +667,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("OPCODE1 %y"), String::from("OPCODE2 %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
+            comment: String::new()
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
@@ -670,11 +693,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("$MACRO1 %2"), String::from("OPCODE3")],
+            comment: String::new()
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
@@ -694,11 +719,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
+            comment: String::new()
         });
         //  let mut input: Vec<InputData> = Vec::<InputData>::new();
 
@@ -734,11 +761,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
+            comment: String::new()
         });
         // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
         let input: Vec<InputData> = vec![
@@ -776,11 +805,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
             items: vec![String::from("PUSH %2")],
+            comment: String::new()
         });
         // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
         let input: Vec<InputData> = vec![
@@ -818,11 +849,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
             items: vec![String::from("PUSH %2")],
+            comment: String::new()
         });
         // let input = vec![String::from("$MACRO7 A B"), String::from("$MACRO2 C D")];
         let input: Vec<InputData> = vec![
@@ -852,11 +885,13 @@ mod tests {
             name: String::from("$MACRO1"),
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
+            comment: String::new()
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
             items: vec![String::from("PUSH %2")],
+            comment: String::new()
         });
 
         let input: Vec<InputData> = vec![InputData {
@@ -880,7 +915,8 @@ mod tests {
             Some(Macro {
                 name: String::from("$POPALL"),
                 variables: 0,
-                items: vec!["POP A".to_string(), "POP B".to_string()]
+                items: vec!["POP A".to_string(), "POP B".to_string()],
+                comment: String::new()
             })
         );
     }
@@ -896,14 +932,33 @@ mod tests {
             Some(Macro {
                 name: String::from("$POPALL"),
                 variables: 2,
-                items: vec!["POP %1".to_string(), "POP %2".to_string()]
+                items: vec!["POP %1".to_string(), "POP %2".to_string()],
+                comment: String::new()
             })
         );
     }
 
     #[test]
-    // Convert string to macro with missng variables
+    // Convert string to macro with comments
     fn test_macro_from_string3() {
+        let mut msglist = MsgList::new();
+        let input_line = String::from("$POPALL POP %1 / POP %2 //Test Macro");
+        let macro_result = macro_from_string(&input_line, &mut msglist);
+        assert_eq!(
+            macro_result,
+            Some(Macro {
+                name: String::from("$POPALL"),
+                variables: 2,
+                items: vec!["POP %1".to_string(), "POP %2".to_string()],
+                comment: String::from("Test Macro")
+            })
+        );
+    }
+
+
+    #[test]
+    // Convert string to macro with missng variables
+    fn test_macro_from_string4() {
         let mut msglist = MsgList::new();
         let input_line = String::from("$POPALL POP %3 / POP %2");
         let macro_result = macro_from_string(&input_line, &mut msglist);
@@ -912,7 +967,8 @@ mod tests {
             Some(Macro {
                 name: String::from("$POPALL"),
                 variables: 3,
-                items: vec!["POP %3".to_string(), "POP %2".to_string()]
+                items: vec!["POP %3".to_string(), "POP %2".to_string()],
+                comment: String::new()
             })
         );
         assert_eq!(
@@ -923,7 +979,7 @@ mod tests {
 
     #[test]
     // Convert string to macro with variables not a macro
-    fn test_macro_from_string4() {
+    fn test_macro_from_string5() {
         let mut msglist = MsgList::new();
         let input_line = String::from("POPALL POP %1 / POP %2");
         let macro_result = macro_from_string(&input_line, &mut msglist);
@@ -932,7 +988,7 @@ mod tests {
 
     #[test]
     // Convert string to macro with missing variables
-    fn test_macro_from_string5() {
+    fn test_macro_from_string6() {
         let mut msglist = MsgList::new();
         let input_line = String::from("$POPALL POP %5 / POP %3");
         let _macro_result = macro_from_string(&input_line, &mut msglist);

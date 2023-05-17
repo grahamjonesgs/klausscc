@@ -179,6 +179,16 @@ pub fn strip_comments(input: &mut str) -> String {
     }
 }
 
+/// Returns trailing comments
+///
+///  Removes comments and starting and training whitespace
+pub fn return_comments(input: &mut str) -> String {
+    match input.find("//") {
+        None => String::new(),
+        Some(a) => return input[a+2..].trim().to_string().trim().to_string(),
+    }
+}
+
 /// Find checksum
 ///
 /// Calculates the checksum from the string of hex values, removing control characters
@@ -277,6 +287,7 @@ pub fn trim_newline(s: &mut String) {
     }
 }
 
+#[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
 pub fn print_all_opcodes(opcodes: Vec<Opcode>) {
     println!("All opcodes:");
     for opcode in opcodes.clone() {
@@ -427,47 +438,32 @@ mod tests {
     #[test]
     // Test that comment is stripped
     fn test_strip_comments() {
-        let mut input = String::from("Hello, world! //This is a comment");
-        let output = strip_comments(&mut input);
-        assert_eq!(output, "Hello, world!");
+        assert_eq!(strip_comments(&mut "Hello, world! //This is a comment".to_string()), "Hello, world!");
+        assert_eq!(strip_comments(&mut "Hello, world! //".to_string()), "Hello, world!");
+        assert_eq!(strip_comments(&mut String::new()), "");
+    }
+
+    #[test]
+    // Test that comment is returned
+    fn test_return_comments() {  
+        assert_eq!(return_comments(&mut "Hello, world! //This is a comment".to_string()), "This is a comment");
+        assert_eq!(return_comments(&mut "Hello, world! //".to_string()), "");
+        assert_eq!(return_comments(&mut "Hello, world!".to_string()), "");
     }
 
     #[test]
     // Test true is returned for comment
     fn test_is_comment() {
-        let mut input = String::from("//This is a comment");
-        let output = is_comment(&mut input);
-        assert!(output);
-    }
-    #[test]
-    fn test_is_comment2() {
-        let mut input = String::from("Hello //This is a comment");
-        let output = is_comment(&mut input);
-        assert!(!output);
-    }
-
-    #[test]
-    // Test false is returned for non-comment
-    fn test_is_comment3() {
-        let mut input = String::from(" ");
-        let output = is_comment(&mut input);
-        assert!(!output);
+        assert!(is_comment(&mut "//This is a comment".to_string()));
+        assert!(!is_comment(&mut "Hello //This is a comment".to_string()));
+        assert!(!is_comment(&mut " ".to_string()));
     }
 
     #[test]
     // Test for blank line returns true
-    fn test_is_blank1() {
-        let input = String::from(" ");
-        let output = is_blank(&input);
-        assert!(output);
-    }
-
-    #[test]
-    // Test for non-blank line returns false
-    fn test_is_blank2() {
-        let input = String::from("1234");
-        let output = is_blank(&input);
-        assert!(!output);
+    fn test_is_blank() {
+        assert!(is_blank(" "));
+        assert!(!is_blank("1234"));
     }
 
     #[test]

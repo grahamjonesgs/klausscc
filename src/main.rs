@@ -16,8 +16,8 @@ mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{
-    filename_stem, write_binary_output_file, write_code_output_file, read_file_to_vector, remove_block_comments,
-    write_serial, LineType,
+    filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file,
+    write_code_output_file, write_serial, LineType,
 };
 use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
@@ -62,6 +62,10 @@ fn main() {
         .get_one::<String>("serial")
         .unwrap_or(&String::new())
         .replace(' ', "");
+    let opcodes_flag = matches.get_flag("opcodes");
+
+    println!("xxxxxxx Opcodes flag is {opcodes_flag:?}");
+    
 
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
@@ -79,7 +83,11 @@ fn main() {
     let oplist = opt_oplist.unwrap_or([].to_vec());
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
 
-    print_all_opcodes(oplist.clone());
+    if opcodes_flag {
+        //print_all_opcodes(oplist.clone());
+        let opcodes_html_file_name = filename_stem(&opcode_file_name) + ".opcodes";
+        println!("xxxxx Writing opcodes file to {opcodes_html_file_name}");
+    }
 
     // Parse the input file
     msg_list.push(
@@ -150,6 +158,8 @@ fn main() {
 #[cfg(not(tarpaulin_include))] // Can not test CLI in tarpaulin
 #[allow(clippy::must_use_candidate)]
 pub fn set_matches() -> Command {
+    use clap::ArgAction;
+
     Command::new("Klauss Assembler")
         .version("0.0.1")
         .author("Graham Jones")
@@ -185,11 +195,11 @@ pub fn set_matches() -> Command {
                 .help("Output bitcode file for assembled code"),
         )
         .arg(
-            Arg::new("verbose")
-                .short('v')
-                .long("verbose")
-                .num_args(0)
-                .help("Set if verbose"),
+            Arg::new("opcodes")
+                .short('d')
+                .long("opcodes")
+                .action(ArgAction::SetTrue)
+                .help("Set if output of opcode list required"),
         )
         .arg(
             Arg::new("serial")

@@ -870,7 +870,8 @@ fn test_parse_vh_file2() {
         vec![Macro {
             name: "$WAIT".to_string(),
             variables: 2,
-            items: ["DELAYV %1".to_string(), "DELAYV %2".to_string()].to_vec()
+            items: ["DELAYV %1".to_string(), "DELAYV %2".to_string()].to_vec(),
+            comment: String::new()
         }]
     );
 }
