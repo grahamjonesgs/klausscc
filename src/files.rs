@@ -1,6 +1,7 @@
 use crate::helper::{strip_comments, trim_newline};
+use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
-use crate::opcodes::{InputData, Pass2};
+use crate::opcodes::{InputData, Opcode, Pass2};
 
 use std::{
     fs::File,
@@ -89,7 +90,7 @@ pub fn read_file_to_vector(
                             MessageType::Error,
                         );
                         //return None;
-                        return Some(lines)
+                        return Some(lines);
                     }
                     let include_lines = include_lines.unwrap();
                     for line in include_lines {
@@ -254,6 +255,90 @@ pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>
     true
 }
 
+#[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
+pub fn output_macros_opcodes(
+    filename: impl AsRef<Path> + std::clone::Clone,
+    opcodes: Vec<Opcode>,
+    macros: Vec<Macro>,
+    msg_list: &mut MsgList,
+) {
+    msg_list.push(
+        format!(
+            "Outputting macros and opcodes to {}",
+            filename.clone().as_ref().display()
+        ),
+        None,
+        None,
+        MessageType::Info,
+    );
+
+    let output_file = File::create(filename.clone());
+
+    if output_file.is_err() {
+        msg_list.push(
+            format!("Error opening file {}", filename.as_ref().display()),
+            None,
+            None,
+            MessageType::Info,
+        );
+    }
+
+    let mut file = output_file.unwrap();
+    let _ = file.write(b"<!DOCTYPE html>\n");
+    let _ = file.write(b"<html> <head> <style>\n");
+    let _ = file.write(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
+    let _ = file.write(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n");
+    let _ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n");
+    let _ = file.write(b"#opcodes tr:hover {background-color: #ddd;}\n");
+    let _ = file.write(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n");
+    let _ = file.write(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
+    let _ = file.write(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n");
+    let _ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");
+    let _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
+    let _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
+    let _ = file.write(b"</style> </head> <body>\n");
+    let _ = file.write(b"<h1>Opcode Table</h1><table id=\"opcodes\">\n");
+    let _ = file.write(b"<tr><th>Name</th><th>Opcode</th><th>Variables</th><th>Registers</th><th>Description</th></tr>\n");
+
+    /*   println!("All opcodes:");
+    for opcode in opcodes.clone() {
+        print!("{}|", opcode.text_name);
+    }
+    println!(); */
+
+    let mut sorted_opcodes: Vec<Opcode> = opcodes;
+    sorted_opcodes.sort_by(|a, b| a.text_name.cmp(&b.text_name));
+
+    for opcode in sorted_opcodes {
+        let _ = file.write(format!("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
+            opcode.text_name,
+            opcode.hex_opcode,
+            opcode.variables,
+            opcode.registers,
+            opcode.comment).as_bytes());       
+    }
+
+    let _ = file.write(b"</table><h1>Macro Table</h1><table id=\"macros\">\n");
+    let _ = file.write(b"<tr><th>Name</th><th>Variables</th><th>Description</th><th>Details</th></tr>\n");
+
+    let mut sorted_macros: Vec<Macro> = macros;
+    sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
+
+    println!("All macros: {:#?}", sorted_macros);
+
+    for macro_item in sorted_macros {
+        let _ = file.write(format!("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
+            macro_item.name,
+            macro_item.variables,
+            macro_item.comment,
+            macro_item.items.iter().fold(String::new(), |cur, nxt| cur + "  " + nxt)).trim().as_bytes());       
+    }
+
+    let _ = file.write(b"</table> </body> </html>\n");
+
+    
+  
+}
 
 /// Format a given string, adding spaces between groups of 4
 ///
@@ -648,7 +733,9 @@ mod test {
         assert_eq!(filename_stem(&"file.type".to_string()), "file");
         assert_eq!(filename_stem(&"file".to_string()), "file");
         assert_eq!(
-            filename_stem(&format!("{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file.kla")),
+            filename_stem(&format!(
+                "{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file.kla"
+            )),
             format!("{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file")
         );
         assert_eq!(
@@ -859,7 +946,7 @@ mod test {
         let _ = writeln!(tmp_file1, "!include test2.kla");
         let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
         let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
-    
+
         let file_path2 = tmp_dir.path().join("test2.kla");
         let mut tmp_file2: File = File::create(file_path2.clone()).unwrap();
         let binding = file_path2;
@@ -887,5 +974,4 @@ mod test {
         drop(tmp_file2);
         let _ = tmp_dir.close();
     }
-
 }

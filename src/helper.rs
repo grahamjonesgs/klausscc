@@ -287,44 +287,7 @@ pub fn trim_newline(s: &mut String) {
     }
 }
 
-#[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-pub fn print_all_opcodes(opcodes: Vec<Opcode>) {
-    println!("All opcodes:");
-    for opcode in opcodes.clone() {
-        print!("{}|", opcode.text_name);
-    }
-    println!();
 
-    println!("Markdown:");
-    println!("# All Opcodes");
-    let mut sorted_opcodes: Vec<Opcode>=opcodes;
-    sorted_opcodes.sort_by(|a, b| a.text_name.cmp(&b.text_name));
-    for opcode in sorted_opcodes {
-        println!("## {}", opcode.text_name);
-        println!("Hex Value: {}", opcode.hex_opcode);
-        println!();
-        if opcode.registers == 1 {
-            println!("The function takes **1** register");
-        }
-        else {
-        println!("The function takes **{}** registers", opcode.registers);
-        }
-        println!();
-        if opcode.variables == 1 {
-            println!("The function takes **1** variable");
-        }
-        else {
-        println!("The function takes **{}** variable", opcode.variables);
-        }
-        println!();
-        println!("Function: {}", opcode.comment);
-        println!();
-        println!();
-
-    }
-    println!();
-
-}
 
 #[cfg(test)]
 mod tests {

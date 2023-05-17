@@ -34,7 +34,8 @@ use opcodes::{
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn main() {
-    use helper::print_all_opcodes;
+    use crate::files::output_macros_opcodes;
+
 
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
@@ -84,9 +85,11 @@ fn main() {
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
 
     if opcodes_flag {
-        //print_all_opcodes(oplist.clone());
-        let opcodes_html_file_name = filename_stem(&opcode_file_name) + ".opcodes";
-        println!("xxxxx Writing opcodes file to {opcodes_html_file_name}");
+        
+        let opcodes_html_file_name = filename_stem(&opcode_file_name) + ".html";
+        output_macros_opcodes(opcodes_html_file_name,oplist.clone(),macro_list.clone(),&mut msg_list);
+       // println!("xxxxx Writing opcodes file to {opcodes_html_file_name}");
+
     }
 
     // Parse the input file

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html> <head> <style>
+#opcodes {  font-family: Arial, Helvetica, sans-serif;   border-collapse: collapse;  width: 100%;}
+#opcodes td, #opcodes th {  border: 1px solid #ddd;  padding: 8px;}
+#opcodes tr:nth-child(even){background-color: #f2f2f2;}
+#opcodes tr:hover {background-color: #ddd;}
+#opcodes th {  padding-top: 12px;  padding-bottom: 12px;  text-align: left;  background-color: #04AA6D;  color: white;}
+#macros {  font-family: Arial, Helvetica, sans-serif;  border-collapse: collapse;  width: 100%;}
+#macros td, #macros th {  border: 1px solid #ddd;  padding: 8px;}
+#macros tr:nth-child(even){background-color: #f2f2f2;}
+#macros tr:hover {background-color: #ddd;}
+#macros th {  padding-top: 12px;  padding-bottom: 12px;  text-align: left;  background-color: #3004aa;  color: white;}
+</style> </head> <body>
+<h1>Opcode Table</h1><table id="opcodes">
+  <tr><th>Name</th><th>Opcode</th><th>Variables</th><th>Registers</th><th>Description</th></tr>
+  <tr>
+    <td>ADD</td>
+    <td>034E</td>
+    <td>0</td>
+    <td>1</td>
+    <td>Adds two registers</td>
+  </tr>
+  <tr>
+    <td>ADD1</td>
+    <td>034W</td>
+    <td>0</td>
+    <td>1</td>
+    <td>Adds three registers</td>
+  </tr>
+  <tr>
+    <td>PUSH</td>
+    <td>032W</td>
+    <td>0</td>
+    <td>1</td>
+    <td>Push three registers</td>
+  </tr>
+</table><h1>Macro Table</h1><table id="macros">
+  <tr><th>Name</th><th>Description</th><th>Variables</th></tr>
+  <tr>
+    <td>MACRO1</td>
+    <td>Pushes 3 registers</td>
+    <td>3</td>
+  </tr>
+  <tr>
+    <td>MACRO2</td>
+    <td>Pushes 4 registers</td>
+    <td>4</td>
+  </tr>
+  <tr>
+    <td>MACRO3</td>
+    <td>Pushes 5 registers</td>
+    <td>5</td>
+  </tr>
+</table> </body> </html>
