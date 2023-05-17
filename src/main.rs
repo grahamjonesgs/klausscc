@@ -89,7 +89,7 @@ fn main() {
     }
 
     if textmate_flag {
-        println!("Textmate formated list of opcodes");
+        println!("Textmate formatted list of opcodes");
         println!("{}",oplist.iter().fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)); 
         println!();         
     }

@@ -299,7 +299,7 @@ pub fn output_macros_opcodes(
     let _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
     let _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
     let _ = file.write(b"</style> </head> <body>\n");
-    let _ = file.write(b"<h1>Klauss ISA Intruction set and macros</h1>\n");
+    let _ = file.write(b"<h1>Klauss ISA Instruction set and macros</h1>\n");
     let _ = file.write(format!("Created {}",Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
     let _ = file.write(b"<h2>Opcode Table</h2><table id=\"opcodes\">\n");
     let _ = file.write(b"<tr><th>Name</th><th>Opcode</th><th>Variables</th><th>Registers</th><th>Description</th></tr>\n");
@@ -782,13 +782,13 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "Testline in file");
-        let _ = writeln!(tmp_file1, "Testline in file 1");
-        let _ = writeln!(tmp_file1, "Testline in file 2");
-        let _ = writeln!(tmp_file1, "Testline in file 4");
+        let _ = writeln!(tmp_file1, "Test line in file");
+        let _ = writeln!(tmp_file1, "Test line in file 1");
+        let _ = writeln!(tmp_file1, "Test line in file 2");
+        let _ = writeln!(tmp_file1, "Test line in file 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
-        assert_eq!(lines.clone().unwrap()[0].input, "Testline in file");
+        assert_eq!(lines.clone().unwrap()[0].input, "Test line in file");
         assert_eq!(lines.unwrap().len(), 4);
 
         drop(tmp_file1);
@@ -807,22 +807,22 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 0");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 0");
         let _ = writeln!(tmp_file1, "!include test2.kla");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let file_path2 = tmp_dir.path().join("test2.kla");
         let mut tmp_file2: File = File::create(file_path2).unwrap();
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 0");
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 1");
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 2");
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 4");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 0");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 1");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 2");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
-        assert_eq!(lines.clone().unwrap()[0].input, "Testline in file 1 line 0");
-        assert_eq!(lines.clone().unwrap()[2].input, "Testline in file 2 line 1");
-        assert_eq!(lines.clone().unwrap()[6].input, "Testline in file 1 line 2");
+        assert_eq!(lines.clone().unwrap()[0].input, "Test line in file 1 line 0");
+        assert_eq!(lines.clone().unwrap()[2].input, "Test line in file 2 line 1");
+        assert_eq!(lines.clone().unwrap()[6].input, "Test line in file 1 line 2");
         assert_eq!(lines.unwrap().len(), 7);
 
         drop(tmp_file1);
@@ -842,17 +842,17 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 0");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 0");
         let _ = writeln!(tmp_file1, "!include test2.kla");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let file_path2 = tmp_dir.path().join("test2.kla");
         let mut tmp_file2: File = File::create(file_path2).unwrap();
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 0");
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 1");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 0");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 1");
         let _ = writeln!(tmp_file2, "!include test1.kla");
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 4");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let _lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
@@ -866,7 +866,7 @@ mod test {
     }
 
     #[test]
-    // Test for missind included file
+    // Test for missing included file
     fn test_write_file_to_vec5() {
         let mut msg_list = MsgList::new();
         let mut opened_files: Vec<String> = Vec::new();
@@ -881,8 +881,8 @@ mod test {
         let file_name2: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
         let _ = writeln!(tmp_file1, "!include test2.kla");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
@@ -899,7 +899,7 @@ mod test {
         let _ = tmp_dir.close();
     }
     #[test]
-    // Test for missind included file name
+    // Test for missing included file name
     fn test_write_file_to_vec6() {
         let mut msg_list = MsgList::new();
         let mut opened_files: Vec<String> = Vec::new();
@@ -911,8 +911,8 @@ mod test {
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
         let _ = writeln!(tmp_file1, "!include");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
@@ -937,19 +937,19 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 0");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 0");
         let _ = writeln!(tmp_file1, "!include test2.kla");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Testline in file 1 line 2");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let file_path2 = tmp_dir.path().join("test2.kla");
         let mut tmp_file2: File = File::create(file_path2.clone()).unwrap();
         let binding = file_path2;
         let file_name2: &str = binding.to_str().unwrap();
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 0");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 0");
         let _ = writeln!(tmp_file2, "!include test3.kla");
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 2");
-        let _ = writeln!(tmp_file2, "Testline in file 2 line 4");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 2");
+        let _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let file_path3 = tmp_dir.path().join("test3.kla");
         let binding = file_path3;

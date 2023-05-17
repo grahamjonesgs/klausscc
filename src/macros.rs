@@ -660,7 +660,7 @@ mod tests {
     }
 
     #[test]
-    // Test expand macros, to look for too invalid varibale in imbedded macro
+    // Test expand macros, to look for too invalid variable in imbedded macro
     fn test_expand_embedded_macros4() {
         let macros = &mut Vec::<Macro>::new();
 
@@ -712,7 +712,7 @@ mod tests {
     }
 
     #[test]
-    // Test to emmbed with no varables
+    // Test to embed with no variables
     fn test_expand_embedded_macros6() {
         let macros = &mut Vec::<Macro>::new();
 
@@ -999,7 +999,7 @@ mod tests {
     }
 
     #[test]
-    // Convert string to macro with missng variables
+    // Convert string to macro with missing variables
     fn test_macro_from_string4() {
         let mut msglist = MsgList::new();
         let input_line = String::from("$POPALL POP %3 / POP %2");
