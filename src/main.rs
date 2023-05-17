@@ -17,7 +17,7 @@ use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{
     filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file,
-    write_code_output_file, write_serial, LineType,
+    write_code_output_file, write_serial, output_macros_opcodes,LineType,
 };
 use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
@@ -29,13 +29,14 @@ use opcodes::{
     add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
 };
 
+
 /// Main function for Klausscc
 ///
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn main() {
-    use crate::files::output_macros_opcodes;
 
+    println!("Hello World {}, {}", Local::now().date_naive(), Local::now().format("%d/%m/%Y %H:%M")); 
 
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
@@ -64,6 +65,7 @@ fn main() {
         .unwrap_or(&String::new())
         .replace(' ', "");
     let opcodes_flag = matches.get_flag("opcodes");
+    let textmate_flag = matches.get_flag("textmate");
 
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
@@ -84,6 +86,12 @@ fn main() {
     if opcodes_flag {   
         let opcodes_html_file_name = filename_stem(&opcode_file_name) + ".html";
         output_macros_opcodes(opcodes_html_file_name,oplist.clone(),macro_list.clone(),&mut msg_list);
+    }
+
+    if textmate_flag {
+        println!("Textmate formated list of opcodes");
+        println!("{}",oplist.iter().fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)); 
+        println!();         
     }
 
     // Parse the input file
@@ -193,10 +201,15 @@ pub fn set_matches() -> Command {
         )
         .arg(
             Arg::new("opcodes")
-                .short('d')
                 .long("opcodes")
                 .action(ArgAction::SetTrue)
-                .help("Set if output of opcode list required"),
+                .help("Set if output of opcode.macro list is required"),
+        )
+        .arg(
+            Arg::new("textmate")
+                .long("textmate")
+                .action(ArgAction::SetTrue)
+                .help("Prints list of all opcodes for use in Textmate of vscode language formatter"),
         )
         .arg(
             Arg::new("serial")

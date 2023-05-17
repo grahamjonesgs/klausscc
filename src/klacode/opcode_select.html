@@ -11,7 +11,8 @@
 #macros tr:hover {background-color: #ddd;}
 #macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}
 </style> </head> <body>
-<h1>Opcode Table</h1><table id="opcodes">
+<h1>Klauss ISA Intruction set and macros</h1>
+Created 17/05/2023 22:54<h2>Opcode Table</h2><table id="opcodes">
 <tr><th>Name</th><th>Opcode</th><th>Variables</th><th>Registers</th><th>Description</th></tr>
 <tr><td>7SEG1R</td><td>0000302?</td><td>0</td><td>1</td><td>Set 7 Seg 1 to register</td></tr>
 <tr><td>7SEG1V</td><td>00003071</td><td>1</td><td>0</td><td>Set 7 Seg 1 to value</td></tr>
@@ -52,7 +53,7 @@
 <tr><td>JMPO</td><td>00001007</td><td>1</td><td>0</td><td>Jump if overflow</td></tr>
 <tr><td>JMPZ</td><td>00001001</td><td>1</td><td>0</td><td>Jump if zero</td></tr>
 <tr><td>LCD</td><td>00002023</td><td>1</td><td>0</td><td>Reset line</td></tr>
-<tr><td>LCDCMDV</td><td>00002021</td><td>1</td><td>0</td><td></td></tr>
+<tr><td>LCDCMDV</td><td>00002021</td><td>1</td><td>0</td><td>LCD command with value</td></tr>
 <tr><td>LCDDATAR</td><td>0000201?</td><td>0</td><td>1</td><td>LCD data with register</td></tr>
 <tr><td>LCDDATAV</td><td>00002022</td><td>1</td><td>0</td><td>LCD data with value</td></tr>
 <tr><td>LEDR</td><td>0000300?</td><td>0</td><td>1</td><td>set with register</td></tr>
@@ -91,6 +92,7 @@
 <tr><td>TXR</td><td>0000501?</td><td>0</td><td>1</td><td>send reg value in message</td></tr>
 <tr><td>XOR</td><td>000004??</td><td>0</td><td>2</td><td>XOR register</td></tr>
 <tr><td>XORV</td><td>0000088?</td><td>1</td><td>1</td><td>XOR register with value</td></tr>
-</table><h1>Macro Table</h1><table id="macros">
+</table><h2>Macro Table</h2><table id="macros">
 <tr><th>Name</th><th>Variables</th><th>Description</th><th>Details</th></tr>
-<tr><td>$IMBED1</td><td>0</td><td>Sets a delay of 65535 cycles</td><td>  DELAYV 0xFFFF</td></tr><tr><td>$IMBED2</td><td>2</td><td></td><td>  DELAYV %1  DELAYV %2</td></tr><tr><td>$IMBED3</td><td>0</td><td></td><td>  PUSH A  PUSH B  PUSH C  DELAYV 0xFFFF</td></tr><tr><td>$POPALL</td><td>0</td><td></td><td>  POP A  POP B  POP C</td></tr><tr><td>$PUSHALL</td><td>0</td><td></td><td>  PUSH A  PUSH B  PUSH C</td></tr><tr><td>$TESTM</td><td>0</td><td></td><td>  NOP  NOP  NOP</td></tr><tr><td>$TESTM2</td><td>0</td><td></td><td>  NOP</td></tr><tr><td>$WAIT</td><td>2</td><td>Increased delay</td><td>  DELAYV %1  DELAYV %2</td></tr></table> </body> </html>
+<tr><td>$IMBED1</td><td>0</td><td>Sets a delay of 65535 cycles</td><td>  DELAYV 0xFFFF</td></tr><tr><td>$IMBED2</td><td>2</td><td></td><td>  DELAYV %1  DELAYV %2</td></tr><tr><td>$IMBED3</td><td>0</td><td></td><td>  PUSH A  PUSH B  PUSH C  DELAYV 0xFFFF</td></tr><tr><td>$POPALL</td><td>0</td><td></td><td>  POP A  POP B  POP C</td></tr><tr><td>$PUSHALL</td><td>0</td><td></td><td>  PUSH A  PUSH B  PUSH C</td></tr><tr><td>$TESTM</td><td>0</td><td></td><td>  NOP  NOP  NOP</td></tr><tr><td>$TESTM2</td><td>0</td><td></td><td>  NOP</td></tr><tr><td>$WAIT</td><td>2</td><td>Increased delay</td><td>  DELAYV %1  DELAYV %2</td></tr></table>
+</body> </html>

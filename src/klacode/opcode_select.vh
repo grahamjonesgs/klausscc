@@ -67,7 +67,7 @@ task t_opcode_select;
             // SPI LCD Control 2xxx
             16'h200?: spi_dc_write_command_reg;                 // CDCDMR LCD command with register
             16'h201?: spi_dc_data_command_reg;                  // LCDDATAR LCD data with register
-            16'h2021: spi_dc_write_command_value(w_var1);       // LCDCMDV
+            16'h2021: spi_dc_write_command_value(w_var1);       // LCDCMDV LCD command with value
             16'h2022: spi_dc_write_data_value(w_var1);          // LCDDATAV LCD data with value
             16'h2023: t_lcd_reset_value(w_var1);                // LCD Reset line
 

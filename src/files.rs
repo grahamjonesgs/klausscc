@@ -262,10 +262,12 @@ pub fn output_macros_opcodes(
     macros: Vec<Macro>,
     msg_list: &mut MsgList,
 ) {
+    use chrono::Local;
+
     msg_list.push(
         format!(
             "Outputting macros and opcodes to {}",
-            filename.clone().as_ref().display()
+            filename.as_ref().display()
         ),
         None,
         None,
@@ -273,7 +275,6 @@ pub fn output_macros_opcodes(
     );
 
     let output_file = File::create(filename.clone());
-
     if output_file.is_err() {
         msg_list.push(
             format!("Error opening file {}", filename.as_ref().display()),
@@ -281,6 +282,7 @@ pub fn output_macros_opcodes(
             None,
             MessageType::Info,
         );
+        return;
     }
 
     let mut file = output_file.unwrap();
@@ -297,19 +299,15 @@ pub fn output_macros_opcodes(
     let _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
     let _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
     let _ = file.write(b"</style> </head> <body>\n");
-    let _ = file.write(b"<h1>Opcode Table</h1><table id=\"opcodes\">\n");
+    let _ = file.write(b"<h1>Klauss ISA Intruction set and macros</h1>\n");
+    let _ = file.write(format!("Created {}",Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
+    let _ = file.write(b"<h2>Opcode Table</h2><table id=\"opcodes\">\n");
     let _ = file.write(b"<tr><th>Name</th><th>Opcode</th><th>Variables</th><th>Registers</th><th>Description</th></tr>\n");
-
-    /*   println!("All opcodes:");
-    for opcode in opcodes.clone() {
-        print!("{}|", opcode.text_name);
-    }
-    println!(); */
 
     let mut sorted_opcodes: Vec<Opcode> = opcodes;
     sorted_opcodes.sort_by(|a, b| a.text_name.cmp(&b.text_name));
 
-    for opcode in sorted_opcodes {
+    for opcode in sorted_opcodes.clone() {
         let _ = file.write(format!("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
             opcode.text_name,
             opcode.hex_opcode,
@@ -318,7 +316,7 @@ pub fn output_macros_opcodes(
             opcode.comment).as_bytes());       
     }
 
-    let _ = file.write(b"</table><h1>Macro Table</h1><table id=\"macros\">\n");
+    let _ = file.write(b"</table><h2>Macro Table</h2><table id=\"macros\">\n");
     let _ = file.write(b"<tr><th>Name</th><th>Variables</th><th>Description</th><th>Details</th></tr>\n");
 
     let mut sorted_macros: Vec<Macro> = macros;
@@ -331,9 +329,9 @@ pub fn output_macros_opcodes(
             macro_item.comment,
             macro_item.items.iter().fold(String::new(), |cur, nxt| cur + "  " + nxt)).trim().as_bytes());       
     }
-    let _ = file.write(b"</table> </body> </html>\n");
+    let _ = file.write(b"</table>\n");
 
-    
+    let _ = file.write(b"</body> </html>\n"); 
   
 }
 
