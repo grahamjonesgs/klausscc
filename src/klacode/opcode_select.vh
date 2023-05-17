@@ -6,7 +6,8 @@ $WAIT DELAYV %1 / DELAYV %2 // Increased delay
 $TESTM NOP / NOP / NOP
 $TESTM2 NOP
 $IMBED1 DELAYV 0xFFFF // Sets a delay of 65535 cycles
-$IMBED3 $PUSHALL / IMBED1
+$IMBED2 $WAIT %1 %2
+$IMBED3 $PUSHALL / $IMBED1
 
 */
 

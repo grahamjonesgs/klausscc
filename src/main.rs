@@ -65,9 +65,6 @@ fn main() {
         .replace(' ', "");
     let opcodes_flag = matches.get_flag("opcodes");
 
-    println!("xxxxxxx Opcodes flag is {opcodes_flag:?}");
-    
-
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
     let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
@@ -84,12 +81,9 @@ fn main() {
     let oplist = opt_oplist.unwrap_or([].to_vec());
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
 
-    if opcodes_flag {
-        
+    if opcodes_flag {   
         let opcodes_html_file_name = filename_stem(&opcode_file_name) + ".html";
         output_macros_opcodes(opcodes_html_file_name,oplist.clone(),macro_list.clone(),&mut msg_list);
-       // println!("xxxxx Writing opcodes file to {opcodes_html_file_name}");
-
     }
 
     // Parse the input file

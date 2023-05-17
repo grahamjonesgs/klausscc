@@ -324,8 +324,6 @@ pub fn output_macros_opcodes(
     let mut sorted_macros: Vec<Macro> = macros;
     sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
 
-    println!("All macros: {:#?}", sorted_macros);
-
     for macro_item in sorted_macros {
         let _ = file.write(format!("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
             macro_item.name,
@@ -333,7 +331,6 @@ pub fn output_macros_opcodes(
             macro_item.comment,
             macro_item.items.iter().fold(String::new(), |cur, nxt| cur + "  " + nxt)).trim().as_bytes());       
     }
-
     let _ = file.write(b"</table> </body> </html>\n");
 
     
