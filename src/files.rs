@@ -309,9 +309,16 @@ pub fn output_macros_opcodes(
     let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n");
 
     let mut sorted_opcodes: Vec<Opcode> = opcodes;
-    sorted_opcodes.sort_by(|a, b| a.text_name.cmp(&b.text_name));
+    //sorted_opcodes.sort_by(|a, b| a.text_name.cmp(&b.text_name));
+    sorted_opcodes.sort_by(|a, b| a.hex_opcode.cmp(&b.hex_opcode));
 
+    let mut old_section = String::new();
     for opcode in sorted_opcodes.clone() {
+
+        if old_section != opcode.section {
+            let _ = file.write(format!("<tr>\n    <td colspan=\"5\"><b>{}</b></td>\n</tr>\n", opcode.section).as_bytes());
+            old_section=opcode.section.clone();
+        }
         let _ = file.write(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
             opcode.text_name,
             opcode.hex_opcode,

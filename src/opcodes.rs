@@ -62,7 +62,7 @@ pub fn parse_vh_file(
     let mut section_name = String::new();
 
     for line in input_list {
-        if let Some(section) = line.input.strip_prefix("///") {
+        if let Some(section) = line.input.trim().strip_prefix("///") {
             section_name = section.to_string().trim().to_string();
         }
 
