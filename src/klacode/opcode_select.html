@@ -4,19 +4,17 @@
 <style>
 #opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}
 #opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}
-#opcodes tr:nth-child(even){background-color: #f2f2f2;}
 #opcodes tr:hover {background-color: #ddd;}
 #opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}
 #macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}
 #macros td, #macros th { border: 1px solid #ddd; padding: 8px;}
-#macros tr:nth-child(even){background-color: #f2f2f2;}
 #macros tr:hover {background-color: #ddd;}
 #macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}
 </style>
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 18/05/2023 20:33<h2>Opcode Table</h2>
+Created 18/05/2023 20:57<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -27,7 +25,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <th>Description</th>
 </tr>
 <tr>
-    <td colspan="5"><b>Register control 0xxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>Register control 0xxx</b></td>
 </tr>
 <tr>
     <td>COPY</td>
@@ -184,7 +182,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <td>Right shift arithmetical reg</td>
 </tr>
 <tr>
-    <td colspan="5"><b>Flow control 1xxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>Flow control 1xxx</b></td>
 </tr>
 <tr>
     <td>JMP</td>
@@ -320,7 +318,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <td>Return from call</td>
 </tr>
 <tr>
-    <td colspan="5"><b>SPI LCD Control 2xxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>SPI LCD Control 2xxx</b></td>
 </tr>
 <tr>
     <td>CDCDMR</td>
@@ -358,7 +356,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <td>Reset line</td>
 </tr>
 <tr>
-    <td colspan="5"><b>Board LED and Switch 3xxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>Board LED and Switch 3xxx</b></td>
 </tr>
 <tr>
     <td>LEDR</td>
@@ -452,7 +450,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <td>RGB 2 from value</td>
 </tr>
 <tr>
-    <td colspan="5"><b>Stack control 4xxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>Stack control 4xxx</b></td>
 </tr>
 <tr>
     <td>PUSH</td>
@@ -476,7 +474,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <td>Push value onto stack</td>
 </tr>
 <tr>
-    <td colspan="5"><b>Coms 5xxxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>Coms 5xxxx</b></td>
 </tr>
 <tr>
     <td>TESTMSG</td>
@@ -521,7 +519,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <td>send char at mem from reg value as message</td>
 </tr>
 <tr>
-    <td colspan="5"><b>CPU Setting 6xxxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>CPU Setting 6xxxx</b></td>
 </tr>
 <tr>
     <td>INTSETRR</td>
@@ -531,7 +529,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <td>Set interupt from registers</td>
 </tr>
 <tr>
-    <td colspan="5"><b>Memory actions 7xxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>Memory actions 7xxx</b></td>
 </tr>
 <tr>
     <td>MEMSETRR</td>
@@ -562,7 +560,7 @@ Created 18/05/2023 20:33<h2>Opcode Table</h2>
     <td>Set contents of register to location given in value</td>
 </tr>
 <tr>
-    <td colspan="5"><b>Other Fxxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>Other Fxxx</b></td>
 </tr>
 <tr>
     <td>DELAYR</td>
