@@ -3,6 +3,7 @@ use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Opcode, Pass2};
 
+use std::ffi::OsStr;
 use std::{
     fs::File,
     io::{prelude::*, BufReader},
@@ -193,7 +194,10 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
 pub fn filename_stem(full_name: &String) -> String {
     let path = Path::new(full_name);
     let stem = path.file_stem();
-    let parent = path.parent().unwrap().join(stem.unwrap());
+    let parent = path
+        .parent()
+        .unwrap_or(Path::new(""))
+        .join(stem.unwrap_or(OsStr::new("")));
 
     return parent.to_str().unwrap().to_owned();
 }
@@ -287,7 +291,7 @@ pub fn output_macros_opcodes(
 
     let mut file = output_file.unwrap();
     let _ = file.write(b"<!DOCTYPE html>\n");
-    let _ = file.write(b"<html> <head> <style>\n");
+    let _ = file.write(b"<html>\n<head>\n<style>\n");
     let _ = file.write(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
     let _ = file.write(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n");
     let _ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n");
@@ -298,41 +302,49 @@ pub fn output_macros_opcodes(
     let _ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");
     let _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
     let _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
-    let _ = file.write(b"</style> </head> <body>\n");
+    let _ = file.write(b"</style>\n</head>\n<body>\n");
     let _ = file.write(b"<h1>Klauss ISA Instruction set and macros</h1>\n");
-    let _ = file.write(format!("Created {}",Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
-    let _ = file.write(b"<h2>Opcode Table</h2><table id=\"opcodes\">\n");
-    let _ = file.write(b"<tr><th>Name</th><th>Opcode</th><th>Variables</th><th>Registers</th><th>Description</th></tr>\n");
+    let _ = file.write(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
+    let _ = file.write(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n");
+    let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n");
 
     let mut sorted_opcodes: Vec<Opcode> = opcodes;
     sorted_opcodes.sort_by(|a, b| a.text_name.cmp(&b.text_name));
 
     for opcode in sorted_opcodes.clone() {
-        let _ = file.write(format!("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
+        let _ = file.write(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
             opcode.text_name,
             opcode.hex_opcode,
             opcode.variables,
             opcode.registers,
-            opcode.comment).as_bytes());       
+            opcode.comment).as_bytes());
     }
 
-    let _ = file.write(b"</table><h2>Macro Table</h2><table id=\"macros\">\n");
-    let _ = file.write(b"<tr><th>Name</th><th>Variables</th><th>Description</th><th>Details</th></tr>\n");
+    let _ = file.write(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n");
+    let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n");
 
     let mut sorted_macros: Vec<Macro> = macros;
     sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
 
     for macro_item in sorted_macros {
-        let _ = file.write(format!("<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-            macro_item.name,
-            macro_item.variables,
-            macro_item.comment,
-            macro_item.items.iter().fold(String::new(), |cur, nxt| cur + "  " + nxt)).trim().as_bytes());       
+        let _ = file.write(
+            format!(
+                "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
+                macro_item.name,
+                macro_item.variables,
+                macro_item.comment,
+                macro_item
+                    .items
+                    .iter()
+                    .fold(String::new(), |cur, nxt| cur + "  " + nxt)
+            )
+            .trim()
+            .as_bytes(),
+        );
     }
     let _ = file.write(b"</table>\n");
 
-    let _ = file.write(b"</body> </html>\n"); 
-  
+    let _ = file.write(b"</body>\n</html>\n");
 }
 
 /// Format a given string, adding spaces between groups of 4
@@ -820,9 +832,18 @@ mod test {
         let _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
-        assert_eq!(lines.clone().unwrap()[0].input, "Test line in file 1 line 0");
-        assert_eq!(lines.clone().unwrap()[2].input, "Test line in file 2 line 1");
-        assert_eq!(lines.clone().unwrap()[6].input, "Test line in file 1 line 2");
+        assert_eq!(
+            lines.clone().unwrap()[0].input,
+            "Test line in file 1 line 0"
+        );
+        assert_eq!(
+            lines.clone().unwrap()[2].input,
+            "Test line in file 2 line 1"
+        );
+        assert_eq!(
+            lines.clone().unwrap()[6].input,
+            "Test line in file 1 line 2"
+        );
         assert_eq!(lines.unwrap().len(), 7);
 
         drop(tmp_file1);

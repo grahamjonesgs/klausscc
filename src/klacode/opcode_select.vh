@@ -16,7 +16,7 @@ task t_opcode_select;
         casez(w_opcode[15:0])
 
 
-            // Register control 0xxx
+            /// Register control 0xxx
             16'h01??: t_copy_regs;                              // COPY Copy register
             16'h02??: t_and_regs;                               // AND AND register
             16'h03??: t_or_regs;                                // OR OR register
@@ -43,7 +43,7 @@ task t_opcode_select;
             16'h090?: t_right_shift_a_reg;                      // SHRAR Right shift arithmetical reg
 
 
-            // Flow control 1xxx
+            /// Flow control 1xxx
             16'h1000: t_cond_jump(w_var1,1'b1);                 // JMP Jump
             16'h1001: t_cond_jump(w_var1,r_zero_flag);          // JMPZ Jump if zero
             16'h1002: t_cond_jump(w_var1,!r_zero_flag);         // JMPNZ Jump if not zero
@@ -64,7 +64,7 @@ task t_opcode_select;
             16'h1011: t_cond_call(w_var1,!r_overflow_flag);     // CALLNO Call if not overflow
             16'h1012: t_ret;                                    // RET Return from call
 
-            // SPI LCD Control 2xxx
+            /// SPI LCD Control 2xxx
             16'h200?: spi_dc_write_command_reg;                 // CDCDMR LCD command with register
             16'h201?: spi_dc_data_command_reg;                  // LCDDATAR LCD data with register
             16'h2021: spi_dc_write_command_value(w_var1);       // LCDCMDV LCD command with value
@@ -72,7 +72,7 @@ task t_opcode_select;
             16'h2023: t_lcd_reset_value(w_var1);                // LCD Reset line
 
 
-            // Board LED and Switch 3xxx
+            /// Board LED and Switch 3xxx
             16'h300?: t_led_reg;                                // LEDR set with register
             16'h301?: t_get_switch_reg;                         // SWR Get switch status into register
             16'h302?: t_7_seg1_reg;                             // 7SEG1R Set 7 Seg 1 to register
@@ -87,30 +87,30 @@ task t_opcode_select;
             16'h3074: t_led_rgb1_value(w_var1);                 // RGB1V RGB 1 from value
             16'h3075: t_led_rgb2_value(w_var1);                 // RGB2V RGB 2 from value
 
-            // Stack control 4xxx
+            /// Stack control 4xxx
             16'h400?: t_stack_push_reg;                         // PUSH Push register onto stack
             16'h401?: t_stack_pop_reg;                          // POP Pop stack into register
             16'h4020: t_stack_push_value(w_var1);               // PUSHV Push value onto stack
 
-            // Coms 5xxxx
+            /// Coms 5xxxx
             16'h5000: t_test_message;                           // TESTMSG test UART message
             16'h5001: t_tx_newline;                             // NEWLINE UART newline
             16'h5002: t_tx_char_from_mem_value(w_var1);         // TXMEM send 8 chars hex from mem locaiton
             16'h501?: t_tx_reg;                                 // TXR send reg value in message
             16'h502?: t_tx_value_from_reg_value;                // TXMEMR send value at mem from reg value in message
             16'h503?: t_tx_char_from_reg_value;                 // TXCHARMEMR send char at mem from reg value as message
-            // CPU Setting 6xxxx
+            /// CPU Setting 6xxxx
 
             16'h60??: t_set_interupt_regs;                      // INTSETRR Set interupt from registers
 
-            // Memory actions 7xxx
+            /// Memory actions 7xxx
             16'h70??: t_set_mem_from_reg_reg;                   // MEMSETRR Set mem location given in register to contents of register (first in order is value, second is location)
             16'h71??: t_set_reg_from_mem_reg;                   // MEMREADRR Set contents of register to location given in register (first in order is reg to be set, second is location)
 
             16'h720?: t_set_mem_from_value_reg(w_var1);         // MEMSETR Set mem location given in value to contents of register
             16'h721?: t_set_reg_from_mem_value(w_var1);         // MEMREADR Set contents of register to location given in value
 
-            // Other Fxxx
+            /// Other Fxxx
             16'hF00?: t_delay_reg;                              // DELAYR Delay with register
             16'hF010: t_nop;                                    // NOP No opperation
             16'hF011: t_halt;                                   // HALT Freeze and hang

@@ -35,9 +35,6 @@ use opcodes::{
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn main() {
-
-    println!("Hello World {}, {}", Local::now().date_naive(), Local::now().format("%d/%m/%Y %H:%M")); 
-
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
 
@@ -89,9 +86,14 @@ fn main() {
     }
 
     if textmate_flag {
-        println!("Textmate formatted list of opcodes");
-        println!("{}",oplist.iter().fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)); 
+        println!("Textmate formatted list of opcodes:");
+        println!("{}",oplist.iter().fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name).strip_prefix('|').unwrap_or("")); 
         println!();         
+    }
+
+    if textmate_flag || opcodes_flag {
+        print_messages(&mut msg_list);
+        std::process::exit(0);
     }
 
     // Parse the input file
@@ -182,6 +184,8 @@ pub fn set_matches() -> Command {
                 .short('i')
                 .long("input")
                 .required(true)
+                .conflicts_with("textmate")
+                .conflicts_with("opcodes")
                 .num_args(1)
                 .help("Input file to be assembled"),
         )
@@ -404,6 +408,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
         opcodes.push(Opcode {
             text_name: String::from("MOV"),
@@ -411,6 +416,7 @@ mod tests {
             comment: String::new(),
             variables: 2,
             registers: 0,
+            section: String::new(),
         });
         opcodes.push(Opcode {
             text_name: String::from("RET"),
@@ -418,6 +424,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 0,
+            section: String::new(),
         });
 
         let pass0 = vec![
@@ -478,6 +485,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
 
         let pass0 = vec![Pass0 {
@@ -502,6 +510,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
         opcodes.push(Opcode {
             text_name: String::from("MOVR"),
@@ -509,6 +518,7 @@ mod tests {
             comment: String::new(),
             variables: 1,
             registers: 1,
+            section: String::new(),
         });
         opcodes.push(Opcode {
             text_name: String::from("MOV"),
@@ -516,6 +526,7 @@ mod tests {
             comment: String::new(),
             variables: 2,
             registers: 0,
+            section: String::new(),
         });
         opcodes.push(Opcode {
             text_name: String::from("RET"),
@@ -523,6 +534,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 0,
+            section: String::new(),
         });
         opcodes.push(Opcode {
             text_name: String::from("DELAY"),
@@ -530,6 +542,7 @@ mod tests {
             comment: String::new(),
             variables: 1,
             registers: 0,
+            section: String::new(),
         });
 
         opcodes.push(Opcode {
@@ -538,6 +551,7 @@ mod tests {
             comment: String::new(),
             variables: 2,
             registers: 2,
+            section: String::new(),
         });
 
         let pass2 = get_pass2(
@@ -636,6 +650,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
         let pass2 = get_pass2(
             &mut msg_list,

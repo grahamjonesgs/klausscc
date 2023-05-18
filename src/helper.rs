@@ -440,6 +440,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 0,
+            section: String::new(),
         });
         let output = is_valid_line(opcodes, input);
         assert!(output);
@@ -455,6 +456,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 0,
+            section: String::new(),
         });
         let output = is_valid_line(opcodes, input);
         assert!(!output);
@@ -471,6 +473,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 0,
+            section: String::new(),
         });
         let output = line_type(opcodes, &mut input);
         assert_eq!(output, LineType::Opcode);
@@ -486,7 +489,7 @@ mod tests {
     #[test]
     // Test for data line type
     fn test_line_type3() {
-        let mut input = String::from("#Dataname");
+        let mut input = String::from("#Data_name");
         let opcodes = &mut Vec::<Opcode>::new();
         let output = line_type(opcodes, &mut input);
         assert_eq!(output, LineType::Data);
@@ -537,7 +540,7 @@ mod tests {
     }
 
     #[test]
-    // Test for correct output from dats
+    // Test for correct output from data line
     fn test_data_as_bytes1() {
         let input = String::from("TEST 3");
         let output = data_as_bytes(&input);
@@ -592,7 +595,7 @@ mod tests {
     }
 
     #[test]
-    // Test for coorect label name
+    // Test for correct label name
     fn test_label_name_from_string1() {
         let input = String::from("LOOP:");
         let output = label_name_from_string(&input);

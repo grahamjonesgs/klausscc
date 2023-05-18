@@ -1,6 +1,6 @@
 use crate::files::LineType;
-use crate::labels::{convert_argument,Label};
-use crate::macros::{macro_from_string,return_macro,Macro};
+use crate::labels::{convert_argument, Label};
+use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::messages::{MessageType, MsgList};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -10,6 +10,7 @@ pub struct Opcode {
     pub registers: u32,
     pub variables: u32,
     pub comment: String,
+    pub section: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -58,8 +59,13 @@ pub fn parse_vh_file(
 
     let mut opcodes: Vec<Opcode> = Vec::new();
     let mut macros: Vec<Macro> = Vec::new();
+    let mut section_name = String::new();
 
     for line in input_list {
+        if let Some(section) = line.input.strip_prefix("///") {
+            section_name = section.to_string().trim().to_string();
+        }
+
         match opcode_from_string(&line.input) {
             None => (),
             Some(a) => {
@@ -71,7 +77,15 @@ pub fn parse_vh_file(
                         MessageType::Error,
                     );
                 }
-                opcodes.push(a);
+                //opcodes.push(a);
+                opcodes.push(Opcode {
+                    text_name: a.text_name,
+                    hex_opcode: a.hex_opcode,
+                    registers: a.registers,
+                    variables: a.variables,
+                    comment: a.comment,
+                    section: section_name.clone(),
+                });
             }
         }
         match macro_from_string(&line.input, msg_list) {
@@ -183,6 +197,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         variables: num_variables,
         comment: input_line[pos_comment..pos_end_comment].to_string(),
         text_name: input_line[pos_name..pos_end_name].to_string(),
+        section: String::new(),
     })
 }
 
@@ -367,8 +382,9 @@ pub fn add_arguments(
             );
         }
     }
-    if arguments.len() != 8 * num_arguments as usize {   
-        #[cfg(not(tarpaulin_include))] // Needs errors in previous functions to produce wrong length
+    if arguments.len() != 8 * num_arguments as usize {
+        #[cfg(not(tarpaulin_include))]
+        // Needs errors in previous functions to produce wrong length
         msg_list.push(
             format!("Incorrect argument definition - \"{line}\""),
             Some(line_number),
@@ -395,6 +411,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
         let output = num_registers(opcodes, &mut input);
         assert_eq!(output, Some(1));
@@ -411,6 +428,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
         let output = num_registers(opcodes, &mut input);
         assert_eq!(output, None);
@@ -426,6 +444,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
         let output = num_registers(opcodes, &mut input);
         assert_eq!(output, Some(1));
@@ -441,6 +460,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 2,
+            section: String::new(),
         });
         let output = num_registers(opcodes, &mut input);
         assert_eq!(output, Some(2));
@@ -457,6 +477,7 @@ mod tests {
             comment: String::new(),
             variables: 2,
             registers: 2,
+            section: String::new(),
         });
         let output = num_registers(opcodes, &mut input);
         assert_eq!(output, Some(2));
@@ -473,6 +494,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 2,
+            section: String::new(),
         });
         let output = num_registers(opcodes, &mut input);
         assert_eq!(output, None);
@@ -489,6 +511,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 2,
+            section: String::new(),
         });
         let output = num_registers(opcodes, &mut input);
         assert_eq!(output, None);
@@ -505,6 +528,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 2,
+            section: String::new(),
         });
         let output = return_opcode(&input, opcodes);
         assert_eq!(output, Some(String::from("1234")));
@@ -521,6 +545,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 2,
+            section: String::new(),
         });
         let output = return_opcode(&input, opcodes);
         assert_eq!(output, None);
@@ -538,6 +563,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 2,
+            section: String::new(),
         });
         let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
         assert_eq!(output, String::from("00005601"));
@@ -555,6 +581,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
         let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
@@ -571,6 +598,7 @@ mod tests {
             comment: String::new(),
             variables: 0,
             registers: 1,
+            section: String::new(),
         });
         let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
@@ -588,6 +616,7 @@ mod tests {
             comment: String::new(),
             variables: 1,
             registers: 0,
+            section: String::new(),
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("0000FFFF"));
@@ -606,6 +635,7 @@ mod tests {
             comment: String::new(),
             variables: 1,
             registers: 0,
+            section: String::new(),
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("000004D2"));
@@ -624,6 +654,7 @@ mod tests {
             comment: String::new(),
             variables: 1,
             registers: 0,
+            section: String::new(),
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000000"));
@@ -642,6 +673,7 @@ mod tests {
             comment: String::new(),
             variables: 2,
             registers: 0,
+            section: String::new(),
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("0000000F00000000"));
@@ -660,6 +692,7 @@ mod tests {
             comment: String::new(),
             variables: 2,
             registers: 0,
+            section: String::new(),
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("000000010000000F"));
@@ -678,6 +711,7 @@ mod tests {
             comment: String::new(),
             variables: 1,
             registers: 0,
+            section: String::new(),
         });
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000001"));
@@ -699,7 +733,8 @@ mod tests {
                 hex_opcode: "000001??".to_string(),
                 registers: 2,
                 variables: 0,
-                comment: "Copy register".to_string()
+                comment: "Copy register".to_string(),
+                section: String::new(),
             })
         );
     }
@@ -716,7 +751,8 @@ mod tests {
                 hex_opcode: "0000086?".to_string(),
                 registers: 1,
                 variables: 1,
-                comment: "AND register with value".to_string()
+                comment: "AND register with value".to_string(),
+                section: String::new(),
             })
         );
     }
@@ -734,7 +770,8 @@ mod tests {
                 hex_opcode: "00000864".to_string(),
                 registers: 0,
                 variables: 2,
-                comment: "Move from addr to addr".to_string()
+                comment: "Move from addr to addr".to_string(),
+                section: String::new(),
             })
         );
     }
@@ -783,7 +820,8 @@ mod tests {
                 hex_opcode: "00001234".to_string(),
                 registers: 0,
                 variables: 0,
-                comment: String::new()
+                comment: String::new(),
+                section: String::new(),
             })
         );
     }
@@ -800,7 +838,8 @@ mod tests {
                 hex_opcode: "00000864".to_string(),
                 registers: 0,
                 variables: 2,
-                comment: String::new()
+                comment: String::new(),
+                section: String::new(),
             })
         );
     }
@@ -814,18 +853,18 @@ mod tests {
 }
 
 #[test]
-// Test no marco or opcodes
+// Test no macro or opcodes
 fn test_parse_vh_file1() {
     let mut msg_list: MsgList = MsgList::new();
     let vh_list = vec![
         InputData {
             input: "abc/* This is a comment */def".to_string(),
-            file_name: "test.kla".to_string(),
+            file_name: "opcode_select.vh".to_string(),
             line_counter: 1,
         },
         InputData {
             input: "abc/* This is a comment */def".to_string(),
-            file_name: "test.kla".to_string(),
+            file_name: "opcode_select.vh".to_string(),
             line_counter: 2,
         },
     ];
@@ -843,12 +882,12 @@ fn test_parse_vh_file2() {
     let vh_list = vec![
         InputData {
             input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-            file_name: "test.kla".to_string(),
+            file_name: "opcode_select.vh".to_string(),
             line_counter: 1,
         },
         InputData {
             input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-            file_name: "test.kla".to_string(),
+            file_name: "opcode_select.vh".to_string(),
             line_counter: 2,
         },
     ];
@@ -862,7 +901,8 @@ fn test_parse_vh_file2() {
             hex_opcode: "000005??".to_string(),
             registers: 2,
             variables: 0,
-            comment: "Compare registers".to_string()
+            comment: "Compare registers".to_string(),
+            section: String::new(),
         }]
     );
     assert_eq!(
@@ -883,22 +923,22 @@ fn test_parse_vh_file3() {
     let vh_list = vec![
         InputData {
             input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-            file_name: "test.kla".to_string(),
+            file_name: "opcode_select.vh".to_string(),
             line_counter: 1,
         },
         InputData {
             input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-            file_name: "test.kla".to_string(),
+            file_name: "opcode_select.vh".to_string(),
             line_counter: 2,
         },
         InputData {
             input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-            file_name: "test.kla".to_string(),
+            file_name: "opcode_select.vh".to_string(),
             line_counter: 3,
         },
         InputData {
             input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-            file_name: "test.kla".to_string(),
+            file_name: "opcode_select.vh".to_string(),
             line_counter: 4,
         },
     ];
@@ -925,4 +965,67 @@ fn test_parse_vh_file4() {
     assert_eq!(opt_macro_list, None);
 }
 
+#[test]
+// Test normal opcode with sections
+fn test_parse_vh_file5() {
+    let mut msg_list: MsgList = MsgList::new();
+    let vh_list = vec![
+        InputData {
+            input: "/// Section 1".to_string(),
+            file_name: "opcode_select.vh".to_string(),
+            line_counter: 1,
+        },
+        InputData {
+            input: "16'h06??: t_push_addr;    // PUSH push value to reg".to_string(),
+            file_name: "opcode_select.vh".to_string(),
+            line_counter: 2,
+        },
+        InputData {
+            input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
+            file_name: "opcode_select.vh".to_string(),
+            line_counter: 3,
+        },
+        InputData {
+            input: "/// Section 2".to_string(),
+            file_name: "opcode_select.vh".to_string(),
+            line_counter: 4,
+        },
+        InputData {
+            input: "16'h16??: t_pop_addr;    // POP push value to reg".to_string(),
+            file_name: "opcode_select.vh".to_string(),
+            line_counter: 5,
+        },
+    ];
 
+    let (opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+    assert_eq!(
+        opt_oplist.unwrap(),
+        vec![
+            Opcode {
+                text_name: "PUSH".to_string(),
+                hex_opcode: "000006??".to_string(),
+                registers: 2,
+                variables: 0,
+                comment: "push value to reg".to_string(),
+                section: "Section 1".to_string(),
+            },
+            Opcode {
+                text_name: "CMPRR".to_string(),
+                hex_opcode: "000005??".to_string(),
+                registers: 2,
+                variables: 0,
+                comment: "Compare registers".to_string(),
+                section: "Section 1".to_string(),
+            },
+            Opcode {
+                text_name: "POP".to_string(),
+                hex_opcode: "000016??".to_string(),
+                registers: 2,
+                variables: 0,
+                comment: "push value to reg".to_string(),
+                section: "Section 2".to_string(),
+            }
+        ]
+    );
+}
