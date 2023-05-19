@@ -16,6 +16,7 @@ pub struct Macro {
 ///
 /// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None
 pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Macro> {
+   let input_line = input_line.trim();
     // Find the macro if it exists
     if input_line.find('$').unwrap_or(usize::MAX) != 0 {
         return None;
@@ -382,6 +383,7 @@ mod tests {
     use crate::messages::MsgList;
 
     #[test]
+    // Test macro is returns if macro is found
     fn test_macro_name_from_string1() {
         let input = String::from("$TEST");
         let output = macro_name_from_string(&input);
@@ -389,8 +391,17 @@ mod tests {
     }
 
     #[test]
+    // Test for no macro
     fn test_macro_name_from_string2() {
         let input = String::from("TEST");
+        let output = macro_name_from_string(&input);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    // Test for dollar sign in middle of string
+    fn test_macro_name_from_string3() {
+        let input = String::from("TE$ST");
         let output = macro_name_from_string(&input);
         assert_eq!(output, None);
     }
@@ -472,7 +483,7 @@ mod tests {
             ],
             comment: String::new(),
         });
-        let input = String::from("$DELAY %MACRO1  ARG_B ARG_C");
+        let input = String::from("   $DELAY %MACRO1  ARG_B ARG_C");
         let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             output,
@@ -982,10 +993,10 @@ mod tests {
     }
 
     #[test]
-    // Convert string to macro with comments
+    // Convert string to macro with comments and spaces before name
     fn test_macro_from_string3() {
         let mut msglist = MsgList::new();
-        let input_line = String::from("$POPALL POP %1 / POP %2 //Test Macro");
+        let input_line = String::from("   $POPALL POP %1 / POP %2 //Test Macro");
         let macro_result = macro_from_string(&input_line, &mut msglist);
         assert_eq!(
             macro_result,
@@ -1029,8 +1040,17 @@ mod tests {
     }
 
     #[test]
-    // Convert string to macro with missing variables
+    // Convert string to macro with variables not a macro with dollar in middle
     fn test_macro_from_string6() {
+        let mut msglist = MsgList::new();
+        let input_line = String::from("POP$ALL POP %1 / POP %2");
+        let macro_result = macro_from_string(&input_line, &mut msglist);
+        assert_eq!(macro_result, None);
+    }
+
+    #[test]
+    // Convert string to macro with missing variables
+    fn test_macro_from_string7() {
         let mut msglist = MsgList::new();
         let input_line = String::from("$POPALL POP %5 / POP %3");
         let _macro_result = macro_from_string(&input_line, &mut msglist);

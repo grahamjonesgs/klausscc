@@ -294,12 +294,12 @@ pub fn output_macros_opcodes(
     let _ = file.write(b"<html>\n<head>\n<style>\n");
     let _ = file.write(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
     let _ = file.write(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n");
-    //let _ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n");
+    //let _ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n"); // Banded table
     let _ = file.write(b"#opcodes tr:hover {background-color: #ddd;}\n");
     let _ = file.write(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n");
     let _ = file.write(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
     let _ = file.write(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n");
-    //let _ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");
+    //let _ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
     let _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
     let _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
     let _ = file.write(b"</style>\n</head>\n<body>\n");
@@ -309,7 +309,6 @@ pub fn output_macros_opcodes(
     let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n");
 
     let mut sorted_opcodes: Vec<Opcode> = opcodes;
-    //sorted_opcodes.sort_by(|a, b| a.text_name.cmp(&b.text_name));
     sorted_opcodes.sort_by(|a, b| a.hex_opcode.cmp(&b.hex_opcode));
 
     let mut old_section = String::new();

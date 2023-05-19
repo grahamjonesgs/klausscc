@@ -173,7 +173,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Check that labels are correctly extracted from strings
+    // Check that labels are correctly extracted from strings test for not label
     fn test_label_name_from_string() {
         assert_eq!(label_name_from_string("label:"), Some("label:".to_string()));
         assert_eq!(
@@ -186,6 +186,9 @@ mod tests {
         assert_eq!(label_name_from_string("label "), None);
         assert_eq!(label_name_from_string(" label"), None);
         assert_eq!(label_name_from_string(" label "), None);
+        assert_eq!(label_name_from_string("lab:el"), None);
+        assert_eq!(label_name_from_string("label:"), Some("label:".to_string()));
+        assert_eq!(label_name_from_string("     label:"), Some("label:".to_string()));
     }
 
     #[test]
