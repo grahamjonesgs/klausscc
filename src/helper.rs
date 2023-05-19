@@ -77,9 +77,9 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         let int_value = if second_word.len() >= 2
             && (second_word[0..2] == *"0x" || second_word[0..2] == *"0X")
         {
-            let without_prefix = second_word.trim_start_matches("0x");
-            let without_prefix = without_prefix.trim_start_matches("0X");
-            let int_value_result = i64::from_str_radix(without_prefix, 16);
+            let without_prefix1 = second_word.trim_start_matches("0x");
+            let without_prefix2 = without_prefix1.trim_start_matches("0X");
+            let int_value_result = i64::from_str_radix(without_prefix2, 16);
             int_value_result.unwrap_or(0)
         } else {
             let int_value_result = second_word.parse::<i64>();

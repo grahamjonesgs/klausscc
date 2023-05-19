@@ -2,7 +2,7 @@ use crate::helper::data_name_from_string;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::Pass1;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Label {
     pub program_counter: u32,
     pub name: String,
@@ -96,15 +96,15 @@ pub fn convert_argument(
     }
 
     if argument_trim.len() >= 2 && (argument_trim[0..2] == *"0x" || argument_trim[0..2] == *"0X") {
-        let without_prefix = argument_trim.trim_start_matches("0x");
-        let without_prefix = without_prefix.trim_start_matches("0X");
-        let int_value_result = i64::from_str_radix(without_prefix, 16);
+        let without_prefix1 = argument_trim.trim_start_matches("0x");
+        let without_prefix2 = without_prefix1.trim_start_matches("0X");
+        let int_value_result = i64::from_str_radix(without_prefix2, 16);
         if int_value_result.is_err() {
             return None;
         }
         let int_value = int_value_result.unwrap_or(0);
 
-        if int_value <= 4_294_967_295 {
+        if int_value <= 0xFFFF_FFFF {
             return Some(format!("{int_value:08X}"));
         }
         msg_list.push(
@@ -118,7 +118,7 @@ pub fn convert_argument(
 
     match argument_trim.parse::<i64>() {
         Ok(n) => {
-            if n <= 4_294_967_295 {
+            if n <= 0xFFFF_FFFF {
                 return Some(format!("{n:08X}"));
             }
             msg_list.push(
@@ -242,6 +242,8 @@ mod tests {
 
     #[test]
     #[allow(clippy::too_many_lines)]
+    #[allow(clippy::cognitive_complexity)]
+
     fn test_convert_argument() {
         let mut labels = vec![
             Label {

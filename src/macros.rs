@@ -4,7 +4,7 @@ use crate::opcodes::{InputData, Pass0};
 use core::fmt::Write as _;
 use itertools::Itertools;
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Macro {
     pub name: String,
     pub variables: u32,
@@ -15,10 +15,9 @@ pub struct Macro {
 /// Parse opcode definition line to macro
 ///
 /// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None
-pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Macro> {
-   let input_line = input_line.trim();
+pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Option<Macro> {
     // Find the macro if it exists
-    if input_line.find('$').unwrap_or(usize::MAX) != 0 {
+    if input_line_full.trim().find('$').unwrap_or(usize::MAX) != 0 {
         return None;
     }
     let mut name: String = String::new();
@@ -27,8 +26,8 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
     let mut max_variable: u32 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
-    let comment = return_comments(&mut input_line.clone().to_string());
-    let input_line = &strip_comments(&mut input_line.clone().to_string());
+    let comment = return_comments(&mut input_line_full.clone().to_string());
+    let input_line = &strip_comments(&mut input_line_full.trim().clone().to_string());
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -70,7 +69,7 @@ pub fn macro_from_string(input_line: &str, msg_list: &mut MsgList) -> Option<Mac
         // Find the missing variables and create string
         let difference_all_variables: Vec<_> = all_variables
             .into_iter()
-            .filter(|item| !all_found_variables.contains(item))
+            .filter(|variable| !all_found_variables.contains(variable))
             .collect();
         let mut missing: String = String::new();
 

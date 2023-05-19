@@ -1,7 +1,7 @@
 use chrono::{Local, NaiveTime};
 use colored::{ColoredString, Colorize};
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Eq, Debug)]
 pub enum MessageType {
     Error,
     Warning,

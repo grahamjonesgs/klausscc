@@ -2,10 +2,35 @@
      clippy::all,
     //clippy::restriction,
       clippy::pedantic,
-    //clippy::nursery,
+    clippy::nursery,
     //clippy::cargo,
 )]
 #![allow(clippy::single_match_else)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::useless_let_if_seq)]
+
+
+#![allow(clippy::missing_docs_in_private_items)]
+#![allow(clippy::str_to_string)]
+#![allow(clippy::unwrap_used)]
+#![allow(clippy::integer_arithmetic)]
+#![allow(clippy::arithmetic_side_effects)]
+#![allow(clippy::print_stdout)]
+#![allow(clippy::use_debug)]
+#![allow(clippy::let_underscore_must_use)]
+#![allow(clippy::implicit_return)]
+#![allow(clippy::let_underscore_untyped)]
+#![allow(clippy::impl_trait_in_params)]
+#![allow(clippy::string_add)]
+#![allow(clippy::string_to_string)]
+#![allow(clippy::string_slice)]
+#![allow(clippy::indexing_slicing)]
+#![allow(clippy::as_conversions)]
+#![allow(clippy::separated_literal_suffix)]
+#![allow(clippy::default_numeric_fallback)]
+#![allow(clippy::modulo_arithmetic)]
+#![allow(clippy::if_then_some_else_none)]
+
 
 mod files;
 mod helper;
@@ -67,7 +92,7 @@ fn main() {
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
     let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
-    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list.unwrap_or(vec![]), &mut msg_list);
+    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list.unwrap_or_default(), &mut msg_list);
     if opt_oplist.is_none() {
         println!("Unable to open opcode file {opcode_file_name:?}");
         std::process::exit(1);
@@ -77,7 +102,7 @@ fn main() {
         println!("Error parsing opcode file {opcode_file_name} to marco and opcode lists");
         std::process::exit(1);
     }
-    let oplist = opt_oplist.unwrap_or([].to_vec());
+    let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
 
     if opcodes_flag {   
@@ -103,14 +128,14 @@ fn main() {
         None,
         MessageType::Info,
     );
-    let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
-    let input_list = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_files);
-    if input_list.is_none() {
+    let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
+    let input_list_option = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
+    if input_list_option.is_none() {
         print_messages(&mut msg_list);
         std::process::exit(1);
     }
 
-    let input_list = Some(remove_block_comments(input_list.unwrap(), &mut msg_list));
+    let input_list = Some(remove_block_comments(input_list_option.unwrap(), &mut msg_list));
 
     // Pass 0 to add macros
     let pass0 = expand_macros(&mut msg_list, input_list.unwrap(), &mut macro_list);

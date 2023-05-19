@@ -10,13 +10,20 @@ use std::{
     path::{Path, MAIN_SEPARATOR_STR},
 };
 
-#[derive(PartialEq, Debug)]
+/// Enum for the type of line
+#[derive(PartialEq, Eq, Debug)]
 pub enum LineType {
-    Comment,
+    /// Comment line type
+    Comment, 
+    /// Blank line type
     Blank,
+    /// Label line type
     Label,
+    /// Opcode line type
     Opcode,
+    /// Data line type
     Data,
+    /// Error line type
     Error,
 }
 
@@ -40,8 +47,8 @@ pub fn read_file_to_vector(
         return None;
     }
 
-    for file in opened_files.clone() {
-        if file == filename {
+    for file_found in opened_files.clone() {
+        if file_found == filename {
             msg_list.push(
                 format!("Recursive include of file {filename}"),
                 None,
@@ -64,7 +71,7 @@ pub fn read_file_to_vector(
                 line_number += 1;
                 if is_include(&v) {
                     let include_file = get_include_filename(&v);
-                    if include_file.clone().unwrap_or(String::new()) == String::new() {
+                    if include_file.clone().unwrap_or_default() == String::new() {
                         msg_list.push(
                             format!("Missing include file name in {filename}"),
                             Some(line_number),
@@ -75,17 +82,17 @@ pub fn read_file_to_vector(
                     }
 
                     // Get the include file from the same directory as the previous file
-                    let include_file = format!(
+                    let new_include_file = format!(
                         "{}{}{}",
                         Path::new(filename).parent().unwrap().to_str().unwrap(),
                         MAIN_SEPARATOR_STR,
                         include_file.unwrap()
                     );
 
-                    let include_lines = read_file_to_vector(&include_file, msg_list, opened_files);
+                    let include_lines = read_file_to_vector(&new_include_file, msg_list, opened_files);
                     if include_lines.is_none() {
                         msg_list.push(
-                            format!("Unable to open include file {include_file} in {filename}"),
+                            format!("Unable to open include file {new_include_file} in {filename}"),
                             Some(line_number),
                             Some(filename.to_string()),
                             MessageType::Error,
@@ -93,9 +100,9 @@ pub fn read_file_to_vector(
                         //return None;
                         return Some(lines);
                     }
-                    let include_lines = include_lines.unwrap();
-                    for line in include_lines {
-                        lines.push(line);
+                    let unwrapped_include_lines = include_lines.unwrap();
+                    for included_line in unwrapped_include_lines {
+                        lines.push(included_line);
                     }
                 } else {
                     lines.push(InputData {
@@ -117,8 +124,7 @@ pub fn read_file_to_vector(
 ///
 /// Checks if the string is include and returns true if it is
 pub fn is_include(line: &str) -> bool {
-    let line = line.trim();
-    if line.starts_with("!include") {
+    if line.trim().starts_with("!include") {
         return true;
     }
     false
@@ -127,14 +133,13 @@ pub fn is_include(line: &str) -> bool {
 /// Return the filename from include string
 ///
 /// Returns the filename from include string
-pub fn get_include_filename(line: &str) -> Option<String> {
-    let line = line.trim();
-    if !line.starts_with("!include") {
+pub fn get_include_filename(input_line: &str) -> Option<String> {
+    if !input_line.trim().starts_with("!include") {
         return None;
     }
-    let mut line = line.replace("!include", "");
-    let line = strip_comments(&mut line);
-    let mut words = line.split_whitespace();
+    let mut line = input_line.replace("!include", "");
+    let stripped_line = strip_comments(&mut line);
+    let mut words = stripped_line.split_whitespace();
     Some(words.next().unwrap_or("").to_owned())
 }
 
@@ -196,8 +201,8 @@ pub fn filename_stem(full_name: &String) -> String {
     let stem = path.file_stem();
     let parent = path
         .parent()
-        .unwrap_or(Path::new(""))
-        .join(stem.unwrap_or(OsStr::new("")));
+        .unwrap_or_else(|| return Path::new(""))
+        .join(stem.unwrap_or_else(|| return OsStr::new("")));
 
     return parent.to_str().unwrap().to_owned();
 }
@@ -261,7 +266,7 @@ pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>
 
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
 pub fn output_macros_opcodes(
-    filename: impl AsRef<Path> + std::clone::Clone,
+    filename: impl AsRef<Path> + core::clone::Clone,
     opcodes: Vec<Opcode>,
     macros: Vec<Macro>,
     msg_list: &mut MsgList,
@@ -382,14 +387,14 @@ pub fn format_opcodes(input: &mut String) -> String {
 pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, 115_200)
-        .timeout(std::time::Duration::from_millis(100))
+        .timeout(core::time::Duration::from_millis(100))
         .open();
 
     if port_result.is_err() {
         let mut all_ports: String = String::new();
-        let ports = serialport::available_ports();
+        let available_ports = serialport::available_ports();
 
-        match ports {
+        match available_ports {
             Err(_) => {
                 msg_list.push(
                     "Error opening serial port, no ports found".to_string(),
@@ -909,8 +914,8 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let file_path2 = tmp_dir.path().join("test2.kla");
-        let binding = file_path2;
-        let file_name2: &str = binding.to_str().unwrap();
+        let binding2 = file_path2;
+        let file_name2: &str = binding2.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
         let _ = writeln!(tmp_file1, "!include test2.kla");
         let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
@@ -976,16 +981,16 @@ mod test {
 
         let file_path2 = tmp_dir.path().join("test2.kla");
         let mut tmp_file2: File = File::create(file_path2.clone()).unwrap();
-        let binding = file_path2;
-        let file_name2: &str = binding.to_str().unwrap();
+        let binding2 = file_path2;
+        let file_name2: &str = binding2.to_str().unwrap();
         let _ = writeln!(tmp_file2, "Test line in file 2 line 0");
         let _ = writeln!(tmp_file2, "!include test3.kla");
         let _ = writeln!(tmp_file2, "Test line in file 2 line 2");
         let _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let file_path3 = tmp_dir.path().join("test3.kla");
-        let binding = file_path3;
-        let file_name3: &str = binding.to_str().unwrap();
+        let binding3 = file_path3;
+        let file_name3: &str = binding3.to_str().unwrap();
 
         let _lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(

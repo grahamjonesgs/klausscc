@@ -3,7 +3,7 @@ use crate::labels::{convert_argument, Label};
 use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::messages::{MessageType, MsgList};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Opcode {
     pub text_name: String,
     pub hex_opcode: String,
@@ -13,7 +13,7 @@ pub struct Opcode {
     pub section: String,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputData {
     pub input: String,
     pub file_name: String,
@@ -139,13 +139,20 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     // Define number of registers from opcode definition
+   
     let mut num_registers: u32 = 0;
+
     if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
         num_registers = 1;
+    } else {
+        
     }
+
     if &input_line[pos_opcode + 2..pos_opcode + 4] == "??" {
         num_registers = 2;
-    }
+    } 
+
+    
 
     // Look for variable, and set flag
     let mut num_variables: u32 = 0;
@@ -850,182 +857,182 @@ mod tests {
         assert_eq!(map_reg_to_hex("P"), "F");
         assert_eq!(map_reg_to_hex("Z"), "X");
     }
-}
 
-#[test]
-// Test no macro or opcodes
-fn test_parse_vh_file1() {
-    let mut msg_list: MsgList = MsgList::new();
-    let vh_list = vec![
-        InputData {
-            input: "abc/* This is a comment */def".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 1,
-        },
-        InputData {
-            input: "abc/* This is a comment */def".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 2,
-        },
-    ];
-
-    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
-
-    assert!(opt_oplist.unwrap().is_empty());
-    assert!(opt_macro_list.unwrap().is_empty());
-}
-
-#[test]
-// Test normal macro and opcode
-fn test_parse_vh_file2() {
-    let mut msg_list: MsgList = MsgList::new();
-    let vh_list = vec![
-        InputData {
-            input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 1,
-        },
-        InputData {
-            input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 2,
-        },
-    ];
-
-    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
-
-    assert_eq!(
-        opt_oplist.unwrap(),
-        vec![Opcode {
-            text_name: "CMPRR".to_string(),
-            hex_opcode: "000005??".to_string(),
-            registers: 2,
-            variables: 0,
-            comment: "Compare registers".to_string(),
-            section: String::new(),
-        }]
-    );
-    assert_eq!(
-        opt_macro_list.unwrap(),
-        vec![Macro {
-            name: "$WAIT".to_string(),
-            variables: 2,
-            items: ["DELAYV %1".to_string(), "DELAYV %2".to_string()].to_vec(),
-            comment: String::new()
-        }]
-    );
-}
-
-#[test]
-// Test duplicate macro
-fn test_parse_vh_file3() {
-    let mut msg_list: MsgList = MsgList::new();
-    let vh_list = vec![
-        InputData {
-            input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 1,
-        },
-        InputData {
-            input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 2,
-        },
-        InputData {
-            input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 3,
-        },
-        InputData {
-            input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 4,
-        },
-    ];
-
-    let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
-
-    assert_eq!(
-        msg_list.list[0].name,
-        "Duplicate Macro definition $WAIT found"
-    );
-    assert_eq!(msg_list.list[0].line_number, Some(3));
-    assert_eq!(msg_list.list[1].name, "Duplicate Opcode CMPRR found");
-    assert_eq!(msg_list.list[1].line_number, Some(4));
-}
-#[test]
-// Test empty list
-fn test_parse_vh_file4() {
-    let mut msg_list: MsgList = MsgList::new();
-    let vh_list = vec![];
-
-    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
-
-    assert_eq!(opt_oplist, None);
-    assert_eq!(opt_macro_list, None);
-}
-
-#[test]
-// Test normal opcode with sections
-fn test_parse_vh_file5() {
-    let mut msg_list: MsgList = MsgList::new();
-    let vh_list = vec![
-        InputData {
-            input: "/// Section 1".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 1,
-        },
-        InputData {
-            input: "16'h06??: t_push_addr;    // PUSH push value to reg".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 2,
-        },
-        InputData {
-            input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 3,
-        },
-        InputData {
-            input: "/// Section 2".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 4,
-        },
-        InputData {
-            input: "16'h16??: t_pop_addr;    // POP push value to reg".to_string(),
-            file_name: "opcode_select.vh".to_string(),
-            line_counter: 5,
-        },
-    ];
-
-    let (opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
-
-    assert_eq!(
-        opt_oplist.unwrap(),
-        vec![
-            Opcode {
-                text_name: "PUSH".to_string(),
-                hex_opcode: "000006??".to_string(),
-                registers: 2,
-                variables: 0,
-                comment: "push value to reg".to_string(),
-                section: "Section 1".to_string(),
+    #[test]
+    // Test no macro or opcodes
+    fn test_parse_vh_file1() {
+        let mut msg_list: MsgList = MsgList::new();
+        let vh_list = vec![
+            InputData {
+                input: "abc/* This is a comment */def".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 1,
             },
-            Opcode {
+            InputData {
+                input: "abc/* This is a comment */def".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 2,
+            },
+        ];
+
+        let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+        assert!(opt_oplist.unwrap().is_empty());
+        assert!(opt_macro_list.unwrap().is_empty());
+    }
+
+    #[test]
+    // Test normal macro and opcode
+    fn test_parse_vh_file2() {
+        let mut msg_list: MsgList = MsgList::new();
+        let vh_list = vec![
+            InputData {
+                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 1,
+            },
+            InputData {
+                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 2,
+            },
+        ];
+
+        let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+        assert_eq!(
+            opt_oplist.unwrap(),
+            vec![Opcode {
                 text_name: "CMPRR".to_string(),
                 hex_opcode: "000005??".to_string(),
                 registers: 2,
                 variables: 0,
                 comment: "Compare registers".to_string(),
-                section: "Section 1".to_string(),
+                section: String::new(),
+            }]
+        );
+        assert_eq!(
+            opt_macro_list.unwrap(),
+            vec![Macro {
+                name: "$WAIT".to_string(),
+                variables: 2,
+                items: ["DELAYV %1".to_string(), "DELAYV %2".to_string()].to_vec(),
+                comment: String::new()
+            }]
+        );
+    }
+
+    #[test]
+    // Test duplicate macro
+    fn test_parse_vh_file3() {
+        let mut msg_list: MsgList = MsgList::new();
+        let vh_list = vec![
+            InputData {
+                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 1,
             },
-            Opcode {
-                text_name: "POP".to_string(),
-                hex_opcode: "000016??".to_string(),
-                registers: 2,
-                variables: 0,
-                comment: "push value to reg".to_string(),
-                section: "Section 2".to_string(),
-            }
-        ]
-    );
+            InputData {
+                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 2,
+            },
+            InputData {
+                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 3,
+            },
+            InputData {
+                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 4,
+            },
+        ];
+
+        let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+        assert_eq!(
+            msg_list.list[0].name,
+            "Duplicate Macro definition $WAIT found"
+        );
+        assert_eq!(msg_list.list[0].line_number, Some(3));
+        assert_eq!(msg_list.list[1].name, "Duplicate Opcode CMPRR found");
+        assert_eq!(msg_list.list[1].line_number, Some(4));
+    }
+    #[test]
+    // Test empty list
+    fn test_parse_vh_file4() {
+        let mut msg_list: MsgList = MsgList::new();
+        let vh_list = vec![];
+
+        let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+        assert_eq!(opt_oplist, None);
+        assert_eq!(opt_macro_list, None);
+    }
+
+    #[test]
+    // Test normal opcode with sections
+    fn test_parse_vh_file5() {
+        let mut msg_list: MsgList = MsgList::new();
+        let vh_list = vec![
+            InputData {
+                input: "/// Section 1".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 1,
+            },
+            InputData {
+                input: "16'h06??: t_push_addr;    // PUSH push value to reg".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 2,
+            },
+            InputData {
+                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 3,
+            },
+            InputData {
+                input: "/// Section 2".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 4,
+            },
+            InputData {
+                input: "16'h16??: t_pop_addr;    // POP push value to reg".to_string(),
+                file_name: "opcode_select.vh".to_string(),
+                line_counter: 5,
+            },
+        ];
+
+        let (opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
+
+        assert_eq!(
+            opt_oplist.unwrap(),
+            vec![
+                Opcode {
+                    text_name: "PUSH".to_string(),
+                    hex_opcode: "000006??".to_string(),
+                    registers: 2,
+                    variables: 0,
+                    comment: "push value to reg".to_string(),
+                    section: "Section 1".to_string(),
+                },
+                Opcode {
+                    text_name: "CMPRR".to_string(),
+                    hex_opcode: "000005??".to_string(),
+                    registers: 2,
+                    variables: 0,
+                    comment: "Compare registers".to_string(),
+                    section: "Section 1".to_string(),
+                },
+                Opcode {
+                    text_name: "POP".to_string(),
+                    hex_opcode: "000016??".to_string(),
+                    registers: 2,
+                    variables: 0,
+                    comment: "push value to reg".to_string(),
+                    section: "Section 2".to_string(),
+                }
+            ]
+        );
+    }
 }
