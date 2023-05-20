@@ -14,7 +14,7 @@ use std::{
 #[derive(PartialEq, Eq, Debug)]
 pub enum LineType {
     /// Comment line type
-    Comment, 
+    Comment,
     /// Blank line type
     Blank,
     /// Label line type
@@ -36,8 +36,8 @@ pub fn read_file_to_vector(
     msg_list: &mut MsgList,
     opened_files: &mut Vec<String>,
 ) -> Option<Vec<InputData>> {
-    let file = File::open(filename);
-    if file.is_err() {
+    let file_result = File::open(filename);
+    if file_result.is_err() {
         msg_list.push(
             format!("Unable to open file {filename}"),
             None,
@@ -46,6 +46,8 @@ pub fn read_file_to_vector(
         );
         return None;
     }
+    #[allow(clippy::unwrap_used)]
+    let file = file_result.unwrap();
 
     for file_found in opened_files.clone() {
         if file_found == filename {
@@ -61,7 +63,7 @@ pub fn read_file_to_vector(
 
     opened_files.push(filename.to_string());
 
-    let buf = BufReader::new(file.unwrap());
+    let buf = BufReader::new(file);
     let mut lines: Vec<InputData> = Vec::new();
 
     let mut line_number = 0;
@@ -84,12 +86,17 @@ pub fn read_file_to_vector(
                     // Get the include file from the same directory as the previous file
                     let new_include_file = format!(
                         "{}{}{}",
-                        Path::new(filename).parent().unwrap().to_str().unwrap(),
+                        Path::new(filename)
+                            .parent()
+                            .unwrap_or_else(|| Path::new(""))
+                            .to_str()
+                            .unwrap_or_default(),
                         MAIN_SEPARATOR_STR,
-                        include_file.unwrap()
+                        include_file.unwrap_or_default()
                     );
 
-                    let include_lines = read_file_to_vector(&new_include_file, msg_list, opened_files);
+                    let include_lines =
+                        read_file_to_vector(&new_include_file, msg_list, opened_files);
                     if include_lines.is_none() {
                         msg_list.push(
                             format!("Unable to open include file {new_include_file} in {filename}"),
@@ -100,7 +107,7 @@ pub fn read_file_to_vector(
                         //return None;
                         return Some(lines);
                     }
-                    let unwrapped_include_lines = include_lines.unwrap();
+                    let unwrapped_include_lines = include_lines.unwrap_or_default();
                     for included_line in unwrapped_include_lines {
                         lines.push(included_line);
                     }
@@ -113,7 +120,12 @@ pub fn read_file_to_vector(
                 }
             }
             #[cfg(not(tarpaulin_include))] // Cannot test error reading file line in tarpaulin
-            Err(e) => println!("Error parsing opcode file: {e:?}"),
+            Err(e) => msg_list.push(
+                format!("Error parsing opcode file: {e}"),
+                Some(line_number),
+                Some(filename.to_string()),
+                MessageType::Error,
+            ),
         }
     }
     opened_files.pop();
@@ -204,20 +216,21 @@ pub fn filename_stem(full_name: &String) -> String {
         .unwrap_or_else(|| return Path::new(""))
         .join(stem.unwrap_or_else(|| return OsStr::new("")));
 
-    return parent.to_str().unwrap().to_owned();
+    return parent.to_str().unwrap_or_default().to_owned();
 }
 
 /// Output the bitcode to given file
 ///
 /// Based on the bitcode string outputs to file
 #[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
+#[allow(clippy::impl_trait_in_params)]
 pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str) -> bool {
     let result_file = File::create(filename);
 
     if result_file.is_err() {
         return false;
     }
-
+    #[allow(clippy::unwrap_used)]
     let mut file = result_file.unwrap();
 
     if file.write(output_string.as_bytes()).is_err() {
@@ -231,13 +244,15 @@ pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str
 ///
 /// Writes all data to the detailed code file
 #[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
+#[allow(clippy::impl_trait_in_params)]
 pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
     let result_file = File::create(filename);
     if result_file.is_err() {
         return false;
     }
-    let mut out_line: String;
+    #[allow(clippy::unwrap_used)]
     let mut file = result_file.unwrap();
+    let mut out_line: String;
 
     for pass in pass2 {
         if pass.line_type == LineType::Opcode {
@@ -264,7 +279,11 @@ pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>
     true
 }
 
+/// Outputs the opcodes and macros details file to given filename
+///
+/// Writes all data to the html ISA and macro file file
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
+#[allow(clippy::impl_trait_in_params)]
 pub fn output_macros_opcodes(
     filename: impl AsRef<Path> + core::clone::Clone,
     opcodes: Vec<Opcode>,
@@ -280,7 +299,7 @@ pub fn output_macros_opcodes(
         ),
         None,
         None,
-        MessageType::Info,
+        MessageType::Information,
     );
 
     let output_file = File::create(filename.clone());
@@ -289,11 +308,11 @@ pub fn output_macros_opcodes(
             format!("Error opening file {}", filename.as_ref().display()),
             None,
             None,
-            MessageType::Info,
+            MessageType::Information,
         );
         return;
     }
-
+    #[allow(clippy::unwrap_used)]
     let mut file = output_file.unwrap();
     let _ = file.write(b"<!DOCTYPE html>\n");
     let _ = file.write(b"<html>\n<head>\n<style>\n");
@@ -368,7 +387,7 @@ pub fn output_macros_opcodes(
 /// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string
 pub fn format_opcodes(input: &mut String) -> String {
     if input.len() == 4 {
-        return (*input).to_string() + "              ";
+        return (*input).clone() + "              ";
     }
     if input.len() == 8 {
         return input[0..4].to_string() + &input[4..8] + "         ";
@@ -376,7 +395,7 @@ pub fn format_opcodes(input: &mut String) -> String {
     if input.len() == 16 {
         return input[0..4].to_string() + &input[4..8] + " " + &input[8..12] + &input[12..16];
     }
-    (*input).to_string()
+    (*input).clone()
 }
 
 /// Output the code details file to given serial port
@@ -415,8 +434,8 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
                 }
 
                 let ports_msg = match max_ports {
-                    -1 => "no ports were found".to_string(),
-                    0 => {
+                    -1_i32 => "no ports were found".to_string(),
+                    0_i32 => {
                         format!("only port {all_ports} was found")
                     }
                     _ => {
@@ -434,7 +453,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
             }
         }
     }
-
+    #[allow(clippy::unwrap_used)]
     let mut port = port_result.unwrap();
 
     if port.set_stop_bits(serialport::StopBits::One).is_err() {
@@ -490,13 +509,14 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
         format!("Message received from board is \"{print_ret_msg}\""),
         None,
         None,
-        MessageType::Info,
+        MessageType::Information,
     );
 
     true
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod test {
 
     use super::*;
@@ -808,7 +828,7 @@ mod test {
 
         let file_path1 = tmp_dir.path().join("test1.kla");
         let binding = file_path1.clone();
-        let file_name1: &str = binding.to_str().unwrap();
+        let file_name1: &str = binding.to_str().unwrap_or_default();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
         let _ = writeln!(tmp_file1, "Test line in file");
         let _ = writeln!(tmp_file1, "Test line in file 1");
@@ -849,7 +869,7 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            lines.clone().unwrap()[0].input,
+            lines.clone().unwrap_or_default()[0].input,
             "Test line in file 1 line 0"
         );
         assert_eq!(

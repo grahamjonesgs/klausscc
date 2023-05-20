@@ -4,11 +4,16 @@ use crate::opcodes::{InputData, Pass0};
 use core::fmt::Write as _;
 use itertools::Itertools;
 
+/// Structure to hold macro
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Macro {
+    /// Name of macro
     pub name: String,
+    /// Number of variables
     pub variables: u32,
+    /// Vector of macro items
     pub items: Vec<String>,
+    /// Comment for macro
     pub comment: String,
 }
 
@@ -34,7 +39,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
         if i == 0 {
             name = word.to_string();
         } else if word == "/" {
-            items.push(item.to_string());
+            items.push(item);
             item = String::new();
         } else {
             if word.contains('%') {
@@ -58,7 +63,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
     }
 
     if !item.is_empty() {
-        items.push(item.to_string());
+        items.push(item);
     }
 
     if max_variable as usize != all_found_variables.clone().into_iter().unique().count() {
@@ -111,7 +116,7 @@ pub fn macro_name_from_string(line: &str) -> Option<String> {
 /// Returns Macro from name
 ///
 /// Return option macro if it exists, or none
-pub fn return_macro<'a>(line: &'a str, macros: &'a mut [Macro]) -> Option<Macro> {
+pub fn return_macro<>(line: & str, macros: & mut [Macro]) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
 
@@ -140,7 +145,7 @@ pub fn return_macro_items_replace(
     let input_line_array: Vec<_> = words.clone().collect();
 
     let first_word = words.next().unwrap_or("");
-    macro_name_from_string(first_word)?;
+
     for macro_line in macros {
         if macro_line.name == first_word {
             found = true;
@@ -172,7 +177,7 @@ pub fn return_macro_items_replace(
                                 MessageType::Error,
                             );
                         } else if int_value.clone().unwrap_or(0)
-                            > (input_line_array.len() - 1).try_into().unwrap()
+                            > (input_line_array.len() - 1).try_into().unwrap_or_default()
                         {
                             msg_list.push(
                                 format!(
@@ -198,10 +203,10 @@ pub fn return_macro_items_replace(
         }
     }
     if found {
-        Some(return_items)
-    } else {
+        return Some(return_items)
+    } 
         None
-    }
+    
 }
 
 /// Multi pass to resolve embedded macros
@@ -229,7 +234,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                     for item_word in item_words {
                         item_line_array.push(item_word.to_string());
                     }
-
+                    #[allow(clippy::unwrap_used)]
                     if (return_macro(&item, &mut input_macros).unwrap().variables as usize)
                         < item_line_array.len() - 1
                     {
@@ -243,7 +248,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                             MessageType::Warning,
                         );
                     }
-
+                    #[allow(clippy::unwrap_used)]
                     for new_item in return_macro(&item, &mut input_macros).unwrap().items {
                         if new_item.contains('%') {
                             // Replace %n in new items with the nth value in item

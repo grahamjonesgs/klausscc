@@ -2,11 +2,13 @@ use crate::helper::data_name_from_string;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::Pass1;
 
+/// Label structure
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Label {
+    /// Program counter value
     pub program_counter: u32,
+    /// Name of label
     pub name: String,
-    pub line_counter: u32,
 }
 
 /// Extracts label from string
@@ -66,33 +68,30 @@ pub fn convert_argument(
 ) -> Option<String> {
     let argument_trim = argument.trim();
     if label_name_from_string(argument_trim).is_some() {
-        match return_label_value(argument_trim, labels) {
-            Some(n) => return Some(format!("{n:08X}")),
-            None => {
-                msg_list.push(
-                    format!("Label {argument} not found - line {line_number}"),
-                    Some(line_number),
-                    Some(filename),
-                    MessageType::Warning,
-                );
-                return None;
-            }
-        };
+        if let Some(n) = return_label_value(argument_trim, labels) {
+            return Some(format!("{n:08X}"));
+        }
+
+        msg_list.push(
+            format!("Label {argument} not found - line {line_number}"),
+            Some(line_number),
+            Some(filename),
+            MessageType::Warning,
+        );
+        return None;
     }
 
     if data_name_from_string(argument_trim).is_some() {
-        match return_label_value(argument_trim, labels) {
-            Some(n) => return Some(format!("{n:08X}")),
-            None => {
-                msg_list.push(
-                    format!("Label {argument} not found"),
-                    Some(line_number),
-                    Some(filename),
-                    MessageType::Warning,
-                );
-                return None;
-            }
-        };
+        if let Some(n) = return_label_value(argument_trim, labels) {
+            return Some(format!("{n:08X}"));
+        }
+        msg_list.push(
+            format!("Label {argument} not found"),
+            Some(line_number),
+            Some(filename),
+            MessageType::Warning,
+        );
+        return None;
     }
 
     if argument_trim.len() >= 2 && (argument_trim[0..2] == *"0x" || argument_trim[0..2] == *"0X") {
@@ -155,12 +154,11 @@ pub fn get_labels(pass1: &[Pass1]) -> Vec<Label> {
                 program_counter: n.program_counter,
                 name: {
                     let this = label_name_from_string(&n.input);
-                    match this {
-                        Some(x) => x,
-                        None => data_name_from_string(&n.input).unwrap_or_default(),
-                    }
+                    this.map_or_else(
+                        || data_name_from_string(&n.input).unwrap_or_default(),
+                        |x| x,
+                    )
                 },
-                line_counter: n.line_counter,
             }
         })
         .collect();
@@ -169,8 +167,8 @@ pub fn get_labels(pass1: &[Pass1]) -> Vec<Label> {
 
 #[cfg(test)]
 mod tests {
-    use crate::files::LineType;
     use super::*;
+    use crate::files::LineType;
 
     #[test]
     // Check that labels are correctly extracted from strings test for not label
@@ -188,7 +186,10 @@ mod tests {
         assert_eq!(label_name_from_string(" label "), None);
         assert_eq!(label_name_from_string("lab:el"), None);
         assert_eq!(label_name_from_string("label:"), Some("label:".to_string()));
-        assert_eq!(label_name_from_string("     label:"), Some("label:".to_string()));
+        assert_eq!(
+            label_name_from_string("     label:"),
+            Some("label:".to_string())
+        );
     }
 
     #[test]
@@ -197,12 +198,10 @@ mod tests {
             Label {
                 program_counter: 0,
                 name: "label1".to_string(),
-                line_counter: 0,
             },
             Label {
                 program_counter: 1,
                 name: "label2".to_string(),
-                line_counter: 0,
             },
         ];
         assert_eq!(return_label_value("label1", &mut labels), Some(0));
@@ -216,17 +215,14 @@ mod tests {
             Label {
                 program_counter: 0,
                 name: "label1".to_string(),
-                line_counter: 0,
             },
             Label {
                 program_counter: 1,
                 name: "label2".to_string(),
-                line_counter: 0,
             },
             Label {
                 program_counter: 2,
                 name: "label1".to_string(),
-                line_counter: 3,
             },
         ];
         let mut msg_list = MsgList::new();
@@ -249,82 +245,133 @@ mod tests {
             Label {
                 program_counter: 1,
                 name: "label1:".to_string(),
-                line_counter: 1,
             },
             Label {
                 program_counter: 2,
                 name: "label2:".to_string(),
-                line_counter: 2,
             },
             Label {
                 program_counter: 30,
                 name: "#data1".to_string(),
-                line_counter: 20,
             },
         ];
         let mut msg_list = MsgList::new();
         assert_eq!(
-            convert_argument("label1", &mut msg_list, 0, "test".to_string(),&mut labels),
+            convert_argument("label1", &mut msg_list, 0, "test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label2", &mut msg_list, 1,"test".to_string(), &mut labels),
+            convert_argument("label2", &mut msg_list, 1, "test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label3", &mut msg_list, 2,"test".to_string(), &mut labels),
+            convert_argument("label3", &mut msg_list, 2, "test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("0x1234", &mut msg_list, 3,"test".to_string(), &mut labels),
+            convert_argument("0x1234", &mut msg_list, 3, "test".to_string(), &mut labels),
             Some("00001234".to_string())
         );
         assert_eq!(
-            convert_argument("0x123456789", &mut msg_list, 4, "test".to_string(),&mut labels),
+            convert_argument(
+                "0x123456789",
+                &mut msg_list,
+                4,
+                "test".to_string(),
+                &mut labels
+            ),
             None
         );
         assert_eq!(
-            convert_argument("1234", &mut msg_list, 5,"test".to_string(), &mut labels),
+            convert_argument("1234", &mut msg_list, 5, "test".to_string(), &mut labels),
             Some("000004D2".to_string())
         );
         assert_eq!(
-            convert_argument("123456789", &mut msg_list, 6, "test".to_string(),&mut labels),
+            convert_argument(
+                "123456789",
+                &mut msg_list,
+                6,
+                "test".to_string(),
+                &mut labels
+            ),
             Some("075BCD15".to_string())
         );
         assert_eq!(
-            convert_argument("label1:", &mut msg_list, 7,"test".to_string(), &mut labels),
+            convert_argument("label1:", &mut msg_list, 7, "test".to_string(), &mut labels),
             Some("00000001".to_string())
         );
         assert_eq!(
-            convert_argument("label1: ", &mut msg_list, 8,"test".to_string(), &mut labels),
+            convert_argument(
+                "label1: ",
+                &mut msg_list,
+                8,
+                "test".to_string(),
+                &mut labels
+            ),
             Some("00000001".to_string())
         );
         assert_eq!(
-            convert_argument("label1 :", &mut msg_list, 9,"test".to_string(), &mut labels),
+            convert_argument(
+                "label1 :",
+                &mut msg_list,
+                9,
+                "test".to_string(),
+                &mut labels
+            ),
             None
         );
         assert_eq!(
-            convert_argument("label1 : ", &mut msg_list, 10,"test".to_string(), &mut labels),
+            convert_argument(
+                "label1 : ",
+                &mut msg_list,
+                10,
+                "test".to_string(),
+                &mut labels
+            ),
             None
         );
         assert_eq!(
-            convert_argument("label1", &mut msg_list, 11,"test".to_string(), &mut labels),
+            convert_argument("label1", &mut msg_list, 11, "test".to_string(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label1 ", &mut msg_list, 12,"test".to_string(), &mut labels),
+            convert_argument(
+                "label1 ",
+                &mut msg_list,
+                12,
+                "test".to_string(),
+                &mut labels
+            ),
             None
         );
         assert_eq!(
-            convert_argument(" label1", &mut msg_list, 13, "test".to_string(),&mut labels),
+            convert_argument(
+                " label1",
+                &mut msg_list,
+                13,
+                "test".to_string(),
+                &mut labels
+            ),
             None
         );
         assert_eq!(
-            convert_argument("label2:", &mut msg_list, 14,"test".to_string(), &mut labels),
+            convert_argument(
+                "label2:",
+                &mut msg_list,
+                14,
+                "test".to_string(),
+                &mut labels
+            ),
             Some("00000002".to_string())
         );
         assert_eq!(
-            convert_argument("label3:", &mut msg_list, 14,"test".to_string(), &mut labels),
+            convert_argument(
+                "label3:",
+                &mut msg_list,
+                14,
+                "test".to_string(),
+                &mut labels
+            ),
             None
         );
         assert_eq!(
@@ -332,7 +379,7 @@ mod tests {
             "Label label3: not found - line 14".to_string()
         );
         assert_eq!(
-            convert_argument("xxxx", &mut msg_list, 14,"test".to_string(), &mut labels),
+            convert_argument("xxxx", &mut msg_list, 14, "test".to_string(), &mut labels),
             None
         );
         assert_eq!(
@@ -340,7 +387,13 @@ mod tests {
             "Decimal value xxxx incorrect".to_string()
         );
         assert_eq!(
-            convert_argument("4294967296", &mut msg_list, 14,"test".to_string(), &mut labels),
+            convert_argument(
+                "4294967296",
+                &mut msg_list,
+                14,
+                "test".to_string(),
+                &mut labels
+            ),
             None
         );
         assert_eq!(
@@ -348,11 +401,11 @@ mod tests {
             "Decimal value out 4294967296 of bounds".to_string()
         );
         assert_eq!(
-            convert_argument("#data1", &mut msg_list, 14,"test".to_string(), &mut labels),
+            convert_argument("#data1", &mut msg_list, 14, "test".to_string(), &mut labels),
             Some("0000001E".to_string())
         );
         assert_eq!(
-            convert_argument("#data2", &mut msg_list, 15,"test".to_string(), &mut labels),
+            convert_argument("#data2", &mut msg_list, 15, "test".to_string(), &mut labels),
             None
         );
         assert_eq!(
@@ -360,7 +413,7 @@ mod tests {
             "Label #data2 not found".to_string()
         );
         assert_eq!(
-            convert_argument("0xGGG", &mut msg_list, 14,"test".to_string(), &mut labels),
+            convert_argument("0xGGG", &mut msg_list, 14, "test".to_string(), &mut labels),
             None
         );
     }
@@ -418,7 +471,6 @@ mod tests {
             Label {
                 program_counter: 0,
                 name: "label1:".to_string(),
-                line_counter: 0
             }
         );
         assert_eq!(
@@ -426,7 +478,6 @@ mod tests {
             Label {
                 program_counter: 4,
                 name: "label2:".to_string(),
-                line_counter: 1
             }
         );
         assert_eq!(
@@ -434,7 +485,6 @@ mod tests {
             Label {
                 program_counter: 6,
                 name: "label3:".to_string(),
-                line_counter: 2
             }
         );
         assert_eq!(
@@ -442,7 +492,6 @@ mod tests {
             Label {
                 program_counter: 7,
                 name: "#data1".to_string(),
-                line_counter: 3
             }
         );
     }

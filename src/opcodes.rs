@@ -109,6 +109,7 @@ pub fn parse_vh_file(
 /// Parse opcode definition line to opcode
 ///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
+#[allow(clippy::useless_let_if_seq)]
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_comment: usize;
     let pos_end_comment: usize;
@@ -141,12 +142,9 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     // Define number of registers from opcode definition
    
     let mut num_registers: u32 = 0;
-
     if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
         num_registers = 1;
-    } else {
-        
-    }
+    } 
 
     if &input_line[pos_opcode + 2..pos_opcode + 4] == "??" {
         num_registers = 2;
@@ -180,11 +178,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     };
 
     // Find end of first word after comment as end of opcode name
-    let pos_end_name: usize = match input_line[pos_name..].find(' ') {
-        // None => return None,
-        None => input_line.len(),
-        Some(a) => a + pos_name,
-    };
+    let pos_end_name: usize = input_line[pos_name..].find(' ').map_or(input_line.len(), |a| a + pos_name);
 
     // Set comments field, or none if missing
     if input_line.len() > pos_end_name + 1 {
@@ -230,7 +224,7 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
         if first_word.to_uppercase() == opcode.text_name {
-            return Some(opcode.hex_opcode.to_string().to_uppercase());
+            return Some(opcode.hex_opcode.to_uppercase());
         }
     }
     None
@@ -288,15 +282,12 @@ pub fn add_registers(
     line_number: u32,
 ) -> String {
     let num_registers =
-        num_registers(opcodes, &mut (*line).to_string().to_uppercase()).unwrap_or(0);
+        num_registers(opcodes, &mut (*line).to_uppercase()).unwrap_or(0);
 
     let mut opcode_found = {
         let this = return_opcode(&line.to_uppercase(), opcodes);
         let default = String::new();
-        match this {
-            Some(x) => x,
-            None => default,
-        }
+        this.map_or(default, |x| x)
     };
 
     if opcode_found.len() != 8 {
@@ -358,10 +349,7 @@ pub fn add_arguments(
                     labels,
                 );
                 let default = "00000000".to_string();
-                match this {
-                    Some(x) => x,
-                    None => default,
-                }
+                this.map_or(default, |x| x)
             });
         }
         if i == num_registers as usize + 2 && num_arguments == 2 {
@@ -374,10 +362,7 @@ pub fn add_arguments(
                     labels,
                 );
                 let default = "00000000".to_string();
-                match this {
-                    Some(x) => x,
-                    None => default,
-                }
+                this.map_or(default, |x| x)
             });
         }
         if i > num_registers as usize + num_arguments as usize {
@@ -877,8 +862,8 @@ mod tests {
 
         let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
-        assert!(opt_oplist.unwrap().is_empty());
-        assert!(opt_macro_list.unwrap().is_empty());
+        assert!(opt_oplist.unwrap_or_default().is_empty());
+        assert!(opt_macro_list.unwrap_or_default().is_empty());
     }
 
     #[test]
@@ -901,7 +886,7 @@ mod tests {
         let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
         assert_eq!(
-            opt_oplist.unwrap(),
+            opt_oplist.unwrap_or_default(),
             vec![Opcode {
                 text_name: "CMPRR".to_string(),
                 hex_opcode: "000005??".to_string(),
@@ -912,7 +897,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            opt_macro_list.unwrap(),
+            opt_macro_list.unwrap_or_default(),
             vec![Macro {
                 name: "$WAIT".to_string(),
                 variables: 2,
@@ -1006,7 +991,7 @@ mod tests {
         let (opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
         assert_eq!(
-            opt_oplist.unwrap(),
+            opt_oplist.unwrap_or_default(),
             vec![
                 Opcode {
                     text_name: "PUSH".to_string(),

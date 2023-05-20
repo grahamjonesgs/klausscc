@@ -5,7 +5,7 @@ use colored::{ColoredString, Colorize};
 pub enum MessageType {
     Error,
     Warning,
-    Info,
+    Information,
 }
 
 #[derive(Debug)]
@@ -64,11 +64,12 @@ impl MsgList {
 ///
 /// Prints all the message in passed `MsgList` vector to terminal with coloured messages
 #[allow(clippy::module_name_repetitions)]
+#[allow(clippy::print_stdout)]
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
         let message_level: ColoredString = match msg.level {
-            MessageType::Info => "I".to_string().green(),
+            MessageType::Information => "I".to_string().green(),
             MessageType::Warning => "W".to_string().yellow(),
             MessageType::Error => "E".to_string().red(),
         };
@@ -80,8 +81,8 @@ pub fn print_messages(msg_list: &mut MsgList) {
                         "{} {} Line {} in file {}. {} ",
                         msg.time.format("%H:%M:%S%.3f"),
                         message_level,
-                        msg.line_number.unwrap(),
-                        msg.file_name.as_ref().unwrap(),
+                        msg.line_number.unwrap_or_default(),
+                        msg.file_name.clone().unwrap_or_default(),
                         msg.name
                     )
                 }
@@ -90,7 +91,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                         "{} {} Line {}. {} ",
                         msg.time.format("%H:%M:%S%.3f"),
                         message_level,
-                        msg.line_number.unwrap(),
+                        msg.line_number.unwrap_or_default(),
                         msg.name
                     )
                 }
@@ -99,7 +100,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                     "{} {} In file {}. {} ",
                     msg.time.format("%H:%M:%S%.3f"),
                     message_level,
-                    msg.file_name.as_ref().unwrap(),
+                    msg.file_name.clone().unwrap_or_default(),
                     msg.name
                 )
             }
@@ -127,11 +128,11 @@ mod tests {
             "Test".to_string(),
             None,
             Some("test".to_string()),
-            MessageType::Info,
+            MessageType::Information,
         );
         assert_eq!(msg_list.list.len(), 1);
         assert_eq!(msg_list.list[0].name, "Test");
-        assert_eq!(msg_list.list[0].level, MessageType::Info);
+        assert_eq!(msg_list.list[0].level, MessageType::Information);
         assert_eq!(msg_list.list[0].line_number, None);
     }
 
@@ -139,7 +140,7 @@ mod tests {
     // Test that the number of errors is correct
     fn test_number_errors() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None, None, MessageType::Info);
+        msg_list.push("Test".to_string(), None, None, MessageType::Information);
         msg_list.push("Test".to_string(), None, None, MessageType::Warning);
         msg_list.push("Test".to_string(), None, None, MessageType::Error);
         assert_eq!(msg_list.number_errors(), 1);
@@ -149,7 +150,7 @@ mod tests {
     // Test number of warnings
     fn test_number_warnings() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None, None, MessageType::Info);
+        msg_list.push("Test".to_string(), None, None, MessageType::Information);
         msg_list.push("Test".to_string(), None, None, MessageType::Warning);
         msg_list.push("Test".to_string(), None, None, MessageType::Error);
         assert_eq!(msg_list.number_warnings(), 1);

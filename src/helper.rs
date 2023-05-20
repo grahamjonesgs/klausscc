@@ -24,9 +24,7 @@ pub fn num_data_bytes(
     line_number: u32,
     filename: String,
 ) -> u32 {
-    match data_as_bytes(line) {
-        Some(data) => data.len().try_into().unwrap(),
-        None => {
+    data_as_bytes(line).map_or_else(|| {
             msg_list.push(
                 format!("Error in data definition for {line}"),
                 Some(line_number),
@@ -34,8 +32,7 @@ pub fn num_data_bytes(
                 MessageType::Error,
             );
             0
-        }
-    }
+        }, |data| data.len().try_into().unwrap_or_default())
 }
 
 /// Returns bytes for data element
@@ -67,10 +64,9 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             }
             output_hex.push_str("00000000"); // Add null terminator
 
-            Some(output_hex)
-        } else {
-            None
+            return Some(output_hex);
         }
+        None
     } else {
         // Check if next word is a number
         // let int_value: i64;
@@ -185,7 +181,7 @@ pub fn strip_comments(input: &mut str) -> String {
 pub fn return_comments(input: &mut str) -> String {
     match input.find("//") {
         None => String::new(),
-        Some(a) => return input[a+2..].trim().to_string().trim().to_string(),
+        Some(a) => return input[a + 2..].trim().to_string().trim().to_string(),
     }
 }
 
@@ -193,6 +189,7 @@ pub fn return_comments(input: &mut str) -> String {
 ///
 /// Calculates the checksum from the string of hex values, removing control characters
 #[allow(clippy::cast_possible_wrap)]
+#[allow(clippy::modulo_arithmetic)]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string: String = String::new();
     let mut checksum: i32 = 0;
@@ -238,12 +235,12 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
                     MessageType::Error,
                 );
             } else {
-                checksum = (checksum + int_value.unwrap_or(0)) % (0xFFFF + 1);
+                checksum = (checksum + int_value.unwrap_or(0_i32)) % (0xFFFF_i32 + 1_i32);
                 position_index += 1;
             }
         }
     }
-    checksum = (checksum + position_index as i32 - 1).abs() % (0xFFFF + 1);
+    checksum = (checksum + position_index as i32 - 1).abs() % (0xFFFF_i32 + 1_i32);
     format!("{checksum:04X}")
 }
 
@@ -272,6 +269,9 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
     output_string
 }
 
+/// Trim newline from string
+///
+/// Removes newline from end of string
 pub fn trim_newline(s: &mut String) {
     if s.ends_with('\n') {
         s.pop();
@@ -286,8 +286,6 @@ pub fn trim_newline(s: &mut String) {
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -401,15 +399,24 @@ mod tests {
     #[test]
     // Test that comment is stripped
     fn test_strip_comments() {
-        assert_eq!(strip_comments(&mut "Hello, world! //This is a comment".to_string()), "Hello, world!");
-        assert_eq!(strip_comments(&mut "Hello, world! //".to_string()), "Hello, world!");
+        assert_eq!(
+            strip_comments(&mut "Hello, world! //This is a comment".to_string()),
+            "Hello, world!"
+        );
+        assert_eq!(
+            strip_comments(&mut "Hello, world! //".to_string()),
+            "Hello, world!"
+        );
         assert_eq!(strip_comments(&mut String::new()), "");
     }
 
     #[test]
     // Test that comment is returned
-    fn test_return_comments() {  
-        assert_eq!(return_comments(&mut "Hello, world! //This is a comment".to_string()), "This is a comment");
+    fn test_return_comments() {
+        assert_eq!(
+            return_comments(&mut "Hello, world! //This is a comment".to_string()),
+            "This is a comment"
+        );
         assert_eq!(return_comments(&mut "Hello, world! //".to_string()), "");
         assert_eq!(return_comments(&mut "Hello, world!".to_string()), "");
     }
@@ -632,7 +639,6 @@ mod tests {
         let labels = &mut Vec::<Label>::new();
         labels.push(Label {
             program_counter: 42,
-            line_counter: 0,
             name: String::from("LOOP:"),
         });
         let input = String::from("LOOP:");
@@ -646,7 +652,6 @@ mod tests {
         let labels = &mut Vec::<Label>::new();
         labels.push(Label {
             program_counter: 42,
-            line_counter: 0,
             name: String::from("LOOP1:"),
         });
         let input = String::from("LOOP2:");

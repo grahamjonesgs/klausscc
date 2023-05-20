@@ -1,36 +1,25 @@
 #![warn(
-     clippy::all,
-    //clippy::restriction,
-      clippy::pedantic,
+    clippy::all,
+    clippy::restriction,
+    clippy::pedantic,
     clippy::nursery,
-    //clippy::cargo,
+    clippy::cargo
 )]
-#![allow(clippy::single_match_else)]
-#![allow(clippy::option_if_let_else)]
-#![allow(clippy::useless_let_if_seq)]
-
-
 #![allow(clippy::missing_docs_in_private_items)]
 #![allow(clippy::str_to_string)]
-#![allow(clippy::unwrap_used)]
 #![allow(clippy::integer_arithmetic)]
 #![allow(clippy::arithmetic_side_effects)]
-#![allow(clippy::print_stdout)]
-#![allow(clippy::use_debug)]
 #![allow(clippy::let_underscore_must_use)]
 #![allow(clippy::implicit_return)]
 #![allow(clippy::let_underscore_untyped)]
-#![allow(clippy::impl_trait_in_params)]
 #![allow(clippy::string_add)]
-#![allow(clippy::string_to_string)]
 #![allow(clippy::string_slice)]
 #![allow(clippy::indexing_slicing)]
 #![allow(clippy::as_conversions)]
 #![allow(clippy::separated_literal_suffix)]
-#![allow(clippy::default_numeric_fallback)]
-#![allow(clippy::modulo_arithmetic)]
-#![allow(clippy::if_then_some_else_none)]
-
+#![allow(clippy::cargo_common_metadata)]
+#![allow(clippy::multiple_crate_versions)]
+#![allow(clippy::blanket_clippy_restriction_lints)]
 
 mod files;
 mod helper;
@@ -41,8 +30,8 @@ mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{
-    filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file,
-    write_code_output_file, write_serial, output_macros_opcodes,LineType,
+    filename_stem, output_macros_opcodes, read_file_to_vector, remove_block_comments,
+    write_binary_output_file, write_code_output_file, write_serial, LineType,
 };
 use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
@@ -54,12 +43,13 @@ use opcodes::{
     add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
 };
 
-
 /// Main function for Klausscc
 ///
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
-fn main() {
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::print_stdout)]
+fn main() -> Result<(), i32> {
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
 
@@ -94,31 +84,44 @@ fn main() {
     let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
     let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list.unwrap_or_default(), &mut msg_list);
     if opt_oplist.is_none() {
-        println!("Unable to open opcode file {opcode_file_name:?}");
-        std::process::exit(1);
+        println!("Unable to open opcode file {opcode_file_name}");
+        return Err(1_i32);
     }
 
     if opt_macro_list.is_none() || opt_oplist.is_none() {
         println!("Error parsing opcode file {opcode_file_name} to marco and opcode lists");
-        std::process::exit(1);
+        return Err(1_i32);
     }
     let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
+    #[allow(clippy::unwrap_used)]
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
 
-    if opcodes_flag {   
+    if opcodes_flag {
         let opcodes_html_file_name = filename_stem(&opcode_file_name) + ".html";
-        output_macros_opcodes(opcodes_html_file_name,oplist.clone(),macro_list.clone(),&mut msg_list);
+        output_macros_opcodes(
+            opcodes_html_file_name,
+            oplist.clone(),
+            macro_list.clone(),
+            &mut msg_list,
+        );
     }
 
     if textmate_flag {
         println!("Textmate formatted list of opcodes:");
-        println!("{}",oplist.iter().fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name).strip_prefix('|').unwrap_or("")); 
-        println!();         
+        println!(
+            "{}",
+            oplist
+                .iter()
+                .fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)
+                .strip_prefix('|')
+                .unwrap_or("")
+        );
+        println!();
     }
 
     if textmate_flag || opcodes_flag {
         print_messages(&mut msg_list);
-        std::process::exit(0);
+        return Err(1_i32);
     }
 
     // Parse the input file
@@ -126,18 +129,24 @@ fn main() {
         format!("Input file is {input_file_name}"),
         None,
         None,
-        MessageType::Info,
+        MessageType::Information,
     );
     let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
-    let input_list_option = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
+    let input_list_option =
+        read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
     if input_list_option.is_none() {
         print_messages(&mut msg_list);
-        std::process::exit(1);
+        return Err(1_i32);
     }
 
-    let input_list = Some(remove_block_comments(input_list_option.unwrap(), &mut msg_list));
+    let input_list = Some(remove_block_comments(
+        #[allow(clippy::unwrap_used)]
+        input_list_option.unwrap(),
+        &mut msg_list,
+    ));
 
     // Pass 0 to add macros
+    #[allow(clippy::unwrap_used)]
     let pass0 = expand_macros(&mut msg_list, input_list.unwrap(), &mut macro_list);
 
     // Pass 1 to get line numbers and labels
@@ -154,11 +163,11 @@ fn main() {
         format!("Writing code file to {output_file_name}"),
         None,
         None,
-        MessageType::Info,
+        MessageType::Information,
     );
     if !write_code_output_file(&output_file_name, &mut pass2) {
-        println!("Unable to write to code file {:?}", &output_file_name);
-        std::process::exit(1);
+        println!("Unable to write to code file {}", &output_file_name);
+        return Err(1_i32);
     }
 
     let bin_string = create_bin_string(&mut pass2, &mut msg_list);
@@ -166,15 +175,23 @@ fn main() {
     if msg_list.number_errors() == 0 {
         write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
     } else if let Err(e) = std::fs::remove_file(&binary_file_name) {
+        #[allow(clippy::wildcard_enum_match_arm)]
         match e.kind() {
             std::io::ErrorKind::NotFound => (),
             _ => msg_list.push(
                 format!("Removing binary file {}, error {}", &binary_file_name, e),
                 None,
                 None,
-                MessageType::Info,
+                MessageType::Information,
             ),
-        };
+        }
+    } else {
+        msg_list.push(
+            "Binary file deleted".to_string(),
+            None,
+            None,
+            MessageType::Information,
+        );
     }
 
     if !output_serial_port.is_empty() {
@@ -182,13 +199,14 @@ fn main() {
     }
 
     print_results(&mut msg_list, start_time);
+    Ok(())
 }
 
 /// Manages the CLI
 ///
 /// Uses the Command from Clap to expand the CLI
 #[cfg(not(tarpaulin_include))] // Can not test CLI in tarpaulin
-#[allow(clippy::must_use_candidate)]
+#[must_use]
 pub fn set_matches() -> Command {
     use clap::ArgAction;
 
@@ -238,7 +256,9 @@ pub fn set_matches() -> Command {
             Arg::new("textmate")
                 .long("textmate")
                 .action(ArgAction::SetTrue)
-                .help("Prints list of all opcodes for use in Textmate of vscode language formatter"),
+                .help(
+                    "Prints list of all opcodes for use in Textmate of vscode language formatter",
+                ),
         )
         .arg(
             Arg::new("serial")
@@ -252,6 +272,8 @@ pub fn set_matches() -> Command {
 ///
 /// Takes the message list and start time and prints the results to the users
 #[allow(clippy::cast_precision_loss)]
+#[allow(clippy::float_arithmetic)]
+#[allow(clippy::print_stdout)]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &mut MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
@@ -285,8 +307,8 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
 
     for mut pass in pass0 {
         pass1.push(Pass1 {
-            input: pass.input.to_string(),
-            file_name: pass.file_name.to_string(),
+            input: pass.input.clone(),
+            file_name: pass.file_name.clone(),
             line_counter: pass.line_counter,
             program_counter,
             line_type: line_type(&mut oplist, &mut pass.input),
@@ -295,7 +317,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             msg_list.push(
                 format!("Opcode error {}", pass.input),
                 Some(pass.line_counter),
-                Some(pass.file_name.to_string()),
+                Some(pass.file_name.clone()),
                 MessageType::Error,
             );
         }
@@ -305,7 +327,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
                 program_counter = program_counter + p + 1;
             }
         }
-
+        #[allow(clippy::integer_division)]
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
             program_counter +=
                 num_data_bytes(&pass.input, msg_list, pass.line_counter, pass.file_name) / 8;
@@ -374,7 +396,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
                 format!("Wrote to serial port {output_serial_port}"),
                 None,
                 None,
-                MessageType::Info,
+                MessageType::Information,
             );
         } else {
             msg_list.push(
@@ -403,7 +425,7 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
         format!("Writing binary file to {binary_file_name}"),
         None,
         None,
-        MessageType::Info,
+        MessageType::Information,
     );
     if !write_binary_output_file(&binary_file_name, bin_string) {
         msg_list.push(
