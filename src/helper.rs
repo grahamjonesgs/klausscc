@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn test_num_data_bytes1() {
         let mut msg_list = MsgList::new();
-        let input = String::from("TEST 3");
+        let input = String::from("#TEST 3");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_string());
         assert_eq!(output, 24);
     }
@@ -540,16 +540,16 @@ mod tests {
     #[test]
     fn test_num_data_bytes2() {
         let mut msg_list = MsgList::new();
-        let input = String::from("TEST");
+        let input = String::from("#TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_string());
         assert_eq!(output, 0);
-        assert_eq!(msg_list.list[0].name, "Error in data definition for TEST");
+        assert_eq!(msg_list.list[0].name, "Error in data definition for #TEST");
     }
 
     #[test]
     // Test for correct output from data line
     fn test_data_as_bytes1() {
-        let input = String::from("TEST 3");
+        let input = String::from("#TEST 3");
         let output = data_as_bytes(&input);
         assert_eq!(output, Some("000000000000000000000000".to_string()));
     }
@@ -557,7 +557,7 @@ mod tests {
     #[test]
     // Test for correct output from invalid data line
     fn test_data_as_bytes2() {
-        let input = String::from("TEST");
+        let input = String::from("#TEST");
         let output = data_as_bytes(&input);
         assert_eq!(output, None);
     }
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn test_data_as_bytes4() {
-        let input = String::from("TEST \"Hello\"");
+        let input = String::from("#TEST \"Hello\"");
         let output = data_as_bytes(&input);
         assert_eq!(
             output,
@@ -582,24 +582,32 @@ mod tests {
 
     #[test]
     fn test_data_as_bytes5() {
-        let input = String::from("TEST 0x1");
+        let input = String::from("#TEST 0x1");
         let output = data_as_bytes(&input);
         assert_eq!(output, Some("00000000".to_string()),);
     }
 
     #[test]
     fn test_data_as_bytes6() {
-        let input = String::from("TEST \"Hello");
+        let input = String::from("#TEST \"Hello");
         let output = data_as_bytes(&input);
         assert_eq!(output, None);
     }
 
     #[test]
     fn test_data_as_bytes7() {
-        let input = String::from("TEST FFFF");
+        let input = String::from("#TEST FFFF");
         let output = data_as_bytes(&input);
         assert_eq!(output, None);
     }
+
+    #[test]
+    fn test_data_as_bytes8() {
+        let input = String::from("#TEST FFFF DUMMY");
+        let output = data_as_bytes(&input);
+        assert_eq!(output, None);
+    }
+    
 
     #[test]
     // Test for correct label name

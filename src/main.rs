@@ -152,7 +152,7 @@ fn main() -> Result<(), i32> {
     // Pass 1 to get line numbers and labels
     //msg_list.push("Pass 1".to_string(), None, MessageType::Info);
     let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, oplist.clone());
-    let mut labels = get_labels(&pass1);
+    let mut labels = get_labels(&pass1, &mut msg_list);
     find_duplicate_label(&mut labels, &mut msg_list);
 
     // Pass 2 to get create output

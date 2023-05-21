@@ -143,7 +143,7 @@ pub fn convert_argument(
 ///
 /// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels
 #[allow(clippy::module_name_repetitions)]
-pub fn get_labels(pass1: &[Pass1]) -> Vec<Label> {
+pub fn get_labels(pass1: &[Pass1],msg_list: &mut MsgList    ) -> Vec<Label> {
     let labels: Vec<Label> = pass1
         .iter()
         .filter(|n| {
@@ -162,6 +162,40 @@ pub fn get_labels(pass1: &[Pass1]) -> Vec<Label> {
             }
         })
         .collect();
+    for line in pass1.iter() {
+        if label_name_from_string(&line.input).is_some() {
+            let mut words = line.input.split_whitespace();
+            let first_word = words.next().unwrap_or("");
+            let second_word = words.next();
+            if second_word.is_some() {
+                msg_list.push(
+                    format!(
+                        "Label {first_word} has extra text {}",second_word.unwrap_or_default()),
+                    Some(line.line_counter),
+                    Some(line.file_name.clone()),
+                    MessageType::Warning,
+                );
+            }
+        }
+    }
+    for line in pass1.iter() {
+        if data_name_from_string(&line.input).is_some() {
+            let mut words = line.input.split_whitespace();
+            let first_word = words.next().unwrap_or("");
+            let _second_word = words.next();
+            let third_word = words.next();
+            if third_word.is_some() {
+                msg_list.push(
+                    format!(
+                        "Data {first_word} has extra text {}",third_word.unwrap_or_default()),
+                    Some(line.line_counter),
+                    Some(line.file_name.clone()),
+                    MessageType::Warning,
+                );
+            }
+        }
+    }
+
     labels
 }
 
@@ -188,6 +222,11 @@ mod tests {
         assert_eq!(label_name_from_string("label:"), Some("label:".to_string()));
         assert_eq!(
             label_name_from_string("     label:"),
+            Some("label:".to_string())
+        );
+        assert_eq!(label_name_from_string("  xxxxxxx   label:"), None);
+        assert_eq!(
+            label_name_from_string("     label: dummy words"),
             Some("label:".to_string())
         );
     }
@@ -421,6 +460,7 @@ mod tests {
     #[test]
     // Test that the labels are correctly extracted from the pass1 list
     fn test_get_labels() {
+        let msglist= &mut MsgList::new();
         let pass1 = vec![
             Pass1 {
                 program_counter: 0,
@@ -464,8 +504,22 @@ mod tests {
                 input: "test".to_string(),
                 line_type: LineType::Label,
             },
+            Pass1 {
+                program_counter: 8,
+                file_name: String::from("test"),
+                line_counter: 7,
+                input: "label1: dummy".to_string(),
+                line_type: LineType::Label,
+            },
+            Pass1 {
+                program_counter: 7,
+                file_name: String::from("test"),
+                line_counter: 3,
+                input: "#data1 0xFFFF dummy2".to_string(),
+                line_type: LineType::Label,
+            },
         ];
-        let labels = get_labels(&pass1);
+        let labels = get_labels(&pass1,msglist);
         assert_eq!(
             labels[0],
             Label {
@@ -494,5 +548,7 @@ mod tests {
                 name: "#data1".to_string(),
             }
         );
+        assert_eq!(msglist.list[0].name, "Label label1: has extra text dummy");
+        assert_eq!(msglist.list[1].name, "Data #data1 has extra text dummy2");
     }
 }
