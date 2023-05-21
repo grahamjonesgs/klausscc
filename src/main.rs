@@ -30,8 +30,8 @@ mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{
-    filename_stem, output_macros_opcodes, read_file_to_vector, remove_block_comments,
-    write_binary_output_file, write_code_output_file, write_serial, LineType,
+    filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file,
+    write_code_output_file, write_serial, LineType,
 };
 use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
@@ -47,9 +47,10 @@ use opcodes::{
 ///
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
-#[allow(clippy::too_many_lines)]
 #[allow(clippy::print_stdout)]
 fn main() -> Result<(), i32> {
+    use files::output_macros_opcodes;
+
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
 
@@ -83,10 +84,6 @@ fn main() -> Result<(), i32> {
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
     let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
     let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list.unwrap_or_default(), &mut msg_list);
-    if opt_oplist.is_none() {
-        println!("Unable to open opcode file {opcode_file_name}");
-        return Err(1_i32);
-    }
 
     if opt_macro_list.is_none() || opt_oplist.is_none() {
         println!("Error parsing opcode file {opcode_file_name} to marco and opcode lists");
@@ -96,32 +93,18 @@ fn main() -> Result<(), i32> {
     #[allow(clippy::unwrap_used)]
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
 
-    if opcodes_flag {
-        let opcodes_html_file_name = filename_stem(&opcode_file_name) + ".html";
-        output_macros_opcodes(
-            opcodes_html_file_name,
-            oplist.clone(),
-            macro_list.clone(),
-            &mut msg_list,
-        );
-    }
-
-    if textmate_flag {
-        println!("Textmate formatted list of opcodes:");
-        println!(
-            "{}",
-            oplist
-                .iter()
-                .fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)
-                .strip_prefix('|')
-                .unwrap_or("")
-        );
-        println!();
-    }
+    output_macros_opcodes(
+        filename_stem(&opcode_file_name) + ".html",
+        &oplist,
+        macro_list.clone(),
+        &mut msg_list,
+        opcodes_flag,
+        textmate_flag,
+    );
 
     if textmate_flag || opcodes_flag {
         print_messages(&mut msg_list);
-        return Err(1_i32);
+        return Ok(());
     }
 
     // Parse the input file
@@ -150,52 +133,32 @@ fn main() -> Result<(), i32> {
     let pass0 = expand_macros(&mut msg_list, input_list.unwrap(), &mut macro_list);
 
     // Pass 1 to get line numbers and labels
-    //msg_list.push("Pass 1".to_string(), None, MessageType::Info);
     let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, oplist.clone());
     let mut labels = get_labels(&pass1, &mut msg_list);
     find_duplicate_label(&mut labels, &mut msg_list);
 
     // Pass 2 to get create output
-    //msg_list.push("Pass 2".to_string(), None, MessageType::Info);
     let mut pass2 = get_pass2(&mut msg_list, pass1, oplist, labels);
 
-    msg_list.push(
-        format!("Writing code file to {output_file_name}"),
-        None,
-        None,
-        MessageType::Information,
-    );
-    if !write_code_output_file(&output_file_name, &mut pass2) {
+    if !write_code_output_file(&output_file_name, &mut pass2,&mut msg_list) {
         println!("Unable to write to code file {}", &output_file_name);
         return Err(1_i32);
     }
 
-    let bin_string = create_bin_string(&mut pass2, &mut msg_list);
-
     if msg_list.number_errors() == 0 {
+        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
         write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
-    } else if let Err(e) = std::fs::remove_file(&binary_file_name) {
-        #[allow(clippy::wildcard_enum_match_arm)]
-        match e.kind() {
-            std::io::ErrorKind::NotFound => (),
-            _ => msg_list.push(
-                format!("Removing binary file {}, error {}", &binary_file_name, e),
-                None,
-                None,
-                MessageType::Information,
-            ),
+        if !output_serial_port.is_empty() {
+            write_to_device(&mut msg_list, &bin_string, &output_serial_port);
         }
     } else {
+        let _ = std::fs::remove_file(&binary_file_name);
         msg_list.push(
-            "Binary file deleted".to_string(),
+            "Not writing binary file due to assembly errors".to_string(),
             None,
             None,
-            MessageType::Information,
+            MessageType::Warning,
         );
-    }
-
-    if !output_serial_port.is_empty() {
-        write_to_device(&mut msg_list, &bin_string, &output_serial_port);
     }
 
     print_results(&mut msg_list, start_time);

@@ -245,7 +245,7 @@ pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str
 /// Writes all data to the detailed code file
 #[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
 #[allow(clippy::impl_trait_in_params)]
-pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>) -> bool {
+pub fn write_code_output_file(filename: impl AsRef<Path> + core::marker::Copy, pass2: &mut Vec<Pass2>,msg_list: &mut MsgList) -> bool {
     let result_file = File::create(filename);
     if result_file.is_err() {
         return false;
@@ -253,6 +253,12 @@ pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>
     #[allow(clippy::unwrap_used)]
     let mut file = result_file.unwrap();
     let mut out_line: String;
+    msg_list.push(
+        format!("Writing code file to {}",filename.as_ref().display()),
+        None,
+        None,
+        MessageType::Information,
+    );
 
     for pass in pass2 {
         if pass.line_type == LineType::Opcode {
@@ -284,86 +290,89 @@ pub fn write_code_output_file(filename: impl AsRef<Path>, pass2: &mut Vec<Pass2>
 /// Writes all data to the html ISA and macro file file
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
 #[allow(clippy::impl_trait_in_params)]
+#[allow(clippy::print_stdout)]
 pub fn output_macros_opcodes(
     filename: impl AsRef<Path> + core::clone::Clone,
-    opcodes: Vec<Opcode>,
+    opcodes: &[Opcode],
     macros: Vec<Macro>,
     msg_list: &mut MsgList,
+    opcodes_flag: bool,
+    textmate_flag: bool,
 ) {
     use chrono::Local;
-
-    msg_list.push(
-        format!(
-            "Outputting macros and opcodes to {}",
-            filename.as_ref().display()
-        ),
-        None,
-        None,
-        MessageType::Information,
-    );
-
-    let output_file = File::create(filename.clone());
-    if output_file.is_err() {
+    if opcodes_flag {
         msg_list.push(
-            format!("Error opening file {}", filename.as_ref().display()),
+            format!(
+                "Outputting macros and opcodes to {}",
+                filename.as_ref().display()
+            ),
             None,
             None,
             MessageType::Information,
         );
-        return;
-    }
-    #[allow(clippy::unwrap_used)]
-    let mut file = output_file.unwrap();
-    let _ = file.write(b"<!DOCTYPE html>\n");
-    let _ = file.write(b"<html>\n<head>\n<style>\n");
-    let _ = file.write(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
-    let _ = file.write(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n");
-    //let _ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n"); // Banded table
-    let _ = file.write(b"#opcodes tr:hover {background-color: #ddd;}\n");
-    let _ = file.write(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n");
-    let _ = file.write(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
-    let _ = file.write(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n");
-    //let _ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
-    let _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
-    let _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
-    let _ = file.write(b"</style>\n</head>\n<body>\n");
-    let _ = file.write(b"<h1>Klauss ISA Instruction set and macros</h1>\n");
-    let _ = file.write(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
-    let _ = file.write(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n");
-    let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n");
 
-    let mut sorted_opcodes: Vec<Opcode> = opcodes;
-    sorted_opcodes.sort_by(|a, b| a.hex_opcode.cmp(&b.hex_opcode));
+        let output_file = File::create(filename.clone());
+        if output_file.is_err() {
+            msg_list.push(
+                format!("Error opening file {}", filename.as_ref().display()),
+                None,
+                None,
+                MessageType::Information,
+            );
+            return;
+        }
+        #[allow(clippy::unwrap_used)]
+        let mut file = output_file.unwrap();
+        let _ = file.write(b"<!DOCTYPE html>\n");
+        let _ = file.write(b"<html>\n<head>\n<style>\n");
+        let _ = file.write(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
+        let _ = file.write(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n");
+        //let _ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n"); // Banded table
+        let _ = file.write(b"#opcodes tr:hover {background-color: #ddd;}\n");
+        let _ = file.write(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n");
+        let _ = file.write(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
+        let _ = file.write(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n");
+        //let _ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
+        let _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
+        let _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
+        let _ = file.write(b"</style>\n</head>\n<body>\n");
+        let _ = file.write(b"<h1>Klauss ISA Instruction set and macros</h1>\n");
+        let _ = file.write(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
+        let _ = file.write(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n");
+        let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n");
 
-    let mut old_section = String::new();
-    for opcode in sorted_opcodes.clone() {
-        if old_section != opcode.section {
-            let _ = file.write(
+        let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
+        sorted_opcodes.sort_by(|a, b| a.hex_opcode.cmp(&b.hex_opcode));
+
+        let mut old_section = String::new();
+        for opcode in sorted_opcodes.clone() {
+            if old_section != opcode.section {
+                let _ = file.write(
                 format!(
                     "<tr>\n    <td colspan=\"5\" style=\"background-color:#b0b0b0;\"><b>{}</b></td>\n</tr>\n",
                     opcode.section
                 )
                 .as_bytes(),
             );
-            old_section = opcode.section.clone();
-        }
-        let _ = file.write(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
+                old_section = opcode.section.clone();
+            }
+            let _ = file.write(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
             opcode.text_name,
             opcode.hex_opcode,
             opcode.variables,
             opcode.registers,
             opcode.comment).as_bytes());
-    }
+        }
 
-    let _ = file.write(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n");
-    let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n");
+        let _ = file.write(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n");
+        let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n");
 
-    let mut sorted_macros: Vec<Macro> = macros;
-    sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
+        let mut sorted_macros: Vec<Macro> = macros;
+        sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
 
-    for macro_item in sorted_macros {
-        let _ = file.write(
-            format!(
+        for macro_item in sorted_macros {
+            let _ = file.write(
+                format!(
                 "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
                 macro_item.name,
                 macro_item.variables,
@@ -373,13 +382,25 @@ pub fn output_macros_opcodes(
                     .iter()
                     .fold(String::new(), |cur, nxt| cur + "  " + nxt)
             )
-            .trim()
-            .as_bytes(),
+                .trim()
+                .as_bytes(),
+            );
+        }
+        let _ = file.write(b"</table>\n");
+
+        let _ = file.write(b"</body>\n</html>\n");
+    }
+    if textmate_flag {
+        println!("Textmate formatted list of opcodes:");
+        println!(
+            "{}\n",
+            opcodes
+                .iter()
+                .fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)
+                .strip_prefix('|')
+                .unwrap_or("")
         );
     }
-    let _ = file.write(b"</table>\n");
-
-    let _ = file.write(b"</body>\n</html>\n");
 }
 
 /// Format a given string, adding spaces between groups of 4

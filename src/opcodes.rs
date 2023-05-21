@@ -295,7 +295,7 @@ pub fn add_registers(
             format!("Incorrect register definition - \"{line}\""),
             Some(line_number),
             Some(filename),
-            MessageType::Warning,
+            MessageType::Error,
         );
         return "ERR     ".to_string();
     }
@@ -314,7 +314,7 @@ pub fn add_registers(
             format!("Incorrect register definition - \"{line}\""),
             Some(line_number),
             Some(filename),
-            MessageType::Warning,
+            MessageType::Error,
         );
         return "ERR     ".to_string();
     }

@@ -9,11 +9,10 @@ RET
 RET
 #DATA2 "H"
 RET
-!include hello.kla
 
 RET
 RET
-ANDD
+AND A 
 RET
 
 /* test comment  // Comment
