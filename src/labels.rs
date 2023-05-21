@@ -11,6 +11,8 @@ pub struct Label {
     pub name: String,
 }
 
+
+
 /// Extracts label from string
 ///
 /// Checks if end of first word is colon if so return label as option string

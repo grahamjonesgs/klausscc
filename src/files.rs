@@ -451,7 +451,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
                         all_ports.push_str(" , ");
                     }
                     all_ports.push_str(&p.port_name);
-                    max_ports = port_count as i32;
+                    max_ports = port_count.try_into().unwrap_or_default();
                 }
 
                 let ports_msg = match max_ports {

@@ -240,7 +240,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
             }
         }
     }
-    checksum = (checksum + position_index as i32 - 1).abs() % (0xFFFF_i32 + 1_i32);
+    checksum = (checksum + position_index.try_into().unwrap_or(0_i32) - 1).abs() % (0xFFFF_i32 + 1_i32);
     format!("{checksum:04X}")
 }
 

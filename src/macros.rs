@@ -66,7 +66,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
         items.push(item);
     }
 
-    if max_variable as usize != all_found_variables.clone().into_iter().unique().count() {
+    if max_variable != all_found_variables.clone().into_iter().unique().count().try_into().unwrap_or_default() {
         for i in 1..max_variable {
             all_variables.push(i.into());
         }
@@ -150,7 +150,7 @@ pub fn return_macro_items_replace(
         if macro_line.name == first_word {
             found = true;
 
-            if input_line_array.len() > macro_line.variables as usize + 1 {
+            if input_line_array.len() > (macro_line.variables + 1_u32).try_into().unwrap_or_default() {
                 msg_list.push(
                     format!("Too many variables for macro {}", macro_line.name),
                     Some(input_line_number),
