@@ -11,7 +11,6 @@
 #![allow(clippy::arithmetic_side_effects)]
 #![allow(clippy::let_underscore_must_use)]
 #![allow(clippy::implicit_return)]
-#![allow(clippy::let_underscore_untyped)]
 #![allow(clippy::string_add)]
 #![allow(clippy::string_slice)]
 #![allow(clippy::indexing_slicing)]
@@ -152,7 +151,7 @@ fn main() -> Result<(), i32> {
             write_to_device(&mut msg_list, &bin_string, &output_serial_port);
         }
     } else {
-        let _ = std::fs::remove_file(&binary_file_name);
+        _ = std::fs::remove_file(&binary_file_name);
         msg_list.push(
             "Not writing binary file due to assembly errors".to_string(),
             None,

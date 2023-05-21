@@ -323,23 +323,23 @@ pub fn output_macros_opcodes(
         }
         #[allow(clippy::unwrap_used)]
         let mut file = output_file.unwrap();
-        let _ = file.write(b"<!DOCTYPE html>\n");
-        let _ = file.write(b"<html>\n<head>\n<style>\n");
-        let _ = file.write(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
-        let _ = file.write(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n");
-        //let _ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n"); // Banded table
-        let _ = file.write(b"#opcodes tr:hover {background-color: #ddd;}\n");
-        let _ = file.write(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n");
-        let _ = file.write(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
-        let _ = file.write(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n");
-        //let _ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
-        let _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
-        let _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
-        let _ = file.write(b"</style>\n</head>\n<body>\n");
-        let _ = file.write(b"<h1>Klauss ISA Instruction set and macros</h1>\n");
-        let _ = file.write(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
-        let _ = file.write(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n");
-        let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n");
+        _ = file.write(b"<!DOCTYPE html>\n");
+        _ = file.write(b"<html>\n<head>\n<style>\n");
+        _ = file.write(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
+        _ = file.write(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n");
+        //_ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n"); // Banded table
+        _ = file.write(b"#opcodes tr:hover {background-color: #ddd;}\n");
+        _ = file.write(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n");
+        _ = file.write(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
+        _ = file.write(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n");
+        //_ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
+        _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
+        _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
+        _ = file.write(b"</style>\n</head>\n<body>\n");
+        _ = file.write(b"<h1>Klauss ISA Instruction set and macros</h1>\n");
+        _ = file.write(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
+        _ = file.write(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n");
+        _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n");
 
         let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
         sorted_opcodes.sort_by(|a, b| a.hex_opcode.cmp(&b.hex_opcode));
@@ -347,7 +347,7 @@ pub fn output_macros_opcodes(
         let mut old_section = String::new();
         for opcode in sorted_opcodes.clone() {
             if old_section != opcode.section {
-                let _ = file.write(
+                _ = file.write(
                 format!(
                     "<tr>\n    <td colspan=\"5\" style=\"background-color:#b0b0b0;\"><b>{}</b></td>\n</tr>\n",
                     opcode.section
@@ -356,7 +356,7 @@ pub fn output_macros_opcodes(
             );
                 old_section = opcode.section.clone();
             }
-            let _ = file.write(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
+            _ = file.write(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
             opcode.text_name,
             opcode.hex_opcode,
             opcode.variables,
@@ -364,14 +364,14 @@ pub fn output_macros_opcodes(
             opcode.comment).as_bytes());
         }
 
-        let _ = file.write(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n");
-        let _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n");
+        _ = file.write(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n");
+        _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n");
 
         let mut sorted_macros: Vec<Macro> = macros;
         sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
 
         for macro_item in sorted_macros {
-            let _ = file.write(
+            _ = file.write(
                 format!(
                 "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
                 macro_item.name,
@@ -386,9 +386,9 @@ pub fn output_macros_opcodes(
                 .as_bytes(),
             );
         }
-        let _ = file.write(b"</table>\n");
+        _ = file.write(b"</table>\n");
 
-        let _ = file.write(b"</body>\n</html>\n");
+        _ = file.write(b"</body>\n</html>\n");
     }
     if textmate_flag {
         println!("Textmate formatted list of opcodes:");
@@ -851,17 +851,17 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap_or_default();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "Test line in file");
-        let _ = writeln!(tmp_file1, "Test line in file 1");
-        let _ = writeln!(tmp_file1, "Test line in file 2");
-        let _ = writeln!(tmp_file1, "Test line in file 4");
+        _ = writeln!(tmp_file1, "Test line in file");
+        _ = writeln!(tmp_file1, "Test line in file 1");
+        _ = writeln!(tmp_file1, "Test line in file 2");
+        _ = writeln!(tmp_file1, "Test line in file 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(lines.clone().unwrap()[0].input, "Test line in file");
         assert_eq!(lines.unwrap().len(), 4);
 
         drop(tmp_file1);
-        let _ = tmp_dir.close();
+        _ = tmp_dir.close();
     }
 
     #[test]
@@ -876,17 +876,17 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 0");
-        let _ = writeln!(tmp_file1, "!include test2.kla");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 0");
+        _ = writeln!(tmp_file1, "!include test2.kla");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let file_path2 = tmp_dir.path().join("test2.kla");
         let mut tmp_file2: File = File::create(file_path2).unwrap();
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 0");
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 1");
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 2");
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 4");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 0");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 1");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 2");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
@@ -905,7 +905,7 @@ mod test {
 
         drop(tmp_file1);
         drop(tmp_file2);
-        let _ = tmp_dir.close();
+        _ = tmp_dir.close();
     }
 
     #[test]
@@ -920,19 +920,19 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 0");
-        let _ = writeln!(tmp_file1, "!include test2.kla");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 0");
+        _ = writeln!(tmp_file1, "!include test2.kla");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let file_path2 = tmp_dir.path().join("test2.kla");
         let mut tmp_file2: File = File::create(file_path2).unwrap();
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 0");
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 1");
-        let _ = writeln!(tmp_file2, "!include test1.kla");
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 4");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 0");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 1");
+        _ = writeln!(tmp_file2, "!include test1.kla");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
-        let _lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
             msg_list.list[0].name,
             format!("Recursive include of file {file_name1}")
@@ -940,7 +940,7 @@ mod test {
 
         drop(tmp_file1);
         drop(tmp_file2);
-        let _ = tmp_dir.close();
+        _ = tmp_dir.close();
     }
 
     #[test]
@@ -958,9 +958,9 @@ mod test {
         let binding2 = file_path2;
         let file_name2: &str = binding2.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "!include test2.kla");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
+        _ = writeln!(tmp_file1, "!include test2.kla");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
@@ -974,7 +974,7 @@ mod test {
         assert_eq!(lines, Some(vec![]));
 
         drop(tmp_file1);
-        let _ = tmp_dir.close();
+        _ = tmp_dir.close();
     }
     #[test]
     // Test for missing included file name
@@ -988,9 +988,9 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "!include");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
+        _ = writeln!(tmp_file1, "!include");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
@@ -1000,7 +1000,7 @@ mod test {
         assert_eq!(lines, None);
 
         drop(tmp_file1);
-        let _ = tmp_dir.close();
+        _ = tmp_dir.close();
     }
 
     #[test]
@@ -1015,25 +1015,25 @@ mod test {
         let binding = file_path1.clone();
         let file_name1: &str = binding.to_str().unwrap();
         let mut tmp_file1: File = File::create(file_path1).unwrap();
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 0");
-        let _ = writeln!(tmp_file1, "!include test2.kla");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 1");
-        let _ = writeln!(tmp_file1, "Test line in file 1 line 2");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 0");
+        _ = writeln!(tmp_file1, "!include test2.kla");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 1");
+        _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let file_path2 = tmp_dir.path().join("test2.kla");
         let mut tmp_file2: File = File::create(file_path2.clone()).unwrap();
         let binding2 = file_path2;
         let file_name2: &str = binding2.to_str().unwrap();
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 0");
-        let _ = writeln!(tmp_file2, "!include test3.kla");
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 2");
-        let _ = writeln!(tmp_file2, "Test line in file 2 line 4");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 0");
+        _ = writeln!(tmp_file2, "!include test3.kla");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 2");
+        _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let file_path3 = tmp_dir.path().join("test3.kla");
         let binding3 = file_path3;
         let file_name3: &str = binding3.to_str().unwrap();
 
-        let _lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
             msg_list.list[0].name,
             format!("Unable to open file {file_name3}")
@@ -1045,6 +1045,6 @@ mod test {
 
         drop(tmp_file1);
         drop(tmp_file2);
-        let _ = tmp_dir.close();
+        _ = tmp_dir.close();
     }
 }
