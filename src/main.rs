@@ -46,7 +46,7 @@ use opcodes::{
 ///
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
-#[allow(clippy::print_stdout)]
+#[allow(clippy::too_many_lines)]
 fn main() -> Result<(), i32> {
     use files::output_macros_opcodes;
 
@@ -85,7 +85,13 @@ fn main() -> Result<(), i32> {
     let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list.unwrap_or_default(), &mut msg_list);
 
     if opt_macro_list.is_none() || opt_oplist.is_none() {
-        println!("Error parsing opcode file {opcode_file_name} to macro and opcode lists");
+        msg_list.push(
+            format!("Error parsing opcode file {opcode_file_name} to macro and opcode lists"),
+            None,
+            None,
+            MessageType::Error,
+        );
+        print_messages(&mut msg_list);
         return Err(1_i32);
     }
     let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
@@ -140,7 +146,13 @@ fn main() -> Result<(), i32> {
     let mut pass2 = get_pass2(&mut msg_list, pass1, oplist, labels);
 
     if !write_code_output_file(&output_file_name, &mut pass2,&mut msg_list) {
-        println!("Unable to write to code file {}", &output_file_name);
+        msg_list.push(
+            format!("Unable to write to code file {}", &output_file_name),
+            None,
+            None,
+            MessageType::Error,
+        );
+        print_messages(&mut msg_list);
         return Err(1_i32);
     }
 
