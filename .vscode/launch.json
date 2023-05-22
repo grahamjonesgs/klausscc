@@ -23,8 +23,8 @@
                     "kind": "bin"
                 }
             },
-            "args": ["-c src/klacode/opcode_select.vh","-i src/klacode/numbers.kla","-s /dev/ttyUSB1"],
-            //"args": ["-c src/klacode/opcode_select.vh","-i test.1","-s /dev/ttyUSB1"],
+           // "args": ["-c src/klacode/opcode_select.vh","-i src/klacode/numbers.kla","-s /dev/ttyUSB1"],
+            "args": ["-c src/klacode/opcode_select.vh","-i src/klacode/count.kla","-s /dev/ttyUSB1"],
             "cwd": "${workspaceFolder}",
             "env": { "RUST_BACKTRACE": "full" }
         },

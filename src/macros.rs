@@ -4,16 +4,11 @@ use crate::opcodes::{InputData, Pass0};
 use core::fmt::Write as _;
 use itertools::Itertools;
 
-/// Structure to hold macro
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Macro {
-    /// Name of macro
     pub name: String,
-    /// Number of variables
     pub variables: u32,
-    /// Vector of macro items
     pub items: Vec<String>,
-    /// Comment for macro
     pub comment: String,
 }
 

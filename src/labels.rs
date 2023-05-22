@@ -2,12 +2,9 @@ use crate::helper::data_name_from_string;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::Pass1;
 
-/// Label structure
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Label {
-    /// Program counter value
     pub program_counter: u32,
-    /// Name of label
     pub name: String,
 }
 

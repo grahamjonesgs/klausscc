@@ -10,20 +10,13 @@ use std::{
     path::{Path, MAIN_SEPARATOR_STR},
 };
 
-/// Enum for the type of line
 #[derive(PartialEq, Eq, Debug)]
 pub enum LineType {
-    /// Comment line type
     Comment,
-    /// Blank line type
     Blank,
-    /// Label line type
     Label,
-    /// Opcode line type
     Opcode,
-    /// Data line type
     Data,
-    /// Error line type
     Error,
 }
 
@@ -245,7 +238,11 @@ pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str
 /// Writes all data to the detailed code file
 #[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
 #[allow(clippy::impl_trait_in_params)]
-pub fn write_code_output_file(filename: impl AsRef<Path> + core::marker::Copy, pass2: &mut Vec<Pass2>,msg_list: &mut MsgList) -> bool {
+pub fn write_code_output_file(
+    filename: impl AsRef<Path> + core::marker::Copy,
+    pass2: &mut Vec<Pass2>,
+    msg_list: &mut MsgList,
+) -> bool {
     let result_file = File::create(filename);
     if result_file.is_err() {
         return false;
@@ -254,7 +251,7 @@ pub fn write_code_output_file(filename: impl AsRef<Path> + core::marker::Copy, p
     let mut file = result_file.unwrap();
     let mut out_line: String;
     msg_list.push(
-        format!("Writing code file to {}",filename.as_ref().display()),
+        format!("Writing code file to {}", filename.as_ref().display()),
         None,
         None,
         MessageType::Information,
@@ -423,6 +420,7 @@ pub fn format_opcodes(input: &mut String) -> String {
 ///
 /// Will send the program to the serial port, and wait for the response
 #[allow(clippy::cast_possible_wrap)]
+#[allow(clippy::too_many_lines)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
     let mut buffer = [0; 1024];
@@ -430,7 +428,13 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
         .timeout(core::time::Duration::from_millis(100))
         .open();
 
-    if port_result.is_err() {
+    if let Err(e) = port_result {
+        msg_list.push(
+            format!("Error opening serial port {port_name} error \"{e}\""),
+            None,
+            None,
+            MessageType::Error,
+        );
         let mut all_ports: String = String::new();
         let available_ports = serialport::available_ports();
 
@@ -448,7 +452,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
                 let mut max_ports: i32 = -1;
                 for (port_count, p) in (0_u32..).zip(ports.into_iter()) {
                     if port_count > 0 {
-                        all_ports.push_str(" , ");
+                        all_ports.push_str(" , \n ");
                     }
                     all_ports.push_str(&p.port_name);
                     max_ports = port_count.try_into().unwrap_or_default();
@@ -474,6 +478,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
             }
         }
     }
+
     #[allow(clippy::unwrap_used)]
     let mut port = port_result.unwrap();
 
