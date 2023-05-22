@@ -85,7 +85,7 @@ fn main() -> Result<(), i32> {
     let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list.unwrap_or_default(), &mut msg_list);
 
     if opt_macro_list.is_none() || opt_oplist.is_none() {
-        println!("Error parsing opcode file {opcode_file_name} to marco and opcode lists");
+        println!("Error parsing opcode file {opcode_file_name} to macro and opcode lists");
         return Err(1_i32);
     }
     let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
