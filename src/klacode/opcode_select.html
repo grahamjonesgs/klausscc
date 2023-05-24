@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 21/05/2023 19:46<h2>Opcode Table</h2>
+Created 23/05/2023 21:30<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -32,77 +32,70 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>000001??</td>
     <td>0</td>
     <td>2</td>
-    <td>Copy register</td>
+    <td>Copy registers, first to second</td>
 </tr>
 <tr>
     <td>AND</td>
     <td>000002??</td>
     <td>0</td>
     <td>2</td>
-    <td>AND register</td>
+    <td>And registers, result in first register</td>
 </tr>
 <tr>
     <td>OR</td>
     <td>000003??</td>
     <td>0</td>
     <td>2</td>
-    <td>OR register</td>
+    <td>Or registers, result in first register</td>
 </tr>
 <tr>
     <td>XOR</td>
     <td>000004??</td>
     <td>0</td>
     <td>2</td>
-    <td>XOR register</td>
+    <td>XOR registers, result in first register</td>
 </tr>
 <tr>
     <td>CMPRR</td>
     <td>000005??</td>
     <td>0</td>
     <td>2</td>
-    <td>Compare registers</td>
-</tr>
-<tr>
-    <td>ADDRR</td>
-    <td>000006??</td>
-    <td>0</td>
-    <td>2</td>
-    <td>Compare registers</td>
+    <td>Compare registers, result in equal flag</td>
 </tr>
 <tr>
     <td>MINUSRR</td>
     <td>000007??</td>
     <td>0</td>
     <td>2</td>
-    <td>Compare registers</td>
+    <td>Minus registers, result in first register</td>
 </tr>
 <tr>
     <td>SETR</td>
     <td>0000080?</td>
     <td>1</td>
     <td>1</td>
-    <td>Set register value</td>
+    <td>Set register to a value</td>
 </tr>
 <tr>
     <td>ADDV</td>
     <td>0000081?</td>
     <td>1</td>
     <td>1</td>
-    <td>Increament register by value</td>
+    <td>Increament register by a value</td>
 </tr>
 <tr>
     <td>MINUSV</td>
     <td>0000082?</td>
     <td>1</td>
     <td>1</td>
-    <td>Decreament register by value</td>
+    <td>Decreament register by a value</td>
 </tr>
 <tr>
     <td>CMPRV</td>
     <td>0000083?</td>
     <td>1</td>
     <td>1</td>
-    <td>Compare register to value</td>
+    <td>Compare register to value, result in equal flag</td>
 </tr>
 <tr>
     <td>INCR</td>
@@ -123,21 +116,21 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>0000086?</td>
     <td>1</td>
     <td>1</td>
-    <td>AND register with value</td>
+    <td>AND register with value, result in register</td>
 </tr>
 <tr>
     <td>ORV</td>
     <td>0000087?</td>
     <td>1</td>
     <td>1</td>
-    <td>OR register with value</td>
+    <td>OR register with value, result in register</td>
 </tr>
 <tr>
     <td>XORV</td>
     <td>0000088?</td>
     <td>1</td>
     <td>1</td>
-    <td>XOR register with value</td>
+    <td>XOR register with value,result in register</td>
 </tr>
 <tr>
     <td>SETFR</td>
@@ -151,35 +144,35 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>000008A?</td>
     <td>0</td>
     <td>1</td>
-    <td>Set register 2's comp</td>
+    <td>Set register 2's compliments </td>
 </tr>
 <tr>
     <td>SHLR</td>
     <td>000008D?</td>
     <td>0</td>
     <td>1</td>
-    <td>Left shift reg</td>
+    <td>Left shift register</td>
 </tr>
 <tr>
     <td>SHRR</td>
     <td>000008E?</td>
     <td>0</td>
     <td>1</td>
-    <td>Right shift reg</td>
+    <td>Right shift register</td>
 </tr>
 <tr>
     <td>SHLAR</td>
     <td>000008F?</td>
     <td>0</td>
     <td>1</td>
-    <td>Left shift arithmetical reg</td>
+    <td>Left shift arithmetical register</td>
 </tr>
 <tr>
     <td>SHRAR</td>
     <td>0000090?</td>
     <td>0</td>
     <td>1</td>
-    <td>Right shift arithmetical reg</td>
+    <td>Right shift arithmetical register</td>
 </tr>
 <tr>
     <td colspan="5" style="background-color:#b0b0b0;"><b>Flow control 1xxx</b></td>
@@ -339,7 +332,7 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>00002021</td>
     <td>1</td>
     <td>0</td>
-    <td>LCD command with value</td>
+    <td></td>
 </tr>
 <tr>
     <td>LCDDATAV</td>
@@ -363,7 +356,7 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>0000300?</td>
     <td>0</td>
     <td>1</td>
-    <td>set with register</td>
+    <td>set LEDs with register</td>
 </tr>
 <tr>
     <td>SWR</td>
@@ -412,7 +405,7 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>00003070</td>
     <td>1</td>
     <td>0</td>
-    <td>Set LED value</td>
+    <td>Set LED to value</td>
 </tr>
 <tr>
     <td>7SEG1V</td>
@@ -509,17 +502,14 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>0000502?</td>
     <td>0</td>
     <td>1</td>
-    <td>send value at mem from reg value in message</td>
+    <td>send value at memory of register value in message</td>
 </tr>
 <tr>
     <td>TXCHARMEMR</td>
     <td>0000503?</td>
     <td>0</td>
     <td>1</td>
-    <td>send char at mem from reg value as message</td>
-</tr>
-<tr>
-    <td colspan="5" style="background-color:#b0b0b0;"><b>CPU Setting 6xxxx</b></td>
+    <td>send char at memory from register value as message</td>
 </tr>
 <tr>
     <td>INTSETRR</td>
@@ -536,7 +526,7 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>000070??</td>
     <td>0</td>
     <td>2</td>
-    <td>Set mem location given in register to contents of register (first in order is value, second is location)</td>
+    <td>Set memory location given in register to contents of register (first in order is value, second is location)</td>
 </tr>
 <tr>
     <td>MEMREADRR</td>
@@ -550,7 +540,7 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>0000720?</td>
     <td>1</td>
     <td>1</td>
-    <td>Set mem location given in value to contents of register</td>
+    <td>Set memory location given in value to contents of register</td>
 </tr>
 <tr>
     <td>MEMREADR</td>
@@ -567,7 +557,7 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>0000F00?</td>
     <td>0</td>
     <td>1</td>
-    <td>Delay with register</td>
+    <td>Delay by register</td>
 </tr>
 <tr>
     <td>NOP</td>
@@ -595,7 +585,7 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
     <td>0000F013</td>
     <td>1</td>
     <td>0</td>
-    <td>Set value</td>
+    <td>Set by value</td>
 </tr>
 
 </table><h2>Macro Table</h2>
@@ -609,13 +599,8 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
 <tr>
     <td>$IMBED1</td>
     <td>0</td>
-    <td>Sets a delay of 65535 cycles</td>
-    <td>  DELAYV 0xFFFF</td>
-</tr><tr>
-    <td>$IMBED2</td>
-    <td>2</td>
     <td></td>
-    <td>  DELAYV %1  DELAYV %2</td>
+    <td>  DELAYV 0xFFFF</td>
 </tr><tr>
     <td>$IMBED3</td>
     <td>0</td>
@@ -644,7 +629,7 @@ Created 21/05/2023 19:46<h2>Opcode Table</h2>
 </tr><tr>
     <td>$WAIT</td>
     <td>2</td>
-    <td>Increased delay</td>
+    <td></td>
     <td>  DELAYV %1  DELAYV %2</td>
 </tr></table>
 </body>

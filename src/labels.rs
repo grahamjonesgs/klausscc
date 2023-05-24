@@ -8,8 +8,6 @@ pub struct Label {
     pub name: String,
 }
 
-
-
 /// Extracts label from string
 ///
 /// Checks if end of first word is colon if so return label as option string
@@ -142,7 +140,7 @@ pub fn convert_argument(
 ///
 /// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels
 #[allow(clippy::module_name_repetitions)]
-pub fn get_labels(pass1: &[Pass1],msg_list: &mut MsgList    ) -> Vec<Label> {
+pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     let labels: Vec<Label> = pass1
         .iter()
         .filter(|n| {
@@ -169,7 +167,9 @@ pub fn get_labels(pass1: &[Pass1],msg_list: &mut MsgList    ) -> Vec<Label> {
             if second_word.is_some() {
                 msg_list.push(
                     format!(
-                        "Label {first_word} has extra text {}",second_word.unwrap_or_default()),
+                        "Label {first_word} has extra text {}",
+                        second_word.unwrap_or_default()
+                    ),
                     Some(line.line_counter),
                     Some(line.file_name.clone()),
                     MessageType::Warning,
@@ -181,17 +181,27 @@ pub fn get_labels(pass1: &[Pass1],msg_list: &mut MsgList    ) -> Vec<Label> {
         if data_name_from_string(&line.input).is_some() {
             let mut words = line.input.split_whitespace();
             let first_word = words.next().unwrap_or("");
-            let _second_word = words.next();
+            let remaining_line = line.input.trim_start_matches(first_word).trim();
+            let second_word = words.next();
             let third_word = words.next();
-            if third_word.is_some() {
+            if third_word.is_some() && !second_word.unwrap_or_default().starts_with('\"') {
                 msg_list.push(
                     format!(
-                        "Data {first_word} has extra text {}",third_word.unwrap_or_default()),
+                        "Data {first_word} has extra text {}",
+                        third_word.unwrap_or_default()
+                    ),
                     Some(line.line_counter),
                     Some(line.file_name.clone()),
                     MessageType::Warning,
                 );
             }
+            if remaining_line.starts_with('\"') && !remaining_line.ends_with('\"') {}
+            msg_list.push(
+                format!("Data {first_word} has no string termination"),
+                Some(line.line_counter),
+                Some(line.file_name.clone()),
+                MessageType::Warning,
+            );
         }
     }
 
@@ -201,7 +211,7 @@ pub fn get_labels(pass1: &[Pass1],msg_list: &mut MsgList    ) -> Vec<Label> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::LineType;
+    use crate::{files::LineType};
 
     #[test]
     // Check that labels are correctly extracted from strings test for not label
@@ -458,8 +468,9 @@ mod tests {
 
     #[test]
     // Test that the labels are correctly extracted from the pass1 list
+    #[allow(clippy::too_many_lines)]
     fn test_get_labels() {
-        let msglist= &mut MsgList::new();
+        let msglist = &mut MsgList::new();
         let pass1 = vec![
             Pass1 {
                 program_counter: 0,
@@ -493,7 +504,7 @@ mod tests {
                 program_counter: 7,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data1".to_string(),
+                input: "#data321".to_string(),
                 line_type: LineType::Label,
             },
             Pass1 {
@@ -514,11 +525,25 @@ mod tests {
                 program_counter: 7,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data1 0xFFFF dummy2".to_string(),
+                input: "#data123 0xFFFF dummy2".to_string(),
+                line_type: LineType::Label,
+            },
+            Pass1 {
+                program_counter: 8,
+                file_name: String::from("test"),
+                line_counter: 3,
+                input: "#data2 \"TEST WITH SPACES\"".to_string(),
+                line_type: LineType::Label,
+            },
+            Pass1 {
+                program_counter: 9,
+                file_name: String::from("test"),
+                line_counter: 3,
+                input: "#data3 \"TEST WITH NO TERMINATION".to_string(),
                 line_type: LineType::Label,
             },
         ];
-        let labels = get_labels(&pass1,msglist);
+        let labels = get_labels(&pass1, msglist);
         assert_eq!(
             labels[0],
             Label {
@@ -544,10 +569,14 @@ mod tests {
             labels[3],
             Label {
                 program_counter: 7,
-                name: "#data1".to_string(),
+                name: "#data321".to_string(),
             }
         );
         assert_eq!(msglist.list[0].name, "Label label1: has extra text dummy");
         assert_eq!(msglist.list[1].name, "Data #data1 has extra text dummy2");
+        assert_eq!(
+            msglist.list[2].name,
+            "Data #data3 has no string termination"
+        );
     }
 }

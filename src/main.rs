@@ -7,7 +7,6 @@
 )]
 #![allow(clippy::missing_docs_in_private_items)]
 #![allow(clippy::str_to_string)]
-#![allow(clippy::integer_arithmetic)]
 #![allow(clippy::arithmetic_side_effects)]
 #![allow(clippy::let_underscore_must_use)]
 #![allow(clippy::implicit_return)]
@@ -145,7 +144,7 @@ fn main() -> Result<(), i32> {
     // Pass 2 to get create output
     let mut pass2 = get_pass2(&mut msg_list, pass1, oplist, labels);
 
-    if !write_code_output_file(&output_file_name, &mut pass2,&mut msg_list) {
+    if !write_code_output_file(&output_file_name, &mut pass2, &mut msg_list) {
         msg_list.push(
             format!("Unable to write to code file {}", &output_file_name),
             None,
@@ -274,10 +273,11 @@ pub fn print_results(msg_list: &mut MsgList, start_time: NaiveTime) {
 
 /// Returns pass1 from pass0
 ///
-/// Takes the macro expanded pass0 and returns vector of pass1, with the program counter
+/// Takes the macro expanded pass0 and returns vector of pass1, with the program counters
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
+    let mut data_pass0: Vec<Pass0> = Vec::new();
 
     for mut pass in pass0 {
         pass1.push(Pass1 {
@@ -301,11 +301,30 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
                 program_counter = program_counter + p + 1;
             }
         }
-        #[allow(clippy::integer_division)]
-        if line_type(&mut oplist, &mut pass.input) == LineType::Data {
+
+        // Need to here move the data elements to the end of the program
+        // Maybe add them to temp vector and then add to end of pass1
+   
+        /*   if line_type(&mut oplist, &mut pass.input) == LineType::Data {
             program_counter +=
                 num_data_bytes(&pass.input, msg_list, pass.line_counter, pass.file_name) / 8;
+        } */
+        if line_type(&mut oplist, &mut pass.input) == LineType::Data {
+            data_pass0.push(pass);
+            pass1.pop();
         }
+    }
+    #[allow(clippy::integer_division)]
+    for mut data_pass in data_pass0 {
+        pass1.push(Pass1 {
+            input: data_pass.input.clone(),
+            file_name: data_pass.file_name.clone(),
+            line_counter: data_pass.line_counter,
+            program_counter,
+            line_type: line_type(&mut oplist, &mut data_pass.input),
+        });  
+        program_counter +=
+            num_data_bytes(&data_pass.input, msg_list, data_pass.line_counter, data_pass.file_name) / 8;
     }
     pass1
 }
@@ -465,24 +484,24 @@ mod tests {
                 line_counter: 3,
             },
             Pass0 {
-                input: "#DATA1 0x2".to_string(),
+                input: "#DATA1 0x2".to_string(), // Should be moved to end
                 file_name: String::new(),
-                line_counter: 3,
+                line_counter: 4,
             },
             Pass0 {
                 input: "RET".to_string(),
                 file_name: String::new(),
-                line_counter: 3,
+                line_counter: 5,
             },
             Pass0 {
-                input: "#DATA1 \"HELLO\"".to_string(),
+                input: "#DATA1 \"HELLO\"".to_string(), // Should be moved to end
                 file_name: String::new(),
-                line_counter: 3,
+                line_counter: 6,
             },
             Pass0 {
                 input: "RET".to_string(),
                 file_name: String::new(),
-                line_counter: 3,
+                line_counter: 7,
             },
         ];
         let pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
@@ -490,9 +509,9 @@ mod tests {
         assert_eq!(pass1[1].program_counter, 3);
         assert_eq!(pass1[2].program_counter, 4);
         assert_eq!(pass1[3].program_counter, 5);
-        assert_eq!(pass1[4].program_counter, 7);
-        assert_eq!(pass1[5].program_counter, 8);
-        assert_eq!(pass1[6].program_counter, 14);
+        assert_eq!(pass1[4].program_counter, 6);
+        assert_eq!(pass1[5].program_counter, 7);
+        assert_eq!(pass1[6].program_counter, 9);
     }
 
     #[test]
