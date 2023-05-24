@@ -58,9 +58,10 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             let output = remaining_line.trim_matches('\"').to_string();
             let mut output_hex = String::new();
             for c in output.as_bytes() {
-                let hex = format!("{c:02X}");
-                output_hex.push_str(&hex);
-                output_hex.push_str("000000");
+              let hex = format!("{c:02X}");
+              output_hex.push_str(&hex);
+              output_hex.push_str("000000");
+
             }
             output_hex.push_str("00000000"); // Add null terminator
 

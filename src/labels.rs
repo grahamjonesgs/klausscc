@@ -195,13 +195,15 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
                     MessageType::Warning,
                 );
             }
-            if remaining_line.starts_with('\"') && !remaining_line.ends_with('\"') {}
+            println!("xxxxxxx remaining_line: {} start {} end {}", remaining_line, remaining_line.starts_with('\"'), remaining_line.ends_with('\"'));
+            if remaining_line.starts_with('\"') && !remaining_line.ends_with('\"') {
             msg_list.push(
                 format!("Data {first_word} has no string termination"),
                 Some(line.line_counter),
                 Some(line.file_name.clone()),
                 MessageType::Warning,
             );
+        }
         }
     }
 
@@ -573,7 +575,7 @@ mod tests {
             }
         );
         assert_eq!(msglist.list[0].name, "Label label1: has extra text dummy");
-        assert_eq!(msglist.list[1].name, "Data #data1 has extra text dummy2");
+        assert_eq!(msglist.list[1].name, "Data #data123 has extra text dummy2");
         assert_eq!(
             msglist.list[2].name,
             "Data #data3 has no string termination"
