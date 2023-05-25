@@ -238,6 +238,8 @@ pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str
 /// Writes all data to the detailed code file
 #[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
 #[allow(clippy::impl_trait_in_params)]
+#[allow(clippy::cast_possible_truncation)]
+#[allow(clippy::integer_division)]
 pub fn write_code_output_file(
     filename: impl AsRef<Path> + core::marker::Copy,
     pass2: &mut Vec<Pass2>,
@@ -249,7 +251,7 @@ pub fn write_code_output_file(
     }
     #[allow(clippy::unwrap_used)]
     let mut file = result_file.unwrap();
-    let mut out_line: String;
+    let mut out_line: String = String::new();
     msg_list.push(
         format!("Writing code file to {}", filename.as_ref().display()),
         None,
@@ -266,10 +268,17 @@ pub fn write_code_output_file(
                 pass.input
             );
         } else if pass.line_type == LineType::Data || pass.line_type == LineType::Label {
-            out_line = format!(
-                "0x{:08X}:                   -- {}\n",
-                pass.program_counter, pass.input
-            );
+            for n in 0..pass.opcode.len() / 8 {
+                out_line.push_str(
+                    format!(
+                        "0x{:08X}: {:<16} -- {}\n",
+                        pass.program_counter + n as u32,
+                        &mut pass.opcode[n * 8..n * 8 + 8],
+                        pass.input
+                    )
+                    .as_str(),
+                );
+            }
         } else if pass.line_type == LineType::Error {
             out_line = format!("Error                         -- {}\n", pass.input);
         } else {

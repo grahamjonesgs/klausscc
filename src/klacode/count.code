@@ -1,5 +1,5 @@
 0x00000000: 00000800 00000005 -- SETR A 5
-0x00000002:                   -- BEGIN:
+0x00000000: 00000800 00000005 -- SETR A 5
 0x00000002: 00000840          -- INCR A
 0x00000003: 00003020          -- 7SEG1R A
 0x00000004: 0000F013 00000FFF -- DELAYV 0xFFF
@@ -9,5 +9,19 @@
 0x0000000A: 00005001          -- NEWLINE
 0x0000000B: 00001000 00000002 -- JMP BEGIN:
                               -- 
-0x0000000D:                   -- #DUMMY "12345"
-0x00000010:                   -- #TEST "c23 "TEST with spaces extra" 
+                              -- 
+0x0000000D: 00000005         -- #DUMMY "12345"
+0x0000000E: 31323334         -- #DUMMY "12345"
+0x0000000F: 35000000         -- #DUMMY "12345"
+                              -- 
+0x0000000D: 00000005         -- #DUMMY "12345"
+0x0000000E: 31323334         -- #DUMMY "12345"
+0x0000000F: 35000000         -- #DUMMY "12345"
+0x00000010: 0000001B         -- #TEST "c23 "TEST with spaces extra" 
+0x00000011: 63323320         -- #TEST "c23 "TEST with spaces extra" 
+0x00000012: 22544553         -- #TEST "c23 "TEST with spaces extra" 
+0x00000013: 54207769         -- #TEST "c23 "TEST with spaces extra" 
+0x00000014: 74682073         -- #TEST "c23 "TEST with spaces extra" 
+0x00000015: 70616365         -- #TEST "c23 "TEST with spaces extra" 
+0x00000016: 73206578         -- #TEST "c23 "TEST with spaces extra" 
+0x00000017: 74726100         -- #TEST "c23 "TEST with spaces extra" 
