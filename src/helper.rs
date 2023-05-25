@@ -24,7 +24,8 @@ pub fn num_data_bytes(
     line_number: u32,
     filename: String,
 ) -> u32 {
-    data_as_bytes(line).map_or_else(|| {
+    data_as_bytes(line).map_or_else(
+        || {
             msg_list.push(
                 format!("Error in data definition for {line}"),
                 Some(line_number),
@@ -32,7 +33,9 @@ pub fn num_data_bytes(
                 MessageType::Error,
             );
             0
-        }, |data| data.len().try_into().unwrap_or_default())
+        },
+        |data| data.len().try_into().unwrap_or_default(),
+    )
 }
 
 /// Returns bytes for data element
@@ -55,16 +58,17 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         let remaining_line = line.trim_start_matches(first_word).trim();
 
         if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
-            let output = remaining_line.trim_matches('\"').to_string();
+            let input_string = remaining_line.trim_matches('\"').to_string();
             let mut output_hex = String::new();
-            for c in output.as_bytes() {
-              let hex = format!("{c:02X}");
-              output_hex.push_str(&hex);
-              output_hex.push_str("000000");
-
+            output_hex.push_str(format!("{:08X}", input_string.len()).as_str()); // Add length of string to start
+            for c in input_string.as_bytes() {
+                let hex = format!("{c:02X}");
+                output_hex.push_str(&hex);
             }
-            output_hex.push_str("00000000"); // Add null terminator
-
+            let needed_bytes = 8 - (output_hex.len() % 8);
+            for _n in 0..needed_bytes {
+                output_hex.push('0');
+            }
             return Some(output_hex);
         }
         None
@@ -241,7 +245,8 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
             }
         }
     }
-    checksum = (checksum + position_index.try_into().unwrap_or(0_i32) - 1).abs() % (0xFFFF_i32 + 1_i32);
+    checksum =
+        (checksum + position_index.try_into().unwrap_or(0_i32) - 1).abs() % (0xFFFF_i32 + 1_i32);
     format!("{checksum:04X}")
 }
 
@@ -577,7 +582,7 @@ mod tests {
         let output = data_as_bytes(&input);
         assert_eq!(
             output,
-            Some("48000000650000006C0000006C0000006F00000000000000".to_string()),
+            Some("0000000548656C6C6F000000".to_string()),
         );
     }
 
@@ -608,7 +613,6 @@ mod tests {
         let output = data_as_bytes(&input);
         assert_eq!(output, None);
     }
-    
 
     #[test]
     // Test for correct label name

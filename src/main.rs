@@ -673,7 +673,7 @@ mod tests {
         assert_eq!(pass2[6].opcode, "00000A340000000A0000000B");
         assert_eq!(
             pass2[7].opcode,
-            "48000000450000004C0000004C0000004F00000000000000"
+            "0000000548454C4C4F000000"
         );
         assert_eq!(pass2[8].opcode, "");
     }

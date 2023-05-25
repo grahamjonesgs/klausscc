@@ -195,7 +195,6 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
                     MessageType::Warning,
                 );
             }
-            println!("xxxxxxx remaining_line: {} start {} end {}", remaining_line, remaining_line.starts_with('\"'), remaining_line.ends_with('\"'));
             if remaining_line.starts_with('\"') && !remaining_line.ends_with('\"') {
             msg_list.push(
                 format!("Data {first_word} has no string termination"),

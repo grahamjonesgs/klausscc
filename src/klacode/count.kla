@@ -1,4 +1,4 @@
-SETR A 0
+SETR A 5
 #DUMMY "12345"
 BEGIN:
 INCR A
@@ -10,4 +10,4 @@ TXMEM #TEST
 NEWLINE
 JMP BEGIN:
 
-#TEST "123 TEST with spaces" 
+#TEST "c23 "TEST with spaces extra" 
