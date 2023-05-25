@@ -1,0 +1,20 @@
+// Prints string starting at reg A
+// Reg B will hold the length of the string for counting down
+NOP
+STRING_PRINT:
+PUSH A
+PUSH B 
+MEMREADRR B A // Reads string length to B
+//7SEG2R B // Displays location
+INCR A // Increments A to first char group
+
+STRING_PRINT_LOOP:
+TXSTRMEMR A // Prints chars at A
+NOP // Delays due to slow TXSTRMEMR
+INCR A // Increments A // To next char group
+DECR B // Decrements B // To count length down
+JMPNZ STRING_PRINT_LOOP: // If A is not zero, loops
+
+POP B // Restores B
+POP A // Restores A
+RET // Returns 

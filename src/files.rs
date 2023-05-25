@@ -17,6 +17,7 @@ pub enum LineType {
     Label,
     Opcode,
     Data,
+    Start,
     Error,
 }
 
@@ -258,8 +259,8 @@ pub fn write_code_output_file(
         None,
         MessageType::Information,
     );
-
     for pass in pass2 {
+        out_line.clear();
         if pass.line_type == LineType::Opcode {
             out_line = format!(
                 "0x{:08X}: {:<16} -- {}\n",
@@ -267,11 +268,11 @@ pub fn write_code_output_file(
                 format_opcodes(&mut pass.opcode),
                 pass.input
             );
-        } else if pass.line_type == LineType::Data || pass.line_type == LineType::Label {
+        } else if pass.line_type == LineType::Data {
             for n in 0..pass.opcode.len() / 8 {
                 out_line.push_str(
                     format!(
-                        "0x{:08X}: {:<16} -- {}\n",
+                        "0x{:08X}: {:<16}  -- {}\n",
                         pass.program_counter + n as u32,
                         &mut pass.opcode[n * 8..n * 8 + 8],
                         pass.input
@@ -279,6 +280,8 @@ pub fn write_code_output_file(
                     .as_str(),
                 );
             }
+        } else if pass.line_type == LineType::Label {
+            out_line = format!("0x{:08X}:                   -- {}\n", pass.program_counter, pass.input);
         } else if pass.line_type == LineType::Error {
             out_line = format!("Error                         -- {}\n", pass.input);
         } else {

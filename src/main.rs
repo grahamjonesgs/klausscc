@@ -289,7 +289,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         });
         if !is_valid_line(&mut oplist, strip_comments(&mut pass.input)) {
             msg_list.push(
-                format!("Opcode error {}", pass.input),
+                format!("Error {}", pass.input),
                 Some(pass.line_counter),
                 Some(pass.file_name.clone()),
                 MessageType::Error,
@@ -302,13 +302,6 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             }
         }
 
-        // Need to here move the data elements to the end of the program
-        // Maybe add them to temp vector and then add to end of pass1
-   
-        /*   if line_type(&mut oplist, &mut pass.input) == LineType::Data {
-            program_counter +=
-                num_data_bytes(&pass.input, msg_list, pass.line_counter, pass.file_name) / 8;
-        } */
         if line_type(&mut oplist, &mut pass.input) == LineType::Data {
             data_pass0.push(pass);
             pass1.pop();
@@ -673,7 +666,7 @@ mod tests {
         assert_eq!(pass2[6].opcode, "00000A340000000A0000000B");
         assert_eq!(
             pass2[7].opcode,
-            "0000000548454C4C4F000000"
+            "0000000248454C4C4F000000"
         );
         assert_eq!(pass2[8].opcode, "");
     }

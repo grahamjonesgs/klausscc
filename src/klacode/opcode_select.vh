@@ -7,6 +7,7 @@ $TESTM NOP / NOP / NOP
 $TESTM2 NOP
 $IMBED1 DELAYV 0xFFFF 
 $IMBED3 $PUSHALL / $IMBED1
+$UART_STRING PUSH A / PUSH B / SETR A %1 
 
 */
 
@@ -66,7 +67,7 @@ task t_opcode_select;
             /// SPI LCD Control 2xxx
             16'h200?: spi_dc_write_command_reg;                 // CDCDMR LCD command with register
             16'h201?: spi_dc_data_command_reg;                  // LCDDATAR LCD data with register
-            16'h2021: spi_dc_write_command_value(w_var1);       // LCDCMDV
+            16'h2021: spi_dc_write_command_value(w_var1);       // LCDCMDV LCD write command value
             16'h2022: spi_dc_write_data_value(w_var1);          // LCDDATAV LCD data with value
             16'h2023: t_lcd_reset_value(w_var1);                // LCD Reset line
 
@@ -92,14 +93,17 @@ task t_opcode_select;
             16'h4020: t_stack_push_value(w_var1);               // PUSHV Push value onto stack
 
             /// Coms 5xxxx
-            16'h5000: t_test_message;                           // TESTMSG test UART message
-            16'h5001: t_tx_newline;                             // NEWLINE UART newline
-            16'h5002: t_tx_char_from_mem_value(w_var1);         // TXMEM send 8 chars hex from mem locaiton
-            16'h501?: t_tx_reg;                                 // TXR send reg value in message
-            16'h502?: t_tx_value_from_reg_value;                // TXMEMR send value at memory of register value in message
+            16'h5000: t_test_message;                           // TESTMSG send test UART message
+            16'h5001: t_tx_newline;                             // NEWLINE send UART newline
+            16'h5002: t_tx_value_of_mem(w_var1);                // TXMEM send 8 bytes value of memory locaiton
+            16'h5003: t_tx_string_at_mem (w_var1);              // TXSTRMEM send string at memory
+            16'h501?: t_tx_reg;                                 // TXR send 8 bytes reg value in message
+            16'h502?: t_tx_value_of_mem_at_reg;                 // TXMEMR send 8 bytes value at memory of register value in message
             16'h503?: t_tx_char_from_reg_value;                 // TXCHARMEMR send char at memory from register value as message
-            // CPU Setting 6xxxx
-
+            16'h504?: t_tx_string_at_reg;                       // TXSTRMEMR send string at memory location from register
+            
+            
+            /// CPU Setting 6xxxx
             16'h60??: t_set_interupt_regs;                      // INTSETRR Set interupt from registers
 
             /// Memory actions 7xxx

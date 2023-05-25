@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 23/05/2023 21:30<h2>Opcode Table</h2>
+Created 25/05/2023 17:42<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -332,7 +332,7 @@ Created 23/05/2023 21:30<h2>Opcode Table</h2>
     <td>00002021</td>
     <td>1</td>
     <td>0</td>
-    <td></td>
+    <td>LCD write command value</td>
 </tr>
 <tr>
     <td>LCDDATAV</td>
@@ -474,35 +474,42 @@ Created 23/05/2023 21:30<h2>Opcode Table</h2>
     <td>00005000</td>
     <td>0</td>
     <td>0</td>
-    <td>test UART message</td>
+    <td>send test UART message</td>
 </tr>
 <tr>
     <td>NEWLINE</td>
     <td>00005001</td>
     <td>0</td>
     <td>0</td>
-    <td>UART newline</td>
+    <td>send UART newline</td>
 </tr>
 <tr>
     <td>TXMEM</td>
     <td>00005002</td>
     <td>1</td>
     <td>0</td>
-    <td>send 8 chars hex from mem locaiton</td>
+    <td>send 8 bytes value of memory locaiton</td>
+</tr>
+<tr>
+    <td>TXSTRMEM</td>
+    <td>00005003</td>
+    <td>1</td>
+    <td>0</td>
+    <td>send string at memory</td>
 </tr>
 <tr>
     <td>TXR</td>
     <td>0000501?</td>
     <td>0</td>
     <td>1</td>
-    <td>send reg value in message</td>
+    <td>send 8 bytes reg value in message</td>
 </tr>
 <tr>
     <td>TXMEMR</td>
     <td>0000502?</td>
     <td>0</td>
     <td>1</td>
-    <td>send value at memory of register value in message</td>
+    <td>send 8 bytes value at memory of register value in message</td>
 </tr>
 <tr>
     <td>TXCHARMEMR</td>
@@ -510,6 +517,16 @@ Created 23/05/2023 21:30<h2>Opcode Table</h2>
     <td>0</td>
     <td>1</td>
     <td>send char at memory from register value as message</td>
+</tr>
+<tr>
+    <td>TXSTRMEMR</td>
+    <td>0000504?</td>
+    <td>0</td>
+    <td>1</td>
+    <td>send string at memory location from register</td>
+</tr>
+<tr>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>CPU Setting 6xxxx</b></td>
 </tr>
 <tr>
     <td>INTSETRR</td>
@@ -626,6 +643,11 @@ Created 23/05/2023 21:30<h2>Opcode Table</h2>
     <td>0</td>
     <td></td>
     <td>  NOP</td>
+</tr><tr>
+    <td>$UART_STRING</td>
+    <td>1</td>
+    <td></td>
+    <td>  PUSH A  PUSH B  SETR A %1</td>
 </tr><tr>
     <td>$WAIT</td>
     <td>2</td>

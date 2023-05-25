@@ -1,13 +1,23 @@
+!include string_print.kla
+
+_start
 SETR A 5
-#DUMMY "12345"
+#DUMMY "123456"
 BEGIN:
 INCR A
 7SEG1R A
 DELAYV 0xFFF
 TXR A
 NEWLINE
-TXMEM #TEST
+
+PUSH A
+SETR A #TEST2
+//CALL STRING_PRINT:
+POP A
+
 NEWLINE
 JMP BEGIN:
 
-#TEST "c23 "TEST with spaces extra" 
+#TEST "Hello there, test is now longer than it was before, and even longer" 
+#TEST2 "12345"
+

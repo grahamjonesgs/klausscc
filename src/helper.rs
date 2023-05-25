@@ -60,7 +60,8 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
             let input_string = remaining_line.trim_matches('\"').to_string();
             let mut output_hex = String::new();
-            output_hex.push_str(format!("{:08X}", input_string.len()).as_str()); // Add length of string to start
+            // Length is based on multiples of 4
+            output_hex.push_str(format!("{:08X}", (input_string.len()+4-input_string.len()%4)/4).as_str()); // Add length of string to start
             for c in input_string.as_bytes() {
                 let hex = format!("{c:02X}");
                 output_hex.push_str(&hex);
@@ -115,6 +116,9 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
     if is_blank(line) {
         return LineType::Blank;
     }
+    if is_start(line) {
+        return LineType::Start;
+    }
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if is_comment(&mut word.to_string()) && i == 0 {
@@ -147,6 +151,20 @@ pub fn is_blank(line: &str) -> bool {
         }
     }
     true
+}
+
+/// Check if line is start
+/// 
+/// Returns true if line is start
+pub fn is_start(line: &str) -> bool {
+    let words = line.split_whitespace();
+    for (i, word) in words.enumerate() {
+        if i == 0 && word.to_uppercase() == "_START" {
+            println!("xxxxx found start");
+            return true
+        } 
+    }
+    false
 }
 
 /// Check if line is comment
@@ -263,8 +281,10 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
         output_string.push_str(&pass.opcode);
     }
 
+    output_string.push_str("00000000"); // Temp adding the start address
+
     // Add writing Z0010 and then checksum.
-    output_string.push_str("Z0010"); // Holding for stack of needed
+    output_string.push_str("Z0010"); // Holding for stack if needed
 
     let checksum: String = calc_checksum(&output_string, msg_list);
 
@@ -582,7 +602,7 @@ mod tests {
         let output = data_as_bytes(&input);
         assert_eq!(
             output,
-            Some("0000000548656C6C6F000000".to_string()),
+            Some("0000000248656C6C6F000000".to_string()),
         );
     }
 
