@@ -10,7 +10,7 @@ use std::{
     path::{Path, MAIN_SEPARATOR_STR},
 };
 
-#[derive(PartialEq, Eq, Debug,Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum LineType {
     Comment,
     Blank,
@@ -281,7 +281,10 @@ pub fn write_code_output_file(
                 );
             }
         } else if pass.line_type == LineType::Label {
-            out_line = format!("0x{:08X}:                   -- {}\n", pass.program_counter, pass.input);
+            out_line = format!(
+                "0x{:08X}:                   -- {}\n",
+                pass.program_counter, pass.input
+            );
         } else if pass.line_type == LineType::Error {
             out_line = format!("Error                         -- {}\n", pass.input);
         } else {
@@ -435,6 +438,8 @@ pub fn format_opcodes(input: &mut String) -> String {
 #[allow(clippy::too_many_lines)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
+    use std::{time, thread};
+
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, 115_200)
         .timeout(core::time::Duration::from_millis(100))
@@ -507,8 +512,12 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
     if port.read(&mut buffer[..]).is_err() { //clear any old messages in buffer
     }
 
-    if port.write(binary_output.as_bytes()).is_err() {
-        return false;
+    for byte in binary_output.as_bytes() {
+        let char_delay = time::Duration::from_micros(100);
+        thread::sleep(char_delay);
+        if port.write(&[*byte]).is_err() {
+            return false;
+        }
     }
 
     if port.flush().is_err() {
@@ -529,9 +538,9 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 
     let ret_msg = String::from_utf8(buffer[..ret_msg_size].to_vec());
 
-    if ret_msg.is_err() {
+    if let Err(e) = ret_msg {
         msg_list.push(
-            "Invalid message received from board".to_string(),
+            format!("Invalid message received from board, error \"{e}\""),
             None,
             None,
             MessageType::Warning,

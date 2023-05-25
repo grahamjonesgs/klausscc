@@ -527,7 +527,7 @@ mod tests {
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(msg_list.list[0].name, "Opcode error Test_not_code_line");
+        assert_eq!(msg_list.list[0].name, "Error Test_not_code_line");
     }
 
     #[allow(clippy::too_many_lines)]

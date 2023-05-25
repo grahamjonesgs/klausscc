@@ -1,11 +1,11 @@
 // Prints string starting at reg A
 // Reg B will hold the length of the string for counting down
 NOP
+//DELAYV 0xFFF
 STRING_PRINT:
 PUSH A
 PUSH B 
 MEMREADRR B A // Reads string length to B
-//7SEG2R B // Displays location
 INCR A // Increments A to first char group
 
 STRING_PRINT_LOOP:

@@ -41,6 +41,7 @@ pub fn num_data_bytes(
 /// Returns bytes for data element
 ///
 /// Parses data element and returns data as bytes, or None if error
+#[allow(clippy::integer_division)]
 pub fn data_as_bytes(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -277,6 +278,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 ///
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
+#[allow(clippy::ptr_arg)]
 pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> String {
     let mut output_string = String::new();
 
@@ -285,8 +287,6 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
     for pass in pass2.clone() {
         output_string.push_str(&pass.opcode);
     }
-
-    output_string.push_str("00000000"); // Temp adding the start address
 
     if pass2
         .iter()
@@ -300,7 +300,14 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
                 pass2
                     .iter()
                     .find(|x| x.line_type == LineType::Start)
-                    .unwrap()
+                    .unwrap_or(&Pass2 {
+                        line_type: LineType::Start,
+                        opcode: String::new(),
+                        program_counter: 0,
+                        line_counter: 0,
+                        input: String::new(),
+                        file_name: "None".to_string(),
+                    })
                     .program_counter
             )
             .as_str(),

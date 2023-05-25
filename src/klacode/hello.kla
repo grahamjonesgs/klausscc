@@ -1,31 +1,6 @@
+_start
 AND A B
 AND A B
-ANDD A B
-PUSH A
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-!include hello2.kla
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-/* AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-
-
+START:
+JMP START:
+#LONG 3000

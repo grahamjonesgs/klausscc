@@ -11,8 +11,8 @@ TXR A
 NEWLINE
 
 PUSH A
-SETR A #TEST2
-//CALL STRING_PRINT:
+SETR A #TEST
+CALL STRING_PRINT:
 POP A
 
 NEWLINE
@@ -20,4 +20,8 @@ JMP BEGIN:
 
 #TEST "Hello there, test is now longer than it was before, and even longer" 
 #TEST2 "12345"
+
+#LONG 50
+
+//!include string_print.kla
 
