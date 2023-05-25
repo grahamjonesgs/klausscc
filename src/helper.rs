@@ -61,7 +61,13 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             let input_string = remaining_line.trim_matches('\"').to_string();
             let mut output_hex = String::new();
             // Length is based on multiples of 4
-            output_hex.push_str(format!("{:08X}", (input_string.len()+4-input_string.len()%4)/4).as_str()); // Add length of string to start
+            output_hex.push_str(
+                format!(
+                    "{:08X}",
+                    (input_string.len() + 4 - input_string.len() % 4) / 4
+                )
+                .as_str(),
+            ); // Add length of string to start
             for c in input_string.as_bytes() {
                 let hex = format!("{c:02X}");
                 output_hex.push_str(&hex);
@@ -154,15 +160,14 @@ pub fn is_blank(line: &str) -> bool {
 }
 
 /// Check if line is start
-/// 
+///
 /// Returns true if line is start
 pub fn is_start(line: &str) -> bool {
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if i == 0 && word.to_uppercase() == "_START" {
-            println!("xxxxx found start");
-            return true
-        } 
+            return true;
+        }
     }
     false
 }
@@ -277,11 +282,49 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
 
     output_string.push('S'); // Start character
 
-    for pass in pass2 {
+    for pass in pass2.clone() {
         output_string.push_str(&pass.opcode);
     }
 
     output_string.push_str("00000000"); // Temp adding the start address
+
+    if pass2
+        .iter()
+        .filter(|x| x.line_type == LineType::Start)
+        .count()
+        == 1
+    {
+        output_string.push_str(
+            format!(
+                "{:08X}",
+                pass2
+                    .iter()
+                    .find(|x| x.line_type == LineType::Start)
+                    .unwrap()
+                    .program_counter
+            )
+            .as_str(),
+        );
+    } else if pass2
+        .iter()
+        .filter(|x| x.line_type == LineType::Start)
+        .count()
+        == 0
+    {
+        msg_list.push(
+            "No start address found".to_string(),
+            None,
+            None,
+            MessageType::Error,
+        );
+    } else {
+        msg_list.push(
+            "Multiple start addresses found".to_string(),
+            None,
+            None,
+            MessageType::Error,
+        );
+    }
 
     // Add writing Z0010 and then checksum.
     output_string.push_str("Z0010"); // Holding for stack if needed
@@ -600,10 +643,7 @@ mod tests {
     fn test_data_as_bytes4() {
         let input = String::from("#TEST \"Hello\"");
         let output = data_as_bytes(&input);
-        assert_eq!(
-            output,
-            Some("0000000248656C6C6F000000".to_string()),
-        );
+        assert_eq!(output, Some("0000000248656C6C6F000000".to_string()),);
     }
 
     #[test]

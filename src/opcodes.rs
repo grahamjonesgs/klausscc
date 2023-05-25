@@ -36,7 +36,7 @@ pub struct Pass1 {
     pub line_type: LineType,
 }
 
-#[derive(Debug)]
+#[derive(Debug,Clone)]
 pub struct Pass2 {
     pub input: String,
     pub file_name: String,

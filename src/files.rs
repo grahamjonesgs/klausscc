@@ -10,7 +10,7 @@ use std::{
     path::{Path, MAIN_SEPARATOR_STR},
 };
 
-#[derive(PartialEq, Eq, Debug)]
+#[derive(PartialEq, Eq, Debug,Clone)]
 pub enum LineType {
     Comment,
     Blank,
