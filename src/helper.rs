@@ -59,7 +59,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         let remaining_line = line.trim_start_matches(first_word).trim();
 
         if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
-            let input_string = remaining_line.trim_matches('\"').to_string();
+            let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
             let mut output_hex = String::new();
             // Length is based on multiples of 4
             output_hex.push_str(

@@ -8,19 +8,29 @@ INCR A
 7SEG1R A
 DELAYV 0xFFF
 TXR A
-NEWLINE
+
 
 PUSH A
 SETR A #TEST
 CALL STRING_PRINT:
 POP A
 
-NEWLINE
+PUSH A
+SETR A #TEST2
+CALL STRING_PRINT:
+POP A
+
+PUSH A
+SETR A #TEST3
+CALL STRING_PRINT:
+POP A
+
+
 JMP BEGIN:
 
-#TEST "Hello there, test is now longer than it was before, and even longer" 
+#TEST "Hello there" 
 #TEST2 "12345"
-
+#TEST3 "Third "line\n"
 #LONG 50
 
 //!include string_print.kla

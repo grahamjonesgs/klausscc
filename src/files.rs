@@ -438,7 +438,7 @@ pub fn format_opcodes(input: &mut String) -> String {
 #[allow(clippy::too_many_lines)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
-    use std::{time, thread};
+    use std::{thread, time};
 
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, 115_200)
@@ -508,6 +508,10 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
     if port.set_parity(serialport::Parity::None).is_err() {
         return false;
     }
+    if port.set_flow_control(serialport::FlowControl::None).is_err() {
+        return false;
+    }
+    if port.flush().is_err() {};
 
     if port.read(&mut buffer[..]).is_err() { //clear any old messages in buffer
     }

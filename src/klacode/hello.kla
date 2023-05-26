@@ -1,6 +1,15 @@
+
 _start
+AND A B
+AND A B
+AND A B
+AND A B
+AND A B
+AND A B
 AND A B
 AND A B
 START:
 JMP START:
-#LONG 3000
+//_start
+START1:
+JMP START1:
