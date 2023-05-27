@@ -3,9 +3,10 @@
 _start
 SETR A 5
 #DUMMY "123456"
+NOP
 BEGIN:
 INCR A
-7SEG1R A
+7SEGR A
 //DELAYV 0xF
 TXR A
 newline

@@ -511,6 +511,9 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
     if port.set_flow_control(serialport::FlowControl::None).is_err() {
         return false;
     }
+
+    thread::sleep(time::Duration::from_millis(500)); //Wait for board to reset
+
     if port.flush().is_err() {};
 
     if port.read(&mut buffer[..]).is_err() { //clear any old messages in buffer
