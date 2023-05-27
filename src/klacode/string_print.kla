@@ -9,7 +9,7 @@ INCR A // Increments A to first char group
 
 STRING_PRINT_LOOP:
 TXSTRMEMR A // Prints chars at A
-NOP // Delays due to slow TXSTRMEMR
+//NOP
 INCR A // Increments A // To next char group
 DECR B // Decrements B // To count length down
 JMPNZ STRING_PRINT_LOOP: // If A is not zero, loops

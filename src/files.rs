@@ -441,7 +441,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
     use std::{thread, time};
 
     let mut buffer = [0; 1024];
-    let port_result = serialport::new(port_name, 115_200)
+    let port_result = serialport::new(port_name, /*115_200*/1_000_000)
         .timeout(core::time::Duration::from_millis(100))
         .open();
 

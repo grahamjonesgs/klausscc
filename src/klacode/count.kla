@@ -6,13 +6,20 @@ SETR A 5
 BEGIN:
 INCR A
 7SEG1R A
-DELAYV 0xFFF
+//DELAYV 0xF
 TXR A
-
+newline
+TXR A
+newline
+TXR A
+newline
+TXR A
+newline
 
 PUSH A
-SETR A #TEST
+SETR A #TEST1
 CALL STRING_PRINT:
+newline
 POP A
 
 PUSH A
@@ -28,8 +35,8 @@ POP A
 
 JMP BEGIN:
 
-#TEST "Hello there" 
-#TEST2 "12345"
+#TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+#TEST2 "123456789\n"
 #TEST3 "Third "line\n"
 #LONG 50
 
