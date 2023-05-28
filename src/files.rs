@@ -512,6 +512,10 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
         return false;
     }
 
+    if port.write(b"S").is_err() {  // Send Start command as reset to stop any UART coms
+        return false;
+    }
+
     thread::sleep(time::Duration::from_millis(500)); //Wait for board to reset
 
     if port.flush().is_err() {};
