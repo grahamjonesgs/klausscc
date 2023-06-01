@@ -94,7 +94,7 @@ pub fn convert_argument(
     if argument_trim.len() >= 2 && (argument_trim[0..2] == *"0x" || argument_trim[0..2] == *"0X") {
         let without_prefix1 = argument_trim.trim_start_matches("0x");
         let without_prefix2 = without_prefix1.trim_start_matches("0X");
-        let int_value_result = i64::from_str_radix(without_prefix2, 16);
+        let int_value_result = i64::from_str_radix(&without_prefix2.replace(&"_", &""), 16);
         if int_value_result.is_err() {
             return None;
         }
