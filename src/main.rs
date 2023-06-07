@@ -225,8 +225,9 @@ pub fn set_matches() -> Command {
                 .action(ArgAction::SetTrue)
                 .help("Set if output of opcode.macro list is required"),
         )
-        .arg(
+         .arg(
             Arg::new("textmate")
+                .short('t')
                 .long("textmate")
                 .action(ArgAction::SetTrue)
                 .help(
@@ -239,7 +240,7 @@ pub fn set_matches() -> Command {
                 .long("serial")
                 .num_args(1)
                 .help("Serial port for output"),
-        )
+        ) 
 }
 /// Prints results of assembly
 ///
@@ -315,9 +316,13 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             line_counter: data_pass.line_counter,
             program_counter,
             line_type: line_type(&mut oplist, &mut data_pass.input),
-        });  
-        program_counter +=
-            num_data_bytes(&data_pass.input, msg_list, data_pass.line_counter, data_pass.file_name) / 8;
+        });
+        program_counter += num_data_bytes(
+            &data_pass.input,
+            msg_list,
+            data_pass.line_counter,
+            data_pass.file_name,
+        ) / 8;
     }
     pass1
 }
@@ -664,10 +669,7 @@ mod tests {
         assert_eq!(pass2[4].opcode, "00000030");
         assert_eq!(pass2[5].opcode, "000000720000AAAA");
         assert_eq!(pass2[6].opcode, "00000A340000000A0000000B");
-        assert_eq!(
-            pass2[7].opcode,
-            "0000000248454C4C4F000000"
-        );
+        assert_eq!(pass2[7].opcode, "0000000248454C4C4F000000");
         assert_eq!(pass2[8].opcode, "");
     }
 
