@@ -6,12 +6,10 @@
     clippy::cargo
 )]
 #![allow(clippy::missing_docs_in_private_items)]
-#![allow(clippy::str_to_string)]
 #![allow(clippy::arithmetic_side_effects)]
 #![allow(clippy::let_underscore_must_use)]
 #![allow(clippy::implicit_return)]
 #![allow(clippy::string_add)]
-#![allow(clippy::string_slice)]
 #![allow(clippy::indexing_slicing)]
 #![allow(clippy::as_conversions)]
 #![allow(clippy::separated_literal_suffix)]
@@ -55,7 +53,7 @@ fn main() -> Result<(), i32> {
     let matches = set_matches().get_matches();
     let opcode_file_name = matches
         .get_one::<String>("opcode_file")
-        .unwrap_or(&"opcode_select.vh".to_string())
+        .unwrap_or(&"opcode_select.vh".to_owned())
         .replace(' ', "");
     let input_file_name = matches
         .get_one::<String>("input")
@@ -164,7 +162,7 @@ fn main() -> Result<(), i32> {
     } else {
         _ = std::fs::remove_file(&binary_file_name);
         msg_list.push(
-            "Not writing binary file due to assembly errors".to_string(),
+            "Not writing binary file due to assembly errors".to_owned(),
             None,
             None,
             MessageType::Warning,
@@ -399,7 +397,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
         }
     } else {
         msg_list.push(
-            "Not writing to serial port due to assembly errors".to_string(),
+            "Not writing to serial port due to assembly errors".to_owned(),
             None,
             None,
             MessageType::Warning,
@@ -467,37 +465,37 @@ mod tests {
 
         let pass0 = vec![
             Pass0 {
-                input: "MOV A B".to_string(),
+                input: "MOV A B".to_owned(),
                 file_name: String::new(),
                 line_counter: 1,
             },
             Pass0 {
-                input: "PUSH A".to_string(),
+                input: "PUSH A".to_owned(),
                 file_name: String::new(),
                 line_counter: 2,
             },
             Pass0 {
-                input: "RET".to_string(),
+                input: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 3,
             },
             Pass0 {
-                input: "#DATA1 0x2".to_string(), // Should be moved to end
+                input: "#DATA1 0x2".to_owned(), // Should be moved to end
                 file_name: String::new(),
                 line_counter: 4,
             },
             Pass0 {
-                input: "RET".to_string(),
+                input: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 5,
             },
             Pass0 {
-                input: "#DATA1 \"HELLO\"".to_string(), // Should be moved to end
+                input: "#DATA1 \"HELLO\"".to_owned(), // Should be moved to end
                 file_name: String::new(),
                 line_counter: 6,
             },
             Pass0 {
-                input: "RET".to_string(),
+                input: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 7,
             },
@@ -527,7 +525,7 @@ mod tests {
         });
 
         let pass0 = vec![Pass0 {
-            input: "Test_not_code_line".to_string(),
+            input: "Test_not_code_line".to_owned(),
             file_name: String::new(),
             line_counter: 1,
         }];
@@ -596,63 +594,63 @@ mod tests {
             &mut msg_list,
             vec![
                 Pass1 {
-                    input: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_string(),
+                    input: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 1,
                     program_counter: 0,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "DELAY 0x7".to_string(),
+                    input: "DELAY 0x7".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 1,
                     program_counter: 1,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "PUSH A".to_string(),
+                    input: "PUSH A".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 2,
                     program_counter: 3,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "RET".to_string(),
+                    input: "RET".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 4,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "RET".to_string(),
+                    input: "RET".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "MOVR C 0xAAAA".to_string(),
+                    input: "MOVR C 0xAAAA".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "DMOV D E 0xA 0xB".to_string(),
+                    input: "DMOV D E 0xA 0xB".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "#DATA1 \"HELLO\"".to_string(),
+                    input: "#DATA1 \"HELLO\"".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Data,
                 },
                 Pass1 {
-                    input: "xxx".to_string(),
+                    input: "xxx".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
@@ -690,7 +688,7 @@ mod tests {
         let pass2 = get_pass2(
             &mut msg_list,
             vec![Pass1 {
-                input: "TEST".to_string(),
+                input: "TEST".to_owned(),
                 file_name: String::from("test"),
                 line_counter: 1,
                 program_counter: 0,

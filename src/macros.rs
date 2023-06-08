@@ -26,13 +26,13 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
     let mut max_variable: u32 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
-    let comment = return_comments(&mut input_line_full.clone().to_string());
-    let input_line = &strip_comments(&mut input_line_full.trim().clone().to_string());
+    let comment = return_comments(&mut input_line_full.clone().to_owned());
+    let input_line = &strip_comments(&mut input_line_full.trim().clone().to_owned());
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
         if i == 0 {
-            name = word.to_string();
+            name = word.to_owned();
         } else if word == "/" {
             items.push(item);
             item = String::new();
@@ -103,7 +103,7 @@ pub fn macro_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.starts_with('$') {
-        return Some(first_word.to_string());
+        return Some(first_word.to_owned());
     }
     None
 }
@@ -193,7 +193,7 @@ pub fn return_macro_items_replace(
                         build_line = build_line + " " + item_word;
                     }
                 }
-                return_items.push(build_line.trim_start().to_string());
+                return_items.push(build_line.trim_start().to_owned());
             }
         }
     }
@@ -227,7 +227,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                     let mut item_line_array: Vec<String> = Vec::new();
                     let item_words = item.split_whitespace();
                     for item_word in item_words {
-                        item_line_array.push(item_word.to_string());
+                        item_line_array.push(item_word.to_owned());
                     }
                     #[allow(clippy::unwrap_used)]
                     if (return_macro(&item, &mut input_macros).unwrap().variables as usize)
@@ -290,7 +290,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                     build_line = build_line + " " + item_word;
                                 }
                             }
-                            output_items.push(build_line.strip_prefix(' ').unwrap().to_string());
+                            output_items.push(build_line.strip_prefix(' ').unwrap().to_owned());
                         } else {
                             output_items.push(new_item);
                         }
@@ -386,7 +386,7 @@ mod tests {
     fn test_macro_name_from_string1() {
         let input = String::from("$TEST");
         let output = macro_name_from_string(&input);
-        assert_eq!(output, Some("$TEST".to_string()));
+        assert_eq!(output, Some("$TEST".to_owned()));
     }
 
     #[test]
@@ -533,7 +533,7 @@ mod tests {
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             msg_list.list[0].name,
-            "Too many variables for macro $DELAY1".to_string()
+            "Too many variables for macro $DELAY1".to_owned()
         );
     }
 
@@ -556,7 +556,7 @@ mod tests {
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             msg_list.list[0].name,
-            "Invalid macro argument number xyz, in macro $DELAY1".to_string()
+            "Invalid macro argument number xyz, in macro $DELAY1".to_owned()
         );
     }
 
@@ -579,7 +579,7 @@ mod tests {
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
             msg_list.list[0].name,
-            "Missing argument 2 for macro $DELAY1".to_string()
+            "Missing argument 2 for macro $DELAY1".to_owned()
         );
     }
 
@@ -968,7 +968,7 @@ mod tests {
             Some(Macro {
                 name: String::from("$POPALL"),
                 variables: 0,
-                items: vec!["POP A".to_string(), "POP B".to_string()],
+                items: vec!["POP A".to_owned(), "POP B".to_owned()],
                 comment: String::new()
             })
         );
@@ -985,7 +985,7 @@ mod tests {
             Some(Macro {
                 name: String::from("$POPALL"),
                 variables: 2,
-                items: vec!["POP %1".to_string(), "POP %2".to_string()],
+                items: vec!["POP %1".to_owned(), "POP %2".to_owned()],
                 comment: String::new()
             })
         );
@@ -1002,7 +1002,7 @@ mod tests {
             Some(Macro {
                 name: String::from("$POPALL"),
                 variables: 2,
-                items: vec!["POP %1".to_string(), "POP %2".to_string()],
+                items: vec!["POP %1".to_owned(), "POP %2".to_owned()],
                 comment: String::from("Test Macro")
             })
         );
@@ -1019,7 +1019,7 @@ mod tests {
             Some(Macro {
                 name: String::from("$POPALL"),
                 variables: 3,
-                items: vec!["POP %3".to_string(), "POP %2".to_string()],
+                items: vec!["POP %3".to_owned(), "POP %2".to_owned()],
                 comment: String::new()
             })
         );

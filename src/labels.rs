@@ -15,7 +15,7 @@ pub fn label_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.ends_with(':') {
-        return Some(first_word.to_string());
+        return Some(first_word.to_owned());
     }
     None
 }
@@ -94,7 +94,7 @@ pub fn convert_argument(
     if argument_trim.len() >= 2 && (argument_trim[0..2] == *"0x" || argument_trim[0..2] == *"0X") {
         let without_prefix1 = argument_trim.trim_start_matches("0x");
         let without_prefix2 = without_prefix1.trim_start_matches("0X");
-        let int_value_result = i64::from_str_radix(&without_prefix2.replace(&"_", &""), 16);
+        let int_value_result = i64::from_str_radix(&without_prefix2.replace('_', ""), 16);
         if int_value_result.is_err() {
             return None;
         }
@@ -217,10 +217,10 @@ mod tests {
     #[test]
     // Check that labels are correctly extracted from strings test for not label
     fn test_label_name_from_string() {
-        assert_eq!(label_name_from_string("label:"), Some("label:".to_string()));
+        assert_eq!(label_name_from_string("label:"), Some("label:".to_owned()));
         assert_eq!(
             label_name_from_string("label: "),
-            Some("label:".to_string())
+            Some("label:".to_owned())
         );
         assert_eq!(label_name_from_string("label :"), None);
         assert_eq!(label_name_from_string("label : "), None);
@@ -229,15 +229,15 @@ mod tests {
         assert_eq!(label_name_from_string(" label"), None);
         assert_eq!(label_name_from_string(" label "), None);
         assert_eq!(label_name_from_string("lab:el"), None);
-        assert_eq!(label_name_from_string("label:"), Some("label:".to_string()));
+        assert_eq!(label_name_from_string("label:"), Some("label:".to_owned()));
         assert_eq!(
             label_name_from_string("     label:"),
-            Some("label:".to_string())
+            Some("label:".to_owned())
         );
         assert_eq!(label_name_from_string("  xxxxxxx   label:"), None);
         assert_eq!(
             label_name_from_string("     label: dummy words"),
-            Some("label:".to_string())
+            Some("label:".to_owned())
         );
     }
 
@@ -246,11 +246,11 @@ mod tests {
         let mut labels = vec![
             Label {
                 program_counter: 0,
-                name: "label1".to_string(),
+                name: "label1".to_owned(),
             },
             Label {
                 program_counter: 1,
-                name: "label2".to_string(),
+                name: "label2".to_owned(),
             },
         ];
         assert_eq!(return_label_value("label1", &mut labels), Some(0));
@@ -263,15 +263,15 @@ mod tests {
         let mut labels = vec![
             Label {
                 program_counter: 0,
-                name: "label1".to_string(),
+                name: "label1".to_owned(),
             },
             Label {
                 program_counter: 1,
-                name: "label2".to_string(),
+                name: "label2".to_owned(),
             },
             Label {
                 program_counter: 2,
-                name: "label1".to_string(),
+                name: "label1".to_owned(),
             },
         ];
         let mut msg_list = MsgList::new();
@@ -293,78 +293,78 @@ mod tests {
         let mut labels = vec![
             Label {
                 program_counter: 1,
-                name: "label1:".to_string(),
+                name: "label1:".to_owned(),
             },
             Label {
                 program_counter: 2,
-                name: "label2:".to_string(),
+                name: "label2:".to_owned(),
             },
             Label {
                 program_counter: 30,
-                name: "#data1".to_string(),
+                name: "#data1".to_owned(),
             },
         ];
         let mut msg_list = MsgList::new();
         assert_eq!(
-            convert_argument("label1", &mut msg_list, 0, "test".to_string(), &mut labels),
+            convert_argument("label1", &mut msg_list, 0, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label2", &mut msg_list, 1, "test".to_string(), &mut labels),
+            convert_argument("label2", &mut msg_list, 1, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("label3", &mut msg_list, 2, "test".to_string(), &mut labels),
+            convert_argument("label3", &mut msg_list, 2, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
-            convert_argument("0x1234", &mut msg_list, 3, "test".to_string(), &mut labels),
-            Some("00001234".to_string())
+            convert_argument("0x1234", &mut msg_list, 3, "test".to_owned(), &mut labels),
+            Some("00001234".to_owned())
         );
         assert_eq!(
             convert_argument(
                 "0x123456789",
                 &mut msg_list,
                 4,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
             None
         );
         assert_eq!(
-            convert_argument("1234", &mut msg_list, 5, "test".to_string(), &mut labels),
-            Some("000004D2".to_string())
+            convert_argument("1234", &mut msg_list, 5, "test".to_owned(), &mut labels),
+            Some("000004D2".to_owned())
         );
         assert_eq!(
             convert_argument(
                 "123456789",
                 &mut msg_list,
                 6,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
-            Some("075BCD15".to_string())
+            Some("075BCD15".to_owned())
         );
         assert_eq!(
-            convert_argument("label1:", &mut msg_list, 7, "test".to_string(), &mut labels),
-            Some("00000001".to_string())
+            convert_argument("label1:", &mut msg_list, 7, "test".to_owned(), &mut labels),
+            Some("00000001".to_owned())
         );
         assert_eq!(
             convert_argument(
                 "label1: ",
                 &mut msg_list,
                 8,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
-            Some("00000001".to_string())
+            Some("00000001".to_owned())
         );
         assert_eq!(
             convert_argument(
                 "label1 :",
                 &mut msg_list,
                 9,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
             None
@@ -374,13 +374,13 @@ mod tests {
                 "label1 : ",
                 &mut msg_list,
                 10,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
             None
         );
         assert_eq!(
-            convert_argument("label1", &mut msg_list, 11, "test".to_string(), &mut labels),
+            convert_argument("label1", &mut msg_list, 11, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
@@ -388,7 +388,7 @@ mod tests {
                 "label1 ",
                 &mut msg_list,
                 12,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
             None
@@ -398,7 +398,7 @@ mod tests {
                 " label1",
                 &mut msg_list,
                 13,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
             None
@@ -408,61 +408,61 @@ mod tests {
                 "label2:",
                 &mut msg_list,
                 14,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
-            Some("00000002".to_string())
+            Some("00000002".to_owned())
         );
         assert_eq!(
             convert_argument(
                 "label3:",
                 &mut msg_list,
                 14,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
             None
         );
         assert_eq!(
             msg_list.list[msg_list.list.len() - 1].name,
-            "Label label3: not found - line 14".to_string()
+            "Label label3: not found - line 14".to_owned()
         );
         assert_eq!(
-            convert_argument("xxxx", &mut msg_list, 14, "test".to_string(), &mut labels),
+            convert_argument("xxxx", &mut msg_list, 14, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
             msg_list.list[msg_list.list.len() - 1].name,
-            "Decimal value xxxx incorrect".to_string()
+            "Decimal value xxxx incorrect".to_owned()
         );
         assert_eq!(
             convert_argument(
                 "4294967296",
                 &mut msg_list,
                 14,
-                "test".to_string(),
+                "test".to_owned(),
                 &mut labels
             ),
             None
         );
         assert_eq!(
             msg_list.list[msg_list.list.len() - 1].name,
-            "Decimal value out 4294967296 of bounds".to_string()
+            "Decimal value out 4294967296 of bounds".to_owned()
         );
         assert_eq!(
-            convert_argument("#data1", &mut msg_list, 14, "test".to_string(), &mut labels),
-            Some("0000001E".to_string())
+            convert_argument("#data1", &mut msg_list, 14, "test".to_owned(), &mut labels),
+            Some("0000001E".to_owned())
         );
         assert_eq!(
-            convert_argument("#data2", &mut msg_list, 15, "test".to_string(), &mut labels),
+            convert_argument("#data2", &mut msg_list, 15, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
             msg_list.list[msg_list.list.len() - 1].name,
-            "Label #data2 not found".to_string()
+            "Label #data2 not found".to_owned()
         );
         assert_eq!(
-            convert_argument("0xGGG", &mut msg_list, 14, "test".to_string(), &mut labels),
+            convert_argument("0xGGG", &mut msg_list, 14, "test".to_owned(), &mut labels),
             None
         );
     }
@@ -477,70 +477,70 @@ mod tests {
                 program_counter: 0,
                 file_name: String::from("test"),
                 line_counter: 0,
-                input: "label1:".to_string(),
+                input: "label1:".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 2,
                 file_name: String::from("test"),
                 line_counter: 0,
-                input: "xxxx".to_string(),
+                input: "xxxx".to_owned(),
                 line_type: LineType::Opcode,
             },
             Pass1 {
                 program_counter: 4,
                 file_name: String::from("test"),
                 line_counter: 1,
-                input: "label2:".to_string(),
+                input: "label2:".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 6,
                 file_name: String::from("test"),
                 line_counter: 2,
-                input: "label3:".to_string(),
+                input: "label3:".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 7,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data321".to_string(),
+                input: "#data321".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 7,
                 file_name: String::from("test"),
                 line_counter: 4,
-                input: "test".to_string(),
+                input: "test".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 8,
                 file_name: String::from("test"),
                 line_counter: 7,
-                input: "label1: dummy".to_string(),
+                input: "label1: dummy".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 7,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data123 0xFFFF dummy2".to_string(),
+                input: "#data123 0xFFFF dummy2".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 8,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data2 \"TEST WITH SPACES\"".to_string(),
+                input: "#data2 \"TEST WITH SPACES\"".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 9,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data3 \"TEST WITH NO TERMINATION".to_string(),
+                input: "#data3 \"TEST WITH NO TERMINATION".to_owned(),
                 line_type: LineType::Label,
             },
         ];
@@ -549,28 +549,28 @@ mod tests {
             labels[0],
             Label {
                 program_counter: 0,
-                name: "label1:".to_string(),
+                name: "label1:".to_owned(),
             }
         );
         assert_eq!(
             labels[1],
             Label {
                 program_counter: 4,
-                name: "label2:".to_string(),
+                name: "label2:".to_owned(),
             }
         );
         assert_eq!(
             labels[2],
             Label {
                 program_counter: 6,
-                name: "label3:".to_string(),
+                name: "label3:".to_owned(),
             }
         );
         assert_eq!(
             labels[3],
             Label {
                 program_counter: 7,
-                name: "#data321".to_string(),
+                name: "#data321".to_owned(),
             }
         );
         assert_eq!(msglist.list[0].name, "Label label1: has extra text dummy");

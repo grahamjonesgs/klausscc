@@ -10,7 +10,7 @@ pub fn data_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.starts_with('#') {
-        return Some(first_word.to_string());
+        return Some(first_word.to_owned());
     }
     None
 }
@@ -88,7 +88,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         {
             let without_prefix1 = second_word.trim_start_matches("0x");
             let without_prefix2 = without_prefix1.trim_start_matches("0X");
-            let int_value_result = i64::from_str_radix(&without_prefix2.replace(&"_", &""), 16);
+            let int_value_result = i64::from_str_radix(&without_prefix2.replace('_', ""), 16);
             int_value_result.unwrap_or(0)
         } else {
             let int_value_result = second_word.parse::<i64>();
@@ -128,7 +128,7 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
     }
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
-        if is_comment(&mut word.to_string()) && i == 0 {
+        if is_comment(&mut word.to_owned()) && i == 0 {
             return LineType::Comment;
         }
     }
@@ -199,8 +199,8 @@ pub fn is_comment(word: &mut String) -> bool {
 ///  Removes comments and starting and training whitespace
 pub fn strip_comments(input: &mut str) -> String {
     match input.find("//") {
-        None => return input.trim().to_string(),
-        Some(a) => return input[0..a].trim().to_string(),
+        None => return input.trim().to_owned(),
+        Some(a) => return input[0..a].trim().to_owned(),
     }
 }
 
@@ -210,7 +210,7 @@ pub fn strip_comments(input: &mut str) -> String {
 pub fn return_comments(input: &mut str) -> String {
     match input.find("//") {
         None => String::new(),
-        Some(a) => return input[a + 2..].trim().to_string().trim().to_string(),
+        Some(a) => return input[a + 2..].trim().to_owned().trim().to_owned(),
     }
 }
 
@@ -243,7 +243,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
             None,
             MessageType::Error,
         );
-        return "0000".to_string();
+        return "0000".to_owned();
     }
 
     let mut position_index: u32 = 0;
@@ -306,7 +306,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
                         program_counter: 0,
                         line_counter: 0,
                         input: String::new(),
-                        file_name: "None".to_string(),
+                        file_name: "None".to_owned(),
                     })
                     .program_counter
             )
@@ -319,14 +319,14 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
         == 0
     {
         msg_list.push(
-            "No start address found".to_string(),
+            "No start address found".to_owned(),
             None,
             None,
             MessageType::Error,
         );
     } else {
         msg_list.push(
-            "Multiple start addresses found".to_string(),
+            "Multiple start addresses found".to_owned(),
             None,
             None,
             MessageType::Error,
@@ -476,11 +476,11 @@ mod tests {
     // Test that comment is stripped
     fn test_strip_comments() {
         assert_eq!(
-            strip_comments(&mut "Hello, world! //This is a comment".to_string()),
+            strip_comments(&mut "Hello, world! //This is a comment".to_owned()),
             "Hello, world!"
         );
         assert_eq!(
-            strip_comments(&mut "Hello, world! //".to_string()),
+            strip_comments(&mut "Hello, world! //".to_owned()),
             "Hello, world!"
         );
         assert_eq!(strip_comments(&mut String::new()), "");
@@ -490,19 +490,19 @@ mod tests {
     // Test that comment is returned
     fn test_return_comments() {
         assert_eq!(
-            return_comments(&mut "Hello, world! //This is a comment".to_string()),
+            return_comments(&mut "Hello, world! //This is a comment".to_owned()),
             "This is a comment"
         );
-        assert_eq!(return_comments(&mut "Hello, world! //".to_string()), "");
-        assert_eq!(return_comments(&mut "Hello, world!".to_string()), "");
+        assert_eq!(return_comments(&mut "Hello, world! //".to_owned()), "");
+        assert_eq!(return_comments(&mut "Hello, world!".to_owned()), "");
     }
 
     #[test]
     // Test true is returned for comment
     fn test_is_comment() {
-        assert!(is_comment(&mut "//This is a comment".to_string()));
-        assert!(!is_comment(&mut "Hello //This is a comment".to_string()));
-        assert!(!is_comment(&mut " ".to_string()));
+        assert!(is_comment(&mut "//This is a comment".to_owned()));
+        assert!(!is_comment(&mut "Hello //This is a comment".to_owned()));
+        assert!(!is_comment(&mut " ".to_owned()));
     }
 
     #[test]
@@ -609,7 +609,7 @@ mod tests {
     fn test_num_data_bytes1() {
         let mut msg_list = MsgList::new();
         let input = String::from("#TEST 3");
-        let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_string());
+        let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
         assert_eq!(output, 24);
     }
 
@@ -617,7 +617,7 @@ mod tests {
     fn test_num_data_bytes2() {
         let mut msg_list = MsgList::new();
         let input = String::from("#TEST");
-        let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_string());
+        let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
         assert_eq!(output, 0);
         assert_eq!(msg_list.list[0].name, "Error in data definition for #TEST");
     }
@@ -627,7 +627,7 @@ mod tests {
     fn test_data_as_bytes1() {
         let input = String::from("#TEST 3");
         let output = data_as_bytes(&input);
-        assert_eq!(output, Some("000000000000000000000000".to_string()));
+        assert_eq!(output, Some("000000000000000000000000".to_owned()));
     }
 
     #[test]
@@ -650,14 +650,14 @@ mod tests {
     fn test_data_as_bytes4() {
         let input = String::from("#TEST \"Hello\"");
         let output = data_as_bytes(&input);
-        assert_eq!(output, Some("0000000248656C6C6F000000".to_string()),);
+        assert_eq!(output, Some("0000000248656C6C6F000000".to_owned()),);
     }
 
     #[test]
     fn test_data_as_bytes5() {
         let input = String::from("#TEST 0x1");
         let output = data_as_bytes(&input);
-        assert_eq!(output, Some("00000000".to_string()),);
+        assert_eq!(output, Some("00000000".to_owned()),);
     }
 
     #[test]
@@ -686,7 +686,7 @@ mod tests {
     fn test_label_name_from_string1() {
         let input = String::from("LOOP:");
         let output = label_name_from_string(&input);
-        assert_eq!(output, Some("LOOP:".to_string()));
+        assert_eq!(output, Some("LOOP:".to_owned()));
     }
 
     #[test]
@@ -702,7 +702,7 @@ mod tests {
     fn test_data_name_from_string1() {
         let input = String::from("#TEST");
         let output = data_name_from_string(&input);
-        assert_eq!(output, Some("#TEST".to_string()));
+        assert_eq!(output, Some("#TEST".to_owned()));
     }
 
     #[test]

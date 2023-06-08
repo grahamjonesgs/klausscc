@@ -69,9 +69,9 @@ impl MsgList {
 pub fn print_messages(msg_list: &mut MsgList) {
     for msg in &msg_list.list {
         let message_level: ColoredString = match msg.level {
-            MessageType::Information => "I".to_string().green(),
-            MessageType::Warning => "W".to_string().yellow(),
-            MessageType::Error => "E".to_string().red(),
+            MessageType::Information => "I".to_owned().green(),
+            MessageType::Warning => "W".to_owned().yellow(),
+            MessageType::Error => "E".to_owned().red(),
         };
         println!(
             "{}",
@@ -125,9 +125,9 @@ mod tests {
     fn test_msg_list() {
         let mut msg_list = MsgList::new();
         msg_list.push(
-            "Test".to_string(),
+            "Test".to_owned(),
             None,
-            Some("test".to_string()),
+            Some("test".to_owned()),
             MessageType::Information,
         );
         assert_eq!(msg_list.list.len(), 1);
@@ -140,9 +140,9 @@ mod tests {
     // Test that the number of errors is correct
     fn test_number_errors() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None, None, MessageType::Information);
-        msg_list.push("Test".to_string(), None, None, MessageType::Warning);
-        msg_list.push("Test".to_string(), None, None, MessageType::Error);
+        msg_list.push("Test".to_owned(), None, None, MessageType::Information);
+        msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
+        msg_list.push("Test".to_owned(), None, None, MessageType::Error);
         assert_eq!(msg_list.number_errors(), 1);
     }
 
@@ -150,9 +150,9 @@ mod tests {
     // Test number of warnings
     fn test_number_warnings() {
         let mut msg_list = MsgList::new();
-        msg_list.push("Test".to_string(), None, None, MessageType::Information);
-        msg_list.push("Test".to_string(), None, None, MessageType::Warning);
-        msg_list.push("Test".to_string(), None, None, MessageType::Error);
+        msg_list.push("Test".to_owned(), None, None, MessageType::Information);
+        msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
+        msg_list.push("Test".to_owned(), None, None, MessageType::Error);
         assert_eq!(msg_list.number_warnings(), 1);
     }
 }

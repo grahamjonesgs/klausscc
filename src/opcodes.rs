@@ -63,7 +63,7 @@ pub fn parse_vh_file(
 
     for line in input_list {
         if let Some(section) = line.input.trim().strip_prefix("///") {
-            section_name = section.to_string().trim().to_string();
+            section_name = section.to_owned().trim().to_owned();
         }
 
         match opcode_from_string(&line.input) {
@@ -192,12 +192,12 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     Some(Opcode {
         hex_opcode: format!(
             "0000{}",
-            &input_line[pos_opcode..pos_opcode + 4].to_string()
+            &input_line[pos_opcode..pos_opcode + 4].to_owned()
         ),
         registers: num_registers,
         variables: num_variables,
-        comment: input_line[pos_comment..pos_end_comment].to_string(),
-        text_name: input_line[pos_name..pos_end_name].to_string(),
+        comment: input_line[pos_comment..pos_end_comment].to_owned(),
+        text_name: input_line[pos_name..pos_end_name].to_owned(),
         section: String::new(),
     })
 }
@@ -251,23 +251,23 @@ fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
 /// Map the register to the hex code for the opcode
 fn map_reg_to_hex(input: &str) -> String {
     match input.to_uppercase().as_str() {
-        "A" => "0".to_string(),
-        "B" => "1".to_string(),
-        "C" => "2".to_string(),
-        "D" => "3".to_string(),
-        "E" => "4".to_string(),
-        "F" => "5".to_string(),
-        "G" => "6".to_string(),
-        "H" => "7".to_string(),
-        "I" => "8".to_string(),
-        "J" => "9".to_string(),
-        "K" => "A".to_string(),
-        "L" => "B".to_string(),
-        "M" => "C".to_string(),
-        "N" => "D".to_string(),
-        "O" => "E".to_string(),
-        "P" => "F".to_string(),
-        _ => "X".to_string(),
+        "A" => "0".to_owned(),
+        "B" => "1".to_owned(),
+        "C" => "2".to_owned(),
+        "D" => "3".to_owned(),
+        "E" => "4".to_owned(),
+        "F" => "5".to_owned(),
+        "G" => "6".to_owned(),
+        "H" => "7".to_owned(),
+        "I" => "8".to_owned(),
+        "J" => "9".to_owned(),
+        "K" => "A".to_owned(),
+        "L" => "B".to_owned(),
+        "M" => "C".to_owned(),
+        "N" => "D".to_owned(),
+        "O" => "E".to_owned(),
+        "P" => "F".to_owned(),
+        _ => "X".to_owned(),
     }
 }
 
@@ -297,10 +297,10 @@ pub fn add_registers(
             Some(filename),
             MessageType::Error,
         );
-        return "ERR     ".to_string();
+        return "ERR     ".to_owned();
     }
 
-    opcode_found = opcode_found[..(8 - num_registers) as usize].to_string();
+    opcode_found = opcode_found[..(8 - num_registers) as usize].to_owned();
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
@@ -316,7 +316,7 @@ pub fn add_registers(
             Some(filename),
             MessageType::Error,
         );
-        return "ERR     ".to_string();
+        return "ERR     ".to_owned();
     }
     opcode_found
 }
@@ -342,26 +342,26 @@ pub fn add_arguments(
         if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
             arguments.push_str(&{
                 let this = convert_argument(
-                    &word.to_string().to_uppercase(),
+                    &word.to_owned().to_uppercase(),
                     msg_list,
                     line_number,
-                    filename.to_string(),
+                    filename.to_owned(),
                     labels,
                 );
-                let default = "00000000".to_string();
+                let default = "00000000".to_owned();
                 this.map_or(default, |x| x)
             });
         }
         if i == num_registers as usize + 2 && num_arguments == 2 {
             arguments.push_str(&{
                 let this = convert_argument(
-                    &word.to_string().to_uppercase(),
+                    &word.to_owned().to_uppercase(),
                     msg_list,
                     line_number,
                     filename.to_owned(),
                     labels,
                 );
-                let default = "00000000".to_string();
+                let default = "00000000".to_owned();
                 this.map_or(default, |x| x)
             });
         }
@@ -557,7 +557,7 @@ mod tests {
             registers: 2,
             section: String::new(),
         });
-        let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("00005601"));
     }
 
@@ -575,7 +575,7 @@ mod tests {
             registers: 1,
             section: String::new(),
         });
-        let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
@@ -592,7 +592,7 @@ mod tests {
             registers: 1,
             section: String::new(),
         });
-        let output = add_registers(opcodes, &mut input, "test".to_string(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &mut input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
@@ -721,11 +721,11 @@ mod tests {
         assert_eq!(
             output,
             Some(Opcode {
-                text_name: "COPY".to_string(),
-                hex_opcode: "000001??".to_string(),
+                text_name: "COPY".to_owned(),
+                hex_opcode: "000001??".to_owned(),
                 registers: 2,
                 variables: 0,
-                comment: "Copy register".to_string(),
+                comment: "Copy register".to_owned(),
                 section: String::new(),
             })
         );
@@ -739,11 +739,11 @@ mod tests {
         assert_eq!(
             output,
             Some(Opcode {
-                text_name: "ANDV".to_string(),
-                hex_opcode: "0000086?".to_string(),
+                text_name: "ANDV".to_owned(),
+                hex_opcode: "0000086?".to_owned(),
                 registers: 1,
                 variables: 1,
-                comment: "AND register with value".to_string(),
+                comment: "AND register with value".to_owned(),
                 section: String::new(),
             })
         );
@@ -758,11 +758,11 @@ mod tests {
         assert_eq!(
             output,
             Some(Opcode {
-                text_name: "MOV".to_string(),
-                hex_opcode: "00000864".to_string(),
+                text_name: "MOV".to_owned(),
+                hex_opcode: "00000864".to_owned(),
                 registers: 0,
                 variables: 2,
-                comment: "Move from addr to addr".to_string(),
+                comment: "Move from addr to addr".to_owned(),
                 section: String::new(),
             })
         );
@@ -808,8 +808,8 @@ mod tests {
         assert_eq!(
             output,
             Some(Opcode {
-                text_name: "abcd".to_string(),
-                hex_opcode: "00001234".to_string(),
+                text_name: "abcd".to_owned(),
+                hex_opcode: "00001234".to_owned(),
                 registers: 0,
                 variables: 0,
                 comment: String::new(),
@@ -826,8 +826,8 @@ mod tests {
         assert_eq!(
             output,
             Some(Opcode {
-                text_name: "MOV".to_string(),
-                hex_opcode: "00000864".to_string(),
+                text_name: "MOV".to_owned(),
+                hex_opcode: "00000864".to_owned(),
                 registers: 0,
                 variables: 2,
                 comment: String::new(),
@@ -849,13 +849,13 @@ mod tests {
         let mut msg_list: MsgList = MsgList::new();
         let vh_list = vec![
             InputData {
-                input: "abc/* This is a comment */def".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "abc/* This is a comment */def".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "abc/* This is a comment */def".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "abc/* This is a comment */def".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 2,
             },
         ];
@@ -872,13 +872,13 @@ mod tests {
         let mut msg_list: MsgList = MsgList::new();
         let vh_list = vec![
             InputData {
-                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 2,
             },
         ];
@@ -888,20 +888,20 @@ mod tests {
         assert_eq!(
             opt_oplist.unwrap_or_default(),
             vec![Opcode {
-                text_name: "CMPRR".to_string(),
-                hex_opcode: "000005??".to_string(),
+                text_name: "CMPRR".to_owned(),
+                hex_opcode: "000005??".to_owned(),
                 registers: 2,
                 variables: 0,
-                comment: "Compare registers".to_string(),
+                comment: "Compare registers".to_owned(),
                 section: String::new(),
             }]
         );
         assert_eq!(
             opt_macro_list.unwrap_or_default(),
             vec![Macro {
-                name: "$WAIT".to_string(),
+                name: "$WAIT".to_owned(),
                 variables: 2,
-                items: ["DELAYV %1".to_string(), "DELAYV %2".to_string()].to_vec(),
+                items: ["DELAYV %1".to_owned(), "DELAYV %2".to_owned()].to_vec(),
                 comment: String::new()
             }]
         );
@@ -913,23 +913,23 @@ mod tests {
         let mut msg_list: MsgList = MsgList::new();
         let vh_list = vec![
             InputData {
-                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 2,
             },
             InputData {
-                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 3,
             },
             InputData {
-                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 4,
             },
         ];
@@ -962,28 +962,28 @@ mod tests {
         let mut msg_list: MsgList = MsgList::new();
         let vh_list = vec![
             InputData {
-                input: "/// Section 1".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "/// Section 1".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "16'h06??: t_push_addr;    // PUSH push value to reg".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "16'h06??: t_push_addr;    // PUSH push value to reg".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 2,
             },
             InputData {
-                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 3,
             },
             InputData {
-                input: "/// Section 2".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "/// Section 2".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 4,
             },
             InputData {
-                input: "16'h16??: t_pop_addr;    // POP push value to reg".to_string(),
-                file_name: "opcode_select.vh".to_string(),
+                input: "16'h16??: t_pop_addr;    // POP push value to reg".to_owned(),
+                file_name: "opcode_select.vh".to_owned(),
                 line_counter: 5,
             },
         ];
@@ -994,28 +994,28 @@ mod tests {
             opt_oplist.unwrap_or_default(),
             vec![
                 Opcode {
-                    text_name: "PUSH".to_string(),
-                    hex_opcode: "000006??".to_string(),
+                    text_name: "PUSH".to_owned(),
+                    hex_opcode: "000006??".to_owned(),
                     registers: 2,
                     variables: 0,
-                    comment: "push value to reg".to_string(),
-                    section: "Section 1".to_string(),
+                    comment: "push value to reg".to_owned(),
+                    section: "Section 1".to_owned(),
                 },
                 Opcode {
-                    text_name: "CMPRR".to_string(),
-                    hex_opcode: "000005??".to_string(),
+                    text_name: "CMPRR".to_owned(),
+                    hex_opcode: "000005??".to_owned(),
                     registers: 2,
                     variables: 0,
-                    comment: "Compare registers".to_string(),
-                    section: "Section 1".to_string(),
+                    comment: "Compare registers".to_owned(),
+                    section: "Section 1".to_owned(),
                 },
                 Opcode {
-                    text_name: "POP".to_string(),
-                    hex_opcode: "000016??".to_string(),
+                    text_name: "POP".to_owned(),
+                    hex_opcode: "000016??".to_owned(),
                     registers: 2,
                     variables: 0,
-                    comment: "push value to reg".to_string(),
-                    section: "Section 2".to_string(),
+                    comment: "push value to reg".to_owned(),
+                    section: "Section 2".to_owned(),
                 }
             ]
         );

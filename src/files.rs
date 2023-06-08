@@ -55,7 +55,7 @@ pub fn read_file_to_vector(
         }
     }
 
-    opened_files.push(filename.to_string());
+    opened_files.push(filename.to_owned());
 
     let buf = BufReader::new(file);
     let mut lines: Vec<InputData> = Vec::new();
@@ -71,7 +71,7 @@ pub fn read_file_to_vector(
                         msg_list.push(
                             format!("Missing include file name in {filename}"),
                             Some(line_number),
-                            Some(filename.to_string()),
+                            Some(filename.to_owned()),
                             MessageType::Error,
                         );
                         return None;
@@ -95,7 +95,7 @@ pub fn read_file_to_vector(
                         msg_list.push(
                             format!("Unable to open include file {new_include_file} in {filename}"),
                             Some(line_number),
-                            Some(filename.to_string()),
+                            Some(filename.to_owned()),
                             MessageType::Error,
                         );
                         //return None;
@@ -108,7 +108,7 @@ pub fn read_file_to_vector(
                 } else {
                     lines.push(InputData {
                         input: v,
-                        file_name: filename.to_string(),
+                        file_name: filename.to_owned(),
                         line_counter: line_number,
                     });
                 }
@@ -117,7 +117,7 @@ pub fn read_file_to_vector(
             Err(e) => msg_list.push(
                 format!("Error parsing opcode file: {e}"),
                 Some(line_number),
-                Some(filename.to_string()),
+                Some(filename.to_owned()),
                 MessageType::Error,
             ),
         }
@@ -241,6 +241,7 @@ pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str
 #[allow(clippy::impl_trait_in_params)]
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::integer_division)]
+#[allow(clippy::string_slice)]
 pub fn write_code_output_file(
     filename: impl AsRef<Path> + core::marker::Copy,
     pass2: &mut Vec<Pass2>,
@@ -423,10 +424,10 @@ pub fn format_opcodes(input: &mut String) -> String {
         return (*input).clone() + "              ";
     }
     if input.len() == 8 {
-        return input[0..4].to_string() + &input[4..8] + "         ";
+        return input[0..4].to_owned() + &input[4..8] + "         ";
     }
     if input.len() == 16 {
-        return input[0..4].to_string() + &input[4..8] + " " + &input[8..12] + &input[12..16];
+        return input[0..4].to_owned() + &input[4..8] + " " + &input[8..12] + &input[12..16];
     }
     (*input).clone()
 }
@@ -458,7 +459,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
         match available_ports {
             Err(_) => {
                 msg_list.push(
-                    "Error opening serial port, no ports found".to_string(),
+                    "Error opening serial port, no ports found".to_owned(),
                     None,
                     None,
                     MessageType::Error,
@@ -476,7 +477,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
                 }
 
                 let ports_msg = match max_ports {
-                    -1_i32 => "no ports were found".to_string(),
+                    -1_i32 => "no ports were found".to_owned(),
                     0_i32 => {
                         format!("only port {all_ports} was found")
                     }
@@ -539,7 +540,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 
     if ret_msg_size == 0 {
         msg_list.push(
-            "No message received from board".to_string(),
+            "No message received from board".to_owned(),
             None,
             None,
             MessageType::Warning,
@@ -584,16 +585,16 @@ mod test {
     // Test remove of comments in single line
     fn test_remove_block_comments1() {
         let input = vec![InputData {
-            input: "abc/* This is a comment */def".to_string(),
-            file_name: "test.kla".to_string(),
+            input: "abc/* This is a comment */def".to_owned(),
+            file_name: "test.kla".to_owned(),
             line_counter: 1,
         }];
         let output = remove_block_comments(input, &mut MsgList::new());
         assert_eq!(
             output,
             vec![InputData {
-                input: "abcdef".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "abcdef".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 1,
             }]
         );
@@ -604,13 +605,13 @@ mod test {
     fn test_remove_block_comments2() {
         let input = vec![
             InputData {
-                input: "abc/* This is a comment */def".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "abc/* This is a comment */def".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "abc/* This is a comment */def".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "abc/* This is a comment */def".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 2,
             },
         ];
@@ -619,13 +620,13 @@ mod test {
             output,
             vec![
                 InputData {
-                    input: "abcdef".to_string(),
-                    file_name: "test.kla".to_string(),
+                    input: "abcdef".to_owned(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 1,
                 },
                 InputData {
-                    input: "abcdef".to_string(),
-                    file_name: "test.kla".to_string(),
+                    input: "abcdef".to_owned(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 2
                 },
             ]
@@ -637,13 +638,13 @@ mod test {
     fn test_remove_block_comments3() {
         let input = vec![
             InputData {
-                input: "abc/* This is a comment ".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "abc/* This is a comment ".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "so is this */def".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "so is this */def".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 2,
             },
         ];
@@ -652,13 +653,13 @@ mod test {
             output,
             vec![
                 InputData {
-                    input: "abc".to_string(),
-                    file_name: "test.kla".to_string(),
+                    input: "abc".to_owned(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 1,
                 },
                 InputData {
-                    input: "def".to_string(),
-                    file_name: "test.kla".to_string(),
+                    input: "def".to_owned(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 2,
                 },
             ]
@@ -670,18 +671,18 @@ mod test {
     fn test_remove_block_comments4() {
         let input = vec![
             InputData {
-                input: "abc/* This is a comment ".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "abc/* This is a comment ".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "so is this def".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "so is this def".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 2,
             },
             InputData {
-                input: "*/def".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "*/def".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 3,
             },
         ];
@@ -690,18 +691,18 @@ mod test {
             output,
             vec![
                 InputData {
-                    input: "abc".to_string(),
-                    file_name: "test.kla".to_string(),
+                    input: "abc".to_owned(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 1,
                 },
                 InputData {
                     input: String::new(),
-                    file_name: "test.kla".to_string(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 2,
                 },
                 InputData {
-                    input: "def".to_string(),
-                    file_name: "test.kla".to_string(),
+                    input: "def".to_owned(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 3,
                 },
             ]
@@ -713,18 +714,18 @@ mod test {
     fn test_remove_block_comments5() {
         let input = vec![
             InputData {
-                input: "abc/* This is a /* /*comment ".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "abc/* This is a /* /*comment ".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "so is this def".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "so is this def".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 2,
             },
             InputData {
-                input: "*/def".to_string(),
-                file_name: "test.kla".to_string(),
+                input: "*/def".to_owned(),
+                file_name: "test.kla".to_owned(),
                 line_counter: 3,
             },
         ];
@@ -733,18 +734,18 @@ mod test {
             output,
             vec![
                 InputData {
-                    input: "abc".to_string(),
-                    file_name: "test.kla".to_string(),
+                    input: "abc".to_owned(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 1,
                 },
                 InputData {
                     input: String::new(),
-                    file_name: "test.kla".to_string(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 2,
                 },
                 InputData {
-                    input: "def".to_string(),
-                    file_name: "test.kla".to_string(),
+                    input: "def".to_owned(),
+                    file_name: "test.kla".to_owned(),
                     line_counter: 3,
                 },
             ]
@@ -757,18 +758,18 @@ mod test {
         let msg_list = &mut MsgList::new();
         let input = vec![
             InputData {
-                input: "abc/* This is a /* /*comment ".to_string(),
-                file_name: "test1.kla".to_string(),
+                input: "abc/* This is a /* /*comment ".to_owned(),
+                file_name: "test1.kla".to_owned(),
                 line_counter: 1,
             },
             InputData {
-                input: "so is this def".to_string(),
-                file_name: "test1.kla".to_string(),
+                input: "so is this def".to_owned(),
+                file_name: "test1.kla".to_owned(),
                 line_counter: 2,
             },
             InputData {
-                input: "def".to_string(),
-                file_name: "test2.kla".to_string(),
+                input: "def".to_owned(),
+                file_name: "test2.kla".to_owned(),
                 line_counter: 3,
             },
         ];
@@ -777,18 +778,18 @@ mod test {
             output,
             vec![
                 InputData {
-                    input: "abc".to_string(),
-                    file_name: "test1.kla".to_string(),
+                    input: "abc".to_owned(),
+                    file_name: "test1.kla".to_owned(),
                     line_counter: 1,
                 },
                 InputData {
                     input: String::new(),
-                    file_name: "test1.kla".to_string(),
+                    file_name: "test1.kla".to_owned(),
                     line_counter: 2,
                 },
                 InputData {
-                    input: "def".to_string(),
-                    file_name: "test2.kla".to_string(),
+                    input: "def".to_owned(),
+                    file_name: "test2.kla".to_owned(),
                     line_counter: 3,
                 },
             ]
@@ -814,12 +815,12 @@ mod test {
     fn test_get_include_filename() {
         assert_eq!(
             get_include_filename("!include myfile.name"),
-            Some("myfile.name".to_string())
+            Some("myfile.name".to_owned())
         );
         assert_eq!(get_include_filename("test_line"), None);
         assert_eq!(
             get_include_filename("!include myfile.name extra words"),
-            Some("myfile.name".to_string())
+            Some("myfile.name".to_owned())
         );
         assert_eq!(get_include_filename("!include"), Some(String::new()));
         assert_eq!(
@@ -831,8 +832,8 @@ mod test {
     #[test]
     // Check correct filename stem is returned
     fn test_filename_stem() {
-        assert_eq!(filename_stem(&"file.type".to_string()), "file");
-        assert_eq!(filename_stem(&"file".to_string()), "file");
+        assert_eq!(filename_stem(&"file.type".to_owned()), "file");
+        assert_eq!(filename_stem(&"file".to_owned()), "file");
         assert_eq!(
             filename_stem(&format!(
                 "{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file.kla"
@@ -849,22 +850,22 @@ mod test {
     // Check for formatting of codes used for debug file
     fn test_format_opcodes() {
         assert_eq!(
-            format_opcodes(&mut "0000000000000000".to_string()),
+            format_opcodes(&mut "0000000000000000".to_owned()),
             "00000000 00000000"
         );
         assert_eq!(
-            format_opcodes(&mut "0000".to_string()),
+            format_opcodes(&mut "0000".to_owned()),
             "0000              "
         );
         assert_eq!(
-            format_opcodes(&mut "0123456789ABCDEF".to_string()),
+            format_opcodes(&mut "0123456789ABCDEF".to_owned()),
             "01234567 89ABCDEF"
         );
         assert_eq!(
-            format_opcodes(&mut "12345678".to_string()),
+            format_opcodes(&mut "12345678".to_owned()),
             "12345678         "
         );
-        assert_eq!(format_opcodes(&mut "123".to_string()), "123");
+        assert_eq!(format_opcodes(&mut "123".to_owned()), "123");
     }
 
     #[test]
