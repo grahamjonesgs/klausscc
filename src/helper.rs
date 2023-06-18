@@ -279,7 +279,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
 #[allow(clippy::ptr_arg)]
-pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> String {
+pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Option<String> {
     let mut output_string = String::new();
 
     output_string.push('S'); // Start character
@@ -324,6 +324,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
             None,
             MessageType::Error,
         );
+        return None
     } else {
         msg_list.push(
             "Multiple start addresses found".to_owned(),
@@ -331,6 +332,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
             None,
             MessageType::Error,
         );
+        return None
     }
 
     // Add writing Z0010 and then checksum.
@@ -342,7 +344,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Stri
 
     output_string.push('X'); // Stop character
 
-    output_string
+    Some(output_string)
 }
 
 /// Trim newline from string
@@ -439,16 +441,24 @@ mod tests {
         assert_eq!(s, "Hello");
     }
     #[test]
-    // Test that the bin_string is created correctly
+    // Test that the bin_string is created correctly with start value
 
-    fn test_create_bin_string() {
+    fn test_create_bin_string1() {
         let mut pass2 = Vec::new();
+        pass2.push(Pass2 {
+            opcode: String::new(),
+            file_name: String::from("test"),
+            input: String::new(),
+            line_counter: 0,
+            program_counter: 1,
+            line_type: LineType::Start,
+        });
         pass2.push(Pass2 {
             opcode: String::from("1234"),
             file_name: String::from("test"),
             input: String::new(),
             line_counter: 0,
-            program_counter: 0,
+            program_counter: 3,
             line_type: LineType::Data,
         });
         pass2.push(Pass2 {
@@ -456,21 +466,84 @@ mod tests {
             input: String::new(),
             file_name: String::from("test"),
             line_counter: 0,
-            program_counter: 0,
-            line_type: LineType::Data,
-        });
-        pass2.push(Pass2 {
-            opcode: String::from("9999"),
-            input: String::new(),
-            file_name: String::from("test"),
-            line_counter: 0,
-            program_counter: 0,
+            program_counter: 5,
             line_type: LineType::Data,
         });
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(&mut pass2, &mut msg_list);
-        assert_eq!(bin_string, "S123443219999Z0010EF01X");
+        assert_eq!(bin_string, Some("S1234432100000001Z0010556AX".to_owned()));
     }
+
+    #[test]
+    // Test that the bin_string is null if duplicate starts
+
+    fn test_create_bin_string2() {
+        let mut pass2 = Vec::new();
+        pass2.push(Pass2 {
+            opcode: String::new(),
+            file_name: String::from("test"),
+            input: String::new(),
+            line_counter: 0,
+            program_counter: 1,
+            line_type: LineType::Start,
+        });
+        pass2.push(Pass2 {
+            opcode: String::new(),
+            file_name: String::from("test"),
+            input: String::new(),
+            line_counter: 0,
+            program_counter: 3,
+            line_type: LineType::Start,
+        });
+        pass2.push(Pass2 {
+            opcode: String::from("4321"),
+            input: String::new(),
+            file_name: String::from("test"),
+            line_counter: 0,
+            program_counter: 5,
+            line_type: LineType::Data,
+        });
+        let mut msg_list = MsgList::new();
+        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+        assert_eq!(bin_string, None);
+        assert_eq!(msg_list.list[0].name, "Multiple start addresses found");
+    }
+
+    #[test]
+    // Test that the bin_string is null if no starts
+
+    fn test_create_bin_string3() {
+        let mut pass2 = Vec::new();
+        pass2.push(Pass2 {
+            opcode: String::new(),
+            file_name: String::from("test"),
+            input: String::new(),
+            line_counter: 0,
+            program_counter: 1,
+            line_type: LineType::Comment,
+        });
+        pass2.push(Pass2 {
+            opcode: String::from("1234"),
+            file_name: String::from("test"),
+            input: String::new(),
+            line_counter: 0,
+            program_counter: 3,
+            line_type: LineType::Data,
+        });
+        pass2.push(Pass2 {
+            opcode: String::from("4321"),
+            input: String::new(),
+            file_name: String::from("test"),
+            line_counter: 0,
+            program_counter: 5,
+            line_type: LineType::Data,
+        });
+        let mut msg_list = MsgList::new();
+        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+        assert_eq!(bin_string, None);
+        assert_eq!(msg_list.list[0].name, "No start address found");
+    }
+
 
     #[test]
     // Test that comment is stripped
@@ -597,8 +670,17 @@ mod tests {
     }
 
     #[test]
-    // Test for error line type
+    // Test for start line type
     fn test_line_type6() {
+        let mut input = String::from("_start");
+        let opcodes = &mut Vec::<Opcode>::new();
+        let output = line_type(opcodes, &mut input);
+        assert_eq!(output, LineType::Start);
+    }
+
+    #[test]
+    // Test for error line type
+    fn test_line_type7() {
         let mut input = String::from("1234");
         let opcodes = &mut Vec::<Opcode>::new();
         let output = line_type(opcodes, &mut input);

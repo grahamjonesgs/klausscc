@@ -374,9 +374,10 @@ pub fn add_arguments(
             );
         }
     }
+    
+    // Can't be in tarpaulin as we can't test the error by passing wrong size
     if arguments.len() != 8 * num_arguments as usize {
         #[cfg(not(tarpaulin_include))]
-        // Needs errors in previous functions to produce wrong length
         msg_list.push(
             format!("Incorrect argument definition - \"{line}\""),
             Some(line_number),

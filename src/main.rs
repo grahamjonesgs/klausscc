@@ -16,6 +16,7 @@
 #![allow(clippy::cargo_common_metadata)]
 #![allow(clippy::multiple_crate_versions)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
+#![allow(clippy::string_slice)]
 
 mod files;
 mod helper;
@@ -154,10 +155,20 @@ fn main() -> Result<(), i32> {
     }
 
     if msg_list.number_errors() == 0 {
-        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
-        write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
-        if !output_serial_port.is_empty() {
-            write_to_device(&mut msg_list, &bin_string, &output_serial_port);
+        // let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+        if let Some(bin_string) = create_bin_string(&mut pass2, &mut msg_list) {
+            write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
+            if !output_serial_port.is_empty() {
+                write_to_device(&mut msg_list, &bin_string, &output_serial_port);
+            }
+        } else {
+            _ = std::fs::remove_file(&binary_file_name);
+            msg_list.push(
+                "Not writing binary file due to assembly errors".to_owned(),
+                None,
+                None,
+                MessageType::Warning,
+            );
         }
     } else {
         _ = std::fs::remove_file(&binary_file_name);
@@ -223,7 +234,7 @@ pub fn set_matches() -> Command {
                 .action(ArgAction::SetTrue)
                 .help("Set if output of opcode.macro list is required"),
         )
-         .arg(
+        .arg(
             Arg::new("textmate")
                 .short('t')
                 .long("textmate")
@@ -238,7 +249,7 @@ pub fn set_matches() -> Command {
                 .long("serial")
                 .num_args(1)
                 .help("Serial port for output"),
-        ) 
+        )
 }
 /// Prints results of assembly
 ///
