@@ -4,45 +4,73 @@ use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::messages::{MessageType, MsgList};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// Struct for opcode
 pub struct Opcode {
+    /// Text name of opcode
     pub text_name: String,
+    /// Hexadecimal opcode
     pub hex_opcode: String,
+    /// Number of registers
     pub registers: u32,
+    /// Number of variables
     pub variables: u32,
+    /// Comment from opcode definition file
     pub comment: String,
+    /// Section name from opcode definition file
     pub section: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// Struct for opcode argument
 pub struct InputData {
+    /// Text name of opcode
     pub input: String,
+    /// File name of input file
     pub file_name: String,
+    /// Line number of input file
     pub line_counter: u32,
 }
 
 #[derive(Debug)]
+/// Struct for Pass0
 pub struct Pass0 {
-    pub input: String,
+    /// Line text
+    pub input_text_line: String,
+    /// File name of input file
     pub file_name: String,
+    /// Line number of input file
     pub line_counter: u32,
 }
 
 #[derive(Debug)]
+/// Struct for Pass1
 pub struct Pass1 {
-    pub input: String,
+    /// Line text
+    pub input_text_line: String,
+    /// File name of input file
     pub file_name: String,
+    /// Line number of input file
     pub line_counter: u32,
+    /// Program counter
     pub program_counter: u32,
+    /// Line type
     pub line_type: LineType,
 }
 
 #[derive(Debug,Clone)]
+/// Struct for Pass2
 pub struct Pass2 {
-    pub input: String,
+    /// Line text
+    pub input_text_line: String,
+    /// File name of input file
     pub file_name: String,
+    /// Line number of input file
     pub line_counter: u32,
+    /// Program counter
     pub program_counter: u32,
+    /// Line type
     pub line_type: LineType,
+    /// Opcode as string
     pub opcode: String,
 }
 
@@ -709,7 +737,7 @@ mod tests {
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             "Too many arguments found - \"PUSH 1 0xF\""
         );
     }
@@ -938,11 +966,11 @@ mod tests {
         let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             "Duplicate Macro definition $WAIT found"
         );
         assert_eq!(msg_list.list[0].line_number, Some(3));
-        assert_eq!(msg_list.list[1].name, "Duplicate Opcode CMPRR found");
+        assert_eq!(msg_list.list[1].text, "Duplicate Opcode CMPRR found");
         assert_eq!(msg_list.list[1].line_number, Some(4));
     }
     #[test]

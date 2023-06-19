@@ -11,6 +11,8 @@ use std::{
 };
 
 #[derive(PartialEq, Eq, Debug, Clone)]
+#[allow(clippy::missing_docs_in_private_items)]
+/// Defines the type of line
 pub enum LineType {
     Comment,
     Blank,
@@ -267,7 +269,7 @@ pub fn write_code_output_file(
                 "0x{:08X}: {:<16} -- {}\n",
                 pass.program_counter,
                 format_opcodes(&mut pass.opcode),
-                pass.input
+                pass.input_text_line
             );
         } else if pass.line_type == LineType::Data {
             for n in 0..pass.opcode.len() / 8 {
@@ -276,7 +278,7 @@ pub fn write_code_output_file(
                         "0x{:08X}: {:<16}  -- {}\n",
                         pass.program_counter + n as u32,
                         &mut pass.opcode[n * 8..n * 8 + 8],
-                        pass.input
+                        pass.input_text_line
                     )
                     .as_str(),
                 );
@@ -284,12 +286,12 @@ pub fn write_code_output_file(
         } else if pass.line_type == LineType::Label {
             out_line = format!(
                 "0x{:08X}:                   -- {}\n",
-                pass.program_counter, pass.input
+                pass.program_counter, pass.input_text_line
             );
         } else if pass.line_type == LineType::Error {
-            out_line = format!("Error                         -- {}\n", pass.input);
+            out_line = format!("Error                         -- {}\n", pass.input_text_line);
         } else {
-            out_line = format!("                              -- {}\n", pass.input);
+            out_line = format!("                              -- {}\n", pass.input_text_line);
         }
         if file.write(out_line.as_bytes()).is_err() {
             return false;
@@ -304,6 +306,7 @@ pub fn write_code_output_file(
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
 #[allow(clippy::impl_trait_in_params)]
 #[allow(clippy::print_stdout)]
+#[allow(clippy::let_underscore_must_use)]
 pub fn output_macros_opcodes(
     filename: impl AsRef<Path> + core::clone::Clone,
     opcodes: &[Opcode],
@@ -794,7 +797,7 @@ mod test {
             ]
         );
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             "Comment not terminated in file test1.kla"
         );
     }
@@ -878,10 +881,11 @@ mod test {
         let mut msg_list = MsgList::new();
         let mut opened_files: Vec<String> = Vec::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list, &mut opened_files);
-        assert_eq!(msg_list.list[0].name, "Unable to open file ////xxxxxxx");
+        assert_eq!(msg_list.list[0].text, "Unable to open file ////xxxxxxx");
     }
 
     #[test]
+    #[allow(clippy::let_underscore_must_use)]
     // Test for simple file added
     fn test_write_file_to_vec2() {
         let mut msg_list = MsgList::new();
@@ -907,6 +911,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::let_underscore_must_use)]
     // Test for included file
     fn test_write_file_to_vec3() {
         let mut msg_list = MsgList::new();
@@ -951,6 +956,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::let_underscore_must_use)]
     // Test for recursive file includes
     fn test_write_file_to_vec4() {
         let mut msg_list = MsgList::new();
@@ -976,7 +982,7 @@ mod test {
 
         _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             format!("Recursive include of file {file_name1}")
         );
 
@@ -986,6 +992,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::let_underscore_must_use)]
     // Test for missing included file
     fn test_write_file_to_vec5() {
         let mut msg_list = MsgList::new();
@@ -1006,11 +1013,11 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             format!("Unable to open file {file_name2}")
         );
         assert_eq!(
-            msg_list.list[1].name,
+            msg_list.list[1].text,
             format!("Unable to open include file {file_name2} in {file_name1}")
         );
         assert_eq!(lines, Some(vec![]));
@@ -1019,6 +1026,7 @@ mod test {
         _ = tmp_dir.close();
     }
     #[test]
+    #[allow(clippy::let_underscore_must_use)]
     // Test for missing included file name
     fn test_write_file_to_vec6() {
         let mut msg_list = MsgList::new();
@@ -1036,7 +1044,7 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             format!("Missing include file name in {file_name1}")
         );
         assert_eq!(lines, None);
@@ -1046,6 +1054,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::let_underscore_must_use)]
     // Test for double included file
     fn test_write_file_to_vec7() {
         let mut msg_list = MsgList::new();
@@ -1077,11 +1086,11 @@ mod test {
 
         _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             format!("Unable to open file {file_name3}")
         );
         assert_eq!(
-            msg_list.list[1].name,
+            msg_list.list[1].text,
             format!("Unable to open include file {file_name3} in {file_name2}")
         );
 

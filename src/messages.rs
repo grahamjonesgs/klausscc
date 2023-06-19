@@ -2,31 +2,46 @@ use chrono::{Local, NaiveTime};
 use colored::{ColoredString, Colorize};
 
 #[derive(PartialEq, Eq, Debug)]
+/// Enum for message type
 pub enum MessageType {
+    /// Error message
     Error,
+    /// Warning message
     Warning,
+    /// Information message
     Information,
 }
 
 #[derive(Debug)]
+/// Struct for message
 pub struct Message {
-    pub name: String,
+    /// Text of message
+    pub text: String,
+    /// File name of file causing message if exists
     pub file_name: Option<String>,
+    /// Line number in file causing message if exists
     pub line_number: Option<u32>,
+    /// Message type
     pub level: MessageType,
+    /// Time of message
     pub time: NaiveTime,
 }
 
 #[derive(Debug)]
+/// Struct for list of messages
 pub struct MsgList {
+    /// Vector of messages
     pub list: Vec<Message>,
 }
 
+/// Implementation of `MsgList`
 impl MsgList {
+    /// Create new `MsgList`
     pub const fn new() -> Self {
         Self { list: Vec::new() }
     }
 
+    /// Push message to `MsgList`
     pub fn push(
         &mut self,
         name: String,
@@ -35,13 +50,15 @@ impl MsgList {
         msg_type: MessageType,
     ) {
         self.list.push(Message {
-            name,
+            text: name,
             line_number,
             file_name,
             level: msg_type,
             time: Local::now().time(),
         });
     }
+
+    /// Returns number of errors in `MsgList`
     pub fn number_errors(&self) -> usize {
         let errors = self
             .list
@@ -50,6 +67,8 @@ impl MsgList {
             .count();
         errors
     }
+
+    /// Returns number of warnings in `MsgList`
     pub fn number_warnings(&self) -> usize {
         let errors = self
             .list
@@ -83,7 +102,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                         message_level,
                         msg.line_number.unwrap_or_default(),
                         msg.file_name.clone().unwrap_or_default(),
-                        msg.name
+                        msg.text
                     )
                 }
                 else {
@@ -92,7 +111,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                         msg.time.format("%H:%M:%S%.3f"),
                         message_level,
                         msg.line_number.unwrap_or_default(),
-                        msg.name
+                        msg.text
                     )
                 }
             } else if msg.file_name.is_some() {
@@ -101,7 +120,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                     msg.time.format("%H:%M:%S%.3f"),
                     message_level,
                     msg.file_name.clone().unwrap_or_default(),
-                    msg.name
+                    msg.text
                 )
             }
             else {
@@ -109,7 +128,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                     "{} {} {} ",
                     msg.time.format("%H:%M:%S%.3f"),
                     message_level,
-                    msg.name
+                    msg.text
                 )
             }
         );
@@ -131,7 +150,7 @@ mod tests {
             MessageType::Information,
         );
         assert_eq!(msg_list.list.len(), 1);
-        assert_eq!(msg_list.list[0].name, "Test");
+        assert_eq!(msg_list.list[0].text, "Test");
         assert_eq!(msg_list.list[0].level, MessageType::Information);
         assert_eq!(msg_list.list[0].line_number, None);
     }

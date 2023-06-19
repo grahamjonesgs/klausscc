@@ -3,8 +3,11 @@ use crate::messages::{MessageType, MsgList};
 use crate::opcodes::Pass1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+/// Label struct
 pub struct Label {
-    pub program_counter: u32,
+    /// Program counter derived from Pass1
+    pub program_counter: u32, 
+    /// Label name as text without colon
     pub name: String,
 }
 
@@ -150,15 +153,15 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     let labels: Vec<Label> = pass1
         .iter()
         .filter(|n| {
-            label_name_from_string(&n.input).is_some() || data_name_from_string(&n.input).is_some()
+            label_name_from_string(&n.input_text_line).is_some() || data_name_from_string(&n.input_text_line).is_some()
         })
         .map(|n| -> Label {
             Label {
                 program_counter: n.program_counter,
                 name: {
-                    let this = label_name_from_string(&n.input);
+                    let this = label_name_from_string(&n.input_text_line);
                     this.map_or_else(
-                        || data_name_from_string(&n.input).unwrap_or_default(),
+                        || data_name_from_string(&n.input_text_line).unwrap_or_default(),
                         |x| x,
                     )
                 },
@@ -166,8 +169,8 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
         })
         .collect();
     for line in pass1.iter() {
-        if label_name_from_string(&line.input).is_some() {
-            let mut words = line.input.split_whitespace();
+        if label_name_from_string(&line.input_text_line).is_some() {
+            let mut words = line.input_text_line.split_whitespace();
             let first_word = words.next().unwrap_or("");
             let second_word = words.next();
             if second_word.is_some() {
@@ -184,10 +187,10 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
         }
     }
     for line in pass1.iter() {
-        if data_name_from_string(&line.input).is_some() {
-            let mut words = line.input.split_whitespace();
+        if data_name_from_string(&line.input_text_line).is_some() {
+            let mut words = line.input_text_line.split_whitespace();
             let first_word = words.next().unwrap_or("");
-            let remaining_line = line.input.trim_start_matches(first_word).trim();
+            let remaining_line = line.input_text_line.trim_start_matches(first_word).trim();
             let second_word = words.next();
             let third_word = words.next();
             if third_word.is_some() && !second_word.unwrap_or_default().starts_with('\"') {
@@ -305,7 +308,7 @@ mod tests {
         assert_eq!(msg_list.number_warnings(), 0);
 
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             "Duplicate label label1 found, with differing values"
         );
     }
@@ -393,7 +396,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].name,
+            msg_list.list[msg_list.list.len() - 1].text,
             "Decimal value label1 incorrect".to_owned()
         );
 
@@ -409,7 +412,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].name,
+            msg_list.list[msg_list.list.len() - 1].text,
             "Hex value out 0x123456789 of bounds".to_owned()
         );
 
@@ -419,7 +422,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].name,
+            msg_list.list[msg_list.list.len() - 1].text,
             "Label label3: not found - line 14".to_owned()
         );
 
@@ -435,7 +438,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].name,
+            msg_list.list[msg_list.list.len() - 1].text,
             "Decimal value out 4294967296 of bounds".to_owned()
         );
 
@@ -445,7 +448,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].name,
+            msg_list.list[msg_list.list.len() - 1].text,
             "Label #data2 not found".to_owned()
         );
 
@@ -455,7 +458,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].name,
+            msg_list.list[msg_list.list.len() - 1].text,
             "Hex value 0xGGG incorrect".to_owned()
         );
 
@@ -471,70 +474,70 @@ mod tests {
                 program_counter: 0,
                 file_name: String::from("test"),
                 line_counter: 0,
-                input: "label1:".to_owned(),
+                input_text_line: "label1:".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 2,
                 file_name: String::from("test"),
                 line_counter: 0,
-                input: "xxxx".to_owned(),
+                input_text_line: "xxxx".to_owned(),
                 line_type: LineType::Opcode,
             },
             Pass1 {
                 program_counter: 4,
                 file_name: String::from("test"),
                 line_counter: 1,
-                input: "label2:".to_owned(),
+                input_text_line: "label2:".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 6,
                 file_name: String::from("test"),
                 line_counter: 2,
-                input: "label3:".to_owned(),
+                input_text_line: "label3:".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 7,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data321".to_owned(),
+                input_text_line: "#data321".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 7,
                 file_name: String::from("test"),
                 line_counter: 4,
-                input: "test".to_owned(),
+                input_text_line: "test".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 8,
                 file_name: String::from("test"),
                 line_counter: 7,
-                input: "label1: dummy".to_owned(),
+                input_text_line: "label1: dummy".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 7,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data123 0xFFFF dummy2".to_owned(),
+                input_text_line: "#data123 0xFFFF dummy2".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 8,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data2 \"TEST WITH SPACES\"".to_owned(),
+                input_text_line: "#data2 \"TEST WITH SPACES\"".to_owned(),
                 line_type: LineType::Label,
             },
             Pass1 {
                 program_counter: 9,
                 file_name: String::from("test"),
                 line_counter: 3,
-                input: "#data3 \"TEST WITH NO TERMINATION".to_owned(),
+                input_text_line: "#data3 \"TEST WITH NO TERMINATION".to_owned(),
                 line_type: LineType::Label,
             },
         ];
@@ -567,10 +570,10 @@ mod tests {
                 name: "#data321".to_owned(),
             }
         );
-        assert_eq!(msglist.list[0].name, "Label label1: has extra text dummy");
-        assert_eq!(msglist.list[1].name, "Data #data123 has extra text dummy2");
+        assert_eq!(msglist.list[0].text, "Label label1: has extra text dummy");
+        assert_eq!(msglist.list[1].text, "Data #data123 has extra text dummy2");
         assert_eq!(
-            msglist.list[2].name,
+            msglist.list[2].text,
             "Data #data3 has no string termination"
         );
     }

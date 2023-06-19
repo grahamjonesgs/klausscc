@@ -2,6 +2,13 @@
 name = "klausscc"
 version = "0.1.0"
 edition = "2021"
+authors = ["Graham jones"]
+description = "Assembler for Klauss microcontroller defined in FPGA"
+repository = "https://github.com/grahamjonesgs/klausscc.git"
+readme = "README.md"
+license = "MIT"
+keywords = ["assembler"]
+categories = ["development-tools"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

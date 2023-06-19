@@ -5,25 +5,29 @@
     clippy::nursery,
     clippy::cargo
 )]
-#![allow(clippy::missing_docs_in_private_items)]
 #![allow(clippy::arithmetic_side_effects)]
-#![allow(clippy::let_underscore_must_use)]
 #![allow(clippy::implicit_return)]
 #![allow(clippy::string_add)]
 #![allow(clippy::indexing_slicing)]
+#![allow(clippy::string_slice)]
 #![allow(clippy::as_conversions)]
 #![allow(clippy::separated_literal_suffix)]
-#![allow(clippy::cargo_common_metadata)]
 #![allow(clippy::multiple_crate_versions)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
-#![allow(clippy::string_slice)]
+//! Top level file for Klausscc
 
+/// Module to manage file read and write
 mod files;
+/// Module of helper functions
 mod helper;
+/// Module to manage labels
 mod labels;
+/// Module to manage macros
 mod macros;
+/// Module to manage messages
 mod messages;
-mod opcodes;
+/// Module to manage opcodes
+mod opcodes; 
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{
@@ -52,25 +56,25 @@ fn main() -> Result<(), i32> {
     let start_time: NaiveTime = Local::now().time();
 
     let matches = set_matches().get_matches();
-    let opcode_file_name = matches
+    let opcode_file_name: String = matches
         .get_one::<String>("opcode_file")
         .unwrap_or(&"opcode_select.vh".to_owned())
         .replace(' ', "");
-    let input_file_name = matches
+    let input_file_name: String = matches
         .get_one::<String>("input")
         .unwrap_or(&String::new())
         .replace(' ', "");
-    let binary_file_name = matches
+    let binary_file_name: String = matches
         .get_one::<String>("bitcode")
         .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "")
         + ".kbt";
-    let output_file_name = matches
+    let output_file_name: String = matches
         .get_one::<String>("output")
         .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "")
         + ".code";
-    let output_serial_port = matches
+    let output_serial_port: String = matches
         .get_one::<String>("serial")
         .unwrap_or(&String::new())
         .replace(' ', "");
@@ -162,18 +166,32 @@ fn main() -> Result<(), i32> {
                 write_to_device(&mut msg_list, &bin_string, &output_serial_port);
             }
         } else {
-            _ = std::fs::remove_file(&binary_file_name);
+            if std::fs::remove_file(&binary_file_name).is_ok() {
+                msg_list.push(
+                    "Removed old binary file".to_owned(),
+                    None,
+                    None,
+                    MessageType::Warning,
+                );
+            }
             msg_list.push(
-                "Not writing binary file due to assembly errors".to_owned(),
+                "Not writing binary file due to assembly errors creating binary file".to_owned(),
                 None,
                 None,
                 MessageType::Warning,
             );
         }
     } else {
-        _ = std::fs::remove_file(&binary_file_name);
+         if std::fs::remove_file(&binary_file_name).is_ok() {
+            msg_list.push(
+                "Removed old binary file".to_owned(),
+                None,
+                None,
+                MessageType::Warning,
+            );
+        }
         msg_list.push(
-            "Not writing binary file due to assembly errors".to_owned(),
+            "Not writing new binary file due to assembly errors".to_owned(),
             None,
             None,
             MessageType::Warning,
@@ -291,28 +309,28 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
 
     for mut pass in pass0 {
         pass1.push(Pass1 {
-            input: pass.input.clone(),
+            input_text_line: pass.input_text_line.clone(),
             file_name: pass.file_name.clone(),
             line_counter: pass.line_counter,
             program_counter,
-            line_type: line_type(&mut oplist, &mut pass.input),
+            line_type: line_type(&mut oplist, &mut pass.input_text_line),
         });
-        if !is_valid_line(&mut oplist, strip_comments(&mut pass.input)) {
+        if !is_valid_line(&mut oplist, strip_comments(&mut pass.input_text_line)) {
             msg_list.push(
-                format!("Error {}", pass.input),
+                format!("Error {}", pass.input_text_line),
                 Some(pass.line_counter),
                 Some(pass.file_name.clone()),
                 MessageType::Error,
             );
         }
-        if line_type(&mut oplist, &mut pass.input) == LineType::Opcode {
-            let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input));
+        if line_type(&mut oplist, &mut pass.input_text_line) == LineType::Opcode {
+            let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input_text_line));
             if let Some(p) = num_args {
                 program_counter = program_counter + p + 1;
             }
         }
 
-        if line_type(&mut oplist, &mut pass.input) == LineType::Data {
+        if line_type(&mut oplist, &mut pass.input_text_line) == LineType::Data {
             data_pass0.push(pass);
             pass1.pop();
         }
@@ -320,14 +338,14 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
     #[allow(clippy::integer_division)]
     for mut data_pass in data_pass0 {
         pass1.push(Pass1 {
-            input: data_pass.input.clone(),
+            input_text_line: data_pass.input_text_line.clone(),
             file_name: data_pass.file_name.clone(),
             line_counter: data_pass.line_counter,
             program_counter,
-            line_type: line_type(&mut oplist, &mut data_pass.input),
+            line_type: line_type(&mut oplist, &mut data_pass.input_text_line),
         });
         program_counter += num_data_bytes(
-            &data_pass.input,
+            &data_pass.input_text_line,
             msg_list,
             data_pass.line_counter,
             data_pass.file_name,
@@ -350,13 +368,13 @@ pub fn get_pass2(
         let new_opcode = if line.line_type == LineType::Opcode {
             add_registers(
                 &mut oplist,
-                &mut strip_comments(&mut line.input.clone()),
+                &mut strip_comments(&mut line.input_text_line.clone()),
                 line.file_name.clone(),
                 msg_list,
                 line.line_counter,
             ) + add_arguments(
                 &mut oplist,
-                &mut strip_comments(&mut line.input.clone()),
+                &mut strip_comments(&mut line.input_text_line.clone()),
                 msg_list,
                 line.line_counter,
                 &line.file_name,
@@ -364,13 +382,13 @@ pub fn get_pass2(
             )
             .as_str()
         } else if line.line_type == LineType::Data {
-            data_as_bytes(line.input.as_str()).unwrap_or_default()
+            data_as_bytes(line.input_text_line.as_str()).unwrap_or_default()
         } else {
             String::new()
         };
 
         pass2.push(Pass2 {
-            input: line.input,
+            input_text_line: line.input_text_line,
             file_name: line.file_name.clone(),
             line_counter: line.line_counter,
             program_counter: line.program_counter,
@@ -476,37 +494,37 @@ mod tests {
 
         let pass0 = vec![
             Pass0 {
-                input: "MOV A B".to_owned(),
+                input_text_line: "MOV A B".to_owned(),
                 file_name: String::new(),
                 line_counter: 1,
             },
             Pass0 {
-                input: "PUSH A".to_owned(),
+                input_text_line: "PUSH A".to_owned(),
                 file_name: String::new(),
                 line_counter: 2,
             },
             Pass0 {
-                input: "RET".to_owned(),
+                input_text_line: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 3,
             },
             Pass0 {
-                input: "#DATA1 0x2".to_owned(), // Should be moved to end
+                input_text_line: "#DATA1 0x2".to_owned(), // Should be moved to end
                 file_name: String::new(),
                 line_counter: 4,
             },
             Pass0 {
-                input: "RET".to_owned(),
+                input_text_line: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 5,
             },
             Pass0 {
-                input: "#DATA1 \"HELLO\"".to_owned(), // Should be moved to end
+                input_text_line: "#DATA1 \"HELLO\"".to_owned(), // Should be moved to end
                 file_name: String::new(),
                 line_counter: 6,
             },
             Pass0 {
-                input: "RET".to_owned(),
+                input_text_line: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 7,
             },
@@ -536,12 +554,12 @@ mod tests {
         });
 
         let pass0 = vec![Pass0 {
-            input: "Test_not_code_line".to_owned(),
+            input_text_line: "Test_not_code_line".to_owned(),
             file_name: String::new(),
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(msg_list.list[0].name, "Error Test_not_code_line");
+        assert_eq!(msg_list.list[0].text, "Error Test_not_code_line");
     }
 
     #[allow(clippy::too_many_lines)]
@@ -605,63 +623,63 @@ mod tests {
             &mut msg_list,
             vec![
                 Pass1 {
-                    input: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_owned(),
+                    input_text_line: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 1,
                     program_counter: 0,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "DELAY 0x7".to_owned(),
+                    input_text_line: "DELAY 0x7".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 1,
                     program_counter: 1,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "PUSH A".to_owned(),
+                    input_text_line: "PUSH A".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 2,
                     program_counter: 3,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "RET".to_owned(),
+                    input_text_line: "RET".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 4,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "RET".to_owned(),
+                    input_text_line: "RET".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "MOVR C 0xAAAA".to_owned(),
+                    input_text_line: "MOVR C 0xAAAA".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "DMOV D E 0xA 0xB".to_owned(),
+                    input_text_line: "DMOV D E 0xA 0xB".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input: "#DATA1 \"HELLO\"".to_owned(),
+                    input_text_line: "#DATA1 \"HELLO\"".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Data,
                 },
                 Pass1 {
-                    input: "xxx".to_owned(),
+                    input_text_line: "xxx".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
@@ -699,7 +717,7 @@ mod tests {
         let pass2 = get_pass2(
             &mut msg_list,
             vec![Pass1 {
-                input: "TEST".to_owned(),
+                input_text_line: "TEST".to_owned(),
                 file_name: String::from("test"),
                 line_counter: 1,
                 program_counter: 0,

@@ -307,7 +307,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Opti
                         opcode: String::new(),
                         program_counter: 0,
                         line_counter: 0,
-                        input: String::new(),
+                        input_text_line: String::new(),
                         file_name: "None".to_owned(),
                     })
                     .program_counter
@@ -388,7 +388,7 @@ mod tests {
         let checksum = calc_checksum("S00001Z0010", &mut msg_list);
         assert_eq!(checksum, "0000");
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             "Opcode list length not multiple of 4, length is 9"
         );
     }
@@ -416,7 +416,7 @@ mod tests {
         let checksum = calc_checksum("____", &mut msg_list);
         assert_eq!(checksum, "0001");
         assert_eq!(
-            msg_list.list[0].name,
+            msg_list.list[0].text,
             "Error creating opcode for invalid value ____"
         );
     }
@@ -450,7 +450,7 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
-            input: String::new(),
+            input_text_line: String::new(),
             line_counter: 0,
             program_counter: 1,
             line_type: LineType::Start,
@@ -458,14 +458,14 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::from("1234"),
             file_name: String::from("test"),
-            input: String::new(),
+            input_text_line: String::new(),
             line_counter: 0,
             program_counter: 3,
             line_type: LineType::Data,
         });
         pass2.push(Pass2 {
             opcode: String::from("4321"),
-            input: String::new(),
+            input_text_line: String::new(),
             file_name: String::from("test"),
             line_counter: 0,
             program_counter: 5,
@@ -484,7 +484,7 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
-            input: String::new(),
+            input_text_line: String::new(),
             line_counter: 0,
             program_counter: 1,
             line_type: LineType::Start,
@@ -492,14 +492,14 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
-            input: String::new(),
+            input_text_line: String::new(),
             line_counter: 0,
             program_counter: 3,
             line_type: LineType::Start,
         });
         pass2.push(Pass2 {
             opcode: String::from("4321"),
-            input: String::new(),
+            input_text_line: String::new(),
             file_name: String::from("test"),
             line_counter: 0,
             program_counter: 5,
@@ -508,7 +508,7 @@ mod tests {
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(&mut pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list[0].name, "Multiple start addresses found");
+        assert_eq!(msg_list.list[0].text, "Multiple start addresses found");
     }
 
     #[test]
@@ -519,7 +519,7 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
-            input: String::new(),
+            input_text_line: String::new(),
             line_counter: 0,
             program_counter: 1,
             line_type: LineType::Comment,
@@ -527,14 +527,14 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::from("1234"),
             file_name: String::from("test"),
-            input: String::new(),
+            input_text_line: String::new(),
             line_counter: 0,
             program_counter: 3,
             line_type: LineType::Data,
         });
         pass2.push(Pass2 {
             opcode: String::from("4321"),
-            input: String::new(),
+            input_text_line: String::new(),
             file_name: String::from("test"),
             line_counter: 0,
             program_counter: 5,
@@ -543,7 +543,7 @@ mod tests {
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(&mut pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list[0].name, "No start address found");
+        assert_eq!(msg_list.list[0].text, "No start address found");
     }
 
 
@@ -717,7 +717,7 @@ mod tests {
         let input = String::from("#TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
         assert_eq!(output, 0);
-        assert_eq!(msg_list.list[0].name, "Error in data definition for #TEST");
+        assert_eq!(msg_list.list[0].text, "Error in data definition for #TEST");
     }
 
     #[test]
