@@ -96,6 +96,12 @@ pub fn convert_argument(
         let without_prefix2 = without_prefix1.trim_start_matches("0X");
         let int_value_result = i64::from_str_radix(&without_prefix2.replace('_', ""), 16);
         if int_value_result.is_err() {
+            msg_list.push(
+                format!("Hex value {argument} incorrect"),
+                Some(line_number),
+                Some(filename),
+                MessageType::Warning,
+            );
             return None;
         }
         let int_value = int_value_result.unwrap_or(0);
@@ -196,13 +202,13 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
                 );
             }
             if remaining_line.starts_with('\"') && !remaining_line.ends_with('\"') {
-            msg_list.push(
-                format!("Data {first_word} has no string termination"),
-                Some(line.line_counter),
-                Some(line.file_name.clone()),
-                MessageType::Warning,
-            );
-        }
+                msg_list.push(
+                    format!("Data {first_word} has no string termination"),
+                    Some(line.line_counter),
+                    Some(line.file_name.clone()),
+                    MessageType::Warning,
+                );
+            }
         }
     }
 
@@ -212,29 +218,18 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{files::LineType};
+    use crate::files::LineType;
 
     #[test]
-    // Check that labels are correctly extracted from strings test for not label
-    fn test_label_name_from_string() {
+    // Check that labels are correctly extracted from strings test for label
+    fn test_label_name_from_string1() {
         assert_eq!(label_name_from_string("label:"), Some("label:".to_owned()));
-        assert_eq!(
-            label_name_from_string("label: "),
-            Some("label:".to_owned())
-        );
-        assert_eq!(label_name_from_string("label :"), None);
-        assert_eq!(label_name_from_string("label : "), None);
-        assert_eq!(label_name_from_string("label"), None);
-        assert_eq!(label_name_from_string("label "), None);
-        assert_eq!(label_name_from_string(" label"), None);
-        assert_eq!(label_name_from_string(" label "), None);
-        assert_eq!(label_name_from_string("lab:el"), None);
+        assert_eq!(label_name_from_string("label: "), Some("label:".to_owned()));
         assert_eq!(label_name_from_string("label:"), Some("label:".to_owned()));
         assert_eq!(
             label_name_from_string("     label:"),
             Some("label:".to_owned())
         );
-        assert_eq!(label_name_from_string("  xxxxxxx   label:"), None);
         assert_eq!(
             label_name_from_string("     label: dummy words"),
             Some("label:".to_owned())
@@ -242,7 +237,21 @@ mod tests {
     }
 
     #[test]
-    fn test_return_label_value() {
+    // Check that none is returned if not a label
+    fn test_label_name_from_string2() {
+        assert_eq!(label_name_from_string("label :"), None);
+        assert_eq!(label_name_from_string("label : "), None);
+        assert_eq!(label_name_from_string("label"), None);
+        assert_eq!(label_name_from_string("label "), None);
+        assert_eq!(label_name_from_string(" label"), None);
+        assert_eq!(label_name_from_string(" label "), None);
+        assert_eq!(label_name_from_string("lab:el"), None);
+        assert_eq!(label_name_from_string("  xxxxxxx   label:"), None);
+    }
+
+    #[test]
+    // Check that labels are correctly extracted from strings test for data
+    fn test_return_label_value1() {
         let mut labels = vec![
             Label {
                 program_counter: 0,
@@ -255,10 +264,26 @@ mod tests {
         ];
         assert_eq!(return_label_value("label1", &mut labels), Some(0));
         assert_eq!(return_label_value("label2", &mut labels), Some(1));
+    }
+
+    #[test]
+    // Check that none is returned if not a label
+    fn test_return_label_value2() {
+        let mut labels = vec![
+            Label {
+                program_counter: 0,
+                name: "label1".to_owned(),
+            },
+            Label {
+                program_counter: 1,
+                name: "label2".to_owned(),
+            },
+        ];
         assert_eq!(return_label_value("label3", &mut labels), None);
     }
 
     #[test]
+    // Test duplicate label names are identitiied
     fn test_find_duplicate_label() {
         let mut labels = vec![
             Label {
@@ -286,10 +311,8 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::too_many_lines)]
-    #[allow(clippy::cognitive_complexity)]
-
-    fn test_convert_argument() {
+    // Test convertion is correct for value argumanets
+    fn test_convert_argument1() {
         let mut labels = vec![
             Label {
                 program_counter: 1,
@@ -306,30 +329,8 @@ mod tests {
         ];
         let mut msg_list = MsgList::new();
         assert_eq!(
-            convert_argument("label1", &mut msg_list, 0, "test".to_owned(), &mut labels),
-            None
-        );
-        assert_eq!(
-            convert_argument("label2", &mut msg_list, 1, "test".to_owned(), &mut labels),
-            None
-        );
-        assert_eq!(
-            convert_argument("label3", &mut msg_list, 2, "test".to_owned(), &mut labels),
-            None
-        );
-        assert_eq!(
             convert_argument("0x1234", &mut msg_list, 3, "test".to_owned(), &mut labels),
             Some("00001234".to_owned())
-        );
-        assert_eq!(
-            convert_argument(
-                "0x123456789",
-                &mut msg_list,
-                4,
-                "test".to_owned(),
-                &mut labels
-            ),
-            None
         );
         assert_eq!(
             convert_argument("1234", &mut msg_list, 5, "test".to_owned(), &mut labels),
@@ -350,91 +351,79 @@ mod tests {
             Some("00000001".to_owned())
         );
         assert_eq!(
-            convert_argument(
-                "label1: ",
-                &mut msg_list,
-                8,
-                "test".to_owned(),
-                &mut labels
-            ),
+            convert_argument("label1: ", &mut msg_list, 8, "test".to_owned(), &mut labels),
             Some("00000001".to_owned())
         );
+       
         assert_eq!(
-            convert_argument(
-                "label1 :",
-                &mut msg_list,
-                9,
-                "test".to_owned(),
-                &mut labels
-            ),
-            None
-        );
-        assert_eq!(
-            convert_argument(
-                "label1 : ",
-                &mut msg_list,
-                10,
-                "test".to_owned(),
-                &mut labels
-            ),
-            None
-        );
-        assert_eq!(
-            convert_argument("label1", &mut msg_list, 11, "test".to_owned(), &mut labels),
-            None
-        );
-        assert_eq!(
-            convert_argument(
-                "label1 ",
-                &mut msg_list,
-                12,
-                "test".to_owned(),
-                &mut labels
-            ),
-            None
-        );
-        assert_eq!(
-            convert_argument(
-                " label1",
-                &mut msg_list,
-                13,
-                "test".to_owned(),
-                &mut labels
-            ),
-            None
-        );
-        assert_eq!(
-            convert_argument(
-                "label2:",
-                &mut msg_list,
-                14,
-                "test".to_owned(),
-                &mut labels
-            ),
+            convert_argument("label2:", &mut msg_list, 14, "test".to_owned(), &mut labels),
             Some("00000002".to_owned())
         );
+        
+        
+        assert_eq!(
+            convert_argument("#data1", &mut msg_list, 14, "test".to_owned(), &mut labels),
+            Some("0000001E".to_owned())
+        );
+        
+    }
+
+    #[test]
+    // Test for convert_argument if the argument is invalid with ocrrect message
+    fn test_convert_argument2() {
+        let mut labels = vec![
+            Label {
+                program_counter: 1,
+                name: "label1:".to_owned(),
+            },
+            Label {
+                program_counter: 2,
+                name: "label2:".to_owned(),
+            },
+            Label {
+                program_counter: 30,
+                name: "#data1".to_owned(),
+            },
+        ];
+        let mut msg_list = MsgList::new();
+        
+        // Check for non label text
+        assert_eq!(
+            convert_argument("label1", &mut msg_list, 0, "test".to_owned(), &mut labels),
+            None
+        );
+        assert_eq!(
+            msg_list.list[msg_list.list.len() - 1].name,
+            "Decimal value label1 incorrect".to_owned()
+        );
+
+        // Check for hex value out of bounds
         assert_eq!(
             convert_argument(
-                "label3:",
+                "0x123456789",
                 &mut msg_list,
-                14,
+                4,
                 "test".to_owned(),
                 &mut labels
             ),
+            None
+        );
+        assert_eq!(
+            msg_list.list[msg_list.list.len() - 1].name,
+            "Hex value out 0x123456789 of bounds".to_owned()
+        );
+
+        // Check for label not defined
+        assert_eq!(
+            convert_argument("label3:", &mut msg_list, 14, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
             msg_list.list[msg_list.list.len() - 1].name,
             "Label label3: not found - line 14".to_owned()
         );
-        assert_eq!(
-            convert_argument("xxxx", &mut msg_list, 14, "test".to_owned(), &mut labels),
-            None
-        );
-        assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].name,
-            "Decimal value xxxx incorrect".to_owned()
-        );
+
+        // Check for invalid decimal value
         assert_eq!(
             convert_argument(
                 "4294967296",
@@ -449,10 +438,8 @@ mod tests {
             msg_list.list[msg_list.list.len() - 1].name,
             "Decimal value out 4294967296 of bounds".to_owned()
         );
-        assert_eq!(
-            convert_argument("#data1", &mut msg_list, 14, "test".to_owned(), &mut labels),
-            Some("0000001E".to_owned())
-        );
+
+        // Check for data not defined
         assert_eq!(
             convert_argument("#data2", &mut msg_list, 15, "test".to_owned(), &mut labels),
             None
@@ -461,10 +448,17 @@ mod tests {
             msg_list.list[msg_list.list.len() - 1].name,
             "Label #data2 not found".to_owned()
         );
+
+        // Check for invalid hex value
         assert_eq!(
             convert_argument("0xGGG", &mut msg_list, 14, "test".to_owned(), &mut labels),
             None
         );
+        assert_eq!(
+            msg_list.list[msg_list.list.len() - 1].name,
+            "Hex value 0xGGG incorrect".to_owned()
+        );
+
     }
 
     #[test]

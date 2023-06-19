@@ -577,7 +577,6 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
-
     use super::*;
     use tempfile::TempDir;
 
@@ -802,12 +801,17 @@ mod test {
 
     #[test]
     // Tests for the is_include to check if there is a !include as first non white-space
-    fn test_is_include() {
+    fn test_is_include1() {
         assert!(is_include("!include file.type"));
-        assert!(!is_include("include file.type"));
         assert!(is_include("!include"));
-        assert!(!is_include("!!include"));
         assert!(is_include("    !include   123 234 456"));
+    }
+
+    #[test]
+    // Tests for the not is_include
+    fn test_is_include2() {
+        assert!(!is_include("include file.type"));
+        assert!(!is_include("!!include"));
     }
 
     #[test]

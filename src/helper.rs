@@ -176,10 +176,12 @@ pub fn is_start(line: &str) -> bool {
 /// Check if line is comment
 ///
 /// Returns true if line if just comment
-pub fn is_comment(word: &mut String) -> bool {
+pub fn is_comment(line: &mut str) -> bool {
+    let word=line.trim();
     if word.len() < 2 {
         return false;
     }
+    
     let bytes = word.as_bytes();
     let mut found_first = false;
 
@@ -572,17 +574,31 @@ mod tests {
 
     #[test]
     // Test true is returned for comment
-    fn test_is_comment() {
+    fn test_is_comment1() {
         assert!(is_comment(&mut "//This is a comment".to_owned()));
+        assert!(is_comment(&mut "      //This is a comment".to_owned()));
+    }
+
+    #[test]
+    // Test false is returned for non-comment
+    fn test_is_comment2() {
         assert!(!is_comment(&mut "Hello //This is a comment".to_owned()));
         assert!(!is_comment(&mut " ".to_owned()));
     }
 
+
     #[test]
     // Test for blank line returns true
-    fn test_is_blank() {
+    fn test_is_blank1() {
         assert!(is_blank(" "));
+        assert!(is_blank(""));
+    }
+
+    #[test]
+    // Test for non blank line returns false
+    fn test_is_blank2() {
         assert!(!is_blank("1234"));
+        assert!(!is_blank("    1234"));
     }
 
     #[test]

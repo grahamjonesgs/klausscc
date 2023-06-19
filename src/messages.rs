@@ -140,6 +140,7 @@ mod tests {
     // Test that the number of errors is correct
     fn test_number_errors() {
         let mut msg_list = MsgList::new();
+        assert_eq!(msg_list.number_errors(), 0);
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
         msg_list.push("Test".to_owned(), None, None, MessageType::Error);
@@ -150,6 +151,7 @@ mod tests {
     // Test number of warnings
     fn test_number_warnings() {
         let mut msg_list = MsgList::new();
+        assert_eq!(msg_list.number_warnings(), 0);
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
         msg_list.push("Test".to_owned(), None, None, MessageType::Error);
