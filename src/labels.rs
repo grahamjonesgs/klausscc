@@ -6,7 +6,7 @@ use crate::opcodes::Pass1;
 /// Label struct
 pub struct Label {
     /// Program counter derived from Pass1
-    pub program_counter: u32, 
+    pub program_counter: u32,
     /// Label name as text without colon
     pub name: String,
 }
@@ -94,7 +94,10 @@ pub fn convert_argument(
         return None;
     }
 
-    if argument_trim.len() >= 2 && (argument_trim[0..2] == *"0x" || argument_trim[0..2] == *"0X") {
+    if argument_trim.len() >= 2
+        && (argument_trim.get(0..2).unwrap_or("  ") == "0x"
+            || argument_trim.get(0..2).unwrap_or("  ") == "0X")
+    {
         let without_prefix1 = argument_trim.trim_start_matches("0x");
         let without_prefix2 = without_prefix1.trim_start_matches("0X");
         let int_value_result = i64::from_str_radix(&without_prefix2.replace('_', ""), 16);
@@ -153,7 +156,8 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     let labels: Vec<Label> = pass1
         .iter()
         .filter(|n| {
-            label_name_from_string(&n.input_text_line).is_some() || data_name_from_string(&n.input_text_line).is_some()
+            label_name_from_string(&n.input_text_line).is_some()
+                || data_name_from_string(&n.input_text_line).is_some()
         })
         .map(|n| -> Label {
             Label {
@@ -308,7 +312,7 @@ mod tests {
         assert_eq!(msg_list.number_warnings(), 0);
 
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             "Duplicate label label1 found, with differing values"
         );
     }
@@ -357,18 +361,16 @@ mod tests {
             convert_argument("label1: ", &mut msg_list, 8, "test".to_owned(), &mut labels),
             Some("00000001".to_owned())
         );
-       
+
         assert_eq!(
             convert_argument("label2:", &mut msg_list, 14, "test".to_owned(), &mut labels),
             Some("00000002".to_owned())
         );
-        
-        
+
         assert_eq!(
             convert_argument("#data1", &mut msg_list, 14, "test".to_owned(), &mut labels),
             Some("0000001E".to_owned())
         );
-        
     }
 
     #[test]
@@ -389,14 +391,14 @@ mod tests {
             },
         ];
         let mut msg_list = MsgList::new();
-        
+
         // Check for non label text
         assert_eq!(
             convert_argument("label1", &mut msg_list, 0, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].text,
+            msg_list.list.last().unwrap_or_default().text,
             "Decimal value label1 incorrect".to_owned()
         );
 
@@ -412,7 +414,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].text,
+            msg_list.list.last().unwrap_or_default().text,
             "Hex value out 0x123456789 of bounds".to_owned()
         );
 
@@ -422,7 +424,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].text,
+            msg_list.list.last().unwrap_or_default().text,
             "Label label3: not found - line 14".to_owned()
         );
 
@@ -438,7 +440,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].text,
+            msg_list.list.last().unwrap_or_default().text,
             "Decimal value out 4294967296 of bounds".to_owned()
         );
 
@@ -448,7 +450,7 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].text,
+            msg_list.list.last().unwrap_or_default().text,
             "Label #data2 not found".to_owned()
         );
 
@@ -458,10 +460,9 @@ mod tests {
             None
         );
         assert_eq!(
-            msg_list.list[msg_list.list.len() - 1].text,
+            msg_list.list.last().unwrap_or_default().text,
             "Hex value 0xGGG incorrect".to_owned()
         );
-
     }
 
     #[test]

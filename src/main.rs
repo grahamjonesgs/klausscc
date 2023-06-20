@@ -9,7 +9,6 @@
 #![allow(clippy::implicit_return)]
 #![allow(clippy::string_add)]
 #![allow(clippy::indexing_slicing)]
-#![allow(clippy::string_slice)]
 #![allow(clippy::as_conversions)]
 #![allow(clippy::separated_literal_suffix)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
@@ -98,8 +97,7 @@ fn main() -> Result<(), i32> {
         return Err(1_i32);
     }
     let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
-    #[allow(clippy::unwrap_used)]
-    let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
+    let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap_or_else(|| [].to_vec()), &mut msg_list);
 
     if let Err(result_err) = output_macros_opcodes(
         filename_stem(&opcode_file_name) + ".html",
@@ -138,14 +136,12 @@ fn main() -> Result<(), i32> {
     }
 
     let input_list = Some(remove_block_comments(
-        #[allow(clippy::unwrap_used)]
-        input_list_option.unwrap(),
+        input_list_option.unwrap_or_else(|| [].to_vec()),
         &mut msg_list,
     ));
 
     // Pass 0 to add macros
-    #[allow(clippy::unwrap_used)]
-    let pass0 = expand_macros(&mut msg_list, input_list.unwrap(), &mut macro_list);
+    let pass0 = expand_macros(&mut msg_list, input_list.unwrap_or_else(|| [].to_vec()), &mut macro_list);
 
     // Pass 1 to get line numbers and labels
     let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, oplist.clone());

@@ -24,7 +24,23 @@ pub struct Message {
     /// Message type
     pub level: MessageType,
     /// Time of message
-    pub time: NaiveTime,
+    pub time: Option<NaiveTime>,
+}
+
+#[allow(clippy::missing_docs_in_private_items)]
+impl Default for & Message {
+    fn default() -> &'static Message {
+        static VALUE: Message = Message {
+            text: String::new(),
+            file_name: None,
+            line_number: None,
+            level: MessageType::Information,
+            time: None,
+           
+        };
+        &VALUE
+
+    }
 }
 
 #[derive(Debug)]
@@ -54,7 +70,7 @@ impl MsgList {
             line_number,
             file_name,
             level: msg_type,
-            time: Local::now().time(),
+            time: Some(Local::now().time()),
         });
     }
 
@@ -98,7 +114,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                 if msg.file_name.is_some() {
                     format!(
                         "{} {} Line {} in file {}. {} ",
-                        msg.time.format("%H:%M:%S%.3f"),
+                        msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
                         message_level,
                         msg.line_number.unwrap_or_default(),
                         msg.file_name.clone().unwrap_or_default(),
@@ -108,7 +124,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                 else {
                     format!(
                         "{} {} Line {}. {} ",
-                        msg.time.format("%H:%M:%S%.3f"),
+                        msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
                         message_level,
                         msg.line_number.unwrap_or_default(),
                         msg.text
@@ -117,7 +133,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
             } else if msg.file_name.is_some() {
                 format!(
                     "{} {} In file {}. {} ",
-                    msg.time.format("%H:%M:%S%.3f"),
+                    msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
                     message_level,
                     msg.file_name.clone().unwrap_or_default(),
                     msg.text
@@ -126,7 +142,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
             else {
                 format!(
                     "{} {} {} ",
-                    msg.time.format("%H:%M:%S%.3f"),
+                    msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
                     message_level,
                     msg.text
                 )
@@ -150,7 +166,10 @@ mod tests {
             MessageType::Information,
         );
         assert_eq!(msg_list.list.len(), 1);
-        assert_eq!(msg_list.list[0].text, "Test");
+        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Test");
+
+        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Test");
+
         assert_eq!(msg_list.list[0].level, MessageType::Information);
         assert_eq!(msg_list.list[0].line_number, None);
     }

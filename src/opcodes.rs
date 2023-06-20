@@ -31,6 +31,18 @@ pub struct InputData {
     pub line_counter: u32,
 }
 
+impl Default for & InputData {
+    fn default() -> &'static InputData {
+        static VALUE: InputData = InputData {
+            input: String::new(),
+            file_name: String::new(),
+            line_counter: 0,  
+        };
+        &VALUE
+
+    }
+}
+
 #[derive(Debug)]
 /// Struct for Pass0
 pub struct Pass0 {
@@ -57,7 +69,7 @@ pub struct Pass1 {
     pub line_type: LineType,
 }
 
-#[derive(Debug,Clone)]
+#[derive(Debug, Clone)]
 /// Struct for Pass2
 pub struct Pass2 {
     /// Line text
@@ -168,17 +180,15 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     // Define number of registers from opcode definition
-   
+
     let mut num_registers: u32 = 0;
-    if &input_line[pos_opcode + 3..pos_opcode + 4] == "?" {
+    if input_line.get(pos_opcode + 3..pos_opcode + 4) == Some("?") {
         num_registers = 1;
-    } 
+    }
 
-    if &input_line[pos_opcode + 2..pos_opcode + 4] == "??" {
+    if input_line.get(pos_opcode + 2..pos_opcode + 4) == Some("??") {
         num_registers = 2;
-    } 
-
-    
+    }
 
     // Look for variable, and set flag
     let mut num_variables: u32 = 0;
@@ -190,12 +200,6 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         }
     }
 
-    /*// Look for comment as first word is opcode name
-    let pos_name: usize = match input_line.find("//") {
-        None => return None,
-        Some(a) => a + 3, // Assumes one space after the // before the name of the opcode
-    };*/
-
     // Look for comment as first word is opcode name
     let pos_name: usize = match input_line.find("// ") {
         None => match input_line.find("//") {
@@ -206,7 +210,9 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     };
 
     // Find end of first word after comment as end of opcode name
-    let pos_end_name: usize = input_line[pos_name..].find(' ').map_or(input_line.len(), |a| a + pos_name);
+    let pos_end_name: usize = input_line.get(pos_name..).unwrap_or("")
+        .find(' ')
+        .map_or(input_line.len(), |a| a + pos_name);
 
     // Set comments field, or none if missing
     if input_line.len() > pos_end_name + 1 {
@@ -218,14 +224,11 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     Some(Opcode {
-        hex_opcode: format!(
-            "0000{}",
-            &input_line[pos_opcode..pos_opcode + 4].to_owned()
-        ),
+        hex_opcode: format!("0000{}", &input_line.get(pos_opcode..pos_opcode + 4).unwrap_or("    ")),
         registers: num_registers,
         variables: num_variables,
-        comment: input_line[pos_comment..pos_end_comment].to_owned(),
-        text_name: input_line[pos_name..pos_end_name].to_owned(),
+        comment: input_line.get(pos_comment..pos_end_comment).unwrap_or("").to_owned(),
+        text_name: input_line.get(pos_name..pos_end_name).unwrap_or("").to_owned(),
         section: String::new(),
     })
 }
@@ -309,8 +312,7 @@ pub fn add_registers(
     msg_list: &mut MsgList,
     line_number: u32,
 ) -> String {
-    let num_registers =
-        num_registers(opcodes, &mut (*line).to_uppercase()).unwrap_or(0);
+    let num_registers = num_registers(opcodes, &mut (*line).to_uppercase()).unwrap_or(0);
 
     let mut opcode_found = {
         let this = return_opcode(&line.to_uppercase(), opcodes);
@@ -328,7 +330,7 @@ pub fn add_registers(
         return "ERR     ".to_owned();
     }
 
-    opcode_found = opcode_found[..(8 - num_registers) as usize].to_owned();
+    opcode_found = opcode_found.get(..(8 - num_registers) as usize).unwrap_or("").to_owned();
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
@@ -402,7 +404,7 @@ pub fn add_arguments(
             );
         }
     }
-    
+
     // Can't be in tarpaulin as we can't test the error by passing wrong size
     if arguments.len() != 8 * num_arguments as usize {
         #[cfg(not(tarpaulin_include))]

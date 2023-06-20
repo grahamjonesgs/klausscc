@@ -42,8 +42,8 @@ pub fn read_file_to_vector(
         );
         return None;
     }
-    #[allow(clippy::unwrap_used)]
-    let file = file_result.unwrap();
+
+    let Ok(file) = file_result else { return None };
 
     for file_found in opened_files.clone() {
         if file_found == filename {
@@ -269,7 +269,7 @@ pub fn write_code_output_file(
                     format!(
                         "0x{:08X}: {:<16}  -- {}\n",
                         pass.program_counter + n as u32,
-                        &mut pass.opcode[n * 8..n * 8 + 8],
+                        &mut pass.opcode.get(n * 8..n * 8 + 8).unwrap_or("        "),
                         pass.input_text_line
                     )
                     .as_str(),
@@ -336,8 +336,7 @@ pub fn output_macros_opcodes(
                 .err()
                 .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
         }
-        #[allow(clippy::unwrap_used)]
-        let mut file = output_file.unwrap();
+        let  Ok(mut file) = output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
         file.write_all(b"<!DOCTYPE html>\n")?;
         file.write_all(b"<html>\n<head>\n<style>\n")?;
         file.write_all(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
@@ -428,10 +427,16 @@ pub fn format_opcodes(input: &mut String) -> String {
         return (*input).clone() + "              ";
     }
     if input.len() == 8 {
-        return input[0..4].to_owned() + &input[4..8] + "         ";
+        return input.get(0..4).unwrap_or("    ").to_owned()
+            + input.get(4..8).unwrap_or("    ")
+            + "         ";
     }
     if input.len() == 16 {
-        return input[0..4].to_owned() + &input[4..8] + " " + &input[8..12] + &input[12..16];
+        return input.get(0..4).unwrap_or("    ").to_owned()
+            + input.get(4..8).unwrap_or("    ")
+            + " "
+            + input.get(8..12).unwrap_or("    ")
+            + input.get(12..16).unwrap_or("    ");
     }
     (*input).clone()
 }
@@ -443,8 +448,15 @@ pub fn format_opcodes(input: &mut String) -> String {
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::question_mark_used)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> Result<(), std::io::Error> {
-    use std::{thread, time};
+pub fn write_serial(
+    binary_output: &str,
+    port_name: &str,
+    msg_list: &mut MsgList,
+) -> Result<(), std::io::Error> {
+    use std::{
+        io::{Error, ErrorKind},
+        thread, time,
+    };
 
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, /*115_200*/ 1_000_000)
@@ -508,8 +520,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
         }
     }
 
-    #[allow(clippy::unwrap_used)]
-    let mut port = port_result.unwrap();
+    let  Ok(mut port) = port_result else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
 
     port.set_stop_bits(serialport::StopBits::One)?;
     port.set_data_bits(serialport::DataBits::Eight)?;
@@ -544,7 +555,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
         return Ok(());
     }
 
-    let ret_msg = String::from_utf8(buffer[..ret_msg_size].to_vec());
+    let ret_msg = String::from_utf8(buffer.get(..ret_msg_size).unwrap_or(b"").to_vec());
 
     if let Err(e) = ret_msg {
         msg_list.push(
@@ -790,7 +801,7 @@ mod test {
             ]
         );
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             "Comment not terminated in file test1.kla"
         );
     }
@@ -871,7 +882,7 @@ mod test {
         let mut msg_list = MsgList::new();
         let mut opened_files: Vec<String> = Vec::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list, &mut opened_files);
-        assert_eq!(msg_list.list[0].text, "Unable to open file ////xxxxxxx");
+        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Unable to open file ////xxxxxxx");
     }
 
     #[test]
@@ -893,7 +904,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
-        assert_eq!(lines.clone().unwrap()[0].input, "Test line in file");
+        assert_eq!(lines.clone().unwrap().get(0).unwrap_or_default().input, "Test line in file");
         assert_eq!(lines.unwrap().len(), 4);
 
         drop(tmp_file1);
@@ -927,15 +938,15 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            lines.clone().unwrap_or_default()[0].input,
+            lines.clone().unwrap_or_default().get(0).unwrap_or_default().input,
             "Test line in file 1 line 0"
         );
         assert_eq!(
-            lines.clone().unwrap()[2].input,
+            lines.clone().unwrap_or_default().get(2).unwrap_or_default().input,
             "Test line in file 2 line 1"
         );
         assert_eq!(
-            lines.clone().unwrap()[6].input,
+            lines.clone().unwrap_or_default().get(6).unwrap_or_default().input,
             "Test line in file 1 line 2"
         );
         assert_eq!(lines.unwrap().len(), 7);
@@ -972,7 +983,7 @@ mod test {
 
         _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             format!("Recursive include of file {file_name1}")
         );
 
@@ -1003,11 +1014,11 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             format!("Unable to open file {file_name2}")
         );
         assert_eq!(
-            msg_list.list[1].text,
+            msg_list.list.get(1).unwrap_or_default().text,
             format!("Unable to open include file {file_name2} in {file_name1}")
         );
         assert_eq!(lines, Some(vec![]));
@@ -1034,7 +1045,7 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             format!("Missing include file name in {file_name1}")
         );
         assert_eq!(lines, None);
@@ -1076,11 +1087,11 @@ mod test {
 
         _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             format!("Unable to open file {file_name3}")
         );
         assert_eq!(
-            msg_list.list[1].text,
+            msg_list.list.get(1).unwrap_or_default().text,
             format!("Unable to open include file {file_name3} in {file_name2}")
         );
 

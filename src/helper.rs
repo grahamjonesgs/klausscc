@@ -84,7 +84,8 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         // Check if next word is a number
         // let int_value: i64;
         let int_value = if second_word.len() >= 2
-            && (second_word[0..2] == *"0x" || second_word[0..2] == *"0X")
+            && (second_word.get(0..2).unwrap_or("  ") == "0x"
+                || second_word.get(0..2).unwrap_or("  ") == "0X")
         {
             let without_prefix1 = second_word.trim_start_matches("0x");
             let without_prefix2 = without_prefix1.trim_start_matches("0X");
@@ -177,11 +178,11 @@ pub fn is_start(line: &str) -> bool {
 ///
 /// Returns true if line if just comment
 pub fn is_comment(line: &mut str) -> bool {
-    let word=line.trim();
+    let word = line.trim();
     if word.len() < 2 {
         return false;
     }
-    
+
     let bytes = word.as_bytes();
     let mut found_first = false;
 
@@ -202,7 +203,7 @@ pub fn is_comment(line: &mut str) -> bool {
 pub fn strip_comments(input: &mut str) -> String {
     match input.find("//") {
         None => return input.trim().to_owned(),
-        Some(a) => return input[0..a].trim().to_owned(),
+        Some(a) => return input.get(0..a).unwrap_or("").trim().to_owned(),
     }
 }
 
@@ -212,7 +213,7 @@ pub fn strip_comments(input: &mut str) -> String {
 pub fn return_comments(input: &mut str) -> String {
     match input.find("//") {
         None => String::new(),
-        Some(a) => return input[a + 2..].trim().to_owned().trim().to_owned(),
+        Some(a) => return input.get(a + 2..).unwrap_or("").trim().to_owned(),
     }
 }
 
@@ -252,13 +253,13 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 
     for (index, _) in stripped_string.chars().enumerate() {
         if index % 4 == 0 {
-            let int_value = i32::from_str_radix(&stripped_string[index..index + 4], 16);
+            let int_value = i32::from_str_radix(stripped_string.get(index..index + 4).unwrap_or("    "), 16);
             if int_value.is_err() {
                 msg_list.push(
                     {
                         format!(
                             "Error creating opcode for invalid value {}",
-                            &stripped_string[index..index + 4],
+                            stripped_string.get(index..index + 4).unwrap_or("    "),
                         )
                     },
                     None,
@@ -326,7 +327,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Opti
             None,
             MessageType::Error,
         );
-        return None
+        return None;
     } else {
         msg_list.push(
             "Multiple start addresses found".to_owned(),
@@ -334,7 +335,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Opti
             None,
             MessageType::Error,
         );
-        return None
+        return None;
     }
 
     // Add writing Z0010 and then checksum.
@@ -388,7 +389,7 @@ mod tests {
         let checksum = calc_checksum("S00001Z0010", &mut msg_list);
         assert_eq!(checksum, "0000");
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             "Opcode list length not multiple of 4, length is 9"
         );
     }
@@ -416,7 +417,7 @@ mod tests {
         let checksum = calc_checksum("____", &mut msg_list);
         assert_eq!(checksum, "0001");
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             "Error creating opcode for invalid value ____"
         );
     }
@@ -508,7 +509,7 @@ mod tests {
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(&mut pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list[0].text, "Multiple start addresses found");
+        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Multiple start addresses found");
     }
 
     #[test]
@@ -543,9 +544,8 @@ mod tests {
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(&mut pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list[0].text, "No start address found");
+        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "No start address found");
     }
-
 
     #[test]
     // Test that comment is stripped
@@ -585,7 +585,6 @@ mod tests {
         assert!(!is_comment(&mut "Hello //This is a comment".to_owned()));
         assert!(!is_comment(&mut " ".to_owned()));
     }
-
 
     #[test]
     // Test for blank line returns true
@@ -717,7 +716,7 @@ mod tests {
         let input = String::from("#TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
         assert_eq!(output, 0);
-        assert_eq!(msg_list.list[0].text, "Error in data definition for #TEST");
+        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Error in data definition for #TEST");
     }
 
     #[test]
