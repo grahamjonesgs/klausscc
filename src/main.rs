@@ -12,8 +12,9 @@
 #![allow(clippy::string_slice)]
 #![allow(clippy::as_conversions)]
 #![allow(clippy::separated_literal_suffix)]
-#![allow(clippy::multiple_crate_versions)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
+#![allow(clippy::multiple_crate_versions)]
+
 //! Top level file for Klausscc
 
 /// Module to manage file read and write
@@ -27,7 +28,7 @@ mod macros;
 /// Module to manage messages
 mod messages;
 /// Module to manage opcodes
-mod opcodes; 
+mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{
@@ -100,14 +101,21 @@ fn main() -> Result<(), i32> {
     #[allow(clippy::unwrap_used)]
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap(), &mut msg_list);
 
-    output_macros_opcodes(
+    if let Err(result_err) = output_macros_opcodes(
         filename_stem(&opcode_file_name) + ".html",
         &oplist,
         macro_list.clone(),
         &mut msg_list,
         opcodes_flag,
         textmate_flag,
-    );
+    ) {
+        msg_list.push(
+            format!("Error {result_err} writing opcode file {opcode_file_name} to HTML"),
+            None,
+            None,
+            MessageType::Error,
+        );
+    }
 
     if textmate_flag || opcodes_flag {
         print_messages(&mut msg_list);
@@ -147,9 +155,12 @@ fn main() -> Result<(), i32> {
     // Pass 2 to get create output
     let mut pass2 = get_pass2(&mut msg_list, pass1, oplist, labels);
 
-    if !write_code_output_file(&output_file_name, &mut pass2, &mut msg_list) {
+    if let Err(result_err) = write_code_output_file(&output_file_name, &mut pass2, &mut msg_list) {
         msg_list.push(
-            format!("Unable to write to code file {}", &output_file_name),
+            format!(
+                "Unable to write to code file {}, error {}",
+                &output_file_name, result_err
+            ),
             None,
             None,
             MessageType::Error,
@@ -182,7 +193,7 @@ fn main() -> Result<(), i32> {
             );
         }
     } else {
-         if std::fs::remove_file(&binary_file_name).is_ok() {
+        if std::fs::remove_file(&binary_file_name).is_ok() {
             msg_list.push(
                 "Removed old binary file".to_owned(),
                 None,
@@ -324,7 +335,8 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             );
         }
         if line_type(&mut oplist, &mut pass.input_text_line) == LineType::Opcode {
-            let num_args = num_arguments(&mut oplist, &mut strip_comments(&mut pass.input_text_line));
+            let num_args =
+                num_arguments(&mut oplist, &mut strip_comments(&mut pass.input_text_line));
             if let Some(p) = num_args {
                 program_counter = program_counter + p + 1;
             }
@@ -409,21 +421,27 @@ pub fn get_pass2(
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
     if msg_list.number_errors() == 0 {
-        if write_serial(bin_string, output_serial_port, msg_list) {
-            msg_list.push(
-                format!("Wrote to serial port {output_serial_port}"),
-                None,
-                None,
-                MessageType::Information,
-            );
-        } else {
-            msg_list.push(
-                format!("Failed to write to serial port {output_serial_port}"),
-                None,
-                None,
-                MessageType::Error,
-            );
+        let write_result = write_serial(bin_string, output_serial_port, msg_list);
+        match write_result {
+            Ok(_) => {
+                msg_list.push(
+                    format!("Wrote to serial port {output_serial_port}"),
+                    None,
+                    None,
+                    MessageType::Information,
+                );
+            }
+            Err(e) => {
+                msg_list.push(
+                    format!("Failed to write to serial port {output_serial_port}, error {e}"),
+                    None,
+                    None,
+                    MessageType::Error,
+                );
+            }
         }
+        
+
     } else {
         msg_list.push(
             "Not writing to serial port due to assembly errors".to_owned(),
@@ -445,11 +463,11 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
         None,
         MessageType::Information,
     );
-    if !write_binary_output_file(&binary_file_name, bin_string) {
+    if let Err(result_err) = write_binary_output_file(&binary_file_name, bin_string) {
         msg_list.push(
             format!(
-                "Unable to write to binary code file {:?}",
-                &binary_file_name
+                "Unable to write to binary code file {:?}, error {}",
+                &binary_file_name, result_err
             ),
             None,
             None,

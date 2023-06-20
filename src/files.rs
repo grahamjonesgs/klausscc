@@ -220,20 +220,16 @@ pub fn filename_stem(full_name: &String) -> String {
 /// Based on the bitcode string outputs to file
 #[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
 #[allow(clippy::impl_trait_in_params)]
-pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str) -> bool {
-    let result_file = File::create(filename);
+#[allow(clippy::question_mark_used)]
+pub fn write_binary_output_file(
+    filename: &impl AsRef<Path>,
+    output_string: &str,
+) -> Result<(), std::io::Error> {
+    let mut file = File::create(filename)?;
 
-    if result_file.is_err() {
-        return false;
-    }
-    #[allow(clippy::unwrap_used)]
-    let mut file = result_file.unwrap();
+    file.write_all(output_string.as_bytes())?;
 
-    if file.write(output_string.as_bytes()).is_err() {
-        return false;
-    };
-
-    true
+    Ok(())
 }
 
 /// Output the code details file to given filename
@@ -243,18 +239,14 @@ pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str
 #[allow(clippy::impl_trait_in_params)]
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::integer_division)]
-#[allow(clippy::string_slice)]
+#[allow(clippy::question_mark_used)]
 pub fn write_code_output_file(
     filename: impl AsRef<Path> + core::marker::Copy,
     pass2: &mut Vec<Pass2>,
     msg_list: &mut MsgList,
-) -> bool {
-    let result_file = File::create(filename);
-    if result_file.is_err() {
-        return false;
-    }
-    #[allow(clippy::unwrap_used)]
-    let mut file = result_file.unwrap();
+) -> Result<(), std::io::Error> {
+    let mut file = File::create(filename)?;
+
     let mut out_line: String = String::new();
     msg_list.push(
         format!("Writing code file to {}", filename.as_ref().display()),
@@ -289,15 +281,19 @@ pub fn write_code_output_file(
                 pass.program_counter, pass.input_text_line
             );
         } else if pass.line_type == LineType::Error {
-            out_line = format!("Error                         -- {}\n", pass.input_text_line);
+            out_line = format!(
+                "Error                         -- {}\n",
+                pass.input_text_line
+            );
         } else {
-            out_line = format!("                              -- {}\n", pass.input_text_line);
+            out_line = format!(
+                "                              -- {}\n",
+                pass.input_text_line
+            );
         }
-        if file.write(out_line.as_bytes()).is_err() {
-            return false;
-        };
+        file.write_all(out_line.as_bytes())?;
     }
-    true
+    Ok(())
 }
 
 /// Outputs the opcodes and macros details file to given filename
@@ -305,8 +301,7 @@ pub fn write_code_output_file(
 /// Writes all data to the html ISA and macro file file
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
 #[allow(clippy::impl_trait_in_params)]
-#[allow(clippy::print_stdout)]
-#[allow(clippy::let_underscore_must_use)]
+#[allow(clippy::question_mark_used)]
 pub fn output_macros_opcodes(
     filename: impl AsRef<Path> + core::clone::Clone,
     opcodes: &[Opcode],
@@ -314,7 +309,9 @@ pub fn output_macros_opcodes(
     msg_list: &mut MsgList,
     opcodes_flag: bool,
     textmate_flag: bool,
-) {
+) -> Result<(), std::io::Error> {
+    use std::io::{Error, ErrorKind};
+
     use chrono::Local;
     if opcodes_flag {
         msg_list.push(
@@ -335,27 +332,29 @@ pub fn output_macros_opcodes(
                 None,
                 MessageType::Information,
             );
-            return;
+            return Err(output_file
+                .err()
+                .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
         }
         #[allow(clippy::unwrap_used)]
         let mut file = output_file.unwrap();
-        _ = file.write(b"<!DOCTYPE html>\n");
-        _ = file.write(b"<html>\n<head>\n<style>\n");
-        _ = file.write(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
-        _ = file.write(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n");
-        //_ = file.write(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n"); // Banded table
-        _ = file.write(b"#opcodes tr:hover {background-color: #ddd;}\n");
-        _ = file.write(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n");
-        _ = file.write(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n");
-        _ = file.write(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n");
-        //_ = file.write(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
-        _ = file.write(b"#macros tr:hover {background-color: #ddd;}\n");
-        _ = file.write(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n");
-        _ = file.write(b"</style>\n</head>\n<body>\n");
-        _ = file.write(b"<h1>Klauss ISA Instruction set and macros</h1>\n");
-        _ = file.write(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes());
-        _ = file.write(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n");
-        _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n");
+        file.write_all(b"<!DOCTYPE html>\n")?;
+        file.write_all(b"<html>\n<head>\n<style>\n")?;
+        file.write_all(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
+        file.write_all(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n")?;
+        //file.write_all(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n")?; // Banded table
+        file.write_all(b"#opcodes tr:hover {background-color: #ddd;}\n")?;
+        file.write_all(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n")?;
+        file.write_all(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
+        file.write_all(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n")?;
+        //file.write_all(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
+        file.write_all(b"#macros tr:hover {background-color: #ddd;}\n")?;
+        file.write_all(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n")?;
+        file.write_all(b"</style>\n</head>\n<body>\n")?;
+        file.write_all(b"<h1>Klauss ISA Instruction set and macros</h1>\n")?;
+        file.write_all(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes())?;
+        file.write_all(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n")?;
+        file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n")?;
 
         let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
         sorted_opcodes.sort_by(|a, b| a.hex_opcode.cmp(&b.hex_opcode));
@@ -363,31 +362,31 @@ pub fn output_macros_opcodes(
         let mut old_section = String::new();
         for opcode in sorted_opcodes.clone() {
             if old_section != opcode.section {
-                _ = file.write(
+                file.write_all(
                 format!(
                     "<tr>\n    <td colspan=\"5\" style=\"background-color:#b0b0b0;\"><b>{}</b></td>\n</tr>\n",
                     opcode.section
                 )
                 .as_bytes(),
-            );
+            )?;
                 old_section = opcode.section.clone();
             }
-            _ = file.write(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
+            file.write_all(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
             opcode.text_name,
             opcode.hex_opcode,
             opcode.variables,
             opcode.registers,
-            opcode.comment).as_bytes());
+            opcode.comment).as_bytes())?;
         }
 
-        _ = file.write(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n");
-        _ = file.write(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n");
+        file.write_all(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n")?;
+        file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n")?;
 
         let mut sorted_macros: Vec<Macro> = macros;
         sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
 
         for macro_item in sorted_macros {
-            _ = file.write(
+            file.write_all(
                 format!(
                 "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
                 macro_item.name,
@@ -400,12 +399,13 @@ pub fn output_macros_opcodes(
             )
                 .trim()
                 .as_bytes(),
-            );
+            )?;
         }
-        _ = file.write(b"</table>\n");
+        file.write_all(b"</table>\n")?;
 
-        _ = file.write(b"</body>\n</html>\n");
+        file.write_all(b"</body>\n</html>\n")?;
     }
+    #[allow(clippy::print_stdout)]
     if textmate_flag {
         println!("Textmate formatted list of opcodes:");
         println!(
@@ -417,6 +417,7 @@ pub fn output_macros_opcodes(
                 .unwrap_or("")
         );
     }
+    Ok(())
 }
 
 /// Format a given string, adding spaces between groups of 4
@@ -440,12 +441,13 @@ pub fn format_opcodes(input: &mut String) -> String {
 /// Will send the program to the serial port, and wait for the response
 #[allow(clippy::cast_possible_wrap)]
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::question_mark_used)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> bool {
+pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList) -> Result<(), std::io::Error> {
     use std::{thread, time};
 
     let mut buffer = [0; 1024];
-    let port_result = serialport::new(port_name, /*115_200*/1_000_000)
+    let port_result = serialport::new(port_name, /*115_200*/ 1_000_000)
         .timeout(core::time::Duration::from_millis(100))
         .open();
 
@@ -467,7 +469,10 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
                     None,
                     MessageType::Error,
                 );
-                return false;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "No ports found",
+                ));
             }
             Ok(ports) => {
                 let mut max_ports: i32 = -1;
@@ -495,7 +500,10 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
                     None,
                     MessageType::Error,
                 );
-                return false;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "Failed to open port",
+                ));
             }
         }
     }
@@ -503,22 +511,11 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
     #[allow(clippy::unwrap_used)]
     let mut port = port_result.unwrap();
 
-    if port.set_stop_bits(serialport::StopBits::One).is_err() {
-        return false;
-    }
-    if port.set_data_bits(serialport::DataBits::Eight).is_err() {
-        return false;
-    }
-    if port.set_parity(serialport::Parity::None).is_err() {
-        return false;
-    }
-    if port.set_flow_control(serialport::FlowControl::None).is_err() {
-        return false;
-    }
-
-    if port.write(b"S").is_err() {  // Send Start command as reset to stop any UART coms
-        return false;
-    }
+    port.set_stop_bits(serialport::StopBits::One)?;
+    port.set_data_bits(serialport::DataBits::Eight)?;
+    port.set_parity(serialport::Parity::None)?;
+    port.set_flow_control(serialport::FlowControl::None)?;
+    port.write_all(b"S")?;
 
     thread::sleep(time::Duration::from_millis(500)); //Wait for board to reset
 
@@ -530,14 +527,10 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
     for byte in binary_output.as_bytes() {
         let char_delay = time::Duration::from_micros(100);
         thread::sleep(char_delay);
-        if port.write(&[*byte]).is_err() {
-            return false;
-        }
+        port.write_all(&[*byte])?;
     }
 
-    if port.flush().is_err() {
-        return false;
-    }
+    port.flush()?;
 
     let ret_msg_size = port.read(&mut buffer[..]).unwrap_or(0);
 
@@ -548,7 +541,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
             None,
             MessageType::Warning,
         );
-        return true;
+        return Ok(());
     }
 
     let ret_msg = String::from_utf8(buffer[..ret_msg_size].to_vec());
@@ -560,7 +553,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
             None,
             MessageType::Warning,
         );
-        return true;
+        return Ok(());
     }
 
     let mut print_ret_msg = ret_msg.unwrap_or_else(|_| String::new());
@@ -574,7 +567,7 @@ pub fn write_serial(binary_output: &str, port_name: &str, msg_list: &mut MsgList
         MessageType::Information,
     );
 
-    true
+    Ok(())
 }
 
 #[cfg(test)]
@@ -860,10 +853,7 @@ mod test {
             format_opcodes(&mut "0000000000000000".to_owned()),
             "00000000 00000000"
         );
-        assert_eq!(
-            format_opcodes(&mut "0000".to_owned()),
-            "0000              "
-        );
+        assert_eq!(format_opcodes(&mut "0000".to_owned()), "0000              ");
         assert_eq!(
             format_opcodes(&mut "0123456789ABCDEF".to_owned()),
             "01234567 89ABCDEF"
