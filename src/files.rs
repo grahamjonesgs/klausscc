@@ -1224,8 +1224,5 @@ mod test {
         let buffer = fs::read_to_string(file_name1).unwrap();
         assert_eq!(buffer.lines().count(), 11);
         assert_eq!(buffer, "0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678          -- #DATA1 \"HELLO\"\n0x00000006: FFFFFFFF          -- #DATA1 \"HELLO\"\n0x00000007: DDDDDDDD          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
-        for lines in buffer.lines() {
-            println!("{}", lines);
-        }
     }
 }
