@@ -27,6 +27,7 @@ pub struct Message {
     pub time: Option<NaiveTime>,
 }
 
+#[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
 impl Default for & Message {
     fn default() -> &'static Message {

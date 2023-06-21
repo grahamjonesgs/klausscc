@@ -31,6 +31,7 @@ pub struct InputData {
     pub line_counter: u32,
 }
 
+#[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
 impl Default for &InputData {
     fn default() -> &'static InputData {
@@ -54,6 +55,7 @@ pub struct Pass0 {
     pub line_counter: u32,
 }
 
+#[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
 impl Default for &Pass0 {
     fn default() -> &'static Pass0 {
@@ -81,6 +83,7 @@ pub struct Pass1 {
     pub line_type: LineType,
 }
 
+#[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
 impl Default for &Pass1 {
     fn default() -> &'static Pass1 {
@@ -112,6 +115,7 @@ pub struct Pass2 {
     pub opcode: String,
 }
 
+#[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
 impl Default for &Pass2 {
     fn default() -> &'static Pass2 {

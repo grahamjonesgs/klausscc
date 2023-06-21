@@ -26,7 +26,6 @@ pub enum LineType {
 /// Open text file and return as vector of strings
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-// #[cfg(not(tarpaulin_include))] // Cannot test reading file in tarpaulin
 pub fn read_file_to_vector(
     filename: &str,
     msg_list: &mut MsgList,
@@ -218,7 +217,6 @@ pub fn filename_stem(full_name: &String) -> String {
 /// Output the bitcode to given file
 ///
 /// Based on the bitcode string outputs to file
-#[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
 #[allow(clippy::impl_trait_in_params)]
 #[allow(clippy::question_mark_used)]
 pub fn write_binary_output_file(
@@ -235,7 +233,6 @@ pub fn write_binary_output_file(
 /// Output the code details file to given filename
 ///
 /// Writes all data to the detailed code file
-#[cfg(not(tarpaulin_include))] // Cannot test writing file in tarpaulin
 #[allow(clippy::impl_trait_in_params)]
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::integer_division)]
@@ -258,7 +255,7 @@ pub fn write_code_output_file(
         out_line.clear();
         if pass.line_type == LineType::Opcode {
             out_line = format!(
-                "0x{:08X}: {:<16} -- {}\n",
+                "0x{:08X}: {:<17} -- {}\n",
                 pass.program_counter,
                 format_opcodes(&mut pass.opcode),
                 pass.input_text_line
@@ -584,6 +581,8 @@ pub fn write_serial(
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod test {
+    use std::fs;
+
     use super::*;
     use tempfile::TempDir;
 
@@ -882,7 +881,10 @@ mod test {
         let mut msg_list = MsgList::new();
         let mut opened_files: Vec<String> = Vec::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list, &mut opened_files);
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Unable to open file ////xxxxxxx");
+        assert_eq!(
+            msg_list.list.get(0).unwrap_or_default().text,
+            "Unable to open file ////xxxxxxx"
+        );
     }
 
     #[test]
@@ -904,7 +906,10 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
-        assert_eq!(lines.clone().unwrap().get(0).unwrap_or_default().input, "Test line in file");
+        assert_eq!(
+            lines.clone().unwrap().get(0).unwrap_or_default().input,
+            "Test line in file"
+        );
         assert_eq!(lines.unwrap().len(), 4);
 
         drop(tmp_file1);
@@ -938,15 +943,30 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            lines.clone().unwrap_or_default().get(0).unwrap_or_default().input,
+            lines
+                .clone()
+                .unwrap_or_default()
+                .get(0)
+                .unwrap_or_default()
+                .input,
             "Test line in file 1 line 0"
         );
         assert_eq!(
-            lines.clone().unwrap_or_default().get(2).unwrap_or_default().input,
+            lines
+                .clone()
+                .unwrap_or_default()
+                .get(2)
+                .unwrap_or_default()
+                .input,
             "Test line in file 2 line 1"
         );
         assert_eq!(
-            lines.clone().unwrap_or_default().get(6).unwrap_or_default().input,
+            lines
+                .clone()
+                .unwrap_or_default()
+                .get(6)
+                .unwrap_or_default()
+                .input,
             "Test line in file 1 line 2"
         );
         assert_eq!(lines.unwrap().len(), 7);
@@ -1098,5 +1118,114 @@ mod test {
         drop(tmp_file1);
         drop(tmp_file2);
         _ = tmp_dir.close();
+    }
+
+    #[test]
+    fn test_write_binary_output_file() {
+        let tmp_dir = TempDir::new().unwrap();
+
+        let file_path1 = tmp_dir.path().join("test1.klb");
+        let binding = file_path1;
+        let file_name1: &str = binding.to_str().unwrap();
+
+        let result_write = write_binary_output_file(&file_name1, "12345678");
+        result_write.unwrap();
+
+        let bytes = fs::read(file_name1).unwrap();
+        assert_eq!(bytes, b"12345678");
+    }
+
+    #[test]
+    fn test_write_code_output_file() {
+        let tmp_dir = TempDir::new().unwrap();
+        let mut msg_list = MsgList::new();
+        let mut pass2: Vec<Pass2> = vec![
+            Pass2 {
+                input_text_line: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 1,
+                program_counter: 0,
+                line_type: LineType::Opcode,
+                opcode: String::from("x"),
+            },
+            Pass2 {
+                input_text_line: "DELAY 0x7".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 1,
+                program_counter: 1,
+                line_type: LineType::Opcode,
+                opcode: String::from("000F013"),
+            },
+            Pass2 {
+                input_text_line: "PUSH A".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 2,
+                program_counter: 3,
+                line_type: LineType::Opcode,
+                opcode: String::from("0000F013"),
+            },
+            Pass2 {
+                input_text_line: "RET".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 3,
+                program_counter: 4,
+                line_type: LineType::Opcode,
+                opcode: String::from("0000F013"),
+            },
+            Pass2 {
+                input_text_line: "RET".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 3,
+                program_counter: 5,
+                line_type: LineType::Opcode,
+                opcode: String::from("0000F013"),
+            },
+            Pass2 {
+                input_text_line: ":ERIC".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 3,
+                program_counter: 5,
+                line_type: LineType::Label,
+                opcode: String::new(),
+            },
+            Pass2 {
+                input_text_line: "// Comment".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 3,
+                program_counter: 5,
+                line_type: LineType::Comment,
+                opcode: String::from("test"),
+            },
+            Pass2 {
+                input_text_line: "#DATA1 \"HELLO\"".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 3,
+                program_counter: 5,
+                line_type: LineType::Data,
+                opcode: String::from("12345678FFFFFFFFDDDDDDDD"),
+            },
+            Pass2 {
+                input_text_line: "xxx".to_owned(),
+                file_name: String::from("test"),
+                line_counter: 3,
+                program_counter: 5,
+                line_type: LineType::Error,
+                opcode: String::from("test"),
+            },
+        ];
+
+        let file_path1 = tmp_dir.path().join("test1.klc");
+        let binding = file_path1;
+        let file_name1: &str = binding.to_str().unwrap();
+
+        let result_write = write_code_output_file(file_name1, &mut pass2, &mut msg_list);
+        result_write.unwrap();
+
+        let buffer = fs::read_to_string(file_name1).unwrap();
+        assert_eq!(buffer.lines().count(), 11);
+        assert_eq!(buffer, "0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678          -- #DATA1 \"HELLO\"\n0x00000006: FFFFFFFF          -- #DATA1 \"HELLO\"\n0x00000007: DDDDDDDD          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
+        for lines in buffer.lines() {
+            println!("{}", lines);
+        }
     }
 }

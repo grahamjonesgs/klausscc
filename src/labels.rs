@@ -11,6 +11,7 @@ pub struct Label {
     pub name: String,
 }
 
+#[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
 impl Default for & Label {
     fn default() -> &'static Label {
