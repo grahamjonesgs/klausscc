@@ -11,6 +11,18 @@ pub struct Label {
     pub name: String,
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
+impl Default for & Label {
+    fn default() -> &'static Label {
+        static VALUE: Label = Label {
+            program_counter: 0,
+            name: String::new(),   
+        };
+        &VALUE
+
+    }
+}
+
 /// Extracts label from string
 ///
 /// Checks if end of first word is colon if so return label as option string
@@ -544,37 +556,37 @@ mod tests {
         ];
         let labels = get_labels(&pass1, msglist);
         assert_eq!(
-            labels[0],
+            *labels.get(0).unwrap_or_default(),
             Label {
                 program_counter: 0,
                 name: "label1:".to_owned(),
             }
         );
         assert_eq!(
-            labels[1],
+            *labels.get(1).unwrap_or_default(),
             Label {
                 program_counter: 4,
                 name: "label2:".to_owned(),
             }
         );
         assert_eq!(
-            labels[2],
+            *labels.get(2).unwrap_or_default(),
             Label {
                 program_counter: 6,
                 name: "label3:".to_owned(),
             }
         );
         assert_eq!(
-            labels[3],
+            *labels.get(3).unwrap_or_default(),
             Label {
                 program_counter: 7,
                 name: "#data321".to_owned(),
             }
         );
-        assert_eq!(msglist.list[0].text, "Label label1: has extra text dummy");
-        assert_eq!(msglist.list[1].text, "Data #data123 has extra text dummy2");
+        assert_eq!(msglist.list.get(0).unwrap_or_default().text, "Label label1: has extra text dummy");
+        assert_eq!(msglist.list.get(1).unwrap_or_default().text, "Data #data123 has extra text dummy2");
         assert_eq!(
-            msglist.list[2].text,
+            msglist.list.get(2).unwrap_or_default().text,
             "Data #data3 has no string termination"
         );
     }

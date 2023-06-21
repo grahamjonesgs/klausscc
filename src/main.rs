@@ -8,7 +8,6 @@
 #![allow(clippy::arithmetic_side_effects)]
 #![allow(clippy::implicit_return)]
 #![allow(clippy::string_add)]
-#![allow(clippy::indexing_slicing)]
 #![allow(clippy::as_conversions)]
 #![allow(clippy::separated_literal_suffix)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
@@ -544,13 +543,13 @@ mod tests {
             },
         ];
         let pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(pass1[0].program_counter, 0);
-        assert_eq!(pass1[1].program_counter, 3);
-        assert_eq!(pass1[2].program_counter, 4);
-        assert_eq!(pass1[3].program_counter, 5);
-        assert_eq!(pass1[4].program_counter, 6);
-        assert_eq!(pass1[5].program_counter, 7);
-        assert_eq!(pass1[6].program_counter, 9);
+        assert_eq!(pass1.get(0).unwrap_or_default().program_counter, 0);
+        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 3);
+        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 4);
+        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 5);
+        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 6);
+        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 7);
+        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 9);
     }
 
     #[test]
@@ -573,7 +572,7 @@ mod tests {
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(msg_list.list[0].text, "Error Test_not_code_line");
+        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Error Test_not_code_line");
     }
 
     #[allow(clippy::too_many_lines)]
@@ -703,15 +702,15 @@ mod tests {
             opcodes.clone(),
             labels,
         );
-        assert_eq!(pass2[0].opcode, "00000020EEEEEEEEFFFFFFFF");
-        assert_eq!(pass2[1].opcode, "0000004000000007");
-        assert_eq!(pass2[2].opcode, "00000010");
-        assert_eq!(pass2[3].opcode, "00000030");
-        assert_eq!(pass2[4].opcode, "00000030");
-        assert_eq!(pass2[5].opcode, "000000720000AAAA");
-        assert_eq!(pass2[6].opcode, "00000A340000000A0000000B");
-        assert_eq!(pass2[7].opcode, "0000000248454C4C4F000000");
-        assert_eq!(pass2[8].opcode, "");
+        assert_eq!(pass2.get(0).unwrap_or_default().opcode, "00000020EEEEEEEEFFFFFFFF");
+        assert_eq!(pass2.get(1).unwrap_or_default().opcode, "0000004000000007");
+        assert_eq!(pass2.get(2).unwrap_or_default().opcode, "00000010");
+        assert_eq!(pass2.get(3).unwrap_or_default().opcode, "00000030");
+        assert_eq!(pass2.get(4).unwrap_or_default().opcode, "00000030");
+        assert_eq!(pass2.get(5).unwrap_or_default().opcode, "000000720000AAAA");
+        assert_eq!(pass2.get(6).unwrap_or_default().opcode, "00000A340000000A0000000B");
+        assert_eq!(pass2.get(7).unwrap_or_default().opcode, "0000000248454C4C4F000000");
+        assert_eq!(pass2.get(8).unwrap_or_default().opcode, "");
     }
 
     #[test]
@@ -740,6 +739,6 @@ mod tests {
             opcodes.clone(),
             labels,
         );
-        assert_eq!(pass2[0].opcode, "ERR     ");
+        assert_eq!(pass2.get(0).unwrap_or_default().opcode, "ERR     ");
     }
 }

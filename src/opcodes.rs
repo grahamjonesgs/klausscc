@@ -31,15 +31,15 @@ pub struct InputData {
     pub line_counter: u32,
 }
 
-impl Default for & InputData {
+#[allow(clippy::missing_docs_in_private_items)]
+impl Default for &InputData {
     fn default() -> &'static InputData {
         static VALUE: InputData = InputData {
             input: String::new(),
             file_name: String::new(),
-            line_counter: 0,  
+            line_counter: 0,
         };
         &VALUE
-
     }
 }
 
@@ -52,6 +52,18 @@ pub struct Pass0 {
     pub file_name: String,
     /// Line number of input file
     pub line_counter: u32,
+}
+
+#[allow(clippy::missing_docs_in_private_items)]
+impl Default for &Pass0 {
+    fn default() -> &'static Pass0 {
+        static VALUE: Pass0 = Pass0 {
+            input_text_line: String::new(),
+            file_name: String::new(),
+            line_counter: 0,
+        };
+        &VALUE
+    }
 }
 
 #[derive(Debug)]
@@ -69,6 +81,20 @@ pub struct Pass1 {
     pub line_type: LineType,
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
+impl Default for &Pass1 {
+    fn default() -> &'static Pass1 {
+        static VALUE: Pass1 = Pass1 {
+            input_text_line: String::new(),
+            file_name: String::new(),
+            line_counter: 0,
+            program_counter: 0,
+            line_type: LineType::Blank,
+        };
+        &VALUE
+    }
+}
+
 #[derive(Debug, Clone)]
 /// Struct for Pass2
 pub struct Pass2 {
@@ -84,6 +110,21 @@ pub struct Pass2 {
     pub line_type: LineType,
     /// Opcode as string
     pub opcode: String,
+}
+
+#[allow(clippy::missing_docs_in_private_items)]
+impl Default for &Pass2 {
+    fn default() -> &'static Pass2 {
+        static VALUE: Pass2 = Pass2 {
+            input_text_line: String::new(),
+            file_name: String::new(),
+            line_counter: 0,
+            program_counter: 0,
+            line_type: LineType::Blank,
+            opcode: String::new(),
+        };
+        &VALUE
+    }
 }
 
 /// Parse file to opcode and macro vectors
@@ -210,7 +251,9 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     };
 
     // Find end of first word after comment as end of opcode name
-    let pos_end_name: usize = input_line.get(pos_name..).unwrap_or("")
+    let pos_end_name: usize = input_line
+        .get(pos_name..)
+        .unwrap_or("")
         .find(' ')
         .map_or(input_line.len(), |a| a + pos_name);
 
@@ -224,11 +267,20 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     Some(Opcode {
-        hex_opcode: format!("0000{}", &input_line.get(pos_opcode..pos_opcode + 4).unwrap_or("    ")),
+        hex_opcode: format!(
+            "0000{}",
+            &input_line.get(pos_opcode..pos_opcode + 4).unwrap_or("    ")
+        ),
         registers: num_registers,
         variables: num_variables,
-        comment: input_line.get(pos_comment..pos_end_comment).unwrap_or("").to_owned(),
-        text_name: input_line.get(pos_name..pos_end_name).unwrap_or("").to_owned(),
+        comment: input_line
+            .get(pos_comment..pos_end_comment)
+            .unwrap_or("")
+            .to_owned(),
+        text_name: input_line
+            .get(pos_name..pos_end_name)
+            .unwrap_or("")
+            .to_owned(),
         section: String::new(),
     })
 }
@@ -330,7 +382,10 @@ pub fn add_registers(
         return "ERR     ".to_owned();
     }
 
-    opcode_found = opcode_found.get(..(8 - num_registers) as usize).unwrap_or("").to_owned();
+    opcode_found = opcode_found
+        .get(..(8 - num_registers) as usize)
+        .unwrap_or("")
+        .to_owned();
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
@@ -739,7 +794,7 @@ mod tests {
         let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             "Too many arguments found - \"PUSH 1 0xF\""
         );
     }
@@ -968,12 +1023,12 @@ mod tests {
         let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.list.get(0).unwrap_or_default().text,
             "Duplicate Macro definition $WAIT found"
         );
-        assert_eq!(msg_list.list[0].line_number, Some(3));
-        assert_eq!(msg_list.list[1].text, "Duplicate Opcode CMPRR found");
-        assert_eq!(msg_list.list[1].line_number, Some(4));
+        assert_eq!(msg_list.list.get(0).unwrap_or_default().line_number, Some(3));
+        assert_eq!(msg_list.list.get(1).unwrap_or_default().text, "Duplicate Opcode CMPRR found");
+        assert_eq!(msg_list.list.get(1).unwrap_or_default().line_number, Some(4));
     }
     #[test]
     // Test empty list

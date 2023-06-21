@@ -17,6 +17,21 @@ pub struct Macro {
     pub comment: String,
 }
 
+#[allow(clippy::missing_docs_in_private_items)]
+impl Default for & Macro {
+    fn default() -> &'static Macro {
+        static VALUE: Macro = Macro {
+            name: String::new(),
+            variables: 0,
+            items: Vec::new(),
+            comment: String::new(),
+        };
+        &VALUE
+
+    }
+}
+
+
 /// Parse opcode definition line to macro
 ///
 /// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None
@@ -192,7 +207,7 @@ pub fn return_macro_items_replace(
                         } else {
                             build_line = build_line
                                 + " "
-                                + input_line_array[int_value.clone().unwrap_or(0) as usize];
+                                + input_line_array.get(int_value.clone().unwrap_or(0) as usize).unwrap_or(&"");
                         }
                     } else {
                         build_line = build_line + " " + item_word;
@@ -288,8 +303,8 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                     } else {
                                         build_line = build_line
                                             + " "
-                                            + &item_line_array
-                                                [int_value.clone().unwrap_or(0) as usize];
+                                            + item_line_array
+                                                .get(int_value.clone().unwrap_or(0) as usize).unwrap_or(&String::new());
                                     }
                                 } else {
                                     build_line = build_line + " " + item_word;
@@ -799,13 +814,13 @@ mod tests {
                 line_counter: 2,
             },
         ];
-        let mut pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(strip_comments(&mut pass0[0].input_text_line), "MOV A");
-        assert_eq!(strip_comments(&mut pass0[0].file_name), "File1");
-        assert_eq!(strip_comments(&mut pass0[1].input_text_line), "RET B");
-        assert_eq!(strip_comments(&mut pass0[2].input_text_line), "PUSH D");
-        assert_eq!(strip_comments(&mut pass0[3].input_text_line), "POP C");
-        assert_eq!(strip_comments(&mut pass0[3].file_name), "File2");
+        let pass0 = expand_macros(&mut msg_list, input, macros);
+        assert_eq!(strip_comments(&mut pass0.get(0).unwrap_or_default().input_text_line.clone()), "MOV A");
+        assert_eq!(strip_comments(&mut pass0.get(0).unwrap_or_default().file_name.clone()), "File1");
+        assert_eq!(strip_comments(&mut pass0.get(1).unwrap_or_default().input_text_line.clone()), "RET B");
+        assert_eq!(strip_comments(&mut pass0.get(2).unwrap_or_default().input_text_line.clone()), "PUSH D");
+        assert_eq!(strip_comments(&mut pass0.get(3).unwrap_or_default().input_text_line.clone()), "POP C");
+        assert_eq!(strip_comments(&mut pass0.get(3).unwrap_or_default().file_name.clone()), "File2");
         //  assert_eq!(&mut pass0[3].line_counter, 1);
     }
 
@@ -841,11 +856,11 @@ mod tests {
             },
         ];
 
-        let mut pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(strip_comments(&mut pass0[0].input_text_line), "MOV A");
-        assert_eq!(strip_comments(&mut pass0[1].input_text_line), "RET B");
-        assert_eq!(strip_comments(&mut pass0[2].input_text_line), "PUSH");
-        assert_eq!(strip_comments(&mut pass0[3].input_text_line), "POP C");
+        let pass0 = expand_macros(&mut msg_list, input, macros);
+        assert_eq!(strip_comments(&mut pass0.get(0).unwrap_or_default().input_text_line.clone()), "MOV A");
+        assert_eq!(strip_comments(&mut pass0.get(1).unwrap_or_default().input_text_line.clone()), "RET B");
+        assert_eq!(strip_comments(&mut pass0.get(2).unwrap_or_default().input_text_line.clone()), "PUSH");
+        assert_eq!(strip_comments(&mut pass0.get(3).unwrap_or_default().input_text_line.clone()), "POP C");
         assert_eq!(msg_list.number_errors(), 1);
         assert_eq!(
             msg_list.list.get(0).unwrap_or_default().text,
@@ -885,11 +900,10 @@ mod tests {
             },
         ];
 
-        let mut pass0 = expand_macros(&mut msg_list, input, macros);
-
-        assert_eq!(strip_comments(&mut pass0[0].input_text_line), "MOV A");
-        assert_eq!(strip_comments(&mut pass0[1].input_text_line), "RET B");
-        assert_eq!(strip_comments(&mut pass0[2].input_text_line), "PUSH D");
+        let  pass0 = expand_macros(&mut msg_list, input, macros);
+        assert_eq!(strip_comments(&mut pass0.get(0).unwrap_or_default().input_text_line.clone()), "MOV A");
+        assert_eq!(strip_comments(&mut pass0.get(1).unwrap_or_default().input_text_line.clone()), "RET B");
+        assert_eq!(strip_comments(&mut pass0.get(2).unwrap_or_default().input_text_line.clone()), "PUSH D");
         assert_eq!(msg_list.number_warnings(), 1);
         assert_eq!(
             msg_list.list.get(0).unwrap_or_default().text,
@@ -958,8 +972,8 @@ mod tests {
             line_counter: 1,
         }];
 
-        let mut pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(strip_comments(&mut pass0[0].input_text_line), "OPCODE1 A B");
+        let pass0 = expand_macros(&mut msg_list, input, macros);
+        assert_eq!(strip_comments(&mut pass0.get(0).unwrap_or_default().input_text_line.clone()), "OPCODE1 A B");
     }
 
     #[test]
@@ -1029,7 +1043,7 @@ mod tests {
             })
         );
         assert_eq!(
-            msglist.list[0].text,
+            msglist.list.get(0).unwrap_or_default().text,
             "Error in macro variable definition for macro $POPALL, missing \"%1\""
         );
     }
@@ -1060,7 +1074,7 @@ mod tests {
         let _macro_result = macro_from_string(&input_line, &mut msglist);
         //assert_eq!(macro_result, None);
         assert_eq!(
-            msglist.list[0].text,
+            msglist.list.get(0).unwrap_or_default().text,
             "Error in macro variable definition for macro $POPALL, missing \"%1 %2 %4\"",
         );
     }
