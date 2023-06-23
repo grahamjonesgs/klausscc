@@ -293,14 +293,56 @@ pub fn write_code_output_file(
     Ok(())
 }
 
-/// Outputs the opcodes and macros details file to given filename
+/// Output the opcodes for textmate to given filename
 ///
-/// Writes all data to the html ISA and macro file file
-#[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-#[allow(clippy::impl_trait_in_params)]
+/// Writes all data of opcodes to textmate file
+#[cfg(not(tarpaulin_include))] 
 #[allow(clippy::question_mark_used)]
-#[allow(clippy::too_many_lines)]
-pub fn output_macros_opcodes(
+fn output_opcodes_textmate(
+    filename_stem: String,
+    opcodes: &[Opcode],
+    msg_list: &mut MsgList,
+) -> Result<(), std::io::Error> {
+    use std::io::{Error, ErrorKind};
+    let textmate_opcode_filename = filename_stem + "_textmate.json";
+    msg_list.push(
+        format!("Writing textmate opcode file to {textmate_opcode_filename}"),
+        None,
+        None,
+        MessageType::Information,
+    );
+
+    let textmate_opcode_output_file = File::create(textmate_opcode_filename.clone());
+    if textmate_opcode_output_file.is_err() {
+        msg_list.push(
+            format!("Error opening file {textmate_opcode_filename}"),
+            None,
+            None,
+            MessageType::Warning,
+        );
+        return Err(textmate_opcode_output_file
+            .err()
+            .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+    }
+    let  Ok(mut json_opcode_file) = textmate_opcode_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+    json_opcode_file.write_all(
+        opcodes
+            .iter()
+            .fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)
+            .strip_prefix('|')
+            .unwrap_or("")
+            .as_bytes(),
+    )?;
+
+    Ok(())
+}
+
+/// Outputs the opcodes and macros as html for documentation
+///
+/// Writes all data of opcodes and macros to html as tables
+#[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
+#[allow(clippy::question_mark_used)]
+pub fn output_macros_opcodes_html(
     filename_stem: String,
     opcodes: &[Opcode],
     macros: Vec<Macro>,
@@ -311,17 +353,11 @@ pub fn output_macros_opcodes(
     use chrono::Local;
     use std::io::{Error, ErrorKind};
 
-    let json_opcode_filename = filename_stem.clone() + "_opcodes.json";
-    let json_macro_filename = filename_stem.clone() + "_macro.json";
-    let html_filename = filename_stem + ".html";
-    //let json_opcode_filename = "klauss_opcode.json";
-    //let json_macro_filename = "klauss_macro.json";
+    let html_filename = filename_stem.clone() + ".html";
 
     if opcodes_flag {
         msg_list.push(
-            format!(
-                "Outputting macros and opcodes to {html_filename}, {json_opcode_filename} and {json_macro_filename}",
-            ),
+            format!("Outputting macros and opcodes to {html_filename}",),
             None,
             None,
             MessageType::Information,
@@ -334,7 +370,7 @@ pub fn output_macros_opcodes(
                 format!("Error opening file {html_filename}"),
                 None,
                 None,
-                MessageType::Information,
+                MessageType::Warning,
             );
             return Err(html_output_file
                 .err()
@@ -410,59 +446,85 @@ pub fn output_macros_opcodes(
         html_file.write_all(b"</table>\n")?;
         html_file.write_all(b"</body>\n</html>\n")?;
 
-        // Write out the JSON opcode file
-        let json_opcode_output_file = File::create(json_opcode_filename.clone());
-        if json_opcode_output_file.is_err() {
-            msg_list.push(
-                format!("Error opening file {json_opcode_filename}"),
-                None,
-                None,
-                MessageType::Information,
-            );
-            return Err(json_opcode_output_file
-                .err()
-                .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
-        }
-        let  Ok(mut json_opcode_file) = json_opcode_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
-        json_opcode_file.write_all(
-            serde_json::to_string_pretty(&sorted_opcodes)
-                .unwrap_or_default()
-                .as_bytes(),
-        )?;
-
-        // Write out the JSON macro file
-        let json_macro_output_file = File::create(json_macro_filename.clone());
-        if json_macro_output_file.is_err() {
-            msg_list.push(
-                format!("Error opening file {json_macro_filename}"),
-                None,
-                None,
-                MessageType::Information,
-            );
-            return Err(json_macro_output_file
-                .err()
-                .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
-        }
-        let  Ok(mut json_macro_file) = json_macro_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
-        json_macro_file.write_all(
-            serde_json::to_string_pretty(&sorted_macros)
-                .unwrap_or_default()
-                .as_bytes(),
-        )?;
+        output_macros_opcodes_json(filename_stem.clone(), &sorted_opcodes, &sorted_macros, msg_list)?;
     }
     // Write out the Textmate
     #[allow(clippy::print_stdout)]
     if textmate_flag {
-        println!("Textmate formatted list of opcodes:");
-        println!(
-            "{}\n",
-            opcodes
-                .iter()
-                .fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)
-                .strip_prefix('|')
-                .unwrap_or("")
-        );
+        output_opcodes_textmate(filename_stem, opcodes, msg_list)?;
     }
+    Ok(())
+}
+
+/// Outputs the opcodes and macros as JSON files
+///
+/// Writes all macros and opcodes to JSON files
+#[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
+#[allow(clippy::question_mark_used)]
+pub fn output_macros_opcodes_json(
+    filename_stem: String,
+    opcodes: &[Opcode],
+    macros: &[Macro],
+    msg_list: &mut MsgList,
+) -> Result<(), std::io::Error> {
+    use std::io::{Error, ErrorKind};
+
+    let json_opcode_filename = filename_stem.clone() + "_opcodes.json";
+    let json_macro_filename = filename_stem + "_macro.json";
+
+    msg_list.push(
+        format!("Writing JSON opcode file {}", json_opcode_filename),
+        None,
+        None,
+        MessageType::Information,
+    );
+
+    msg_list.push(
+        format!("Writing JSON macro file {}", json_macro_filename),
+        None,
+        None,
+        MessageType::Information,
+    );
+
+    // Write out the JSON opcode file
+    let json_opcode_output_file = File::create(json_opcode_filename.clone());
+    if json_opcode_output_file.is_err() {
+        msg_list.push(
+            format!("Error opening file {json_opcode_filename}"),
+            None,
+            None,
+            MessageType::Warning,
+        );
+        return Err(json_opcode_output_file
+            .err()
+            .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+    }
+    let  Ok(mut json_opcode_file) = json_opcode_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+    json_opcode_file.write_all(
+        serde_json::to_string_pretty(&opcodes)
+            .unwrap_or_default()
+            .as_bytes(),
+    )?;
+
+    // Write out the JSON macro file
+    let json_macro_output_file = File::create(json_macro_filename.clone());
+    if json_macro_output_file.is_err() {
+        msg_list.push(
+            format!("Error opening file {json_macro_filename}"),
+            None,
+            None,
+            MessageType::Warning,
+        );
+        return Err(json_macro_output_file
+            .err()
+            .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+    }
+    let  Ok(mut json_macro_file) = json_macro_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+    json_macro_file.write_all(
+        serde_json::to_string_pretty(&macros)
+            .unwrap_or_default()
+            .as_bytes(),
+    )?;
     Ok(())
 }
 

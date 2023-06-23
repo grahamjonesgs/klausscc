@@ -49,7 +49,8 @@ use opcodes::{
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<(), i32> {
-    use files::output_macros_opcodes;
+    use files::output_macros_opcodes_html;
+
 
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
@@ -98,7 +99,7 @@ fn main() -> Result<(), i32> {
     let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap_or_else(|| [].to_vec()), &mut msg_list);
 
-    if let Err(result_err) = output_macros_opcodes(
+    if let Err(result_err) = output_macros_opcodes_html(
         filename_stem(&opcode_file_name),
         &oplist,
         macro_list.clone(),
