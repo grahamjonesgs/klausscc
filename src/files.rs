@@ -2,6 +2,7 @@ use crate::helper::{strip_comments, trim_newline};
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Opcode, Pass2};
+use std::io::{Error, ErrorKind};
 
 use std::ffi::OsStr;
 use std::{
@@ -296,14 +297,13 @@ pub fn write_code_output_file(
 /// Output the opcodes for textmate to given filename
 ///
 /// Writes all data of opcodes to textmate file
-#[cfg(not(tarpaulin_include))] 
+#[cfg(not(tarpaulin_include))]
 #[allow(clippy::question_mark_used)]
 fn output_opcodes_textmate(
     filename_stem: String,
     opcodes: &[Opcode],
     msg_list: &mut MsgList,
 ) -> Result<(), std::io::Error> {
-    use std::io::{Error, ErrorKind};
     let textmate_opcode_filename = filename_stem + "_textmate.json";
     msg_list.push(
         format!("Writing textmate opcode file to {textmate_opcode_filename}"),
@@ -351,7 +351,6 @@ pub fn output_macros_opcodes_html(
     textmate_flag: bool,
 ) -> Result<(), std::io::Error> {
     use chrono::Local;
-    use std::io::{Error, ErrorKind};
 
     let html_filename = filename_stem.clone() + ".html";
 
@@ -446,7 +445,12 @@ pub fn output_macros_opcodes_html(
         html_file.write_all(b"</table>\n")?;
         html_file.write_all(b"</body>\n</html>\n")?;
 
-        output_macros_opcodes_json(filename_stem.clone(), &sorted_opcodes, &sorted_macros, msg_list)?;
+        output_macros_opcodes_json(
+            filename_stem.clone(),
+            &sorted_opcodes,
+            &sorted_macros,
+            msg_list,
+        )?;
     }
     // Write out the Textmate
     #[allow(clippy::print_stdout)]
@@ -467,20 +471,18 @@ pub fn output_macros_opcodes_json(
     macros: &[Macro],
     msg_list: &mut MsgList,
 ) -> Result<(), std::io::Error> {
-    use std::io::{Error, ErrorKind};
-
     let json_opcode_filename = filename_stem.clone() + "_opcodes.json";
     let json_macro_filename = filename_stem + "_macro.json";
 
     msg_list.push(
-        format!("Writing JSON opcode file {}", json_opcode_filename),
+        format!("Writing JSON opcode file {json_opcode_filename}"),
         None,
         None,
         MessageType::Information,
     );
 
     msg_list.push(
-        format!("Writing JSON macro file {}", json_macro_filename),
+        format!("Writing JSON macro file {json_macro_filename}"),
         None,
         None,
         MessageType::Information,
@@ -562,10 +564,7 @@ pub fn write_serial(
     port_name: &str,
     msg_list: &mut MsgList,
 ) -> Result<(), std::io::Error> {
-    use std::{
-        io::{Error, ErrorKind},
-        thread, time,
-    };
+    use std::{thread, time};
 
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, /*115_200*/ 1_000_000)
