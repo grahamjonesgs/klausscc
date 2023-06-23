@@ -16,6 +16,9 @@ categories = ["development-tools"]
 clap = { version = "4.3.5"}
 chrono = { version = "0.4.26", default-features = false, features = ["clock"] }
 colored = { version = "2.0.0"}
-itertools = { version = "0.10.5", default-features = false, features = ["use_std"] }
+itertools = { version = "0.11.0", default-features = false, features = ["use_std"] }
 serialport = { version = "4.2.1", default-features = false}
 tempfile = "3.6.0"
+serde = { version = "1.0.164", features = ["derive"] }
+serde_json = {version = "1.0.97"}
+bincode = "1.3.3"

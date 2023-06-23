@@ -299,58 +299,68 @@ pub fn write_code_output_file(
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
 #[allow(clippy::impl_trait_in_params)]
 #[allow(clippy::question_mark_used)]
+#[allow(clippy::too_many_lines)]
 pub fn output_macros_opcodes(
-    filename: impl AsRef<Path> + core::clone::Clone,
+    filename_stem: String,
     opcodes: &[Opcode],
     macros: Vec<Macro>,
     msg_list: &mut MsgList,
     opcodes_flag: bool,
     textmate_flag: bool,
 ) -> Result<(), std::io::Error> {
+    use chrono::Local;
     use std::io::{Error, ErrorKind};
 
-    use chrono::Local;
+    let json_opcode_filename = filename_stem.clone() + "_opcodes.json";
+    let json_macro_filename = filename_stem.clone() + "_macro.json";
+    let html_filename = filename_stem + ".html";
+    //let json_opcode_filename = "klauss_opcode.json";
+    //let json_macro_filename = "klauss_macro.json";
+
     if opcodes_flag {
         msg_list.push(
             format!(
-                "Outputting macros and opcodes to {}",
-                filename.as_ref().display()
+                "Outputting macros and opcodes to {html_filename}, {json_opcode_filename} and {json_macro_filename}",
             ),
             None,
             None,
             MessageType::Information,
         );
 
-        let output_file = File::create(filename.clone());
-        if output_file.is_err() {
+        // Open the html file
+        let html_output_file = File::create(html_filename.clone());
+        if html_output_file.is_err() {
             msg_list.push(
-                format!("Error opening file {}", filename.as_ref().display()),
+                format!("Error opening file {html_filename}"),
                 None,
                 None,
                 MessageType::Information,
             );
-            return Err(output_file
+            return Err(html_output_file
                 .err()
                 .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
         }
-        let  Ok(mut file) = output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
-        file.write_all(b"<!DOCTYPE html>\n")?;
-        file.write_all(b"<html>\n<head>\n<style>\n")?;
-        file.write_all(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
-        file.write_all(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n")?;
+        let  Ok(mut html_file) = html_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+        html_file.write_all(b"<!DOCTYPE html>\n")?;
+        html_file.write_all(b"<html>\n<head>\n<style>\n")?;
+        html_file.write_all(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
+        html_file
+            .write_all(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n")?;
         //file.write_all(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n")?; // Banded table
-        file.write_all(b"#opcodes tr:hover {background-color: #ddd;}\n")?;
-        file.write_all(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n")?;
-        file.write_all(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
-        file.write_all(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n")?;
+        html_file.write_all(b"#opcodes tr:hover {background-color: #ddd;}\n")?;
+        html_file.write_all(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n")?;
+        html_file.write_all(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
+        html_file
+            .write_all(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n")?;
         //file.write_all(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
-        file.write_all(b"#macros tr:hover {background-color: #ddd;}\n")?;
-        file.write_all(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n")?;
-        file.write_all(b"</style>\n</head>\n<body>\n")?;
-        file.write_all(b"<h1>Klauss ISA Instruction set and macros</h1>\n")?;
-        file.write_all(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes())?;
-        file.write_all(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n")?;
-        file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n")?;
+        html_file.write_all(b"#macros tr:hover {background-color: #ddd;}\n")?;
+        html_file.write_all(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n")?;
+        html_file.write_all(b"</style>\n</head>\n<body>\n")?;
+        html_file.write_all(b"<h1>Klauss ISA Instruction set and macros</h1>\n")?;
+        html_file
+            .write_all(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes())?;
+        html_file.write_all(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n")?;
+        html_file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n")?;
 
         let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
         sorted_opcodes.sort_by(|a, b| a.hex_opcode.cmp(&b.hex_opcode));
@@ -358,7 +368,7 @@ pub fn output_macros_opcodes(
         let mut old_section = String::new();
         for opcode in sorted_opcodes.clone() {
             if old_section != opcode.section {
-                file.write_all(
+                html_file.write_all(
                 format!(
                     "<tr>\n    <td colspan=\"5\" style=\"background-color:#b0b0b0;\"><b>{}</b></td>\n</tr>\n",
                     opcode.section
@@ -367,7 +377,7 @@ pub fn output_macros_opcodes(
             )?;
                 old_section = opcode.section.clone();
             }
-            file.write_all(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
+            html_file.write_all(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
             opcode.text_name,
             opcode.hex_opcode,
             opcode.variables,
@@ -375,14 +385,14 @@ pub fn output_macros_opcodes(
             opcode.comment).as_bytes())?;
         }
 
-        file.write_all(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n")?;
-        file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n")?;
+        html_file.write_all(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n")?;
+        html_file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n")?;
 
         let mut sorted_macros: Vec<Macro> = macros;
         sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
 
-        for macro_item in sorted_macros {
-            file.write_all(
+        for macro_item in sorted_macros.clone() {
+            html_file.write_all(
                 format!(
                 "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
                 macro_item.name,
@@ -397,10 +407,50 @@ pub fn output_macros_opcodes(
                 .as_bytes(),
             )?;
         }
-        file.write_all(b"</table>\n")?;
+        html_file.write_all(b"</table>\n")?;
+        html_file.write_all(b"</body>\n</html>\n")?;
 
-        file.write_all(b"</body>\n</html>\n")?;
+        // Write out the JSON opcode file
+        let json_opcode_output_file = File::create(json_opcode_filename.clone());
+        if json_opcode_output_file.is_err() {
+            msg_list.push(
+                format!("Error opening file {json_opcode_filename}"),
+                None,
+                None,
+                MessageType::Information,
+            );
+            return Err(json_opcode_output_file
+                .err()
+                .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+        }
+        let  Ok(mut json_opcode_file) = json_opcode_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+        json_opcode_file.write_all(
+            serde_json::to_string_pretty(&sorted_opcodes)
+                .unwrap_or_default()
+                .as_bytes(),
+        )?;
+
+        // Write out the JSON macro file
+        let json_macro_output_file = File::create(json_macro_filename.clone());
+        if json_macro_output_file.is_err() {
+            msg_list.push(
+                format!("Error opening file {json_macro_filename}"),
+                None,
+                None,
+                MessageType::Information,
+            );
+            return Err(json_macro_output_file
+                .err()
+                .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+        }
+        let  Ok(mut json_macro_file) = json_macro_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+        json_macro_file.write_all(
+            serde_json::to_string_pretty(&sorted_macros)
+                .unwrap_or_default()
+                .as_bytes(),
+        )?;
     }
+    // Write out the Textmate
     #[allow(clippy::print_stdout)]
     if textmate_flag {
         println!("Textmate formatted list of opcodes:");

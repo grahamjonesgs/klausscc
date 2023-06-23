@@ -3,8 +3,9 @@ use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Pass0};
 use core::fmt::Write as _;
 use itertools::Itertools;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 /// Holds instance of macro from opcode definition file
 pub struct Macro {
     /// Name of macro
@@ -82,12 +83,11 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
     }
 
     if max_variable
-        != all_found_variables
+        != core::convert::TryInto::<u32>::try_into(all_found_variables
             .clone()
             .into_iter()
             .unique()
-            .count()
-            .try_into()
+            .count())
             .unwrap_or_default()
     {
         for i in 1..max_variable {

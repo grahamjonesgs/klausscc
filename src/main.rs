@@ -99,7 +99,7 @@ fn main() -> Result<(), i32> {
     let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap_or_else(|| [].to_vec()), &mut msg_list);
 
     if let Err(result_err) = output_macros_opcodes(
-        filename_stem(&opcode_file_name) + ".html",
+        filename_stem(&opcode_file_name),
         &oplist,
         macro_list.clone(),
         &mut msg_list,

@@ -2,8 +2,9 @@ use crate::files::LineType;
 use crate::labels::{convert_argument, Label};
 use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::messages::{MessageType, MsgList};
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Struct for opcode
 pub struct Opcode {
     /// Text name of opcode
@@ -1030,9 +1031,18 @@ mod tests {
             msg_list.list.get(0).unwrap_or_default().text,
             "Duplicate Macro definition $WAIT found"
         );
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().line_number, Some(3));
-        assert_eq!(msg_list.list.get(1).unwrap_or_default().text, "Duplicate Opcode CMPRR found");
-        assert_eq!(msg_list.list.get(1).unwrap_or_default().line_number, Some(4));
+        assert_eq!(
+            msg_list.list.get(0).unwrap_or_default().line_number,
+            Some(3)
+        );
+        assert_eq!(
+            msg_list.list.get(1).unwrap_or_default().text,
+            "Duplicate Opcode CMPRR found"
+        );
+        assert_eq!(
+            msg_list.list.get(1).unwrap_or_default().line_number,
+            Some(4)
+        );
     }
     #[test]
     // Test empty list
