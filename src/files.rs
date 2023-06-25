@@ -1,3 +1,5 @@
+use serialport::UsbPortInfo;
+
 use crate::helper::{strip_comments, trim_newline};
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
@@ -558,6 +560,8 @@ pub fn format_opcodes(input: &mut String) -> String {
 #[allow(clippy::cast_possible_wrap)]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::question_mark_used)]
+#[allow(clippy::pattern_type_mismatch )]
+#[allow(clippy::format_push_string)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_serial(
     binary_output: &str,
@@ -565,6 +569,8 @@ pub fn write_serial(
     msg_list: &mut MsgList,
 ) -> Result<(), std::io::Error> {
     use std::{thread, time};
+
+    use serialport::SerialPortType;
 
     let mut buffer = [0; 1024];
     let port_result = serialport::new(port_name, /*115_200*/ 1_000_000)
@@ -598,9 +604,19 @@ pub fn write_serial(
                 let mut max_ports: i32 = -1;
                 for (port_count, p) in (0_u32..).zip(ports.into_iter()) {
                     if port_count > 0 {
-                        all_ports.push_str(" , \n ");
+                        all_ports.push_str(",\n");
                     }
-                    all_ports.push_str(&p.port_name);
+
+                    if let SerialPortType::UsbPort(info) = &p.port_type {
+                        all_ports.push_str(&format!(
+                            "USB Serial Device{} {}",
+                            extra_usb_info(info),
+                            p.port_name
+                        ));
+                    } else {
+                        all_ports.push_str(&format!("Non USB Serial Device {}", p.port_name));
+                    }
+
                     max_ports = port_count.try_into().unwrap_or_default();
                 }
 
@@ -610,7 +626,7 @@ pub fn write_serial(
                         format!("only port {all_ports} was found")
                     }
                     _ => {
-                        format!("the following ports were found {all_ports}")
+                        format!("the following {max_ports} ports were found:\n{all_ports}")
                     }
                 };
 
@@ -687,6 +703,34 @@ pub fn write_serial(
     );
 
     Ok(())
+}
+
+/// Formats the USB Port information into a human readable form.
+///
+
+/// Give more USB detals
+#[allow(clippy::format_push_string)]
+#[allow(clippy::pattern_type_mismatch )]
+fn extra_usb_info(info: &UsbPortInfo) -> String {
+    let mut output = String::new();
+    output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
+
+    let mut extra_items = Vec::new();
+
+    if let Some(manufacturer) = &info.manufacturer {
+        extra_items.push(format!("manufacturer '{manufacturer}'"));
+    }
+    if let Some(serial) = &info.serial_number {
+        extra_items.push(format!("serial '{serial}'"));
+    }
+    if let Some(product) = &info.product {
+        extra_items.push(format!("product '{product}'"));
+    }
+    if !extra_items.is_empty() {
+        output += " with ";
+        output += &extra_items.join(" ");
+    }
+    output
 }
 
 #[cfg(test)]
