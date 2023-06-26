@@ -35,7 +35,9 @@ pub fn write_to_board(
             );
             local_port_name=suggested_port;
             
-        } 
+        } else {
+            local_port_name=String::new();
+        }
     }
  
     let mut buffer = [0; 1024];
