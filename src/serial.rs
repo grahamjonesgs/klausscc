@@ -1,12 +1,11 @@
-
-
-use std::{thread, time};
+use crate::helper::trim_newline;
+use crate::messages::{MessageType, MsgList};
 use serialport::{SerialPortType, UsbPortInfo};
 use std::io::{Error, ErrorKind};
-use crate::helper::{trim_newline};
-use crate::messages::{MsgList,MessageType};
+use std::{thread, time};
 
-
+/// Used to define if a port requst was not defined so is for auto
+pub const AUTOSERIAL: &str = "auto_serial_requested";
 
 /// Output the code details file to given serial port
 ///
@@ -22,36 +21,34 @@ pub fn write_to_board(
     port_name: &str,
     msg_list: &mut MsgList,
 ) -> Result<(), std::io::Error> {
-
     let mut local_port_name = port_name.to_owned();
 
-    if port_name=="auto" {
+    if port_name == AUTOSERIAL {
         if let Some(suggested_port) = find_possible_port() {
             msg_list.push(
                 format!("No port name given, using suggested port {suggested_port}"),
                 None,
                 None,
-                MessageType::Warning,
+                MessageType::Information,
             );
-            local_port_name=suggested_port;
-            
-        } else {
-            local_port_name=String::new();
-        }
+            local_port_name = suggested_port;
+        } 
     }
- 
+
     let mut buffer = [0; 1024];
     let port_result = serialport::new(local_port_name.clone(), 1_000_000)
         .timeout(core::time::Duration::from_millis(100))
         .open();
 
     if let Err(e) = port_result {
-        msg_list.push(
-            format!("Error opening serial port {local_port_name} error \"{e}\""),
-            None,
-            None,
-            MessageType::Error,
-        );
+        if local_port_name != AUTOSERIAL {
+            msg_list.push(
+                format!("Error opening serial port {local_port_name} error \"{e}\""),
+                None,
+                None,
+                MessageType::Error,
+            );
+        }
         let mut all_ports: String = String::new();
         let available_ports = serialport::available_ports();
         let mut suggested_port: Option<String> = None;
@@ -103,7 +100,7 @@ pub fn write_to_board(
                 };
 
                 msg_list.push(
-                    format!("Error opening serial port {port_name}, {ports_msg}"),
+                    format!("Error opening serial port, {ports_msg}"),
                     None,
                     None,
                     MessageType::Error,
@@ -231,7 +228,6 @@ fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
 /// Lists all ports, checlks if ISB and possible and returns some last one or none
 #[allow(clippy::pattern_type_mismatch)]
 pub fn find_possible_port() -> Option<String> {
-
     let mut suggested_port: Option<String> = None;
     let available_ports = serialport::available_ports();
     match available_ports {

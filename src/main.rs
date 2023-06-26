@@ -31,7 +31,7 @@ mod messages;
 mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use serial::write_to_board;
+use serial::{write_to_board,AUTOSERIAL};
 use files::{
     filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file,
     write_code_output_file, LineType,
@@ -45,6 +45,8 @@ use messages::{print_messages, MessageType, MsgList};
 use opcodes::{
     add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
 };
+
+
 
 /// Main function for Klausscc
 ///
@@ -276,7 +278,7 @@ pub fn set_matches() -> Command {
                 .short('s')
                 .long("serial")
                 .num_args(0..=1)
-                .default_missing_value("auto")
+                .default_missing_value(AUTOSERIAL)
                 .help("Serial port for output"),
         )
 }
