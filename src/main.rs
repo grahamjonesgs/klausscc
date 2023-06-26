@@ -17,6 +17,8 @@
 
 /// Module to manage file read and write
 mod files;
+/// Module to write to serial and read response
+mod serial;
 /// Module of helper functions
 mod helper;
 /// Module to manage labels
@@ -29,9 +31,10 @@ mod messages;
 mod opcodes;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
+use serial::write_to_board;
 use files::{
     filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file,
-    write_code_output_file, write_serial, LineType,
+    write_code_output_file, LineType,
 };
 use helper::{
     create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
@@ -272,7 +275,8 @@ pub fn set_matches() -> Command {
             Arg::new("serial")
                 .short('s')
                 .long("serial")
-                .num_args(1)
+                .num_args(0..=1)
+                .default_missing_value("auto")
                 .help("Serial port for output"),
         )
 }
@@ -417,7 +421,7 @@ pub fn get_pass2(
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
     if msg_list.number_errors() == 0 {
-        let write_result = write_serial(bin_string, output_serial_port, msg_list);
+        let write_result = write_to_board(bin_string, output_serial_port, msg_list);
         match write_result {
             Ok(_) => {
                 msg_list.push(
