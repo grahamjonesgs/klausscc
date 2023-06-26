@@ -429,7 +429,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
         match write_result {
             Ok(_) => {
                 msg_list.push(
-                    format!("Wrote to serial port {output_serial_port}"),
+                    "Wrote to serial port".to_owned(),
                     None,
                     None,
                     MessageType::Information,
@@ -437,7 +437,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
             }
             Err(e) => {
                 msg_list.push(
-                    format!("Failed to write to serial port, error {e}"),
+                    format!("Failed to write to serial port, error \"{e}\""),
                     None,
                     None,
                     MessageType::Error,
