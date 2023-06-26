@@ -586,6 +586,7 @@ pub fn write_serial(
         );
         let mut all_ports: String = String::new();
         let available_ports = serialport::available_ports();
+        let mut suggested_port:Option<String>= None;
 
         match available_ports {
             Err(_) => {
@@ -613,6 +614,9 @@ pub fn write_serial(
                             extra_usb_info(info),
                             p.port_name
                         ));
+                        if check_usb_serial_possible(info) {
+                            suggested_port = Some(p.port_name.clone());
+                        }
                     } else {
                         all_ports.push_str(&format!("Non USB Serial Device {}", p.port_name));
                     }
@@ -636,6 +640,16 @@ pub fn write_serial(
                     None,
                     MessageType::Error,
                 );
+
+                if suggested_port.is_some() {
+                    msg_list.push(
+                        format!("Suggested port {}",suggested_port.unwrap_or_default()),
+                        None,
+                        None,
+                        MessageType::Information,
+                    );
+                }
+
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::Other,
                     "Failed to open port",
@@ -707,7 +721,6 @@ pub fn write_serial(
 
 /// Formats the USB Port information into a human readable form.
 ///
-
 /// Gives more USB detals
 #[allow(clippy::format_push_string)]
 #[allow(clippy::pattern_type_mismatch )]
@@ -716,10 +729,6 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
     output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
 
     let mut extra_items = Vec::new();
-
-    if let vid = &info.vid {
-        extra_items.push(format!("vid '{vid}'"));
-    }
 
     if let Some(manufacturer) = &info.manufacturer {
         extra_items.push(format!("manufacturer '{manufacturer}'"));
@@ -735,6 +744,19 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
         output += &extra_items.join(" ");
     }
     output
+}
+
+/// Return option of possibly correct FDTI port
+/// 
+/// Checks the info to check the VID and PID of known boards
+fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
+
+    let vid_pi = format!("{:04x}:{:04x}", info.vid, info.pid);
+
+    if vid_pi == "0403:6010" || vid_pi == "0403:6014" || vid_pi == "0403:6015" {
+        return true;
+    }
+    false  
 }
 
 #[cfg(test)]
