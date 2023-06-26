@@ -1,11 +1,8 @@
-
-
-use crate::helper::{strip_comments};
+use crate::helper::strip_comments;
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Opcode, Pass2};
 use std::io::{Error, ErrorKind};
-
 
 use std::ffi::OsStr;
 use std::{
@@ -554,8 +551,6 @@ pub fn format_opcodes(input: &mut String) -> String {
     }
     (*input).clone()
 }
-
-
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]

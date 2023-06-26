@@ -17,8 +17,6 @@
 
 /// Module to manage file read and write
 mod files;
-/// Module to write to serial and read response
-mod serial;
 /// Module of helper functions
 mod helper;
 /// Module to manage labels
@@ -29,9 +27,10 @@ mod macros;
 mod messages;
 /// Module to manage opcodes
 mod opcodes;
+/// Module to write to serial and read response
+mod serial;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use serial::{write_to_board,AUTOSERIAL};
 use files::{
     filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file,
     write_code_output_file, LineType,
@@ -45,8 +44,7 @@ use messages::{print_messages, MessageType, MsgList};
 use opcodes::{
     add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
 };
-
-
+use serial::{write_to_board, AUTO_SERIAL};
 
 /// Main function for Klausscc
 ///
@@ -55,7 +53,6 @@ use opcodes::{
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<(), i32> {
     use files::output_macros_opcodes_html;
-
 
     let mut msg_list: MsgList = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
@@ -102,7 +99,8 @@ fn main() -> Result<(), i32> {
         return Err(1_i32);
     }
     let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
-    let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap_or_else(|| [].to_vec()), &mut msg_list);
+    let mut macro_list =
+        expand_embedded_macros(opt_macro_list.unwrap_or_else(|| [].to_vec()), &mut msg_list);
 
     if let Err(result_err) = output_macros_opcodes_html(
         filename_stem(&opcode_file_name),
@@ -146,7 +144,11 @@ fn main() -> Result<(), i32> {
     ));
 
     // Pass 0 to add macros
-    let pass0 = expand_macros(&mut msg_list, input_list.unwrap_or_else(|| [].to_vec()), &mut macro_list);
+    let pass0 = expand_macros(
+        &mut msg_list,
+        input_list.unwrap_or_else(|| [].to_vec()),
+        &mut macro_list,
+    );
 
     // Pass 1 to get line numbers and labels
     let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, oplist.clone());
@@ -278,7 +280,7 @@ pub fn set_matches() -> Command {
                 .short('s')
                 .long("serial")
                 .num_args(0..=1)
-                .default_missing_value(AUTOSERIAL)
+                .default_missing_value(AUTO_SERIAL)
                 .help("Serial port for output"),
         )
 }
@@ -442,8 +444,6 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
                 );
             }
         }
-        
-
     } else {
         msg_list.push(
             "Not writing to serial port due to assembly errors".to_owned(),
@@ -579,7 +579,10 @@ mod tests {
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Error Test_not_code_line");
+        assert_eq!(
+            msg_list.list.get(0).unwrap_or_default().text,
+            "Error Test_not_code_line"
+        );
     }
 
     #[allow(clippy::too_many_lines)]
@@ -709,14 +712,23 @@ mod tests {
             opcodes.clone(),
             labels,
         );
-        assert_eq!(pass2.get(0).unwrap_or_default().opcode, "00000020EEEEEEEEFFFFFFFF");
+        assert_eq!(
+            pass2.get(0).unwrap_or_default().opcode,
+            "00000020EEEEEEEEFFFFFFFF"
+        );
         assert_eq!(pass2.get(1).unwrap_or_default().opcode, "0000004000000007");
         assert_eq!(pass2.get(2).unwrap_or_default().opcode, "00000010");
         assert_eq!(pass2.get(3).unwrap_or_default().opcode, "00000030");
         assert_eq!(pass2.get(4).unwrap_or_default().opcode, "00000030");
         assert_eq!(pass2.get(5).unwrap_or_default().opcode, "000000720000AAAA");
-        assert_eq!(pass2.get(6).unwrap_or_default().opcode, "00000A340000000A0000000B");
-        assert_eq!(pass2.get(7).unwrap_or_default().opcode, "0000000248454C4C4F000000");
+        assert_eq!(
+            pass2.get(6).unwrap_or_default().opcode,
+            "00000A340000000A0000000B"
+        );
+        assert_eq!(
+            pass2.get(7).unwrap_or_default().opcode,
+            "0000000248454C4C4F000000"
+        );
         assert_eq!(pass2.get(8).unwrap_or_default().opcode, "");
     }
 

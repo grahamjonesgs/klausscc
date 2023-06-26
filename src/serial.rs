@@ -4,13 +4,12 @@ use serialport::{SerialPortType, UsbPortInfo};
 use std::io::{Error, ErrorKind};
 use std::{thread, time};
 
-/// Used to define if a port requst was not defined so is for auto
-pub const AUTOSERIAL: &str = "auto_serial_requested";
+/// Used to define if a port request was not defined so is for auto
+pub const AUTO_SERIAL: &str = "auto_serial_requested";
 
 /// Output the code details file to given serial port
 ///
 /// Will send the program to the serial port, and wait for the response
-#[allow(clippy::cast_possible_wrap)]
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::question_mark_used)]
 #[allow(clippy::pattern_type_mismatch)]
@@ -23,16 +22,16 @@ pub fn write_to_board(
 ) -> Result<(), std::io::Error> {
     let mut local_port_name = port_name.to_owned();
 
-    if port_name == AUTOSERIAL {
+    if port_name == AUTO_SERIAL {
         if let Some(suggested_port) = find_possible_port() {
             msg_list.push(
-                format!("No port name given, using suggested port {suggested_port}"),
+                format!("No port name given, using automatic port {suggested_port}"),
                 None,
                 None,
                 MessageType::Information,
             );
             local_port_name = suggested_port;
-        } 
+        }
     }
 
     let mut buffer = [0; 1024];
@@ -41,7 +40,7 @@ pub fn write_to_board(
         .open();
 
     if let Err(e) = port_result {
-        if local_port_name != AUTOSERIAL {
+        if local_port_name != AUTO_SERIAL {
             msg_list.push(
                 format!("Error opening serial port {local_port_name} error \"{e}\""),
                 None,
@@ -186,9 +185,10 @@ pub fn write_to_board(
 
 /// Formats the USB Port information into a human readable form.
 ///
-/// Gives more USB detals
+/// Gives more USB details
 #[allow(clippy::format_push_string)]
 #[allow(clippy::pattern_type_mismatch)]
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn extra_usb_info(info: &UsbPortInfo) -> String {
     let mut output = String::new();
     output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
@@ -214,6 +214,7 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
 /// Return bool if port is possibly correct FDTI port
 ///
 /// Checks the info to check the VID and PID of known boards
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
     let vid_pi = format!("{:04x}:{:04x}", info.vid, info.pid);
 
@@ -225,8 +226,9 @@ fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
 
 /// Checks all ports and returns option of last possible one
 ///
-/// Lists all ports, checlks if ISB and possible and returns some last one or none
+/// Lists all ports, checks if ISB and possible and returns some last one or none
 #[allow(clippy::pattern_type_mismatch)]
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn find_possible_port() -> Option<String> {
     let mut suggested_port: Option<String> = None;
     let available_ports = serialport::available_ports();

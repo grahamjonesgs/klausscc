@@ -83,12 +83,10 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
     }
 
     if max_variable
-        != core::convert::TryInto::<u32>::try_into(all_found_variables
-            .clone()
-            .into_iter()
-            .unique()
-            .count())
-            .unwrap_or_default()
+        != core::convert::TryInto::<u32>::try_into(
+            all_found_variables.clone().into_iter().unique().count(),
+        )
+        .unwrap_or_default()
     {
         for i in 1..max_variable {
             all_variables.push(i.into());
