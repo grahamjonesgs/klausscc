@@ -708,7 +708,7 @@ pub fn write_serial(
 /// Formats the USB Port information into a human readable form.
 ///
 
-/// Give more USB detals
+/// Gives more USB detals
 #[allow(clippy::format_push_string)]
 #[allow(clippy::pattern_type_mismatch )]
 fn extra_usb_info(info: &UsbPortInfo) -> String {
@@ -716,6 +716,10 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
     output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
 
     let mut extra_items = Vec::new();
+
+    if let vid = &info.vid {
+        extra_items.push(format!("vid '{vid}'"));
+    }
 
     if let Some(manufacturer) = &info.manufacturer {
         extra_items.push(format!("manufacturer '{manufacturer}'"));

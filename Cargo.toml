@@ -21,4 +21,3 @@ serialport = { version = "4.2.1", default-features = true}
 tempfile = "3.6.0"
 serde = { version = "1.0.164", features = ["derive"] }
 serde_json = {version = "1.0.97"}
-bincode = "1.3.3"
