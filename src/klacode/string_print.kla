@@ -2,6 +2,8 @@
 // Reg B will hold the length of the string for counting down
 DELAYV 0xFFF
 STRING_PRINT:
+DELAYV 0xFFF
+NOP
 PUSH A
 PUSH B 
 MEMREADRR B A // Reads string length to B
@@ -9,7 +11,6 @@ INCR A // Increments A to first char group
 
 STRING_PRINT_LOOP:
 TXSTRMEMR A // Prints chars at A
-//NOP
 INCR A // Increments A // To next char group
 DECR B // Decrements B // To count length down
 JMPNZ STRING_PRINT_LOOP: // If A is not zero, loops

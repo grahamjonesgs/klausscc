@@ -3,10 +3,12 @@
 nop
 nop
 nop
+nop
 BEGIN:
 _start
 DELAYV 0xFFF
 7SEG1V 0x1234
+nop
 nop
 LEDV 0x3
 

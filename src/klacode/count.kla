@@ -9,6 +9,7 @@ SETR A 5
 NOP
 NOP
 BEGIN:
+NOP
 DELAYV 0x2FFF
 INCR A
 7SEGR A
@@ -44,6 +45,7 @@ JMP BEGIN:
 #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
 #TEST2 "123456789\n"
 #TEST3 "Third "line\n"
+#TEST4 "1"
 #LONG 50 
 
 //!include string_print.kla

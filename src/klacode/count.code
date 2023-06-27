@@ -2,101 +2,99 @@
                               -- // Reg B will hold the length of the string for counting down
 0x00000000: 0000F013 00000FFF -- DELAYV 0xFFF
 0x00000002:                   -- STRING_PRINT:
-0x00000002: 00004000          -- PUSH A
-0x00000003: 00004001          -- PUSH B 
-0x00000004: 00007110          -- MEMREADRR B A // Reads string length to B
-0x00000005: 00000840          -- INCR A // Increments A to first char group
+0x00000002: 0000F013 00000FFF -- DELAYV 0xFFF
+0x00000004: 0000F010          -- NOP
+0x00000005: 00004000          -- PUSH A
+0x00000006: 00004001          -- PUSH B 
+0x00000007: 00007110          -- MEMREADRR B A // Reads string length to B
+0x00000008: 00000840          -- INCR A // Increments A to first char group
                               -- 
-0x00000006:                   -- STRING_PRINT_LOOP:
-0x00000006: 00005040          -- TXSTRMEMR A // Prints chars at A
-                              -- //NOP
-0x00000007: 00000840          -- INCR A // Increments A // To next char group
-0x00000008: 00000851          -- DECR B // Decrements B // To count length down
-0x00000009: 00001002 00000006 -- JMPNZ STRING_PRINT_LOOP: // If A is not zero, loops
+0x00000009:                   -- STRING_PRINT_LOOP:
+0x00000009: 00005040          -- TXSTRMEMR A // Prints chars at A
+0x0000000A: 00000840          -- INCR A // Increments A // To next char group
+0x0000000B: 00000851          -- DECR B // Decrements B // To count length down
+0x0000000C: 00001002 00000009 -- JMPNZ STRING_PRINT_LOOP: // If A is not zero, loops
                               -- 
-0x0000000B: 00004011          -- POP B // Restores B
-0x0000000C: 00004010          -- POP A // Restores A
-0x0000000D: 00001012          -- RET // Returns 
+0x0000000E: 00004011          -- POP B // Restores B
+0x0000000F: 00004010          -- POP A // Restores A
+0x00000010: 00001012          -- RET // Returns 
                               -- 
                               -- _start
-0x0000000E: 0000F010          -- nop
-0x0000000F: 00003071 00001234 -- 7SEG1V 0x1234
-0x00000011: 0000F013 0000FFFF -- DELAYV 0xFFFF
-0x00000013: 00000800 00000005 -- SETR A 5
-0x00000015: 0000F010          -- NOP
-0x00000016: 0000F010          -- NOP
-0x00000017:                   -- BEGIN:
-0x00000017: 0000F013 00002FFF -- DELAYV 0x2FFF
-0x00000019: 00000840          -- INCR A
-0x0000001A: 00003040          -- 7SEGR A
+0x00000011: 0000F010          -- nop
+0x00000012: 00003071 00001234 -- 7SEG1V 0x1234
+0x00000014: 0000F013 0000FFFF -- DELAYV 0xFFFF
+0x00000016: 00000800 00000005 -- SETR A 5
+0x00000018: 0000F010          -- NOP
+0x00000019: 0000F010          -- NOP
+0x0000001A:                   -- BEGIN:
+0x0000001A: 0000F010          -- NOP
+0x0000001B: 0000F013 00002FFF -- DELAYV 0x2FFF
+0x0000001D: 00000840          -- INCR A
+0x0000001E: 00003040          -- 7SEGR A
                               -- //DELAYV 0xF
-0x0000001B: 00005010          -- TXR A
-0x0000001C: 00005001          -- newline
-0x0000001D: 00005010          -- TXR A
-0x0000001E: 00005001          -- newline
 0x0000001F: 00005010          -- TXR A
 0x00000020: 00005001          -- newline
 0x00000021: 00005010          -- TXR A
 0x00000022: 00005001          -- newline
+0x00000023: 00005010          -- TXR A
+0x00000024: 00005001          -- newline
+0x00000025: 00005010          -- TXR A
+0x00000026: 00005001          -- newline
                               -- 
-0x00000023: 00004000          -- PUSH A
-0x00000024: 00000800 0000003B -- SETR A #TEST1
-0x00000026: 00001009 00000002 -- CALL STRING_PRINT:
-0x00000028: 00005001          -- newline
-0x00000029: 00004010          -- POP A
+0x00000027: 00004000          -- PUSH A
+0x00000028: 00000800 0000003F -- SETR A #TEST1
+0x0000002A: 00001009 00000002 -- CALL STRING_PRINT:
+0x0000002C: 00005001          -- newline
+0x0000002D: 00004010          -- POP A
                               -- 
-0x0000002A: 00004000          -- PUSH A
-0x0000002B: 00000800 0000004D -- SETR A #TEST2
-0x0000002D: 00001009 00000002 -- CALL STRING_PRINT:
-0x0000002F: 00004010          -- POP A
+0x0000002E: 00004000          -- PUSH A
+0x0000002F: 00000800 00000051 -- SETR A #TEST2
+0x00000031: 00001009 00000002 -- CALL STRING_PRINT:
+0x00000033: 00004010          -- POP A
                               -- 
-0x00000030: 00004000          -- PUSH A
-0x00000031: 00000800 00000051 -- SETR A #TEST3
-0x00000033: 00001009 00000002 -- CALL STRING_PRINT:
-0x00000035: 00004010          -- POP A
+0x00000034: 00004000          -- PUSH A
+0x00000035: 00000800 00000055 -- SETR A #TEST3
+0x00000037: 00001009 00000002 -- CALL STRING_PRINT:
+0x00000039: 00004010          -- POP A
                               -- 
                               -- 
-0x00000036: 00001000 00000017 -- JMP BEGIN:
+0x0000003A: 00001000 0000001A -- JMP BEGIN:
                               -- 
                               -- 
                               -- //!include string_print.kla
                               -- 
-0x00000038: 00000002          -- #DUMMY "123456"
-0x00000039: 31323334          -- #DUMMY "123456"
-0x0000003A: 35360000          -- #DUMMY "123456"
-0x0000003B: 00000011          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x0000003C: 48656C6C          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x0000003D: 6F207468          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x0000003E: 6572652C          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x0000003F: 20746869          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000040: 73206D75          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000041: 73742062          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000042: 65206120          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000043: 6C6F6E67          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000044: 6572206A          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000045: 646B6C6A          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000046: 646B206A          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000047: 646B736C          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000048: 73747269          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x00000049: 6E672074          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x0000004A: 6F207465          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x0000004B: 73740D0A          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x0000004C: 00000000          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
-0x0000004D: 00000003          -- #TEST2 "123456789\n"
-0x0000004E: 31323334          -- #TEST2 "123456789\n"
-0x0000004F: 35363738          -- #TEST2 "123456789\n"
-0x00000050: 390D0A00          -- #TEST2 "123456789\n"
-0x00000051: 00000004          -- #TEST3 "Third "line\n"
-0x00000052: 54686972          -- #TEST3 "Third "line\n"
-0x00000053: 6420226C          -- #TEST3 "Third "line\n"
-0x00000054: 696E650D          -- #TEST3 "Third "line\n"
-0x00000055: 0A000000          -- #TEST3 "Third "line\n"
-0x00000056: 00000000          -- #LONG 50 
-0x00000057: 00000000          -- #LONG 50 
-0x00000058: 00000000          -- #LONG 50 
-0x00000059: 00000000          -- #LONG 50 
-0x0000005A: 00000000          -- #LONG 50 
-0x0000005B: 00000000          -- #LONG 50 
+0x0000003C: 00000002          -- #DUMMY "123456"
+0x0000003D: 31323334          -- #DUMMY "123456"
+0x0000003E: 35360000          -- #DUMMY "123456"
+0x0000003F: 00000011          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000040: 48656C6C          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000041: 6F207468          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000042: 6572652C          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000043: 20746869          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000044: 73206D75          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000045: 73742062          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000046: 65206120          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000047: 6C6F6E67          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000048: 6572206A          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000049: 646B6C6A          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x0000004A: 646B206A          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x0000004B: 646B736C          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x0000004C: 73747269          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x0000004D: 6E672074          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x0000004E: 6F207465          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x0000004F: 73740D0A          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000050: 00000000          -- #TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+0x00000051: 00000003          -- #TEST2 "123456789\n"
+0x00000052: 31323334          -- #TEST2 "123456789\n"
+0x00000053: 35363738          -- #TEST2 "123456789\n"
+0x00000054: 390D0A00          -- #TEST2 "123456789\n"
+0x00000055: 00000004          -- #TEST3 "Third "line\n"
+0x00000056: 54686972          -- #TEST3 "Third "line\n"
+0x00000057: 6420226C          -- #TEST3 "Third "line\n"
+0x00000058: 696E650D          -- #TEST3 "Third "line\n"
+0x00000059: 0A000000          -- #TEST3 "Third "line\n"
+0x0000005A: 00000001          -- #TEST4 "1"
+0x0000005B: 31000000          -- #TEST4 "1"
 0x0000005C: 00000000          -- #LONG 50 
 0x0000005D: 00000000          -- #LONG 50 
 0x0000005E: 00000000          -- #LONG 50 
@@ -141,3 +139,9 @@
 0x00000085: 00000000          -- #LONG 50 
 0x00000086: 00000000          -- #LONG 50 
 0x00000087: 00000000          -- #LONG 50 
+0x00000088: 00000000          -- #LONG 50 
+0x00000089: 00000000          -- #LONG 50 
+0x0000008A: 00000000          -- #LONG 50 
+0x0000008B: 00000000          -- #LONG 50 
+0x0000008C: 00000000          -- #LONG 50 
+0x0000008D: 00000000          -- #LONG 50 
