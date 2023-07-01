@@ -1,7 +1,13 @@
 {
     "cSpell.words": [
+        "DECR",
         "FDTI",
-        "serialport"
+        "JMPNZ",
+        "MEMREADRR",
+        "SEGR",
+        "serialport",
+        "SETR",
+        "TXSTRMEMR"
     ],
     "rust-analyzer.linkedProjects": [
         "./Cargo.toml",

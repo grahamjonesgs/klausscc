@@ -1,19 +1,14 @@
 !include string_print.kla
 
 _start
-nop
 7SEG1V 0x1234
-DELAYV 0xFFFF
+DELAYV 0x0FFF
 SETR A 5
-#DUMMY "123456"
 NOP
 NOP
 BEGIN:
-NOP
-DELAYV 0x2FFF
 INCR A
 7SEGR A
-//DELAYV 0xF
 TXR A
 newline
 TXR A
@@ -42,7 +37,8 @@ POP A
 
 JMP BEGIN:
 
-#TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+//#TEST1 "Hello there, this must be a longer jdkljdk jdkslstring to test\n" 
+#TEST1 "Short\n" 
 #TEST2 "123456789\n"
 #TEST3 "Third "line\n"
 #TEST4 "1"

@@ -1,9 +1,9 @@
 // Prints string starting at reg A
 // Reg B will hold the length of the string for counting down
-DELAYV 0xFFF
+//DELAYV 0xFFF
 STRING_PRINT:
-DELAYV 0xFFF
-NOP
+//DELAYV 0xFFF
+//NOP
 PUSH A
 PUSH B 
 MEMREADRR B A // Reads string length to B

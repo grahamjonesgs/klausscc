@@ -1,33 +1,9 @@
 
-BEGIN:
-SETR B 0x87654321
-
-SETR A 0x100
-
-7SEGR B
-//DELAYV 0xFFF
-
-SETR D 0x0 // holding memory location to read
+_start
+SETR A 0x0
 
 
 LOOP:
-//7SEGR A 
-DECR A
-//DELAYV 0x000A
-CALLZ RESET:
-//DELAYV 0x000A
+7SEGR A 
+INCR A
 JMP LOOP:
-
-RESET:
-//LEDR D
-7SEGR D
-SETR A #ADDR
-CALL PRINT_DATA:  // Print add 
-TXR D  // print address from reg
-SETR A #DATA
-//CALL PRINT_DATA: // print data word
-//TXMEMR D // print memory contects
-//NEWLINE
-INCR D
-SETR A 0x1
-RET

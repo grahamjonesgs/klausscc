@@ -1,33 +1,9 @@
                               -- 
-0x00000000:                   -- BEGIN:
-0x00000000: 00000801 87654321 -- SETR B 0x87654321
-                              -- 
-0x00000002: 00000800 00000100 -- SETR A 0x100
-                              -- 
-0x00000004: 00003041          -- 7SEGR B
-                              -- //DELAYV 0xFFF
-                              -- 
-0x00000005: 00000803 00000000 -- SETR D 0x0 // holding memory location to read
+                              -- _start
+0x00000000: 00000800 00000000 -- SETR A 0x0
                               -- 
                               -- 
-0x00000007:                   -- LOOP:
-                              -- //7SEGR A 
-0x00000007: 00000850          -- DECR A
-                              -- //DELAYV 0x000A
-0x00000008: 0000100A 0000000C -- CALLZ RESET:
-                              -- //DELAYV 0x000A
-0x0000000A: 00001000 00000007 -- JMP LOOP:
-                              -- 
-0x0000000C:                   -- RESET:
-                              -- //LEDR D
-0x0000000C: 00003043          -- 7SEGR D
-0x0000000D: 00000800 00000000 -- SETR A #ADDR
-0x0000000F: 00001009 00000000 -- CALL PRINT_DATA:  // Print add 
-0x00000011: 00005013          -- TXR D  // print address from reg
-0x00000012: 00000800 00000000 -- SETR A #DATA
-                              -- //CALL PRINT_DATA: // print data word
-                              -- //TXMEMR D // print memory contects
-                              -- //NEWLINE
-0x00000014: 00000843          -- INCR D
-0x00000015: 00000800 00000001 -- SETR A 0x1
-0x00000017: 00001012          -- RET
+0x00000002:                   -- LOOP:
+0x00000002: 00003040          -- 7SEGR A 
+0x00000003: 00000840          -- INCR A
+0x00000004: 00001000 00000002 -- JMP LOOP:
