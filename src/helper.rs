@@ -223,7 +223,7 @@ pub fn return_comments(input: &mut str) -> String {
 #[allow(clippy::cast_possible_wrap)]
 #[allow(clippy::modulo_arithmetic)]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
-    let mut stripped_string: String = String::new();
+    let mut stripped_string = String::new();
     let mut checksum: i32 = 0;
 
     // Remove S, Z and X
@@ -341,7 +341,7 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Opti
     // Add writing Z0010 and then checksum.
     output_string.push_str("Z0010"); // Holding for stack if needed
 
-    let checksum: String = calc_checksum(&output_string, msg_list);
+    let checksum = calc_checksum(&output_string, msg_list);
 
     output_string.push_str(&checksum);
 

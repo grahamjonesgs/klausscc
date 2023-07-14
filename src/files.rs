@@ -65,10 +65,10 @@ pub fn read_file_to_vector(
     let mut line_number = 0;
     for line in buf.lines() {
         match line {
-            Ok(v) => {
+            Ok(line_contents) => {
                 line_number += 1;
-                if is_include(&v) {
-                    let include_file = get_include_filename(&v);
+                if is_include(&line_contents) {
+                    let include_file = get_include_filename(&line_contents);
                     if include_file.clone().unwrap_or_default() == String::new() {
                         msg_list.push(
                             format!("Missing include file name in {filename}"),
@@ -109,15 +109,15 @@ pub fn read_file_to_vector(
                     }
                 } else {
                     lines.push(InputData {
-                        input: v,
+                        input: line_contents,
                         file_name: filename.to_owned(),
                         line_counter: line_number,
                     });
                 }
             }
             #[cfg(not(tarpaulin_include))] // Cannot test error reading file line in tarpaulin
-            Err(e) => msg_list.push(
-                format!("Error parsing opcode file: {e}"),
+            Err(err) => msg_list.push(
+                format!("Error parsing opcode file: {err}"),
                 Some(line_number),
                 Some(filename.to_owned()),
                 MessageType::Error,
@@ -245,7 +245,7 @@ pub fn write_code_output_file(
 ) -> Result<(), std::io::Error> {
     let mut file = File::create(filename)?;
 
-    let mut out_line: String = String::new();
+    let mut out_line = String::new();
     msg_list.push(
         format!("Writing code file to {}", filename.as_ref().display()),
         None,

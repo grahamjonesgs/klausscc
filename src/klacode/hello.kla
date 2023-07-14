@@ -1,15 +1,23 @@
 
 _start
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
-AND A B
+
+SETR A #DATA2 // Address to store value
+SETR B 0xB // Value to store
+SETR C 0 // For display
+
+//MEMSETRR B A
+
 START:
+INCR B
+MEMSETRR B A  // Set value B to location A
+//MEMSETR B 0x100
+MEMREADRR C A // Read value from location A to C
+7SEGR C // Display value in C
+DELAYV 0xFFF
+LEDV 0xFF
 JMP START:
-//_start
-START1:
-JMP START1:
+
+
+
+#DATA1 20
+#DATA2 20

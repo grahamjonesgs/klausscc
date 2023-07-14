@@ -12,6 +12,8 @@
 #![allow(clippy::separated_literal_suffix)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
 #![allow(clippy::multiple_crate_versions)]
+#![allow(clippy::pattern_type_mismatch)]
+#![allow(clippy::ref_patterns)]
 
 //! Top level file for Klausscc
 
@@ -146,7 +148,7 @@ fn main() -> Result<(), i32> {
     // Pass 0 to add macros
     let pass0 = expand_macros(
         &mut msg_list,
-        input_list.unwrap_or_else(|| [].to_vec()),
+        input_list.unwrap_or_default(),
         &mut macro_list,
     );
 

@@ -185,7 +185,7 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
             }
         })
         .collect();
-    for line in pass1.iter() {
+    for line in pass1 {
         if label_name_from_string(&line.input_text_line).is_some() {
             let mut words = line.input_text_line.split_whitespace();
             let first_word = words.next().unwrap_or("");
@@ -203,7 +203,7 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
             }
         }
     }
-    for line in pass1.iter() {
+    for line in pass1 {
         if data_name_from_string(&line.input_text_line).is_some() {
             let mut words = line.input_text_line.split_whitespace();
             let first_word = words.next().unwrap_or("");
@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    // Test duplicate label names are identitiied
+    // Test duplicate label names are identified
     fn test_find_duplicate_label() {
         let mut labels = vec![
             Label {
@@ -331,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    // Test convertion is correct for value argumanets
+    // Test conversion is correct for value arguments
     fn test_convert_argument1() {
         let mut labels = vec![
             Label {
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[test]
-    // Test for convert_argument if the argument is invalid with ocrrect message
+    // Test for convert_argument if the argument is invalid with correct message
     fn test_convert_argument2() {
         let mut labels = vec![
             Label {

@@ -83,6 +83,7 @@ pub fn write_to_board(
 /// Return port from port name
 ///
 /// If port name is `AUTO_SERIAL` then return the first USB serial port found
+#[allow(clippy::format_push_string)]
 fn return_port(
     port_name: &str,
     msg_list: &mut MsgList,
@@ -131,7 +132,7 @@ fn return_port(
             }
             Ok(ports) => {
                 let mut max_ports: i32 = -1;
-                for (port_count, port) in (0_u32..).zip(ports.into_iter()) {
+                for (port_count, port) in (0_u32..).zip(ports) {
                     if port_count > 0 {
                         all_ports.push_str(",\n");
                     }
