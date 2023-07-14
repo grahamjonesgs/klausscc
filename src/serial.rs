@@ -1,6 +1,6 @@
 use crate::helper::trim_newline;
 use crate::messages::{MessageType, MsgList};
-use serialport::{SerialPortType, UsbPortInfo, SerialPort};
+use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::io::{Error, ErrorKind};
 use std::{thread, time};
 
@@ -20,8 +20,8 @@ pub fn write_to_board(
 ) -> Result<(), std::io::Error> {
     let mut read_buffer = [0; 1024];
 
-    let mut port=return_port(port_name.to_owned(), msg_list)?;
-   
+    let mut port = return_port(port_name, msg_list)?;
+
     port.set_stop_bits(serialport::StopBits::One)?;
     port.set_data_bits(serialport::DataBits::Eight)?;
     port.set_parity(serialport::Parity::None)?;
@@ -42,7 +42,6 @@ pub fn write_to_board(
     }
 
     port.flush()?;
-
     let ret_msg_size = port.read(&mut read_buffer[..]).unwrap_or(0);
 
     if ret_msg_size == 0 {
@@ -82,9 +81,12 @@ pub fn write_to_board(
 }
 
 /// Return port from port name
-/// 
+///
 /// If port name is `AUTO_SERIAL` then return the first USB serial port found
-fn return_port(port_name: String, msg_list: &mut MsgList) -> Result<Box<dyn SerialPort>, std::io::Error> {
+fn return_port(
+    port_name: &str,
+    msg_list: &mut MsgList,
+) -> Result<Box<dyn SerialPort>, std::io::Error> {
     let mut local_port_name = port_name.to_owned();
     if port_name == AUTO_SERIAL {
         if let Some(suggested_port) = find_possible_port() {
@@ -133,32 +135,32 @@ fn return_port(port_name: String, msg_list: &mut MsgList) -> Result<Box<dyn Seri
                     if port_count > 0 {
                         all_ports.push_str(",\n");
                     }
-                    
-                        if let SerialPortType::UsbPort(ref info) = &port.port_type {
-                            all_ports.push_str(&format!(
-                                "USB Serial Device{} {}",
-                                extra_usb_info(info),
-                                port.port_name
-                            ));
-                            if check_usb_serial_possible(info) {
-                                suggested_port = Some(port.port_name.clone());
-                            }
-                        } else {
-                            all_ports.push_str(&format!("Non USB Serial Device {}", port.port_name));
-                        }
 
-                        max_ports = port_count.try_into().unwrap_or_default();
+                    if let SerialPortType::UsbPort(ref info) = &port.port_type {
+                        all_ports.push_str(&format!(
+                            "USB Serial Device{} {}",
+                            extra_usb_info(info),
+                            port.port_name
+                        ));
+                        if check_usb_serial_possible(info) {
+                            suggested_port = Some(port.port_name.clone());
+                        }
+                    } else {
+                        all_ports.push_str(&format!("Non USB Serial Device {}", port.port_name));
                     }
 
-                    let ports_msg = match max_ports {
-                        -1_i32 => "no ports were found".to_owned(),
-                        0_i32 => {
-                            format!("only port {all_ports} was found")
-                        }
-                        _ => {
-                            format!("the following {max_ports} ports were found:\n{all_ports}")
-                        }
-                    };
+                    max_ports = port_count.try_into().unwrap_or_default();
+                }
+
+                let ports_msg = match max_ports {
+                    -1_i32 => "no ports were found".to_owned(),
+                    0_i32 => {
+                        format!("only port {all_ports} was found")
+                    }
+                    _ => {
+                        format!("the following {max_ports} ports were found:\n{all_ports}")
+                    }
+                };
 
                 msg_list.push(
                     format!("Error opening serial port, {ports_msg}"),
@@ -222,7 +224,11 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
 fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
     let vid_pi = format!("{:04x}:{:04x}", info.vid, info.pid);
 
-    if vid_pi == "0403:6010" || vid_pi == "0403:6014" || vid_pi == "0403:6015" {
+    if vid_pi == "0403:6001"
+        || vid_pi == "0403:6010"
+        || vid_pi == "0403:6011"
+        || vid_pi == "0403:6014"
+    {
         return true;
     }
     false
