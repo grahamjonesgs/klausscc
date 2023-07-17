@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 23/06/2023 16:28<h2>Opcode Table</h2>
+Created 17/07/2023 22:27<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -81,35 +81,28 @@ Created 23/06/2023 16:28<h2>Opcode Table</h2>
     <td>0000081?</td>
     <td>1</td>
     <td>1</td>
-    <td>Increament register by a value</td>
+    <td>Increment register by a value</td>
 </tr>
 <tr>
     <td>MINUSV</td>
     <td>0000082?</td>
     <td>1</td>
     <td>1</td>
-    <td>Decreament register by a value</td>
-</tr>
-<tr>
-    <td>CMPRV</td>
-    <td>0000083?</td>
-    <td>1</td>
-    <td>1</td>
-    <td>Compare register to value, result in equal flag</td>
+    <td>Decrement register by a value</td>
 </tr>
 <tr>
     <td>INCR</td>
     <td>0000084?</td>
     <td>0</td>
     <td>1</td>
-    <td>Increament register</td>
+    <td>Increment register</td>
 </tr>
 <tr>
     <td>DECR</td>
     <td>0000085?</td>
     <td>0</td>
     <td>1</td>
-    <td>Decreament register</td>
+    <td>Decrement register</td>
 </tr>
 <tr>
     <td>ANDV</td>
@@ -144,7 +137,7 @@ Created 23/06/2023 16:28<h2>Opcode Table</h2>
     <td>000008A?</td>
     <td>0</td>
     <td>1</td>
-    <td>Set register 2's compliments </td>
+    <td>Set register 2's compliments</td>
 </tr>
 <tr>
     <td>SHLR</td>
@@ -467,7 +460,7 @@ Created 23/06/2023 16:28<h2>Opcode Table</h2>
     <td>Push value onto stack</td>
 </tr>
 <tr>
-    <td colspan="5" style="background-color:#b0b0b0;"><b>Coms 5xxxx</b></td>
+    <td colspan="5" style="background-color:#b0b0b0;"><b>Communication 5xxxx</b></td>
 </tr>
 <tr>
     <td>TESTMSG</td>
@@ -488,7 +481,7 @@ Created 23/06/2023 16:28<h2>Opcode Table</h2>
     <td>00005002</td>
     <td>1</td>
     <td>0</td>
-    <td>send 8 bytes value of memory locaiton</td>
+    <td>send 8 bytes value of memory location</td>
 </tr>
 <tr>
     <td>TXSTRMEM</td>
@@ -505,20 +498,6 @@ Created 23/06/2023 16:28<h2>Opcode Table</h2>
     <td>send 8 bytes reg value in message</td>
 </tr>
 <tr>
-    <td>TXMEMR</td>
-    <td>0000502?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>send 8 bytes value at memory of register value in message</td>
-</tr>
-<tr>
-    <td>TXCHARMEMR</td>
-    <td>0000503?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>send char at memory from register value as message</td>
-</tr>
-<tr>
     <td>TXSTRMEMR</td>
     <td>0000504?</td>
     <td>0</td>
@@ -533,38 +512,7 @@ Created 23/06/2023 16:28<h2>Opcode Table</h2>
     <td>000060??</td>
     <td>0</td>
     <td>2</td>
-    <td>Set interupt from registers</td>
-</tr>
-<tr>
-    <td colspan="5" style="background-color:#b0b0b0;"><b>Memory actions 7xxx</b></td>
-</tr>
-<tr>
-    <td>MEMSETRR</td>
-    <td>000070??</td>
-    <td>0</td>
-    <td>2</td>
-    <td>Set memory location given in register to contents of register (first in order is value, second is location)</td>
-</tr>
-<tr>
-    <td>MEMREADRR</td>
-    <td>000071??</td>
-    <td>0</td>
-    <td>2</td>
-    <td>Set contents of register to location given in register (first in order is reg to be set, second is location)</td>
-</tr>
-<tr>
-    <td>MEMSETR</td>
-    <td>0000720?</td>
-    <td>1</td>
-    <td>1</td>
-    <td>Set memory location given in value to contents of register</td>
-</tr>
-<tr>
-    <td>MEMREADR</td>
-    <td>0000721?</td>
-    <td>1</td>
-    <td>1</td>
-    <td>Set contents of register to location given in value</td>
+    <td>Set interrupt from registers</td>
 </tr>
 <tr>
     <td colspan="5" style="background-color:#b0b0b0;"><b>Other Fxxx</b></td>
@@ -581,7 +529,7 @@ Created 23/06/2023 16:28<h2>Opcode Table</h2>
     <td>0000F010</td>
     <td>0</td>
     <td>0</td>
-    <td>No opperation</td>
+    <td>No operation</td>
 </tr>
 <tr>
     <td>HALT</td>

@@ -60,7 +60,7 @@
     "hex_opcode": "0000081?",
     "registers": 1,
     "variables": 1,
-    "comment": "Increament register by a value",
+    "comment": "Increment register by a value",
     "section": "Register control 0xxx"
   },
   {
@@ -68,15 +68,7 @@
     "hex_opcode": "0000082?",
     "registers": 1,
     "variables": 1,
-    "comment": "Decreament register by a value",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "CMPRV",
-    "hex_opcode": "0000083?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "Compare register to value, result in equal flag",
+    "comment": "Decrement register by a value",
     "section": "Register control 0xxx"
   },
   {
@@ -84,7 +76,7 @@
     "hex_opcode": "0000084?",
     "registers": 1,
     "variables": 0,
-    "comment": "Increament register",
+    "comment": "Increment register",
     "section": "Register control 0xxx"
   },
   {
@@ -92,7 +84,7 @@
     "hex_opcode": "0000085?",
     "registers": 1,
     "variables": 0,
-    "comment": "Decreament register",
+    "comment": "Decrement register",
     "section": "Register control 0xxx"
   },
   {
@@ -132,7 +124,7 @@
     "hex_opcode": "000008A?",
     "registers": 1,
     "variables": 0,
-    "comment": "Set register 2's compliments ",
+    "comment": "Set register 2's compliments",
     "section": "Register control 0xxx"
   },
   {
@@ -493,7 +485,7 @@
     "registers": 0,
     "variables": 0,
     "comment": "send test UART message",
-    "section": "Coms 5xxxx"
+    "section": "Communication 5xxxx"
   },
   {
     "text_name": "NEWLINE",
@@ -501,15 +493,15 @@
     "registers": 0,
     "variables": 0,
     "comment": "send UART newline",
-    "section": "Coms 5xxxx"
+    "section": "Communication 5xxxx"
   },
   {
     "text_name": "TXMEM",
     "hex_opcode": "00005002",
     "registers": 0,
     "variables": 1,
-    "comment": "send 8 bytes value of memory locaiton",
-    "section": "Coms 5xxxx"
+    "comment": "send 8 bytes value of memory location",
+    "section": "Communication 5xxxx"
   },
   {
     "text_name": "TXSTRMEM",
@@ -517,7 +509,7 @@
     "registers": 0,
     "variables": 1,
     "comment": "send string at memory",
-    "section": "Coms 5xxxx"
+    "section": "Communication 5xxxx"
   },
   {
     "text_name": "TXR",
@@ -525,23 +517,7 @@
     "registers": 1,
     "variables": 0,
     "comment": "send 8 bytes reg value in message",
-    "section": "Coms 5xxxx"
-  },
-  {
-    "text_name": "TXMEMR",
-    "hex_opcode": "0000502?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "send 8 bytes value at memory of register value in message",
-    "section": "Coms 5xxxx"
-  },
-  {
-    "text_name": "TXCHARMEMR",
-    "hex_opcode": "0000503?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "send char at memory from register value as message",
-    "section": "Coms 5xxxx"
+    "section": "Communication 5xxxx"
   },
   {
     "text_name": "TXSTRMEMR",
@@ -549,47 +525,15 @@
     "registers": 1,
     "variables": 0,
     "comment": "send string at memory location from register",
-    "section": "Coms 5xxxx"
+    "section": "Communication 5xxxx"
   },
   {
     "text_name": "INTSETRR",
     "hex_opcode": "000060??",
     "registers": 2,
     "variables": 0,
-    "comment": "Set interupt from registers",
+    "comment": "Set interrupt from registers",
     "section": "CPU Setting 6xxxx"
-  },
-  {
-    "text_name": "MEMSETRR",
-    "hex_opcode": "000070??",
-    "registers": 2,
-    "variables": 0,
-    "comment": "Set memory location given in register to contents of register (first in order is value, second is location)",
-    "section": "Memory actions 7xxx"
-  },
-  {
-    "text_name": "MEMREADRR",
-    "hex_opcode": "000071??",
-    "registers": 2,
-    "variables": 0,
-    "comment": "Set contents of register to location given in register (first in order is reg to be set, second is location)",
-    "section": "Memory actions 7xxx"
-  },
-  {
-    "text_name": "MEMSETR",
-    "hex_opcode": "0000720?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "Set memory location given in value to contents of register",
-    "section": "Memory actions 7xxx"
-  },
-  {
-    "text_name": "MEMREADR",
-    "hex_opcode": "0000721?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "Set contents of register to location given in value",
-    "section": "Memory actions 7xxx"
   },
   {
     "text_name": "DELAYR",
@@ -604,7 +548,7 @@
     "hex_opcode": "0000F010",
     "registers": 0,
     "variables": 0,
-    "comment": "No opperation",
+    "comment": "No operation",
     "section": "Other Fxxx"
   },
   {

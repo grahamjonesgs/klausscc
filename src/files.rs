@@ -304,7 +304,7 @@ fn output_opcodes_textmate(
     opcodes: &[Opcode],
     msg_list: &mut MsgList,
 ) -> Result<(), std::io::Error> {
-    let textmate_opcode_filename = filename_stem + "_textmate.json";
+    let textmate_opcode_filename = filename_stem + "_textmate.txt";
     msg_list.push(
         format!("Writing textmate opcode file to {textmate_opcode_filename}"),
         None,
@@ -472,17 +472,17 @@ pub fn output_macros_opcodes_json(
     msg_list: &mut MsgList,
 ) -> Result<(), std::io::Error> {
     let json_opcode_filename = filename_stem.clone() + "_opcodes.json";
-    let json_macro_filename = filename_stem + "_macro.json";
+    let json_macro_filename = filename_stem + "_macros.json";
 
     msg_list.push(
-        format!("Writing JSON opcode file {json_opcode_filename}"),
+        format!("Writing JSON opcode file to {json_opcode_filename}"),
         None,
         None,
         MessageType::Information,
     );
 
     msg_list.push(
-        format!("Writing JSON macro file {json_macro_filename}"),
+        format!("Writing JSON macro file to {json_macro_filename}"),
         None,
         None,
         MessageType::Information,

@@ -266,7 +266,7 @@ pub fn set_matches() -> Command {
             Arg::new("opcodes")
                 .long("opcodes")
                 .action(ArgAction::SetTrue)
-                .help("Set if output of opcode.macro list is required"),
+                .help("Set if JSON output of opcode and macro list is required"),
         )
         .arg(
             Arg::new("textmate")
@@ -274,7 +274,7 @@ pub fn set_matches() -> Command {
                 .long("textmate")
                 .action(ArgAction::SetTrue)
                 .help(
-                    "Prints list of all opcodes for use in Textmate of vscode language formatter",
+                    "Set if JSON output of opcodes for use in Textmate of vscode language formatter is required",
                 ),
         )
         .arg(
