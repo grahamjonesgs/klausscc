@@ -154,10 +154,10 @@ pub fn parse_vh_file(
 
         match opcode_from_string(&line.input) {
             None => (),
-            Some(a) => {
-                if return_opcode(&a.text_name, &mut opcodes).is_some() {
+            Some(opcode) => {
+                if return_opcode(&opcode.text_name, &mut opcodes).is_some() {
                     msg_list.push(
-                        format!("Duplicate Opcode {} found", a.text_name),
+                        format!("Duplicate Opcode {} found", opcode.text_name),
                         Some(line.line_counter),
                         Some(line.file_name.clone()),
                         MessageType::Error,
@@ -165,27 +165,27 @@ pub fn parse_vh_file(
                 }
                 //opcodes.push(a);
                 opcodes.push(Opcode {
-                    text_name: a.text_name,
-                    hex_opcode: a.hex_opcode,
-                    registers: a.registers,
-                    variables: a.variables,
-                    comment: a.comment,
+                    text_name: opcode.text_name,
+                    hex_opcode: opcode.hex_opcode,
+                    registers: opcode.registers,
+                    variables: opcode.variables,
+                    comment: opcode.comment,
                     section: section_name.clone(),
                 });
             }
         }
         match macro_from_string(&line.input, msg_list) {
             None => (),
-            Some(a) => {
-                if return_macro(&a.name, &mut macros).is_some() {
+            Some(found_macro) => {
+                if return_macro(&found_macro.name, &mut macros).is_some() {
                     msg_list.push(
-                        format!("Duplicate Macro definition {} found", a.name),
+                        format!("Duplicate Macro definition {} found", found_macro.name),
                         Some(line.line_counter),
                         Some(line.file_name),
                         MessageType::Error,
                     );
                 }
-                macros.push(a);
+                macros.push(found_macro);
             }
         }
     }
@@ -204,17 +204,17 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     // Find the opcode if it exists
     let pos_opcode: usize = match input_line.find("16'h") {
         None => return None,
-        Some(a) => {
-            line_pos_opcode = a;
-            a + 4
+        Some(location) => {
+            line_pos_opcode = location;
+            location + 4
         }
     };
 
     // check if the line was commented out
     match input_line.find("//") {
         None => {}
-        Some(a) => {
-            if a < line_pos_opcode {
+        Some(location) => {
+            if location < line_pos_opcode {
                 return None;
             }
         }
@@ -250,9 +250,9 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_name: usize = match input_line.find("// ") {
         None => match input_line.find("//") {
             None => return None,
-            Some(a) => a + 2,
+            Some(location) => location + 2,
         },
-        Some(a) => a + 3, // Assumes one space after the // before the name of the opcode
+        Some(location) => location + 3, // Assumes one space after the // before the name of the opcode
     };
 
     // Find end of first word after comment as end of opcode name
@@ -260,7 +260,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         .get(pos_name..)
         .unwrap_or("")
         .find(' ')
-        .map_or(input_line.len(), |a| a + pos_name);
+        .map_or(input_line.len(), |location| location + pos_name);
 
     // Set comments field, or none if missing
     if input_line.len() > pos_end_name + 1 {
@@ -937,7 +937,7 @@ mod tests {
     #[test]
     // Test no macro or opcodes
     fn test_parse_vh_file1() {
-        let mut msg_list: MsgList = MsgList::new();
+        let mut msg_list = MsgList::new();
         let vh_list = vec![
             InputData {
                 input: "abc/* This is a comment */def".to_owned(),
@@ -960,7 +960,7 @@ mod tests {
     #[test]
     // Test normal macro and opcode
     fn test_parse_vh_file2() {
-        let mut msg_list: MsgList = MsgList::new();
+        let mut msg_list = MsgList::new();
         let vh_list = vec![
             InputData {
                 input: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
@@ -1001,7 +1001,7 @@ mod tests {
     #[test]
     // Test duplicate macro
     fn test_parse_vh_file3() {
-        let mut msg_list: MsgList = MsgList::new();
+        let mut msg_list = MsgList::new();
         let vh_list = vec![
             InputData {
                 input: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
@@ -1047,7 +1047,7 @@ mod tests {
     #[test]
     // Test empty list
     fn test_parse_vh_file4() {
-        let mut msg_list: MsgList = MsgList::new();
+        let mut msg_list = MsgList::new();
         let vh_list = vec![];
 
         let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
@@ -1059,7 +1059,7 @@ mod tests {
     #[test]
     // Test normal opcode with sections
     fn test_parse_vh_file5() {
-        let mut msg_list: MsgList = MsgList::new();
+        let mut msg_list = MsgList::new();
         let vh_list = vec![
             InputData {
                 input: "/// Section 1".to_owned(),

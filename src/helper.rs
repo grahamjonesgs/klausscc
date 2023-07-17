@@ -69,8 +69,8 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
                 )
                 .as_str(),
             ); // Add length of string to start
-            for c in input_string.as_bytes() {
-                let hex = format!("{c:02X}");
+            for char in input_string.as_bytes() {
+                let hex = format!("{char:02X}");
                 output_hex.push_str(&hex);
             }
             let needed_bytes = 8 - (output_hex.len() % 8);
@@ -203,7 +203,7 @@ pub fn is_comment(line: &mut str) -> bool {
 pub fn strip_comments(input: &mut str) -> String {
     match input.find("//") {
         None => return input.trim().to_owned(),
-        Some(a) => return input.get(0..a).unwrap_or("").trim().to_owned(),
+        Some(location) => return input.get(0..location).unwrap_or("").trim().to_owned(),
     }
 }
 
@@ -213,7 +213,7 @@ pub fn strip_comments(input: &mut str) -> String {
 pub fn return_comments(input: &mut str) -> String {
     match input.find("//") {
         None => String::new(),
-        Some(a) => return input.get(a + 2..).unwrap_or("").trim().to_owned(),
+        Some(location) => return input.get(location + 2..).unwrap_or("").trim().to_owned(),
     }
 }
 
@@ -353,17 +353,17 @@ pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Opti
 /// Trim newline from string
 ///
 /// Removes newline from end of string
-pub fn trim_newline(s: &mut String) {
-    if s.ends_with('\n') {
-        s.pop();
-        if s.ends_with('\r') {
-            s.pop();
+pub fn trim_newline(input: &mut String) {
+    if input.ends_with('\n') {
+        input.pop();
+        if input.ends_with('\r') {
+            input.pop();
         }
     }
-    if s.ends_with('\r') {
-        s.pop();
-        if s.ends_with('\n') {
-            s.pop();
+    if input.ends_with('\r') {
+        input.pop();
+        if input.ends_with('\n') {
+            input.pop();
         }
     }
 }
@@ -425,23 +425,23 @@ mod tests {
     #[test]
     // Test that line is trimmed of newline
     fn test_trim_newline1() {
-        let mut s = String::from("Hello\n");
-        trim_newline(&mut s);
-        assert_eq!(s, "Hello");
+        let mut test_string: String = String::from("Hello\n");
+        trim_newline(&mut test_string);
+        assert_eq!(test_string, "Hello");
     }
     #[test]
     // Test that line is trimmed of newline
     fn test_trim_newline2() {
-        let mut s = String::from("Hello\r\n");
-        trim_newline(&mut s);
-        assert_eq!(s, "Hello");
+        let mut test_string: String = String::from("Hello\r\n");
+        trim_newline(&mut test_string);
+        assert_eq!(test_string, "Hello");
     }
     #[test]
     // Test that line is trimmed of newline
     fn test_trim_newline3() {
-        let mut s = String::from("Hello\n\r");
-        trim_newline(&mut s);
-        assert_eq!(s, "Hello");
+        let mut test_string: String = String::from("Hello\n\r");
+        trim_newline(&mut test_string);
+        assert_eq!(test_string, "Hello");
     }
     #[test]
     // Test that the bin_string is created correctly with start value

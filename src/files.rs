@@ -174,22 +174,22 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
         old_file_name = line.file_name.clone();
         let mut new_line = String::new();
         let mut in_char = false; // If in normal last was / or if in comment last was *
-        for c in line.input.chars() {
+        for char in line.input.chars() {
             if in_comment {
-                if c == '/' && in_char {
+                if char == '/' && in_char {
                     in_comment = false;
                 } else {
-                    in_char = c == '*';
+                    in_char = char == '*';
                 }; // Sets to true if c == '*'
-            } else if c == '*' && in_char {
+            } else if char == '*' && in_char {
                 in_comment = true;
                 new_line.pop();
-            } else if c == '/' {
+            } else if char == '/' {
                 in_char = true;
-                new_line.push(c);
+                new_line.push(char);
             } else {
                 in_char = false;
-                new_line.push(c);
+                new_line.push(char);
             }
         }
         new_lines.push(InputData {
@@ -398,7 +398,7 @@ pub fn output_macros_opcodes_html(
         html_file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n")?;
 
         let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
-        sorted_opcodes.sort_by(|a, b| a.hex_opcode.cmp(&b.hex_opcode));
+        sorted_opcodes.sort_by(|first: &Opcode, second: &Opcode| first.hex_opcode.cmp(&second.hex_opcode));
 
         let mut old_section = String::new();
         for opcode in sorted_opcodes.clone() {
@@ -424,7 +424,7 @@ pub fn output_macros_opcodes_html(
         html_file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n")?;
 
         let mut sorted_macros: Vec<Macro> = macros;
-        sorted_macros.sort_by(|a, b| a.name.cmp(&b.name));
+        sorted_macros.sort_by(|first, second| first.name.cmp(&second.name));
 
         for macro_item in sorted_macros.clone() {
             html_file.write_all(

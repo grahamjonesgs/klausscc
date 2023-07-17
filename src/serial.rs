@@ -56,9 +56,9 @@ pub fn write_to_board(
 
     let ret_msg = String::from_utf8(read_buffer.get(..ret_msg_size).unwrap_or(b"").to_vec());
 
-    if let Err(e) = ret_msg {
+    if let Err(err) = ret_msg {
         msg_list.push(
-            format!("Invalid message received from board, error \"{e}\""),
+            format!("Invalid message received from board, error \"{err}\""),
             None,
             None,
             MessageType::Warning,
@@ -113,7 +113,7 @@ fn return_port(
                 MessageType::Error,
             );
         }
-        let mut all_ports: String = String::new();
+        let mut all_ports = String::new();
         let available_ports = serialport::available_ports();
         let mut suggested_port: Option<String> = None;
 

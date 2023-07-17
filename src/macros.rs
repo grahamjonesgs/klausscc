@@ -41,8 +41,8 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
     if input_line_full.trim().find('$').unwrap_or(usize::MAX) != 0 {
         return None;
     }
-    let mut name: String = String::new();
-    let mut item: String = String::new();
+    let mut name = String::new();
+    let mut item = String::new();
     let mut items: Vec<String> = Vec::new();
     let mut max_variable: u32 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
@@ -97,7 +97,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
             .into_iter()
             .filter(|variable| !all_found_variables.contains(variable))
             .collect();
-        let mut missing: String = String::new();
+        let mut missing = String::new();
 
         for i in difference_all_variables {
             if !missing.is_empty() {
@@ -161,7 +161,7 @@ pub fn return_macro_items_replace(
 ) -> Option<Vec<String>> {
     let mut words = line.split_whitespace();
     let mut return_items: Vec<String> = Vec::new();
-    let mut found: bool = false;
+    let mut found = false;
 
     let input_line_array: Vec<_> = words.clone().collect();
 
@@ -186,7 +186,7 @@ pub fn return_macro_items_replace(
 
             for item in &macro_line.items {
                 let item_words = item.split_whitespace();
-                let mut build_line: String = String::new();
+                let mut build_line = String::new();
                 for item_word in item_words {
                     if item_word.contains('%') {
                         let without_prefix = item_word.trim_start_matches('%');
@@ -243,8 +243,8 @@ pub fn return_macro_items_replace(
 #[allow(clippy::module_name_repetitions)]
 pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
-    let mut changed: bool = true;
-    let mut last_macro: String = String::new();
+    let mut changed = true;
+    let mut last_macro = String::new();
 
     let mut input_macros = macros;
 
@@ -280,7 +280,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                             // Replace %n in new items with the nth value in item
 
                             let new_item_words = new_item.split_whitespace();
-                            let mut build_line: String = String::new();
+                            let mut build_line = String::new();
                             for item_word in new_item_words {
                                 if item_word.contains('%') {
                                     let without_prefix = item_word.trim_start_matches('%');

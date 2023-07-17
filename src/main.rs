@@ -14,6 +14,7 @@
 #![allow(clippy::multiple_crate_versions)]
 #![allow(clippy::pattern_type_mismatch)]
 #![allow(clippy::ref_patterns)]
+#![allow(clippy::single_call_fn)]
 
 //! Top level file for Klausscc
 
@@ -56,7 +57,7 @@ use serial::{write_to_board, AUTO_SERIAL};
 fn main() -> Result<(), i32> {
     use files::output_macros_opcodes_html;
 
-    let mut msg_list: MsgList = MsgList::new();
+    let mut msg_list = MsgList::new();
     let start_time: NaiveTime = Local::now().time();
 
     let matches = set_matches().get_matches();
@@ -140,15 +141,15 @@ fn main() -> Result<(), i32> {
         return Err(1_i32);
     }
 
-    let input_list = Some(remove_block_comments(
+    let input_list = remove_block_comments(
         input_list_option.unwrap_or_else(|| [].to_vec()),
         &mut msg_list,
-    ));
+    );
 
     // Pass 0 to add macros
     let pass0 = expand_macros(
         &mut msg_list,
-        input_list.unwrap_or_default(),
+        input_list,
         &mut macro_list,
     );
 
@@ -343,8 +344,8 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         if line_type(&mut oplist, &mut pass.input_text_line) == LineType::Opcode {
             let num_args =
                 num_arguments(&mut oplist, &mut strip_comments(&mut pass.input_text_line));
-            if let Some(p) = num_args {
-                program_counter = program_counter + p + 1;
+            if let Some(arguments) = num_args {
+                program_counter = program_counter + arguments + 1;
             }
         }
 
@@ -437,9 +438,9 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
                     MessageType::Information,
                 );
             }
-            Err(e) => {
+            Err(err) => {
                 msg_list.push(
-                    format!("Failed to write to serial port, error \"{e}\""),
+                    format!("Failed to write to serial port, error \"{err}\""),
                     None,
                     None,
                     MessageType::Error,
