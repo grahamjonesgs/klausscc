@@ -12,7 +12,6 @@
 #![allow(clippy::separated_literal_suffix)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
 #![allow(clippy::multiple_crate_versions)]
-#![allow(clippy::pattern_type_mismatch)]
 #![allow(clippy::ref_patterns)]
 #![allow(clippy::single_call_fn)]
 

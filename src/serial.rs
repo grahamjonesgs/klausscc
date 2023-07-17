@@ -104,7 +104,7 @@ fn return_port(
     let port_result = serialport::new(local_port_name.clone(), 1_000_000)
         .timeout(core::time::Duration::from_millis(100))
         .open();
-    if let Err(ref err) = &port_result {
+    if let Err(err) = port_result {
         if local_port_name != AUTO_SERIAL {
             msg_list.push(
                 format!("Error opening serial port {local_port_name} error \"{err}\""),
@@ -137,13 +137,13 @@ fn return_port(
                         all_ports.push_str(",\n");
                     }
 
-                    if let SerialPortType::UsbPort(ref info) = &port.port_type {
+                    if let SerialPortType::UsbPort(info) = port.port_type {
                         all_ports.push_str(&format!(
                             "USB Serial Device{} {}",
-                            extra_usb_info(info),
+                            extra_usb_info(&info),
                             port.port_name
                         ));
-                        if check_usb_serial_possible(info) {
+                        if check_usb_serial_possible(&info) {
                             suggested_port = Some(port.port_name.clone());
                         }
                     } else {
@@ -202,13 +202,13 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
 
     let mut extra_items = Vec::new();
 
-    if let Some(ref manufacturer) = &info.manufacturer {
+    if let Some(ref manufacturer) = info.manufacturer {
         extra_items.push(format!("manufacturer '{manufacturer}'"));
     }
-    if let Some(ref serial) = &info.serial_number {
+    if let Some(ref serial) = info.serial_number {
         extra_items.push(format!("serial '{serial}'"));
     }
-    if let Some(ref product) = &info.product {
+    if let Some(ref product) = info.product {
         extra_items.push(format!("product '{product}'"));
     }
     if !extra_items.is_empty() {
@@ -248,8 +248,8 @@ pub fn find_possible_port() -> Option<String> {
         }
         Ok(ports) => {
             for port in ports {
-                if let SerialPortType::UsbPort(ref info) = &port.port_type {
-                    if check_usb_serial_possible(info) {
+                if let SerialPortType::UsbPort(info) = port.port_type {
+                    if check_usb_serial_possible(&info) {
                         suggested_port = Some(port.port_name.clone());
                     }
                 }
