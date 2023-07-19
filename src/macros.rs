@@ -903,7 +903,7 @@ mod tests {
             strip_comments(&mut pass0.get(3).unwrap_or_default().input_text_line.clone()),
             "POP C"
         );
-        assert_eq!(msg_list.number_errors(), 1);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
         assert_eq!(
             msg_list.list.get(0).unwrap_or_default().text,
             "Missing argument 2 for macro $MACRO2"
@@ -955,7 +955,7 @@ mod tests {
             strip_comments(&mut pass0.get(2).unwrap_or_default().input_text_line.clone()),
             "PUSH D"
         );
-        assert_eq!(msg_list.number_warnings(), 1);
+        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
         assert_eq!(
             msg_list.list.get(0).unwrap_or_default().text,
             "Too many variables for macro $MACRO2"

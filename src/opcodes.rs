@@ -391,6 +391,7 @@ pub fn add_registers(
         .get(..(8 - num_registers) as usize)
         .unwrap_or("")
         .to_owned();
+
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))

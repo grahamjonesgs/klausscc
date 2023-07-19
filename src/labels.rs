@@ -321,8 +321,8 @@ mod tests {
         ];
         let mut msg_list = MsgList::new();
         find_duplicate_label(&mut labels, &mut msg_list);
-        assert_eq!(msg_list.number_errors(), 1);
-        assert_eq!(msg_list.number_warnings(), 0);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 0);
 
         assert_eq!(
             msg_list.list.get(0).unwrap_or_default().text,

@@ -174,7 +174,7 @@ fn main() -> Result<(), i32> {
         return Err(1_i32);
     }
 
-    if msg_list.number_errors() == 0 {
+    if msg_list.number_by_type(&MessageType::Error) == 0 {
         // let bin_string = create_bin_string(&mut pass2, &mut msg_list);
         if let Some(bin_string) = create_bin_string(&mut pass2, &mut msg_list) {
             write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
@@ -300,14 +300,14 @@ pub fn print_results(msg_list: &mut MsgList, start_time: NaiveTime) {
         duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
     println!(
         "Completed with {} error{} and {} warning{} in {} seconds",
-        msg_list.number_errors(),
-        if msg_list.number_errors() == 1 {
+        msg_list.number_by_type(&MessageType::Error),
+        if msg_list.number_by_type(&MessageType::Error) == 1 {
             ""
         } else {
             "s"
         },
-        msg_list.number_warnings(),
-        if msg_list.number_warnings() == 1 {
+        msg_list.number_by_type(&MessageType::Error),
+        if msg_list.number_by_type(&MessageType::Warning) == 1 {
             ""
         } else {
             "s"
@@ -426,7 +426,7 @@ pub fn get_pass2(
 /// Sends the resultant code on the serial device defined if no errors were found
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
-    if msg_list.number_errors() == 0 {
+    if msg_list.number_by_type(&MessageType::Error) == 0 {
         let write_result = write_to_board(bin_string, output_serial_port, msg_list);
         match write_result {
             Ok(_) => {

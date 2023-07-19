@@ -84,6 +84,7 @@ pub fn write_to_board(
 ///
 /// If port name is `AUTO_SERIAL` then return the first USB serial port found
 #[allow(clippy::format_push_string)]
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn return_port(
     port_name: &str,
     msg_list: &mut MsgList,

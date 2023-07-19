@@ -99,10 +99,8 @@ task t_opcode_select;
          16'h5002: t_tx_value_of_mem(w_var1);  // TXMEM send 8 bytes value of memory location
          16'h5003: t_tx_string_at_mem(w_var1);  // TXSTRMEM send string at memory
          16'h501?: t_tx_reg;  // TXR send 8 bytes reg value in message
-         16'h502?:
-         t_tx_value_of_mem_at_reg;  // TXMEMR send 8 bytes value at memory of register value in message
-         16'h503?:
-         t_tx_char_from_reg_value;  // TXCHARMEMR send char at memory from register value as message
+         16'h502?: t_tx_value_of_mem_at_reg;  // TXMEMR send 8 bytes value at memory of register value in message
+         16'h503?: t_tx_char_from_reg_value;  // TXCHARMEMR send char at memory from register value as message
          16'h504?: t_tx_string_at_reg;  // TXSTRMEMR send string at memory location from register
 
 
@@ -110,17 +108,11 @@ task t_opcode_select;
          16'h60??: t_set_interrupt_regs;  // INTSETRR Set interrupt from registers
 
          /// Memory actions 7xxx
-         16'h70??:
-         t_set_mem_from_reg_reg;                   // MEMSETRR Set memory location given in register to contents of register (first in order is value, second is location)
-         16'h71??:
-         t_set_reg_from_mem_reg;                   // MEMREADRR Set contents of register to location given in register (first in order is reg to be set, second is location)
+         16'h70??: t_set_mem_from_reg_reg; // MEMSETRR Set memory location given in register to contents of register (first in order is value, second is location)
+         16'h71??: t_set_reg_from_mem_reg; // MEMREADRR Set contents of register to location given in register (first in order is reg to be set, second is location)
 
-         16'h720?:
-         t_set_mem_from_value_reg(
-             w_var1);  // MEMSETR Set memory location given in value to contents of register
-         16'h721?:
-         t_set_reg_from_mem_value(
-             w_var1);  // MEMREADR Set contents of register to location given in value
+         16'h720?: t_set_mem_from_value_reg(w_var1); // MEMSETR Set memory location given in value to contents of register
+         16'h721?: t_set_reg_from_mem_value(w_var1); // MEMREADR Set contents of register to location given in value
 
          /// Other Fxxx
          16'hF00?: t_delay_reg;  // DELAYR Delay by register

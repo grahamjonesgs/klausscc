@@ -29,7 +29,7 @@ pub struct Message {
 
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
-impl Default for & Message {
+impl Default for &Message {
     fn default() -> &'static Message {
         static VALUE: Message = Message {
             text: String::new(),
@@ -37,10 +37,8 @@ impl Default for & Message {
             line_number: None,
             level: MessageType::Information,
             time: None,
-           
         };
         &VALUE
-
     }
 }
 
@@ -75,24 +73,10 @@ impl MsgList {
         });
     }
 
-    /// Returns number of errors in `MsgList`
-    pub fn number_errors(&self) -> usize {
-        let errors = self
-            .list
-            .iter()
-            .filter(|&x| x.level == MessageType::Error)
-            .count();
-        errors
-    }
-
     /// Returns number of warnings in `MsgList`
-    pub fn number_warnings(&self) -> usize {
-        let errors = self
-            .list
-            .iter()
-            .filter(|&x| x.level == MessageType::Warning)
-            .count();
-        errors
+    pub fn number_by_type(&self, msg_type: &MessageType) -> usize {
+        let warnings = self.list.iter().filter(|x| x.level == *msg_type).count();
+        warnings
     }
 }
 
@@ -121,8 +105,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                         msg.file_name.clone().unwrap_or_default(),
                         msg.text
                     )
-                }
-                else {
+                } else {
                     format!(
                         "{} {} Line {}. {} ",
                         msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
@@ -139,8 +122,7 @@ pub fn print_messages(msg_list: &mut MsgList) {
                     msg.file_name.clone().unwrap_or_default(),
                     msg.text
                 )
-            }
-            else {
+            } else {
                 format!(
                     "{} {} {} ",
                     msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
@@ -169,7 +151,10 @@ mod tests {
         assert_eq!(msg_list.list.len(), 1);
         assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Test");
         assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Test");
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().level, MessageType::Information);
+        assert_eq!(
+            msg_list.list.get(0).unwrap_or_default().level,
+            MessageType::Information
+        );
         assert_eq!(msg_list.list.get(0).unwrap_or_default().line_number, None);
     }
 
@@ -177,21 +162,21 @@ mod tests {
     // Test that the number of errors is correct
     fn test_number_errors() {
         let mut msg_list = MsgList::new();
-        assert_eq!(msg_list.number_errors(), 0);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
         msg_list.push("Test".to_owned(), None, None, MessageType::Error);
-        assert_eq!(msg_list.number_errors(), 1);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
     }
 
     #[test]
     // Test number of warnings
     fn test_number_warnings() {
         let mut msg_list = MsgList::new();
-        assert_eq!(msg_list.number_warnings(), 0);
+        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 0);
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
         msg_list.push("Test".to_owned(), None, None, MessageType::Error);
-        assert_eq!(msg_list.number_warnings(), 1);
+        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
     }
 }
