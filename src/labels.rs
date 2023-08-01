@@ -13,14 +13,13 @@ pub struct Label {
 
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
-impl Default for & Label {
+impl Default for &Label {
     fn default() -> &'static Label {
         static VALUE: Label = Label {
             program_counter: 0,
-            name: String::new(),   
+            name: String::new(),
         };
         &VALUE
-
     }
 }
 
@@ -584,8 +583,14 @@ mod tests {
                 name: "#data321".to_owned(),
             }
         );
-        assert_eq!(msglist.list.get(0).unwrap_or_default().text, "Label label1: has extra text dummy");
-        assert_eq!(msglist.list.get(1).unwrap_or_default().text, "Data #data123 has extra text dummy2");
+        assert_eq!(
+            msglist.list.get(0).unwrap_or_default().text,
+            "Label label1: has extra text dummy"
+        );
+        assert_eq!(
+            msglist.list.get(1).unwrap_or_default().text,
+            "Data #data123 has extra text dummy2"
+        );
         assert_eq!(
             msglist.list.get(2).unwrap_or_default().text,
             "Data #data3 has no string termination"

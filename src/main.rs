@@ -14,6 +14,7 @@
 #![allow(clippy::multiple_crate_versions)]
 #![allow(clippy::ref_patterns)]
 #![allow(clippy::single_call_fn)]
+#![allow(clippy::vec_init_then_push)]
 
 //! Top level file for Klausscc
 
@@ -97,7 +98,7 @@ fn main() -> Result<(), i32> {
             None,
             MessageType::Error,
         );
-        print_messages(&mut msg_list);
+        print_messages(&msg_list);
         return Err(1_i32);
     }
     let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
@@ -121,7 +122,7 @@ fn main() -> Result<(), i32> {
     }
 
     if textmate_flag || opcodes_flag {
-        print_messages(&mut msg_list);
+        print_messages(&msg_list);
         return Ok(());
     }
 
@@ -136,7 +137,7 @@ fn main() -> Result<(), i32> {
     let input_list_option =
         read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
     if input_list_option.is_none() {
-        print_messages(&mut msg_list);
+        print_messages(&msg_list);
         return Err(1_i32);
     }
 
@@ -146,11 +147,7 @@ fn main() -> Result<(), i32> {
     );
 
     // Pass 0 to add macros
-    let pass0 = expand_macros(
-        &mut msg_list,
-        input_list,
-        &mut macro_list,
-    );
+    let pass0 = expand_macros(&mut msg_list, input_list, &mut macro_list);
 
     // Pass 1 to get line numbers and labels
     let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, oplist.clone());
@@ -170,13 +167,12 @@ fn main() -> Result<(), i32> {
             None,
             MessageType::Error,
         );
-        print_messages(&mut msg_list);
+        print_messages(&msg_list);
         return Err(1_i32);
     }
 
     if msg_list.number_by_type(&MessageType::Error) == 0 {
-        // let bin_string = create_bin_string(&mut pass2, &mut msg_list);
-        if let Some(bin_string) = create_bin_string(&mut pass2, &mut msg_list) {
+        if let Some(bin_string) = create_bin_string(&pass2, &mut msg_list) {
             write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
             if !output_serial_port.is_empty() {
                 write_to_device(&mut msg_list, &bin_string, &output_serial_port);
@@ -214,7 +210,7 @@ fn main() -> Result<(), i32> {
         );
     }
 
-    print_results(&mut msg_list, start_time);
+    print_results(&msg_list, start_time);
     Ok(())
 }
 
@@ -293,7 +289,7 @@ pub fn set_matches() -> Command {
 #[allow(clippy::float_arithmetic)]
 #[allow(clippy::print_stdout)]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
-pub fn print_results(msg_list: &mut MsgList, start_time: NaiveTime) {
+pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
     let duration = Local::now().time() - start_time;
     let time_taken: f64 =
@@ -324,15 +320,15 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
     let mut program_counter: u32 = 0;
     let mut data_pass0: Vec<Pass0> = Vec::new();
 
-    for mut pass in pass0 {
+    for pass in pass0 {
         pass1.push(Pass1 {
             input_text_line: pass.input_text_line.clone(),
             file_name: pass.file_name.clone(),
             line_counter: pass.line_counter,
             program_counter,
-            line_type: line_type(&mut oplist, &mut pass.input_text_line),
+            line_type: line_type(&mut oplist, &pass.input_text_line),
         });
-        if !is_valid_line(&mut oplist, strip_comments(&mut pass.input_text_line)) {
+        if !is_valid_line(&mut oplist, strip_comments(&pass.input_text_line)) {
             msg_list.push(
                 format!("Error {}", pass.input_text_line),
                 Some(pass.line_counter),
@@ -340,27 +336,26 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
                 MessageType::Error,
             );
         }
-        if line_type(&mut oplist, &mut pass.input_text_line) == LineType::Opcode {
-            let num_args =
-                num_arguments(&mut oplist, &mut strip_comments(&mut pass.input_text_line));
+        if line_type(&mut oplist, &pass.input_text_line) == LineType::Opcode {
+            let num_args = num_arguments(&mut oplist, &strip_comments(&pass.input_text_line));
             if let Some(arguments) = num_args {
                 program_counter = program_counter + arguments + 1;
             }
         }
 
-        if line_type(&mut oplist, &mut pass.input_text_line) == LineType::Data {
+        if line_type(&mut oplist, &pass.input_text_line) == LineType::Data {
             data_pass0.push(pass);
             pass1.pop();
         }
     }
     #[allow(clippy::integer_division)]
-    for mut data_pass in data_pass0 {
+    for data_pass in data_pass0 {
         pass1.push(Pass1 {
             input_text_line: data_pass.input_text_line.clone(),
             file_name: data_pass.file_name.clone(),
             line_counter: data_pass.line_counter,
             program_counter,
-            line_type: line_type(&mut oplist, &mut data_pass.input_text_line),
+            line_type: line_type(&mut oplist, &data_pass.input_text_line),
         });
         program_counter += num_data_bytes(
             &data_pass.input_text_line,
@@ -386,13 +381,13 @@ pub fn get_pass2(
         let new_opcode = if line.line_type == LineType::Opcode {
             add_registers(
                 &mut oplist,
-                &mut strip_comments(&mut line.input_text_line.clone()),
+                &strip_comments(&line.input_text_line.clone()),
                 line.file_name.clone(),
                 msg_list,
                 line.line_counter,
             ) + add_arguments(
                 &mut oplist,
-                &mut strip_comments(&mut line.input_text_line.clone()),
+                &strip_comments(&line.input_text_line.clone()),
                 msg_list,
                 line.line_counter,
                 &line.file_name,

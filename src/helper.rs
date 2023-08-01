@@ -111,7 +111,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
 /// Returns enum of type of line
 ///
 /// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error
-pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
+pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
     if label_name_from_string(line).is_some() {
         return LineType::Label;
     };
@@ -129,7 +129,7 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
     }
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
-        if is_comment(&mut word.to_owned()) && i == 0 {
+        if is_comment(word) && i == 0 {
             return LineType::Comment;
         }
     }
@@ -140,8 +140,8 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &mut str) -> LineType {
 ///  
 /// Returns true if line is not error
 pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
-    let mut temp_line: String = line;
-    if line_type(opcodes, &mut temp_line) == LineType::Error {
+    let temp_line: String = line;
+    if line_type(opcodes, &temp_line) == LineType::Error {
         return false;
     }
     true
@@ -177,7 +177,7 @@ pub fn is_start(line: &str) -> bool {
 /// Check if line is comment
 ///
 /// Returns true if line if just comment
-pub fn is_comment(line: &mut str) -> bool {
+pub fn is_comment(line: &str) -> bool {
     let word = line.trim();
     if word.len() < 2 {
         return false;
@@ -200,7 +200,7 @@ pub fn is_comment(line: &mut str) -> bool {
 /// Strip trailing comments
 ///
 ///  Removes comments and starting and training whitespace
-pub fn strip_comments(input: &mut str) -> String {
+pub fn strip_comments(input: &str) -> String {
     match input.find("//") {
         None => return input.trim().to_owned(),
         Some(location) => return input.get(0..location).unwrap_or("").trim().to_owned(),
@@ -210,7 +210,7 @@ pub fn strip_comments(input: &mut str) -> String {
 /// Returns trailing comments
 ///
 ///  Removes comments and starting and training whitespace
-pub fn return_comments(input: &mut str) -> String {
+pub fn return_comments(input: &str) -> String {
     match input.find("//") {
         None => String::new(),
         Some(location) => return input.get(location + 2..).unwrap_or("").trim().to_owned(),
@@ -253,7 +253,8 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 
     for (index, _) in stripped_string.chars().enumerate() {
         if index % 4 == 0 {
-            let int_value = i32::from_str_radix(stripped_string.get(index..index + 4).unwrap_or("    "), 16);
+            let int_value =
+                i32::from_str_radix(stripped_string.get(index..index + 4).unwrap_or("    "), 16);
             if int_value.is_err() {
                 msg_list.push(
                     {
@@ -282,7 +283,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
 #[allow(clippy::ptr_arg)]
-pub fn create_bin_string(pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Option<String> {
+pub fn create_bin_string(pass2: &Vec<Pass2>, msg_list: &mut MsgList) -> Option<String> {
     let mut output_string = String::new();
 
     output_string.push('S'); // Start character
@@ -473,7 +474,7 @@ mod tests {
             line_type: LineType::Data,
         });
         let mut msg_list = MsgList::new();
-        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+        let bin_string = create_bin_string(&pass2, &mut msg_list);
         assert_eq!(bin_string, Some("S1234432100000001Z0010556AX".to_owned()));
     }
 
@@ -507,9 +508,12 @@ mod tests {
             line_type: LineType::Data,
         });
         let mut msg_list = MsgList::new();
-        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+        let bin_string = create_bin_string(&pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Multiple start addresses found");
+        assert_eq!(
+            msg_list.list.get(0).unwrap_or_default().text,
+            "Multiple start addresses found"
+        );
     }
 
     #[test]
@@ -542,48 +546,48 @@ mod tests {
             line_type: LineType::Data,
         });
         let mut msg_list = MsgList::new();
-        let bin_string = create_bin_string(&mut pass2, &mut msg_list);
+        let bin_string = create_bin_string(&pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "No start address found");
+        assert_eq!(
+            msg_list.list.get(0).unwrap_or_default().text,
+            "No start address found"
+        );
     }
 
     #[test]
     // Test that comment is stripped
     fn test_strip_comments() {
         assert_eq!(
-            strip_comments(&mut "Hello, world! //This is a comment".to_owned()),
+            strip_comments("Hello, world! //This is a comment"),
             "Hello, world!"
         );
-        assert_eq!(
-            strip_comments(&mut "Hello, world! //".to_owned()),
-            "Hello, world!"
-        );
-        assert_eq!(strip_comments(&mut String::new()), "");
+        assert_eq!(strip_comments("Hello, world! //"), "Hello, world!");
+        assert_eq!(strip_comments(""), "");
     }
 
     #[test]
     // Test that comment is returned
     fn test_return_comments() {
         assert_eq!(
-            return_comments(&mut "Hello, world! //This is a comment".to_owned()),
+            return_comments("Hello, world! //This is a comment"),
             "This is a comment"
         );
-        assert_eq!(return_comments(&mut "Hello, world! //".to_owned()), "");
-        assert_eq!(return_comments(&mut "Hello, world!".to_owned()), "");
+        assert_eq!(return_comments("Hello, world! //"), "");
+        assert_eq!(return_comments("Hello, world!"), "");
     }
 
     #[test]
     // Test true is returned for comment
     fn test_is_comment1() {
-        assert!(is_comment(&mut "//This is a comment".to_owned()));
-        assert!(is_comment(&mut "      //This is a comment".to_owned()));
+        assert!(is_comment("//This is a comment"));
+        assert!(is_comment("      //This is a comment"));
     }
 
     #[test]
     // Test false is returned for non-comment
     fn test_is_comment2() {
-        assert!(!is_comment(&mut "Hello //This is a comment".to_owned()));
-        assert!(!is_comment(&mut " ".to_owned()));
+        assert!(!is_comment("Hello //This is a comment"));
+        assert!(!is_comment(" "));
     }
 
     #[test]
@@ -636,8 +640,8 @@ mod tests {
     #[test]
     // Test for opcode line type
     fn test_line_type1() {
-        let mut input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
+        let input = String::from("PUSH");
+        let mut opcodes = Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_opcode: String::from("1234"),
@@ -646,59 +650,59 @@ mod tests {
             registers: 0,
             section: String::new(),
         });
-        let output = line_type(opcodes, &mut input);
+        let output = line_type(&mut opcodes, &input);
         assert_eq!(output, LineType::Opcode);
     }
     #[test]
     // Test for label line type
     fn test_line_type2() {
-        let mut input = String::from("LOOP:");
+        let input = String::from("LOOP:");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
+        let output = line_type(opcodes, & input);
         assert_eq!(output, LineType::Label);
     }
     #[test]
     // Test for data line type
     fn test_line_type3() {
-        let mut input = String::from("#Data_name");
+        let input = String::from("#Data_name");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
+        let output = line_type(opcodes, &input);
         assert_eq!(output, LineType::Data);
     }
 
     #[test]
     // Test for blank line type
     fn test_line_type4() {
-        let mut input = String::new();
+        let input = String::new();
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
+        let output = line_type(opcodes, &input);
         assert_eq!(output, LineType::Blank);
     }
 
     #[test]
     // Test for comment line type
     fn test_line_type5() {
-        let mut input = String::from("//This is a comment");
+        let  input = String::from("//This is a comment");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
+        let output = line_type(opcodes, &input);
         assert_eq!(output, LineType::Comment);
     }
 
     #[test]
     // Test for start line type
     fn test_line_type6() {
-        let mut input = String::from("_start");
+        let  input = String::from("_start");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
+        let output = line_type(opcodes, & input);
         assert_eq!(output, LineType::Start);
     }
 
     #[test]
     // Test for error line type
     fn test_line_type7() {
-        let mut input = String::from("1234");
+        let  input = String::from("1234");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &mut input);
+        let output = line_type(opcodes, & input);
         assert_eq!(output, LineType::Error);
     }
 
@@ -716,7 +720,10 @@ mod tests {
         let input = String::from("#TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
         assert_eq!(output, 0);
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Error in data definition for #TEST");
+        assert_eq!(
+            msg_list.list.get(0).unwrap_or_default().text,
+            "Error in data definition for #TEST"
+        );
     }
 
     #[test]

@@ -86,7 +86,7 @@ impl MsgList {
 #[allow(clippy::module_name_repetitions)]
 #[allow(clippy::print_stdout)]
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
-pub fn print_messages(msg_list: &mut MsgList) {
+pub fn print_messages(msg_list: &MsgList) {
     for msg in &msg_list.list {
         let message_level: ColoredString = match msg.level {
             MessageType::Information => "I".to_owned().green(),

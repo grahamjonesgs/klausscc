@@ -293,7 +293,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 /// Returns number of args for opcode
 ///
 /// From opcode name, option of number of arguments for opcode, or None
-pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
+pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -321,7 +321,7 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
 //// Returns number of registers for opcode
 ///
 /// From opcode name, option of number of registers for opcode, or None
-fn num_registers(opcodes: &mut Vec<Opcode>, line: &mut str) -> Option<u32> {
+fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -364,12 +364,12 @@ fn map_reg_to_hex(input: &str) -> String {
 /// Returns the hex code operand from the line, adding register values
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
-    line: &mut String,
+    line: &String,
     filename: String,
     msg_list: &mut MsgList,
     line_number: u32,
 ) -> String {
-    let num_registers = num_registers(opcodes, &mut (*line).to_uppercase()).unwrap_or(0);
+    let num_registers = num_registers(opcodes, &(*line).to_uppercase()).unwrap_or(0);
 
     let mut opcode_found = {
         let this = return_opcode(&line.to_uppercase(), opcodes);
@@ -418,14 +418,14 @@ pub fn add_registers(
 /// Converts label names to hex addresses
 pub fn add_arguments(
     opcodes: &mut Vec<Opcode>,
-    line: &mut String,
+    line: &String,
     msg_list: &mut MsgList,
     line_number: u32,
     filename: &str,
     labels: &mut Vec<Label>,
 ) -> String {
-    let num_registers = num_registers(opcodes, &mut line.to_uppercase()).unwrap_or(0);
-    let num_arguments = num_arguments(opcodes, &mut line.to_uppercase()).unwrap_or(0);
+    let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
+    let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
     let mut arguments = String::new();
 
     let words = line.split_whitespace();
@@ -487,7 +487,7 @@ mod tests {
     #[test]
     // Test that the correct number of registers is returned
     fn test_num_registers1() {
-        let mut input = String::from("PUSH");
+        let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -497,14 +497,14 @@ mod tests {
             registers: 1,
             section: String::new(),
         });
-        let output = num_registers(opcodes, &mut input);
+        let output = num_registers(opcodes, &input);
         assert_eq!(output, Some(1));
     }
 
     #[test]
     // Test that the None is returned if the opcode is not found
     fn test_num_registers2() {
-        let mut input = String::from("PULL");
+        let input = String::from("PULL");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -514,13 +514,13 @@ mod tests {
             registers: 1,
             section: String::new(),
         });
-        let output = num_registers(opcodes, &mut input);
+        let output = num_registers(opcodes, &input);
         assert_eq!(output, None);
     }
     #[test]
     // Test that the correct number of arguments is returned
     fn test_num_arguments1() {
-        let mut input = String::from("PUSH");
+        let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -530,13 +530,13 @@ mod tests {
             registers: 1,
             section: String::new(),
         });
-        let output = num_registers(opcodes, &mut input);
+        let output = num_registers(opcodes, &input);
         assert_eq!(output, Some(1));
     }
     #[test]
     // Test that the correct number of arguments is returned
     fn test_num_arguments2() {
-        let mut input = String::from("PUSH");
+        let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -546,14 +546,14 @@ mod tests {
             registers: 2,
             section: String::new(),
         });
-        let output = num_registers(opcodes, &mut input);
+        let output = num_registers(opcodes, &input);
         assert_eq!(output, Some(2));
     }
 
     #[test]
     // Test that the correct number of arguments is returned 2 variable 2 registers
     fn test_num_arguments3() {
-        let mut input = String::from("PUSH ddd yyy");
+        let input = String::from("PUSH ddd yyy");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -563,14 +563,14 @@ mod tests {
             registers: 2,
             section: String::new(),
         });
-        let output = num_registers(opcodes, &mut input);
+        let output = num_registers(opcodes, &input);
         assert_eq!(output, Some(2));
     }
 
     #[test]
     // Test that None is returned if the opcode is not found
     fn test_num_arguments4() {
-        let mut input = String::from("PUSH2");
+        let input = String::from("PUSH2");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -580,14 +580,14 @@ mod tests {
             registers: 2,
             section: String::new(),
         });
-        let output = num_registers(opcodes, &mut input);
+        let output = num_registers(opcodes, &input);
         assert_eq!(output, None);
     }
 
     #[test]
     // Test that None is returned if the opcode is blank
     fn test_num_arguments5() {
-        let mut input = String::new();
+        let input = String::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -597,7 +597,7 @@ mod tests {
             registers: 2,
             section: String::new(),
         });
-        let output = num_registers(opcodes, &mut input);
+        let output = num_registers(opcodes, &input);
         assert_eq!(output, None);
     }
 
@@ -639,7 +639,7 @@ mod tests {
     // This test is to check that the function will return correct output if the number of registers is correct
     fn test_add_registers1() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH A B");
+        let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -649,7 +649,7 @@ mod tests {
             registers: 2,
             section: String::new(),
         });
-        let output = add_registers(opcodes, &mut input, "test".to_owned(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("00005601"));
     }
 
@@ -657,7 +657,7 @@ mod tests {
     // This test is to check that the function will return an error if the number of registers is incorrect
     fn test_add_registers2() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH A B");
+        let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -667,14 +667,14 @@ mod tests {
             registers: 1,
             section: String::new(),
         });
-        let output = add_registers(opcodes, &mut input, "test".to_owned(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
     // This test is to check that the function will return an error if the length of the opcode is not correct
     fn test_add_registers3() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH A B");
+        let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -684,14 +684,14 @@ mod tests {
             registers: 1,
             section: String::new(),
         });
-        let output = add_registers(opcodes, &mut input, "test".to_owned(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
     // Test single hex argument
     fn test_add_arguments1() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH 0xFFFF");
+        let input = String::from("PUSH 0xFFFF");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -702,7 +702,7 @@ mod tests {
             registers: 0,
             section: String::new(),
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("0000FFFF"));
     }
 
@@ -710,7 +710,7 @@ mod tests {
     // Test single decimal argument
     fn test_add_arguments2() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH 1234");
+        let input = String::from("PUSH 1234");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -721,7 +721,7 @@ mod tests {
             registers: 0,
             section: String::new(),
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("000004D2"));
     }
 
@@ -729,7 +729,7 @@ mod tests {
     // Test invalid argument
     fn test_add_arguments3() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH HELLO");
+        let input = String::from("PUSH HELLO");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -740,7 +740,7 @@ mod tests {
             registers: 0,
             section: String::new(),
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000000"));
     }
 
@@ -748,7 +748,7 @@ mod tests {
     // Test invalid second argument
     fn test_add_arguments4() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH 0xF RRR");
+        let input = String::from("PUSH 0xF RRR");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -759,7 +759,7 @@ mod tests {
             registers: 0,
             section: String::new(),
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("0000000F00000000"));
     }
 
@@ -767,7 +767,7 @@ mod tests {
     // Test two arguments
     fn test_add_arguments5() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH 1 0xF");
+        let input = String::from("PUSH 1 0xF");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -778,7 +778,7 @@ mod tests {
             registers: 0,
             section: String::new(),
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("000000010000000F"));
     }
 
@@ -786,7 +786,7 @@ mod tests {
     // Test too many arguments
     fn test_add_arguments6() {
         let mut msg_list = crate::messages::MsgList::new();
-        let mut input = String::from("PUSH 1 0xF");
+        let input = String::from("PUSH 1 0xF");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -797,7 +797,7 @@ mod tests {
             registers: 0,
             section: String::new(),
         });
-        let output = add_arguments(opcodes, &mut input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(
             msg_list.list.get(0).unwrap_or_default().text,

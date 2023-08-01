@@ -145,8 +145,8 @@ pub fn get_include_filename(input_line: &str) -> Option<String> {
     if !input_line.trim().starts_with("!include") {
         return None;
     }
-    let mut line = input_line.replace("!include", "");
-    let stripped_line = strip_comments(&mut line);
+    let line = input_line.replace("!include", "");
+    let stripped_line = strip_comments(&line);
     let mut words = stripped_line.split_whitespace();
     Some(words.next().unwrap_or("").to_owned())
 }
@@ -258,7 +258,7 @@ pub fn write_code_output_file(
             out_line = format!(
                 "0x{:08X}: {:<17} -- {}\n",
                 pass.program_counter,
-                format_opcodes(&mut pass.opcode),
+                format_opcodes(&pass.opcode),
                 pass.input_text_line
             );
         } else if pass.line_type == LineType::Data {
@@ -324,7 +324,9 @@ fn output_opcodes_textmate(
             .err()
             .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
     }
-    let  Ok(mut json_opcode_file) = textmate_opcode_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+    let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
+        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+    };
     json_opcode_file.write_all(
         opcodes
             .iter()
@@ -375,7 +377,9 @@ pub fn output_macros_opcodes_html(
                 .err()
                 .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
         }
-        let  Ok(mut html_file) = html_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+        let Ok(mut html_file) = html_output_file else {
+            return Err(Error::new(ErrorKind::Other, "Unknown error"));
+        };
         html_file.write_all(b"<!DOCTYPE html>\n")?;
         html_file.write_all(b"<html>\n<head>\n<style>\n")?;
         html_file.write_all(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
@@ -398,7 +402,8 @@ pub fn output_macros_opcodes_html(
         html_file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n")?;
 
         let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
-        sorted_opcodes.sort_by(|first: &Opcode, second: &Opcode| first.hex_opcode.cmp(&second.hex_opcode));
+        sorted_opcodes
+            .sort_by(|first: &Opcode, second: &Opcode| first.hex_opcode.cmp(&second.hex_opcode));
 
         let mut old_section = String::new();
         for opcode in sorted_opcodes.clone() {
@@ -501,7 +506,9 @@ pub fn output_macros_opcodes_json(
             .err()
             .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
     }
-    let  Ok(mut json_opcode_file) = json_opcode_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+    let Ok(mut json_opcode_file) = json_opcode_output_file else {
+        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+    };
     json_opcode_file.write_all(
         serde_json::to_string_pretty(&opcodes)
             .unwrap_or_default()
@@ -521,7 +528,9 @@ pub fn output_macros_opcodes_json(
             .err()
             .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
     }
-    let  Ok(mut json_macro_file) = json_macro_output_file else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
+    let Ok(mut json_macro_file) = json_macro_output_file else {
+        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+    };
     json_macro_file.write_all(
         serde_json::to_string_pretty(&macros)
             .unwrap_or_default()
@@ -533,7 +542,7 @@ pub fn output_macros_opcodes_json(
 /// Format a given string, adding spaces between groups of 4
 ///
 /// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string
-pub fn format_opcodes(input: &mut String) -> String {
+pub fn format_opcodes(input: &String) -> String {
     if input.len() == 4 {
         return (*input).clone() + "              ";
     }
@@ -834,19 +843,16 @@ mod test {
     // Check for formatting of codes used for debug file
     fn test_format_opcodes() {
         assert_eq!(
-            format_opcodes(&mut "0000000000000000".to_owned()),
+            format_opcodes(&"0000000000000000".to_owned()),
             "00000000 00000000"
         );
-        assert_eq!(format_opcodes(&mut "0000".to_owned()), "0000              ");
+        assert_eq!(format_opcodes(&"0000".to_owned()), "0000              ");
         assert_eq!(
-            format_opcodes(&mut "0123456789ABCDEF".to_owned()),
+            format_opcodes(&"0123456789ABCDEF".to_owned()),
             "01234567 89ABCDEF"
         );
-        assert_eq!(
-            format_opcodes(&mut "12345678".to_owned()),
-            "12345678         "
-        );
-        assert_eq!(format_opcodes(&mut "123".to_owned()), "123");
+        assert_eq!(format_opcodes(&"12345678".to_owned()), "12345678         ");
+        assert_eq!(format_opcodes(&"123".to_owned()), "123");
     }
 
     #[test]
