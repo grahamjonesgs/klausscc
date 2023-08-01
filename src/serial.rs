@@ -148,7 +148,7 @@ fn return_port(
                             suggested_port = Some(port.port_name.clone());
                         }
                     } else {
-                        all_ports.push_str(&format!("Non USB Serial Device {}", port.port_name));
+                        all_ports.push_str(&format!(" Non USB Serial Device {}", port.port_name));
                     }
 
                     max_ports = port_count.try_into().unwrap_or_default();
@@ -157,7 +157,7 @@ fn return_port(
                 let ports_msg = match max_ports {
                     -1_i32 => "no ports were found".to_owned(),
                     0_i32 => {
-                        format!("only port {all_ports} was found")
+                        format!("only port{all_ports} was found")
                     }
                     _ => {
                         format!("the following {max_ports} ports were found:\n{all_ports}")

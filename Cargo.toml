@@ -19,5 +19,5 @@ colored = { version = "2.0.4"}
 itertools = { version = "0.11.0", default-features = false, features = ["use_std"] }
 serialport = { version = "4.2.1", default-features = true}
 tempfile = "3.7.0"
-serde = { version = "1.0.175", features = ["derive"] }
-serde_json = {version = "1.0.103"}
+serde = { version = "1.0.177", features = ["derive"] }
+serde_json = {version = "1.0.104"}
