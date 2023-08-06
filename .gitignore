@@ -1,4 +1,4 @@
 /target
-cargo.lock
+Cargo.lock
 .devcontainer/devcontainer.json
 *.svg
