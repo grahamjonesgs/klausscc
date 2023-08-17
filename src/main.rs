@@ -12,9 +12,9 @@
 #![allow(clippy::separated_literal_suffix)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
 #![allow(clippy::multiple_crate_versions)]
-#![allow(clippy::ref_patterns)]
-#![allow(clippy::single_call_fn)]
 #![allow(clippy::vec_init_then_push)]
+#![allow(clippy::single_call_fn)]
+
 
 //! Top level file for Klausscc
 
@@ -55,6 +55,8 @@ use serial::{write_to_board, AUTO_SERIAL};
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 #[allow(clippy::too_many_lines)]
 fn main() -> Result<(), i32> {
+    use std::fs::remove_file;
+
     use files::output_macros_opcodes_html;
 
     let mut msg_list = MsgList::new();
@@ -178,7 +180,7 @@ fn main() -> Result<(), i32> {
                 write_to_device(&mut msg_list, &bin_string, &output_serial_port);
             }
         } else {
-            if std::fs::remove_file(&binary_file_name).is_ok() {
+            if remove_file(&binary_file_name).is_ok() {
                 msg_list.push(
                     "Removed old binary file".to_owned(),
                     None,
@@ -194,7 +196,7 @@ fn main() -> Result<(), i32> {
             );
         }
     } else {
-        if std::fs::remove_file(&binary_file_name).is_ok() {
+        if remove_file(&binary_file_name).is_ok() {
             msg_list.push(
                 "Removed old binary file".to_owned(),
                 None,
@@ -424,7 +426,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
     if msg_list.number_by_type(&MessageType::Error) == 0 {
         let write_result = write_to_board(bin_string, output_serial_port, msg_list);
         match write_result {
-            Ok(_) => {
+            Ok(()) => {
                 msg_list.push(
                     "Wrote to serial port".to_owned(),
                     None,

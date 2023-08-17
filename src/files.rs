@@ -223,7 +223,7 @@ pub fn filename_stem(full_name: &String) -> String {
 pub fn write_binary_output_file(
     filename: &impl AsRef<Path>,
     output_string: &str,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
     let mut file = File::create(filename)?;
 
     file.write_all(output_string.as_bytes())?;
@@ -239,10 +239,10 @@ pub fn write_binary_output_file(
 #[allow(clippy::integer_division)]
 #[allow(clippy::question_mark_used)]
 pub fn write_code_output_file(
-    filename: impl AsRef<Path> + core::marker::Copy,
+    filename: impl AsRef<Path> + Copy,
     pass2: &mut Vec<Pass2>,
     msg_list: &mut MsgList,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
     let mut file = File::create(filename)?;
 
     let mut out_line = String::new();
@@ -303,7 +303,7 @@ fn output_opcodes_textmate(
     filename_stem: String,
     opcodes: &[Opcode],
     msg_list: &mut MsgList,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
     let textmate_opcode_filename = filename_stem + "_textmate.txt";
     msg_list.push(
         format!("Writing textmate opcode file to {textmate_opcode_filename}"),
@@ -351,7 +351,7 @@ pub fn output_macros_opcodes_html(
     msg_list: &mut MsgList,
     opcodes_flag: bool,
     textmate_flag: bool,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
     use chrono::Local;
 
     let html_filename = filename_stem.clone() + ".html";
@@ -475,7 +475,7 @@ pub fn output_macros_opcodes_json(
     opcodes: &[Opcode],
     macros: &[Macro],
     msg_list: &mut MsgList,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
     let json_opcode_filename = filename_stem.clone() + "_opcodes.json";
     let json_macro_filename = filename_stem + "_macros.json";
 

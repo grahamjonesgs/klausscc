@@ -318,7 +318,7 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
     None
 }
 
-//// Returns number of registers for opcode
+/// Returns number of registers for opcode
 ///
 /// From opcode name, option of number of registers for opcode, or None
 fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
@@ -638,7 +638,7 @@ mod tests {
     #[test]
     // This test is to check that the function will return correct output if the number of registers is correct
     fn test_add_registers1() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -656,7 +656,7 @@ mod tests {
     #[test]
     // This test is to check that the function will return an error if the number of registers is incorrect
     fn test_add_registers2() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -673,7 +673,7 @@ mod tests {
     #[test]
     // This test is to check that the function will return an error if the length of the opcode is not correct
     fn test_add_registers3() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -690,7 +690,7 @@ mod tests {
     #[test]
     // Test single hex argument
     fn test_add_arguments1() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH 0xFFFF");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -709,7 +709,7 @@ mod tests {
     #[test]
     // Test single decimal argument
     fn test_add_arguments2() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH 1234");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -728,7 +728,7 @@ mod tests {
     #[test]
     // Test invalid argument
     fn test_add_arguments3() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH HELLO");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     // Test invalid second argument
     fn test_add_arguments4() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH 0xF RRR");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -766,7 +766,7 @@ mod tests {
     #[test]
     // Test two arguments
     fn test_add_arguments5() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH 1 0xF");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -785,7 +785,7 @@ mod tests {
     #[test]
     // Test too many arguments
     fn test_add_arguments6() {
-        let mut msg_list = crate::messages::MsgList::new();
+        let mut msg_list = MsgList::new();
         let input = String::from("PUSH 1 0xF");
         let mut labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();

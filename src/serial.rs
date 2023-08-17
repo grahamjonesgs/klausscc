@@ -3,6 +3,7 @@ use crate::messages::{MessageType, MsgList};
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::io::{Error, ErrorKind};
 use std::{thread, time};
+use core::time::Duration;
 
 /// Used to define if a port request was not defined so is for auto
 pub const AUTO_SERIAL: &str = "auto_serial_requested";
@@ -12,12 +13,14 @@ pub const AUTO_SERIAL: &str = "auto_serial_requested";
 /// Will send the program to the serial port, and wait for the response
 #[allow(clippy::question_mark_used)]
 #[allow(clippy::format_push_string)]
+#[allow(clippy::absolute_paths)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_to_board(
+    
     binary_output: &str,
     port_name: &str,
     msg_list: &mut MsgList,
-) -> Result<(), std::io::Error> {
+) -> Result<(), Error> {
     let mut read_buffer = [0; 1024];
 
     let mut port = return_port(port_name, msg_list)?;
@@ -88,7 +91,7 @@ pub fn write_to_board(
 fn return_port(
     port_name: &str,
     msg_list: &mut MsgList,
-) -> Result<Box<dyn SerialPort>, std::io::Error> {
+) -> Result<Box<dyn SerialPort>, Error> {
     let mut local_port_name = port_name.to_owned();
     if port_name == AUTO_SERIAL {
         if let Some(suggested_port) = find_possible_port() {
@@ -103,7 +106,7 @@ fn return_port(
     }
 
     let port_result = serialport::new(local_port_name.clone(), 1_000_000)
-        .timeout(core::time::Duration::from_millis(100))
+        .timeout(Duration::from_millis(100))
         .open();
     if let Err(err) = port_result {
         if local_port_name != AUTO_SERIAL {
@@ -126,8 +129,8 @@ fn return_port(
                     None,
                     MessageType::Error,
                 );
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Error::new(
+                    ErrorKind::Other,
                     "No ports found",
                 ));
             }
@@ -180,8 +183,8 @@ fn return_port(
                     );
                 }
 
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(Error::new(
+                    ErrorKind::Other,
                     "Failed to open port",
                 ));
             }
@@ -196,6 +199,7 @@ fn return_port(
 ///
 /// Gives more USB details
 #[allow(clippy::format_push_string)]
+#[allow(clippy::ref_patterns)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn extra_usb_info(info: &UsbPortInfo) -> String {
     let mut output = String::new();
