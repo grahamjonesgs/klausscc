@@ -27,6 +27,7 @@ pub enum LineType {
 /// Open text file and return as vector of strings
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
+#[allow(clippy::arithmetic_side_effects)]
 pub fn read_file_to_vector(
     filename: &str,
     msg_list: &mut MsgList,
@@ -238,6 +239,7 @@ pub fn write_binary_output_file(
 #[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::integer_division)]
 #[allow(clippy::question_mark_used)]
+#[allow(clippy::arithmetic_side_effects)]
 pub fn write_code_output_file(
     filename: impl AsRef<Path> + Copy,
     pass2: &mut Vec<Pass2>,
@@ -299,6 +301,7 @@ pub fn write_code_output_file(
 /// Writes all data of opcodes to textmate file
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::question_mark_used)]
+#[allow(clippy::arithmetic_side_effects)]
 fn output_opcodes_textmate(
     filename_stem: String,
     opcodes: &[Opcode],
@@ -431,6 +434,7 @@ pub fn output_macros_opcodes_html(
         let mut sorted_macros: Vec<Macro> = macros;
         sorted_macros.sort_by(|first, second| first.name.cmp(&second.name));
 
+        #[allow(clippy::arithmetic_side_effects)]
         for macro_item in sorted_macros.clone() {
             html_file.write_all(
                 format!(

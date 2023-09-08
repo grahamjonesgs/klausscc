@@ -171,6 +171,7 @@ pub fn return_macro_items_replace(
         if macro_line.name == first_word {
             found = true;
 
+            #[allow(clippy::arithmetic_side_effects)]
             if input_line_array.len()
                 > (macro_line.variables + 1_u32)
                     .try_into()
@@ -191,6 +192,7 @@ pub fn return_macro_items_replace(
                     if item_word.contains('%') {
                         let without_prefix = item_word.trim_start_matches('%');
                         let int_value = without_prefix.parse::<u32>();
+                        #[allow(clippy::arithmetic_side_effects)]
                         if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                             msg_list.push(
                                 format!(
@@ -241,6 +243,7 @@ pub fn return_macro_items_replace(
 /// Will create errors message for more than 10 passes
 #[allow(clippy::too_many_lines)]
 #[allow(clippy::module_name_repetitions)]
+#[allow(clippy::arithmetic_side_effects)]
 pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed = true;
@@ -261,6 +264,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                         item_line_array.push(item_word.to_owned());
                     }
                     #[allow(clippy::unwrap_used)]
+                    #[allow(clippy::arithmetic_side_effects)]
                     if (return_macro(&item, &mut input_macros).unwrap().variables as usize)
                         < item_line_array.len() - 1
                     {
@@ -285,6 +289,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                 if item_word.contains('%') {
                                     let without_prefix = item_word.trim_start_matches('%');
                                     let int_value = without_prefix.parse::<u32>();
+                                    #[allow(clippy::arithmetic_side_effects)]
                                     if int_value.is_err() || int_value.clone().unwrap_or(0) < 1 {
                                         msg_list.push(
                                             format!(
@@ -340,6 +345,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                 comment: input_macro_line.comment,
             });
         }
+        
         pass += 1;
         input_macros = output_macros.clone();
     }
@@ -373,6 +379,7 @@ pub fn expand_macros(
                 &code_line.file_name,
                 msg_list,
             );
+            #[allow(clippy::arithmetic_side_effects)]
             if items.is_some() {
                 for item in Option::unwrap(items) {
                     pass0.push(Pass0 {

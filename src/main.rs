@@ -5,14 +5,13 @@
     clippy::nursery,
     clippy::cargo
 )]
-#![allow(clippy::arithmetic_side_effects)]
+
 #![allow(clippy::implicit_return)]
 #![allow(clippy::string_add)]
 #![allow(clippy::as_conversions)]
 #![allow(clippy::separated_literal_suffix)]
 #![allow(clippy::blanket_clippy_restriction_lints)]
 #![allow(clippy::multiple_crate_versions)]
-#![allow(clippy::vec_init_then_push)]
 #![allow(clippy::single_call_fn)]
 
 
@@ -293,6 +292,7 @@ pub fn set_matches() -> Command {
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
+    #[allow(clippy::arithmetic_side_effects)]
     let duration = Local::now().time() - start_time;
     let time_taken: f64 =
         duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
@@ -340,6 +340,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
         if line_type(&mut oplist, &pass.input_text_line) == LineType::Opcode {
             let num_args = num_arguments(&mut oplist, &strip_comments(&pass.input_text_line));
+            #[allow(clippy::arithmetic_side_effects)]
             if let Some(arguments) = num_args {
                 program_counter = program_counter + arguments + 1;
             }
@@ -351,6 +352,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
     }
     #[allow(clippy::integer_division)]
+    #[allow(clippy::arithmetic_side_effects)]
     for data_pass in data_pass0 {
         pass1.push(Pass1 {
             input_text_line: data_pass.input_text_line.clone(),
@@ -359,6 +361,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             program_counter,
             line_type: line_type(&mut oplist, &data_pass.input_text_line),
         });
+        
         program_counter += num_data_bytes(
             &data_pass.input_text_line,
             msg_list,

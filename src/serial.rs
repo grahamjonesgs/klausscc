@@ -200,6 +200,7 @@ fn return_port(
 /// Gives more USB details
 #[allow(clippy::format_push_string)]
 #[allow(clippy::ref_patterns)]
+#[allow(clippy::arithmetic_side_effects)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn extra_usb_info(info: &UsbPortInfo) -> String {
     let mut output = String::new();

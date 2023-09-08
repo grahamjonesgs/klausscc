@@ -196,6 +196,7 @@ pub fn parse_vh_file(
 ///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
 #[allow(clippy::useless_let_if_seq)]
+#[allow(clippy::arithmetic_side_effects)]
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_comment: usize;
     let pos_end_comment: usize;
@@ -362,6 +363,7 @@ fn map_reg_to_hex(input: &str) -> String {
 /// Updates opcode with register
 ///
 /// Returns the hex code operand from the line, adding register values
+#[allow(clippy::arithmetic_side_effects)]
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
     line: &String,
@@ -429,6 +431,7 @@ pub fn add_arguments(
     let mut arguments = String::new();
 
     let words = line.split_whitespace();
+    #[allow(clippy::arithmetic_side_effects)]
     for (i, word) in words.enumerate() {
         if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
             arguments.push_str(&{
@@ -467,6 +470,7 @@ pub fn add_arguments(
     }
 
     // Can't be in tarpaulin as we can't test the error by passing wrong size
+    #[allow(clippy::arithmetic_side_effects)]
     if arguments.len() != 8 * num_arguments as usize {
         #[cfg(not(tarpaulin_include))]
         msg_list.push(

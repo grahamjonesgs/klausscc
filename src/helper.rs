@@ -42,6 +42,7 @@ pub fn num_data_bytes(
 ///
 /// Parses data element and returns data as bytes, or None if error
 #[allow(clippy::integer_division)]
+#[allow(clippy::arithmetic_side_effects)]
 pub fn data_as_bytes(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -210,6 +211,7 @@ pub fn strip_comments(input: &str) -> String {
 /// Returns trailing comments
 ///
 ///  Removes comments and starting and training whitespace
+#[allow(clippy::arithmetic_side_effects)]
 pub fn return_comments(input: &str) -> String {
     match input.find("//") {
         None => String::new(),
@@ -222,6 +224,7 @@ pub fn return_comments(input: &str) -> String {
 /// Calculates the checksum from the string of hex values, removing control characters
 #[allow(clippy::cast_possible_wrap)]
 #[allow(clippy::modulo_arithmetic)]
+#[allow(clippy::arithmetic_side_effects)]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string = String::new();
     let mut checksum: i32 = 0;
@@ -448,7 +451,7 @@ mod tests {
     // Test that the bin_string is created correctly with start value
 
     fn test_create_bin_string1() {
-        let mut pass2 = Vec::new();
+        let pass2 = & mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
@@ -474,7 +477,7 @@ mod tests {
             line_type: LineType::Data,
         });
         let mut msg_list = MsgList::new();
-        let bin_string = create_bin_string(&pass2, &mut msg_list);
+        let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, Some("S1234432100000001Z0010556AX".to_owned()));
     }
 
@@ -482,7 +485,7 @@ mod tests {
     // Test that the bin_string is null if duplicate starts
 
     fn test_create_bin_string2() {
-        let mut pass2 = Vec::new();
+        let pass2 = & mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
@@ -508,7 +511,7 @@ mod tests {
             line_type: LineType::Data,
         });
         let mut msg_list = MsgList::new();
-        let bin_string = create_bin_string(&pass2, &mut msg_list);
+        let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
         assert_eq!(
             msg_list.list.get(0).unwrap_or_default().text,
@@ -520,7 +523,7 @@ mod tests {
     // Test that the bin_string is null if no starts
 
     fn test_create_bin_string3() {
-        let mut pass2 = Vec::new();
+        let pass2 = & mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
@@ -546,7 +549,7 @@ mod tests {
             line_type: LineType::Data,
         });
         let mut msg_list = MsgList::new();
-        let bin_string = create_bin_string(&pass2, &mut msg_list);
+        let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
         assert_eq!(
             msg_list.list.get(0).unwrap_or_default().text,
