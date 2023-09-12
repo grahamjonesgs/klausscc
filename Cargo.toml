@@ -1,6 +1,6 @@
 [package]
 name = "klausscc"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Graham jones"]
 description = "Assembler for Klauss microcontroller defined in FPGA"
@@ -14,10 +14,10 @@ categories = ["development-tools"]
 
 [dependencies]
 clap = { version = "4.4.2"}
-chrono = { version = "0.4.30", default-features = false, features = ["clock"] }
+chrono = { version = "0.4.30" }
 colored = { version = "2.0.4"}
-itertools = { version = "0.11.0", default-features = false, features = ["use_std"] }
-serialport = { version = "4.2.2", default-features = true}
+itertools = { version = "0.11.0"}
+serialport = { version = "4.2.2", default-features = false}
 tempfile = "3.8.0"
 serde = { version = "1.0.188", features = ["derive"] }
-serde_json = {version = "1.0.105"}
+serde_json = {version = "1.0.106"}

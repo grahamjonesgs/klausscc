@@ -3,7 +3,7 @@
     clippy::restriction,
     clippy::pedantic,
     clippy::nursery,
-    clippy::cargo
+    clippy::cargo,
 )]
 
 #![allow(clippy::implicit_return)]
@@ -13,7 +13,6 @@
 #![allow(clippy::blanket_clippy_restriction_lints)]
 #![allow(clippy::multiple_crate_versions)]
 #![allow(clippy::single_call_fn)]
-
 
 //! Top level file for Klausscc
 
