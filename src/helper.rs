@@ -222,7 +222,6 @@ pub fn return_comments(input: &str) -> String {
 /// Find checksum
 ///
 /// Calculates the checksum from the string of hex values, removing control characters
-#[allow(clippy::cast_possible_wrap)]
 #[allow(clippy::modulo_arithmetic)]
 #[allow(clippy::arithmetic_side_effects)]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
@@ -285,13 +284,12 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 ///
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
-#[allow(clippy::ptr_arg)]
-pub fn create_bin_string(pass2: &Vec<Pass2>, msg_list: &mut MsgList) -> Option<String> {
+pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<String> {
     let mut output_string = String::new();
 
     output_string.push('S'); // Start character
 
-    for pass in pass2.clone() {
+    for pass in pass2 {
         output_string.push_str(&pass.opcode);
     }
 

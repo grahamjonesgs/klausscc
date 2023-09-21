@@ -286,13 +286,13 @@ pub fn set_matches() -> Command {
 ///
 /// Takes the message list and start time and prints the results to the users
 #[allow(clippy::cast_precision_loss)]
-#[allow(clippy::float_arithmetic)]
 #[allow(clippy::print_stdout)]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
     #[allow(clippy::arithmetic_side_effects)]
     let duration = Local::now().time() - start_time;
+    #[allow(clippy::float_arithmetic)]
     let time_taken: f64 =
         duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
     println!(

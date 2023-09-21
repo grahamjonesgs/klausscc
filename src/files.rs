@@ -220,14 +220,24 @@ pub fn filename_stem(full_name: &String) -> String {
 ///
 /// Based on the bitcode string outputs to file
 #[allow(clippy::impl_trait_in_params)]
-#[allow(clippy::question_mark_used)]
 pub fn write_binary_output_file(
     filename: &impl AsRef<Path>,
     output_string: &str,
 ) -> Result<(), Error> {
-    let mut file = File::create(filename)?;
+    match File::create(filename) {
+        Ok(mut file) => {
+            match file.write_all(output_string.as_bytes()) {
+                Ok(()) => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Err(err) => {
+            // code to execute if File::create returned an error
+            return Err(err);
+        }
+    }
 
-    file.write_all(output_string.as_bytes())?;
+    
 
     Ok(())
 }
@@ -237,15 +247,16 @@ pub fn write_binary_output_file(
 /// Writes all data to the detailed code file
 #[allow(clippy::impl_trait_in_params)]
 #[allow(clippy::cast_possible_truncation)]
-#[allow(clippy::integer_division)]
-#[allow(clippy::question_mark_used)]
 #[allow(clippy::arithmetic_side_effects)]
 pub fn write_code_output_file(
     filename: impl AsRef<Path> + Copy,
     pass2: &mut Vec<Pass2>,
     msg_list: &mut MsgList,
 ) -> Result<(), Error> {
-    let mut file = File::create(filename)?;
+    let mut file = match File::create(filename) {
+        Ok(file) => file,
+        Err(err) => return Err(err),
+    };
 
     let mut out_line = String::new();
     msg_list.push(
@@ -254,6 +265,7 @@ pub fn write_code_output_file(
         None,
         MessageType::Information,
     );
+    #[allow(clippy::integer_division)]
     for pass in pass2 {
         out_line.clear();
         if pass.line_type == LineType::Opcode {
@@ -291,7 +303,10 @@ pub fn write_code_output_file(
                 pass.input_text_line
             );
         }
-        file.write_all(out_line.as_bytes())?;
+        match file.write_all(out_line.as_bytes()) {
+            Ok(()) => {}
+            Err(err) => return Err(err),
+        }
     }
     Ok(())
 }
@@ -300,7 +315,6 @@ pub fn write_code_output_file(
 ///
 /// Writes all data of opcodes to textmate file
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::question_mark_used)]
 #[allow(clippy::arithmetic_side_effects)]
 fn output_opcodes_textmate(
     filename_stem: String,
@@ -330,14 +344,17 @@ fn output_opcodes_textmate(
     let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
         return Err(Error::new(ErrorKind::Other, "Unknown error"));
     };
-    json_opcode_file.write_all(
+    match json_opcode_file.write_all(
         opcodes
             .iter()
             .fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)
             .strip_prefix('|')
             .unwrap_or("")
             .as_bytes(),
-    )?;
+    ) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    };
 
     Ok(())
 }

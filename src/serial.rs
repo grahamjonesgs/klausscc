@@ -12,23 +12,21 @@ pub const AUTO_SERIAL: &str = "auto_serial_requested";
 ///
 /// Will send the program to the serial port, and wait for the response
 #[allow(clippy::question_mark_used)]
-#[allow(clippy::format_push_string)]
-#[allow(clippy::absolute_paths)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_to_board(
-    
     binary_output: &str,
     port_name: &str,
     msg_list: &mut MsgList,
 ) -> Result<(), Error> {
-    let mut read_buffer = [0; 1024];
+    use serialport::{StopBits,DataBits,Parity,FlowControl};
 
+    let mut read_buffer = [0; 1024];
     let mut port = return_port(port_name, msg_list)?;
 
-    port.set_stop_bits(serialport::StopBits::One)?;
-    port.set_data_bits(serialport::DataBits::Eight)?;
-    port.set_parity(serialport::Parity::None)?;
-    port.set_flow_control(serialport::FlowControl::None)?;
+    port.set_stop_bits(StopBits::One)?;
+    port.set_data_bits(DataBits::Eight)?;
+    port.set_parity(Parity::None)?;
+    port.set_flow_control(FlowControl::None)?;
     port.write_all(b"S")?;
 
     thread::sleep(time::Duration::from_millis(500)); //Wait for board to reset
@@ -86,7 +84,6 @@ pub fn write_to_board(
 /// Return port from port name
 ///
 /// If port name is `AUTO_SERIAL` then return the first USB serial port found
-#[allow(clippy::format_push_string)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn return_port(
     port_name: &str,
@@ -140,7 +137,7 @@ fn return_port(
                     if port_count > 0 {
                         all_ports.push_str(",\n");
                     }
-
+                    #[allow(clippy::format_push_string)]
                     if let SerialPortType::UsbPort(info) = port.port_type {
                         all_ports.push_str(&format!(
                             "USB Serial Device{} {}",
@@ -198,12 +195,12 @@ fn return_port(
 /// Formats the USB Port information into a human readable form.
 ///
 /// Gives more USB details
-#[allow(clippy::format_push_string)]
 #[allow(clippy::ref_patterns)]
 #[allow(clippy::arithmetic_side_effects)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn extra_usb_info(info: &UsbPortInfo) -> String {
     let mut output = String::new();
+    #[allow(clippy::format_push_string)]
     output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
 
     let mut extra_items = Vec::new();
