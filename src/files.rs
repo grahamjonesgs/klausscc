@@ -228,9 +228,11 @@ pub fn write_binary_output_file(
         Ok(mut file) => {
             match file.write_all(output_string.as_bytes()) {
                 Ok(()) => {}
+                #[cfg(not(tarpaulin_include))] // Can't test error writing to files
                 Err(err) => return Err(err),
             }
         }
+        #[cfg(not(tarpaulin_include))] // Can't test error creating
         Err(err) => {
             // code to execute if File::create returned an error
             return Err(err);
@@ -255,6 +257,7 @@ pub fn write_code_output_file(
 ) -> Result<(), Error> {
     let mut file = match File::create(filename) {
         Ok(file) => file,
+        #[cfg(not(tarpaulin_include))] // Can't test error creating file
         Err(err) => return Err(err),
     };
 
@@ -305,6 +308,7 @@ pub fn write_code_output_file(
         }
         match file.write_all(out_line.as_bytes()) {
             Ok(()) => {}
+            #[cfg(not(tarpaulin_include))] // Can't test error writing to file
             Err(err) => return Err(err),
         }
     }
