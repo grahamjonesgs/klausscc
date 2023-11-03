@@ -41,8 +41,6 @@ pub fn num_data_bytes(
 /// Returns bytes for data element
 ///
 /// Parses data element and returns data as bytes, or None if error
-#[allow(clippy::integer_division)]
-#[allow(clippy::arithmetic_side_effects)]
 pub fn data_as_bytes(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -63,6 +61,8 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
             let mut output_hex = String::new();
             // Length is based on multiples of 4
+            #[allow(clippy::integer_division)]
+            #[allow(clippy::arithmetic_side_effects)]
             output_hex.push_str(
                 format!(
                     "{:08X}",
@@ -74,6 +74,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
                 let hex = format!("{char:02X}");
                 output_hex.push_str(&hex);
             }
+            #[allow(clippy::arithmetic_side_effects)]
             let needed_bytes = 8 - (output_hex.len() % 8);
             for _n in 0..needed_bytes {
                 output_hex.push('0');
@@ -391,7 +392,7 @@ mod tests {
         let checksum = calc_checksum("S00001Z0010", &mut msg_list);
         assert_eq!(checksum, "0000");
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Opcode list length not multiple of 4, length is 9"
         );
     }
@@ -419,7 +420,7 @@ mod tests {
         let checksum = calc_checksum("____", &mut msg_list);
         assert_eq!(checksum, "0001");
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Error creating opcode for invalid value ____"
         );
     }
@@ -512,7 +513,7 @@ mod tests {
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Multiple start addresses found"
         );
     }
@@ -550,7 +551,7 @@ mod tests {
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "No start address found"
         );
     }
@@ -612,7 +613,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -628,7 +629,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PULL"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -645,7 +646,7 @@ mod tests {
         let mut opcodes = Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -722,7 +723,7 @@ mod tests {
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
         assert_eq!(output, 0);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Error in data definition for #TEST"
         );
     }

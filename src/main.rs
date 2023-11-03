@@ -285,7 +285,6 @@ pub fn set_matches() -> Command {
 /// Prints results of assembly
 ///
 /// Takes the message list and start time and prints the results to the users
-#[allow(clippy::cast_precision_loss)]
 #[allow(clippy::print_stdout)]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
@@ -293,6 +292,7 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     #[allow(clippy::arithmetic_side_effects)]
     let duration = Local::now().time() - start_time;
     #[allow(clippy::float_arithmetic)]
+    #[allow(clippy::cast_precision_loss)]
     let time_taken: f64 =
         duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
     println!(
@@ -490,7 +490,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("0000001X"),
+            hex_code: String::from("0000001X"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -498,7 +498,7 @@ mod tests {
         });
         opcodes.push(Opcode {
             text_name: String::from("MOV"),
-            hex_opcode: String::from("00000020"),
+            hex_code: String::from("00000020"),
             comment: String::new(),
             variables: 2,
             registers: 0,
@@ -506,7 +506,7 @@ mod tests {
         });
         opcodes.push(Opcode {
             text_name: String::from("RET"),
-            hex_opcode: String::from("00000030"),
+            hex_code: String::from("00000030"),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -551,7 +551,7 @@ mod tests {
             },
         ];
         let pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(pass1.get(0).unwrap_or_default().program_counter, 0);
+        assert_eq!(pass1.first().unwrap_or_default().program_counter, 0);
         assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 3);
         assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 4);
         assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 5);
@@ -567,7 +567,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("0000001X"),
+            hex_code: String::from("0000001X"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -581,7 +581,7 @@ mod tests {
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Error Test_not_code_line"
         );
     }
@@ -595,7 +595,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("0000001X"),
+            hex_code: String::from("0000001X"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -603,7 +603,7 @@ mod tests {
         });
         opcodes.push(Opcode {
             text_name: String::from("MOVR"),
-            hex_opcode: String::from("0000007X"),
+            hex_code: String::from("0000007X"),
             comment: String::new(),
             variables: 1,
             registers: 1,
@@ -611,7 +611,7 @@ mod tests {
         });
         opcodes.push(Opcode {
             text_name: String::from("MOV"),
-            hex_opcode: String::from("00000020"),
+            hex_code: String::from("00000020"),
             comment: String::new(),
             variables: 2,
             registers: 0,
@@ -619,7 +619,7 @@ mod tests {
         });
         opcodes.push(Opcode {
             text_name: String::from("RET"),
-            hex_opcode: String::from("00000030"),
+            hex_code: String::from("00000030"),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -627,7 +627,7 @@ mod tests {
         });
         opcodes.push(Opcode {
             text_name: String::from("DELAY"),
-            hex_opcode: String::from("00000040"),
+            hex_code: String::from("00000040"),
             comment: String::new(),
             variables: 1,
             registers: 0,
@@ -636,7 +636,7 @@ mod tests {
 
         opcodes.push(Opcode {
             text_name: String::from("DMOV"),
-            hex_opcode: String::from("00000AXX"),
+            hex_code: String::from("00000AXX"),
             comment: String::new(),
             variables: 2,
             registers: 2,
@@ -714,7 +714,7 @@ mod tests {
             labels,
         );
         assert_eq!(
-            pass2.get(0).unwrap_or_default().opcode,
+            pass2.first().unwrap_or_default().opcode,
             "00000020EEEEEEEEFFFFFFFF"
         );
         assert_eq!(pass2.get(1).unwrap_or_default().opcode, "0000004000000007");
@@ -741,7 +741,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("0000001X"),
+            hex_code: String::from("0000001X"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -759,6 +759,6 @@ mod tests {
             opcodes.clone(),
             labels,
         );
-        assert_eq!(pass2.get(0).unwrap_or_default().opcode, "ERR     ");
+        assert_eq!(pass2.first().unwrap_or_default().opcode, "ERR     ");
     }
 }

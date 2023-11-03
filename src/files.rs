@@ -27,7 +27,6 @@ pub enum LineType {
 /// Open text file and return as vector of strings
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-#[allow(clippy::arithmetic_side_effects)]
 pub fn read_file_to_vector(
     filename: &str,
     msg_list: &mut MsgList,
@@ -64,6 +63,7 @@ pub fn read_file_to_vector(
     let mut lines: Vec<InputData> = Vec::new();
 
     let mut line_number = 0;
+    #[allow(clippy::arithmetic_side_effects)]
     for line in buf.lines() {
         match line {
             Ok(line_contents) => {
@@ -248,7 +248,6 @@ pub fn write_binary_output_file(
 ///
 /// Writes all data to the detailed code file
 #[allow(clippy::impl_trait_in_params)]
-#[allow(clippy::cast_possible_truncation)]
 #[allow(clippy::arithmetic_side_effects)]
 pub fn write_code_output_file(
     filename: impl AsRef<Path> + Copy,
@@ -269,6 +268,7 @@ pub fn write_code_output_file(
         MessageType::Information,
     );
     #[allow(clippy::integer_division)]
+    #[allow(clippy::cast_possible_truncation)]
     for pass in pass2 {
         out_line.clear();
         if pass.line_type == LineType::Opcode {
@@ -319,7 +319,6 @@ pub fn write_code_output_file(
 ///
 /// Writes all data of opcodes to textmate file
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::arithmetic_side_effects)]
 fn output_opcodes_textmate(
     filename_stem: String,
     opcodes: &[Opcode],
@@ -348,6 +347,7 @@ fn output_opcodes_textmate(
     let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
         return Err(Error::new(ErrorKind::Other, "Unknown error"));
     };
+    #[allow(clippy::arithmetic_side_effects)]
     match json_opcode_file.write_all(
         opcodes
             .iter()
@@ -427,7 +427,7 @@ pub fn output_macros_opcodes_html(
 
         let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
         sorted_opcodes
-            .sort_by(|first: &Opcode, second: &Opcode| first.hex_opcode.cmp(&second.hex_opcode));
+            .sort_by(|first: &Opcode, second: &Opcode| first.hex_code.cmp(&second.hex_code));
 
         let mut old_section = String::new();
         for opcode in sorted_opcodes.clone() {
@@ -443,7 +443,7 @@ pub fn output_macros_opcodes_html(
             }
             html_file.write_all(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
             opcode.text_name,
-            opcode.hex_opcode,
+            opcode.hex_code,
             opcode.variables,
             opcode.registers,
             opcode.comment).as_bytes())?;
@@ -808,7 +808,7 @@ mod test {
             ]
         );
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Comment not terminated in file test1.kla"
         );
     }
@@ -887,7 +887,7 @@ mod test {
         let mut opened_files: Vec<String> = Vec::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Unable to open file ////xxxxxxx"
         );
     }
@@ -912,7 +912,7 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            lines.clone().unwrap().get(0).unwrap_or_default().input,
+            lines.clone().unwrap().first().unwrap_or_default().input,
             "Test line in file"
         );
         assert_eq!(lines.unwrap().len(), 4);
@@ -950,8 +950,7 @@ mod test {
         assert_eq!(
             lines
                 .clone()
-                .unwrap_or_default()
-                .get(0)
+                .unwrap_or_default().first()
                 .unwrap_or_default()
                 .input,
             "Test line in file 1 line 0"
@@ -1008,7 +1007,7 @@ mod test {
 
         _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             format!("Recursive include of file {file_name1}")
         );
 
@@ -1039,7 +1038,7 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             format!("Unable to open file {file_name2}")
         );
         assert_eq!(
@@ -1070,7 +1069,7 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             format!("Missing include file name in {file_name1}")
         );
         assert_eq!(lines, None);
@@ -1112,7 +1111,7 @@ mod test {
 
         _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             format!("Unable to open file {file_name3}")
         );
         assert_eq!(

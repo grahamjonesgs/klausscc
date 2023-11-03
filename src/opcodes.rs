@@ -10,7 +10,7 @@ pub struct Opcode {
     /// Text name of opcode
     pub text_name: String,
     /// Hexadecimal opcode
-    pub hex_opcode: String,
+    pub hex_code: String,
     /// Number of registers
     pub registers: u32,
     /// Number of variables
@@ -166,7 +166,7 @@ pub fn parse_vh_file(
                 //opcodes.push(a);
                 opcodes.push(Opcode {
                     text_name: opcode.text_name,
-                    hex_opcode: opcode.hex_opcode,
+                    hex_code: opcode.hex_code,
                     registers: opcode.registers,
                     variables: opcode.variables,
                     comment: opcode.comment,
@@ -273,7 +273,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     Some(Opcode {
-        hex_opcode: format!(
+        hex_code: format!(
             "0000{}",
             &input_line.get(pos_opcode..pos_opcode + 4).unwrap_or("    ")
         ),
@@ -313,7 +313,7 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
         if first_word.to_uppercase() == opcode.text_name {
-            return Some(opcode.hex_opcode.to_uppercase());
+            return Some(opcode.hex_code.to_uppercase());
         }
     }
     None
@@ -495,7 +495,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -512,7 +512,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -528,7 +528,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -544,7 +544,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 2,
@@ -561,7 +561,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 2,
             registers: 2,
@@ -578,7 +578,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 2,
@@ -595,7 +595,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 2,
@@ -612,7 +612,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 2,
@@ -629,7 +629,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("1234"),
+            hex_code: String::from("1234"),
             comment: String::new(),
             variables: 0,
             registers: 2,
@@ -647,7 +647,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("000056XX"),
+            hex_code: String::from("000056XX"),
             comment: String::new(),
             variables: 0,
             registers: 2,
@@ -665,7 +665,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("000056XX"),
+            hex_code: String::from("000056XX"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -682,7 +682,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("000056X"),
+            hex_code: String::from("000056X"),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -700,7 +700,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("00000000"),
+            hex_code: String::from("00000000"),
             comment: String::new(),
             variables: 1,
             registers: 0,
@@ -719,7 +719,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("00000000"),
+            hex_code: String::from("00000000"),
             comment: String::new(),
             variables: 1,
             registers: 0,
@@ -738,7 +738,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("00000000"),
+            hex_code: String::from("00000000"),
             comment: String::new(),
             variables: 1,
             registers: 0,
@@ -757,7 +757,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("00000000"),
+            hex_code: String::from("00000000"),
             comment: String::new(),
             variables: 2,
             registers: 0,
@@ -776,7 +776,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("00000000"),
+            hex_code: String::from("00000000"),
             comment: String::new(),
             variables: 2,
             registers: 0,
@@ -795,7 +795,7 @@ mod tests {
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
-            hex_opcode: String::from("00000000"),
+            hex_code: String::from("00000000"),
             comment: String::new(),
             variables: 1,
             registers: 0,
@@ -804,7 +804,7 @@ mod tests {
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Too many arguments found - \"PUSH 1 0xF\""
         );
     }
@@ -818,7 +818,7 @@ mod tests {
             output,
             Some(Opcode {
                 text_name: "COPY".to_owned(),
-                hex_opcode: "000001??".to_owned(),
+                hex_code: "000001??".to_owned(),
                 registers: 2,
                 variables: 0,
                 comment: "Copy register".to_owned(),
@@ -836,7 +836,7 @@ mod tests {
             output,
             Some(Opcode {
                 text_name: "ANDV".to_owned(),
-                hex_opcode: "0000086?".to_owned(),
+                hex_code: "0000086?".to_owned(),
                 registers: 1,
                 variables: 1,
                 comment: "AND register with value".to_owned(),
@@ -855,7 +855,7 @@ mod tests {
             output,
             Some(Opcode {
                 text_name: "MOV".to_owned(),
-                hex_opcode: "00000864".to_owned(),
+                hex_code: "00000864".to_owned(),
                 registers: 0,
                 variables: 2,
                 comment: "Move from addr to addr".to_owned(),
@@ -905,7 +905,7 @@ mod tests {
             output,
             Some(Opcode {
                 text_name: "abcd".to_owned(),
-                hex_opcode: "00001234".to_owned(),
+                hex_code: "00001234".to_owned(),
                 registers: 0,
                 variables: 0,
                 comment: String::new(),
@@ -923,7 +923,7 @@ mod tests {
             output,
             Some(Opcode {
                 text_name: "MOV".to_owned(),
-                hex_opcode: "00000864".to_owned(),
+                hex_code: "00000864".to_owned(),
                 registers: 0,
                 variables: 2,
                 comment: String::new(),
@@ -985,7 +985,7 @@ mod tests {
             opt_oplist.unwrap_or_default(),
             vec![Opcode {
                 text_name: "CMPRR".to_owned(),
-                hex_opcode: "000005??".to_owned(),
+                hex_code: "000005??".to_owned(),
                 registers: 2,
                 variables: 0,
                 comment: "Compare registers".to_owned(),
@@ -1033,11 +1033,11 @@ mod tests {
         let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Duplicate Macro definition $WAIT found"
         );
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().line_number,
+            msg_list.list.first().unwrap_or_default().line_number,
             Some(3)
         );
         assert_eq!(
@@ -1100,7 +1100,7 @@ mod tests {
             vec![
                 Opcode {
                     text_name: "PUSH".to_owned(),
-                    hex_opcode: "000006??".to_owned(),
+                    hex_code: "000006??".to_owned(),
                     registers: 2,
                     variables: 0,
                     comment: "push value to reg".to_owned(),
@@ -1108,7 +1108,7 @@ mod tests {
                 },
                 Opcode {
                     text_name: "CMPRR".to_owned(),
-                    hex_opcode: "000005??".to_owned(),
+                    hex_code: "000005??".to_owned(),
                     registers: 2,
                     variables: 0,
                     comment: "Compare registers".to_owned(),
@@ -1116,7 +1116,7 @@ mod tests {
                 },
                 Opcode {
                     text_name: "POP".to_owned(),
-                    hex_opcode: "000016??".to_owned(),
+                    hex_code: "000016??".to_owned(),
                     registers: 2,
                     variables: 0,
                     comment: "push value to reg".to_owned(),

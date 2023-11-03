@@ -327,7 +327,7 @@ mod tests {
         assert_eq!(msg_list.number_by_type(&MessageType::Warning), 0);
 
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Duplicate label label1 found, with differing values"
         );
     }
@@ -559,7 +559,7 @@ mod tests {
         ];
         let labels = get_labels(&pass1, msglist);
         assert_eq!(
-            *labels.get(0).unwrap_or_default(),
+            *labels.first().unwrap_or_default(),
             Label {
                 program_counter: 0,
                 name: "label1:".to_owned(),
@@ -587,7 +587,7 @@ mod tests {
             }
         );
         assert_eq!(
-            msglist.list.get(0).unwrap_or_default().text,
+            msglist.list.first().unwrap_or_default().text,
             "Label label1: has extra text dummy"
         );
         assert_eq!(

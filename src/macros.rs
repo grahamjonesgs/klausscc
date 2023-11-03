@@ -571,7 +571,7 @@ mod tests {
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C ARG_D ARG_E");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Too many variables for macro $DELAY1".to_owned()
         );
     }
@@ -594,7 +594,7 @@ mod tests {
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Invalid macro argument number xyz, in macro $DELAY1".to_owned()
         );
     }
@@ -617,7 +617,7 @@ mod tests {
         let input = String::from("$DELAY1  ARG_A");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Missing argument 2 for macro $DELAY1".to_owned()
         );
     }
@@ -677,7 +677,7 @@ mod tests {
         let _output = expand_embedded_macros(macros.clone(), msg_list);
 
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Too many macro passes, check $MACRO1"
         );
     }
@@ -703,7 +703,7 @@ mod tests {
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Too many variables in imbedded macro \"$MACRO1 %2 %1\" in macro $MACRO2"
         );
     }
@@ -729,7 +729,7 @@ mod tests {
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Invalid macro argument number y, in imbedded macro \"$MACRO1 %2 %1\" in $MACRO2"
         );
     }
@@ -755,7 +755,7 @@ mod tests {
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Missing argument 2 for imbedded macro \"$MACRO1 %2\" in $MACRO2"
         );
     }
@@ -835,11 +835,11 @@ mod tests {
         ];
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            strip_comments(& pass0.get(0).unwrap_or_default().input_text_line.clone()),
+            strip_comments(& pass0.first().unwrap_or_default().input_text_line.clone()),
             "MOV A"
         );
         assert_eq!(
-            strip_comments(& pass0.get(0).unwrap_or_default().file_name.clone()),
+            strip_comments(& pass0.first().unwrap_or_default().file_name.clone()),
             "File1"
         );
         assert_eq!(
@@ -895,7 +895,7 @@ mod tests {
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            strip_comments(& pass0.get(0).unwrap_or_default().input_text_line.clone()),
+            strip_comments(& pass0.first().unwrap_or_default().input_text_line.clone()),
             "MOV A"
         );
         assert_eq!(
@@ -912,7 +912,7 @@ mod tests {
         );
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Missing argument 2 for macro $MACRO2"
         );
     }
@@ -951,7 +951,7 @@ mod tests {
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            strip_comments(& pass0.get(0).unwrap_or_default().input_text_line.clone()),
+            strip_comments(& pass0.first().unwrap_or_default().input_text_line.clone()),
             "MOV A"
         );
         assert_eq!(
@@ -965,7 +965,7 @@ mod tests {
         );
         assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Too many variables for macro $MACRO2"
         );
     }
@@ -1004,7 +1004,7 @@ mod tests {
 
         let _pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().text,
+            msg_list.list.first().unwrap_or_default().text,
             "Macro not found $MACRO7 A B"
         );
     }
@@ -1036,7 +1036,7 @@ mod tests {
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            strip_comments(& pass0.get(0).unwrap_or_default().input_text_line.clone()),
+            strip_comments(& pass0.first().unwrap_or_default().input_text_line.clone()),
             "OPCODE1 A B"
         );
     }
@@ -1108,7 +1108,7 @@ mod tests {
             })
         );
         assert_eq!(
-            msglist.list.get(0).unwrap_or_default().text,
+            msglist.list.first().unwrap_or_default().text,
             "Error in macro variable definition for macro $POPALL, missing \"%1\""
         );
     }
@@ -1139,7 +1139,7 @@ mod tests {
         let _macro_result = macro_from_string(&input_line, &mut msglist);
         //assert_eq!(macro_result, None);
         assert_eq!(
-            msglist.list.get(0).unwrap_or_default().text,
+            msglist.list.first().unwrap_or_default().text,
             "Error in macro variable definition for macro $POPALL, missing \"%1 %2 %4\"",
         );
     }

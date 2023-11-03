@@ -149,13 +149,13 @@ mod tests {
             MessageType::Information,
         );
         assert_eq!(msg_list.list.len(), 1);
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Test");
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().text, "Test");
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Test");
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Test");
         assert_eq!(
-            msg_list.list.get(0).unwrap_or_default().level,
+            msg_list.list.first().unwrap_or_default().level,
             MessageType::Information
         );
-        assert_eq!(msg_list.list.get(0).unwrap_or_default().line_number, None);
+        assert_eq!(msg_list.list.first().unwrap_or_default().line_number, None);
     }
 
     #[test]
