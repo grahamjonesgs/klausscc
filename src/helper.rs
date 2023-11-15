@@ -155,7 +155,7 @@ pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
 pub fn is_blank(line: &str) -> bool {
     let words = line.split_whitespace();
 
-    for (_i, word) in words.enumerate() {
+    for word in words {
         if !word.is_empty() {
             return false;
         }
