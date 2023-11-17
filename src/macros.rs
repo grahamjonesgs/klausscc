@@ -270,7 +270,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                     {
                         msg_list.push(
                             format!(
-                                "Too many variables in imbedded macro \"{}\" in macro {}",
+                                "Too many variables in embedded macro \"{}\" in macro {}",
                                 item, input_macro_line.name,
                             ),
                             None,
@@ -293,7 +293,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                     if int_value.is_err() || int_value.clone().unwrap_or(0) < 1 {
                                         msg_list.push(
                                             format!(
-                                            "Invalid macro argument number {}, in imbedded macro \"{}\" in {}",
+                                            "Invalid macro argument number {}, in embedded macro \"{}\" in {}",
                                             without_prefix,
                                             item,
                                             input_macro_line.name,
@@ -307,7 +307,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                     {
                                         msg_list.push(
                                             format!(
-                                                "Missing argument {} for imbedded macro \"{}\" in {}",
+                                                "Missing argument {} for embedded macro \"{}\" in {}",
                                                 int_value.unwrap_or(0),
                                                 item,
                                                 input_macro_line.name,
@@ -683,7 +683,7 @@ mod tests {
     }
 
     #[test]
-    // Test expand macros, to look for too many variables in imbedded macro
+    // Test expand macros, to look for too many variables in embedded macro
     fn test_expand_embedded_macros3() {
         let macros = &mut Vec::<Macro>::new();
 
@@ -704,12 +704,12 @@ mod tests {
         let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
             msg_list.list.first().unwrap_or_default().text,
-            "Too many variables in imbedded macro \"$MACRO1 %2 %1\" in macro $MACRO2"
+            "Too many variables in embedded macro \"$MACRO1 %2 %1\" in macro $MACRO2"
         );
     }
 
     #[test]
-    // Test expand macros, to look for too invalid variable in imbedded macro
+    // Test expand macros, to look for too invalid variable in embedded macro
     fn test_expand_embedded_macros4() {
         let macros = &mut Vec::<Macro>::new();
 
@@ -730,12 +730,12 @@ mod tests {
         let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
             msg_list.list.first().unwrap_or_default().text,
-            "Invalid macro argument number y, in imbedded macro \"$MACRO1 %2 %1\" in $MACRO2"
+            "Invalid macro argument number y, in embedded macro \"$MACRO1 %2 %1\" in $MACRO2"
         );
     }
 
     #[test]
-    // Test expand macros, to look for missing variable in imbedded macro
+    // Test expand macros, to look for missing variable in embedded macro
     fn test_expand_embedded_macros5() {
         let macros = &mut Vec::<Macro>::new();
 
@@ -756,7 +756,7 @@ mod tests {
         let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
             msg_list.list.first().unwrap_or_default().text,
-            "Missing argument 2 for imbedded macro \"$MACRO1 %2\" in $MACRO2"
+            "Missing argument 2 for embedded macro \"$MACRO1 %2\" in $MACRO2"
         );
     }
 

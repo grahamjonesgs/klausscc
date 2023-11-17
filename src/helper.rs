@@ -203,9 +203,9 @@ pub fn is_comment(line: &str) -> bool {
 ///
 ///  Removes comments and starting and training whitespace
 pub fn strip_comments(input: &str) -> String {
-    match input.find("//") {
-        None => return input.trim().to_owned(),
-        Some(location) => return input.get(0..location).unwrap_or("").trim().to_owned(),
+    return match input.find("//") {
+        None => input.trim().to_owned(),
+        Some(location) => input.get(0..location).unwrap_or("").trim().to_owned(),
     }
 }
 

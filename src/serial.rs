@@ -2,7 +2,7 @@ use crate::helper::trim_newline;
 use crate::messages::{MessageType, MsgList};
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::io::{Error, ErrorKind};
-use std::{thread, time};
+use std::thread;
 use core::time::Duration;
 
 /// Used to define if a port request was not defined so is for auto
@@ -29,7 +29,7 @@ pub fn write_to_board(
     port.set_flow_control(FlowControl::None)?;
     port.write_all(b"S")?;
 
-    thread::sleep(time::Duration::from_millis(500)); //Wait for board to reset
+    thread::sleep(Duration::from_millis(500)); //Wait for board to reset
 
     if port.flush().is_err() {};
 
@@ -37,7 +37,7 @@ pub fn write_to_board(
     }
 
     for byte in binary_output.as_bytes() {
-        let char_delay = time::Duration::from_micros(100);
+        let char_delay = Duration::from_micros(100);
         thread::sleep(char_delay);
         port.write_all(&[*byte])?;
     }
@@ -118,7 +118,7 @@ fn return_port(
         let available_ports = serialport::available_ports();
         let mut suggested_port: Option<String> = None;
 
-        match available_ports {
+        return match available_ports {
             Err(_) => {
                 msg_list.push(
                     "Error opening serial port, no ports found".to_owned(),
@@ -126,10 +126,10 @@ fn return_port(
                     None,
                     MessageType::Error,
                 );
-                return Err(Error::new(
+                Err(Error::new(
                     ErrorKind::Other,
                     "No ports found",
-                ));
+                ))
             }
             Ok(ports) => {
                 let mut max_ports: i32 = -1;
@@ -180,10 +180,10 @@ fn return_port(
                     );
                 }
 
-                return Err(Error::new(
+                Err(Error::new(
                     ErrorKind::Other,
                     "Failed to open port",
-                ));
+                ))
             }
         }
     }
