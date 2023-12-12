@@ -203,10 +203,10 @@ pub fn is_comment(line: &str) -> bool {
 ///
 ///  Removes comments and starting and training whitespace
 pub fn strip_comments(input: &str) -> String {
-    return match input.find("//") {
-        None => input.trim().to_owned(),
-        Some(location) => input.get(0..location).unwrap_or("").trim().to_owned(),
-    }
+    return input.find("//").map_or_else(
+        || input.trim().to_owned(),
+        |location| input.get(0..location).unwrap_or("").trim().to_owned(),
+    );
 }
 
 /// Returns trailing comments
@@ -450,7 +450,7 @@ mod tests {
     // Test that the bin_string is created correctly with start value
 
     fn test_create_bin_string1() {
-        let pass2 = & mut Vec::<Pass2>::new();
+        let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
@@ -484,7 +484,7 @@ mod tests {
     // Test that the bin_string is null if duplicate starts
 
     fn test_create_bin_string2() {
-        let pass2 = & mut Vec::<Pass2>::new();
+        let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
@@ -522,7 +522,7 @@ mod tests {
     // Test that the bin_string is null if no starts
 
     fn test_create_bin_string3() {
-        let pass2 = & mut Vec::<Pass2>::new();
+        let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
             opcode: String::new(),
             file_name: String::from("test"),
@@ -660,7 +660,7 @@ mod tests {
     fn test_line_type2() {
         let input = String::from("LOOP:");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, & input);
+        let output = line_type(opcodes, &input);
         assert_eq!(output, LineType::Label);
     }
     #[test]
@@ -684,7 +684,7 @@ mod tests {
     #[test]
     // Test for comment line type
     fn test_line_type5() {
-        let  input = String::from("//This is a comment");
+        let input = String::from("//This is a comment");
         let opcodes = &mut Vec::<Opcode>::new();
         let output = line_type(opcodes, &input);
         assert_eq!(output, LineType::Comment);
@@ -693,18 +693,18 @@ mod tests {
     #[test]
     // Test for start line type
     fn test_line_type6() {
-        let  input = String::from("_start");
+        let input = String::from("_start");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, & input);
+        let output = line_type(opcodes, &input);
         assert_eq!(output, LineType::Start);
     }
 
     #[test]
     // Test for error line type
     fn test_line_type7() {
-        let  input = String::from("1234");
+        let input = String::from("1234");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, & input);
+        let output = line_type(opcodes, &input);
         assert_eq!(output, LineType::Error);
     }
 
