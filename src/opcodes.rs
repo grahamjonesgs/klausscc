@@ -37,8 +37,8 @@ pub struct InputData {
 impl Default for &InputData {
     fn default() -> &'static InputData {
         static VALUE: InputData = InputData {
-            input: String::new(),
-            file_name: String::new(),
+            input: String::default(),
+            file_name: String::default(),
             line_counter: 0,
         };
         &VALUE
@@ -61,8 +61,8 @@ pub struct Pass0 {
 impl Default for &Pass0 {
     fn default() -> &'static Pass0 {
         static VALUE: Pass0 = Pass0 {
-            input_text_line: String::new(),
-            file_name: String::new(),
+            input_text_line: String::default(),
+            file_name: String::default(),
             line_counter: 0,
         };
         &VALUE
@@ -89,8 +89,8 @@ pub struct Pass1 {
 impl Default for &Pass1 {
     fn default() -> &'static Pass1 {
         static VALUE: Pass1 = Pass1 {
-            input_text_line: String::new(),
-            file_name: String::new(),
+            input_text_line: String::default(),
+            file_name: String::default(),
             line_counter: 0,
             program_counter: 0,
             line_type: LineType::Blank,
@@ -121,12 +121,12 @@ pub struct Pass2 {
 impl Default for &Pass2 {
     fn default() -> &'static Pass2 {
         static VALUE: Pass2 = Pass2 {
-            input_text_line: String::new(),
-            file_name: String::new(),
+            input_text_line: String::default(),
+            file_name: String::default(),
             line_counter: 0,
             program_counter: 0,
             line_type: LineType::Blank,
-            opcode: String::new(),
+            opcode: String::default(),
         };
         &VALUE
     }
@@ -145,7 +145,7 @@ pub fn parse_vh_file(
 
     let mut opcodes: Vec<Opcode> = Vec::new();
     let mut macros: Vec<Macro> = Vec::new();
-    let mut section_name = String::new();
+    let mut section_name = String::default();
 
     for line in input_list {
         if let Some(section) = line.input.trim().strip_prefix("///") {
@@ -287,7 +287,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
             .get(pos_name..pos_end_name)
             .unwrap_or("")
             .to_owned(),
-        section: String::new(),
+        section: String::default(),
     })
 }
 
@@ -375,7 +375,7 @@ pub fn add_registers(
 
     let mut opcode_found = {
         let this = return_opcode(&line.to_uppercase(), opcodes);
-        let default = String::new();
+        let default = String::default();
         this.unwrap_or(default)
     };
 
@@ -428,7 +428,7 @@ pub fn add_arguments(
 ) -> String {
     let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
     let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
-    let mut arguments = String::new();
+    let mut arguments = String::default();
 
     let words = line.split_whitespace();
     #[allow(clippy::arithmetic_side_effects)]
@@ -496,10 +496,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         let output = num_registers(opcodes, &input);
         assert_eq!(output, Some(1));
@@ -513,10 +513,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         let output = num_registers(opcodes, &input);
         assert_eq!(output, None);
@@ -529,10 +529,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         let output = num_registers(opcodes, &input);
         assert_eq!(output, Some(1));
@@ -545,10 +545,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 2,
-            section: String::new(),
+            section: String::default(),
         });
         let output = num_registers(opcodes, &input);
         assert_eq!(output, Some(2));
@@ -562,10 +562,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 2,
             registers: 2,
-            section: String::new(),
+            section: String::default(),
         });
         let output = num_registers(opcodes, &input);
         assert_eq!(output, Some(2));
@@ -579,10 +579,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 2,
-            section: String::new(),
+            section: String::default(),
         });
         let output = num_registers(opcodes, &input);
         assert_eq!(output, None);
@@ -591,15 +591,15 @@ mod tests {
     #[test]
     // Test that None is returned if the opcode is blank
     fn test_num_arguments5() {
-        let input = String::new();
+        let input = String::default();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 2,
-            section: String::new(),
+            section: String::default(),
         });
         let output = num_registers(opcodes, &input);
         assert_eq!(output, None);
@@ -613,10 +613,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 2,
-            section: String::new(),
+            section: String::default(),
         });
         let output = return_opcode(&input, opcodes);
         assert_eq!(output, Some(String::from("1234")));
@@ -630,10 +630,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 2,
-            section: String::new(),
+            section: String::default(),
         });
         let output = return_opcode(&input, opcodes);
         assert_eq!(output, None);
@@ -648,10 +648,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("000056XX"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 2,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("00005601"));
@@ -666,10 +666,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("000056XX"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
@@ -683,10 +683,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("000056X"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
@@ -701,10 +701,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 1,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("0000FFFF"));
@@ -720,10 +720,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 1,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("000004D2"));
@@ -739,10 +739,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 1,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000000"));
@@ -758,10 +758,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 2,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("0000000F00000000"));
@@ -777,10 +777,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 2,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("000000010000000F"));
@@ -796,10 +796,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 1,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000001"));
@@ -822,7 +822,7 @@ mod tests {
                 registers: 2,
                 variables: 0,
                 comment: "Copy register".to_owned(),
-                section: String::new(),
+                section: String::default(),
             })
         );
     }
@@ -840,7 +840,7 @@ mod tests {
                 registers: 1,
                 variables: 1,
                 comment: "AND register with value".to_owned(),
-                section: String::new(),
+                section: String::default(),
             })
         );
     }
@@ -859,7 +859,7 @@ mod tests {
                 registers: 0,
                 variables: 2,
                 comment: "Move from addr to addr".to_owned(),
-                section: String::new(),
+                section: String::default(),
             })
         );
     }
@@ -908,8 +908,8 @@ mod tests {
                 hex_code: "00001234".to_owned(),
                 registers: 0,
                 variables: 0,
-                comment: String::new(),
-                section: String::new(),
+                comment: String::default(),
+                section: String::default(),
             })
         );
     }
@@ -926,8 +926,8 @@ mod tests {
                 hex_code: "00000864".to_owned(),
                 registers: 0,
                 variables: 2,
-                comment: String::new(),
-                section: String::new(),
+                comment: String::default(),
+                section: String::default(),
             })
         );
     }
@@ -989,7 +989,7 @@ mod tests {
                 registers: 2,
                 variables: 0,
                 comment: "Compare registers".to_owned(),
-                section: String::new(),
+                section: String::default(),
             }]
         );
         assert_eq!(
@@ -998,7 +998,7 @@ mod tests {
                 name: "$WAIT".to_owned(),
                 variables: 2,
                 items: ["DELAYV %1".to_owned(), "DELAYV %2".to_owned()].to_vec(),
-                comment: String::new()
+                comment: String::default()
             }]
         );
     }

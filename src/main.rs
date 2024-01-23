@@ -67,7 +67,7 @@ fn main() -> Result<(), i32> {
         .replace(' ', "");
     let input_file_name: String = matches
         .get_one::<String>("input")
-        .unwrap_or(&String::new())
+        .unwrap_or(&String::default())
         .replace(' ', "");
     let binary_file_name: String = matches
         .get_one::<String>("bitcode")
@@ -81,7 +81,7 @@ fn main() -> Result<(), i32> {
         + ".code";
     let output_serial_port: String = matches
         .get_one::<String>("serial")
-        .unwrap_or(&String::new())
+        .unwrap_or(&String::default())
         .replace(' ', "");
     let opcodes_flag = matches.get_flag("opcodes");
     let textmate_flag = matches.get_flag("textmate");
@@ -401,7 +401,7 @@ pub fn get_pass2(
         } else if line.line_type == LineType::Data {
             data_as_bytes(line.input_text_line.as_str()).unwrap_or_default()
         } else {
-            String::new()
+            String::default()
         };
 
         pass2.push(Pass2 {
@@ -491,62 +491,62 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("0000001X"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         opcodes.push(Opcode {
             text_name: String::from("MOV"),
             hex_code: String::from("00000020"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 2,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         opcodes.push(Opcode {
             text_name: String::from("RET"),
             hex_code: String::from("00000030"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
 
         let pass0 = vec![
             Pass0 {
                 input_text_line: "MOV A B".to_owned(),
-                file_name: String::new(),
+                file_name: String::default(),
                 line_counter: 1,
             },
             Pass0 {
                 input_text_line: "PUSH A".to_owned(),
-                file_name: String::new(),
+                file_name: String::default(),
                 line_counter: 2,
             },
             Pass0 {
                 input_text_line: "RET".to_owned(),
-                file_name: String::new(),
+                file_name: String::default(),
                 line_counter: 3,
             },
             Pass0 {
                 input_text_line: "#DATA1 0x2".to_owned(), // Should be moved to end
-                file_name: String::new(),
+                file_name: String::default(),
                 line_counter: 4,
             },
             Pass0 {
                 input_text_line: "RET".to_owned(),
-                file_name: String::new(),
+                file_name: String::default(),
                 line_counter: 5,
             },
             Pass0 {
                 input_text_line: "#DATA1 \"HELLO\"".to_owned(), // Should be moved to end
-                file_name: String::new(),
+                file_name: String::default(),
                 line_counter: 6,
             },
             Pass0 {
                 input_text_line: "RET".to_owned(),
-                file_name: String::new(),
+                file_name: String::default(),
                 line_counter: 7,
             },
         ];
@@ -568,15 +568,15 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("0000001X"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
 
         let pass0 = vec![Pass0 {
             input_text_line: "Test_not_code_line".to_owned(),
-            file_name: String::new(),
+            file_name: String::default(),
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
@@ -596,51 +596,51 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("0000001X"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         opcodes.push(Opcode {
             text_name: String::from("MOVR"),
             hex_code: String::from("0000007X"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 1,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         opcodes.push(Opcode {
             text_name: String::from("MOV"),
             hex_code: String::from("00000020"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 2,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         opcodes.push(Opcode {
             text_name: String::from("RET"),
             hex_code: String::from("00000030"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         opcodes.push(Opcode {
             text_name: String::from("DELAY"),
             hex_code: String::from("00000040"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 1,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
 
         opcodes.push(Opcode {
             text_name: String::from("DMOV"),
             hex_code: String::from("00000AXX"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 2,
             registers: 2,
-            section: String::new(),
+            section: String::default(),
         });
 
         let pass2 = get_pass2(
@@ -742,10 +742,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("0000001X"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 1,
-            section: String::new(),
+            section: String::default(),
         });
         let pass2 = get_pass2(
             &mut msg_list,

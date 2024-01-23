@@ -70,7 +70,7 @@ pub fn read_file_to_vector(
                 line_number += 1;
                 if is_include(&line_contents) {
                     let include_file = get_include_filename(&line_contents);
-                    if include_file.clone().unwrap_or_default() == String::new() {
+                    if include_file.clone().unwrap_or_default() == String::default() {
                         msg_list.push(
                             format!("Missing include file name in {filename}"),
                             Some(line_number),
@@ -158,7 +158,7 @@ pub fn get_include_filename(input_line: &str) -> Option<String> {
 pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> Vec<InputData> {
     let mut in_comment = false;
     let mut new_lines: Vec<InputData> = Vec::new();
-    let mut old_file_name = String::new();
+    let mut old_file_name = String::default();
     for line in lines {
         if old_file_name != line.file_name {
             if in_comment {
@@ -173,7 +173,7 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
         }
 
         old_file_name = line.file_name.clone();
-        let mut new_line = String::new();
+        let mut new_line = String::default();
         let mut in_char = false; // If in normal last was / or if in comment last was *
         for char in line.input.chars() {
             if in_comment {
@@ -260,7 +260,7 @@ pub fn write_code_output_file(
         Err(err) => return Err(err),
     };
 
-    let mut out_line = String::new();
+    let mut out_line = String::default();
     msg_list.push(
         format!("Writing code file to {}", filename.as_ref().display()),
         None,
@@ -351,7 +351,7 @@ fn output_opcodes_textmate(
     match json_opcode_file.write_all(
         opcodes
             .iter()
-            .fold(String::new(), |cur, nxt| cur + "|" + &nxt.text_name)
+            .fold(String::default(), |cur, nxt| cur + "|" + &nxt.text_name)
             .strip_prefix('|')
             .unwrap_or("")
             .as_bytes(),
@@ -429,7 +429,7 @@ pub fn output_macros_opcodes_html(
         sorted_opcodes
             .sort_by(|first: &Opcode, second: &Opcode| first.hex_code.cmp(&second.hex_code));
 
-        let mut old_section = String::new();
+        let mut old_section = String::default();
         for opcode in sorted_opcodes.clone() {
             if old_section != opcode.section {
                 html_file.write_all(
@@ -466,7 +466,7 @@ pub fn output_macros_opcodes_html(
                 macro_item
                     .items
                     .iter()
-                    .fold(String::new(), |cur, nxt| cur + "  " + nxt)
+                    .fold(String::default(), |cur, nxt| cur + "  " + nxt)
             )
                 .trim()
                 .as_bytes(),
@@ -709,7 +709,7 @@ mod test {
                     line_counter: 1,
                 },
                 InputData {
-                    input: String::new(),
+                    input: String::default(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 2,
                 },
@@ -752,7 +752,7 @@ mod test {
                     line_counter: 1,
                 },
                 InputData {
-                    input: String::new(),
+                    input: String::default(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 2,
                 },
@@ -796,7 +796,7 @@ mod test {
                     line_counter: 1,
                 },
                 InputData {
-                    input: String::new(),
+                    input: String::default(),
                     file_name: "test1.kla".to_owned(),
                     line_counter: 2,
                 },
@@ -840,10 +840,10 @@ mod test {
             get_include_filename("!include myfile.name extra words"),
             Some("myfile.name".to_owned())
         );
-        assert_eq!(get_include_filename("!include"), Some(String::new()));
+        assert_eq!(get_include_filename("!include"), Some(String::default()));
         assert_eq!(
             get_include_filename("!include //test comment"),
-            Some(String::new())
+            Some(String::default())
         );
     }
 
@@ -1190,7 +1190,7 @@ mod test {
                 line_counter: 3,
                 program_counter: 5,
                 line_type: LineType::Label,
-                opcode: String::new(),
+                opcode: String::default(),
             },
             Pass2 {
                 input_text_line: "// Comment".to_owned(),

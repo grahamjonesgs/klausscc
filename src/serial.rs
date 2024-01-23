@@ -67,7 +67,7 @@ pub fn write_to_board(
         return Ok(());
     }
 
-    let mut print_ret_msg = ret_msg.unwrap_or_else(|_| String::new());
+    let mut print_ret_msg = ret_msg.unwrap_or_else(|_| String::default());
 
     trim_newline(&mut print_ret_msg); //Board can send CR/LF messages
 
@@ -114,7 +114,7 @@ fn return_port(
                 MessageType::Error,
             );
         }
-        let mut all_ports = String::new();
+        let mut all_ports = String::default();
         let available_ports = serialport::available_ports();
         let mut suggested_port: Option<String> = None;
 
@@ -199,7 +199,7 @@ fn return_port(
 #[allow(clippy::arithmetic_side_effects)]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn extra_usb_info(info: &UsbPortInfo) -> String {
-    let mut output = String::new();
+    let mut output = String::default();
     #[allow(clippy::format_push_string)]
     output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
 

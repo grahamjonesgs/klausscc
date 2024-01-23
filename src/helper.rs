@@ -59,7 +59,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
 
         if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
             let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
-            let mut output_hex = String::new();
+            let mut output_hex = String::default();
             // Length is based on multiples of 4
             #[allow(clippy::integer_division)]
             #[allow(clippy::arithmetic_side_effects)]
@@ -101,7 +101,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         if int_value == 0 {
             None
         } else {
-            let mut data = String::new();
+            let mut data = String::default();
             for _ in 0..int_value {
                 data.push_str("00000000");
             }
@@ -215,7 +215,7 @@ pub fn strip_comments(input: &str) -> String {
 #[allow(clippy::arithmetic_side_effects)]
 pub fn return_comments(input: &str) -> String {
     match input.find("//") {
-        None => String::new(),
+        None => String::default(),
         Some(location) => return input.get(location + 2..).unwrap_or("").trim().to_owned(),
     }
 }
@@ -226,7 +226,7 @@ pub fn return_comments(input: &str) -> String {
 #[allow(clippy::modulo_arithmetic)]
 #[allow(clippy::arithmetic_side_effects)]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
-    let mut stripped_string = String::new();
+    let mut stripped_string = String::default();
     let mut checksum: i32 = 0;
 
     // Remove S, Z and X
@@ -286,7 +286,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
 pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<String> {
-    let mut output_string = String::new();
+    let mut output_string = String::default();
 
     output_string.push('S'); // Start character
 
@@ -308,10 +308,10 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
                     .find(|x| x.line_type == LineType::Start)
                     .unwrap_or(&Pass2 {
                         line_type: LineType::Start,
-                        opcode: String::new(),
+                        opcode: String::default(),
                         program_counter: 0,
                         line_counter: 0,
-                        input_text_line: String::new(),
+                        input_text_line: String::default(),
                         file_name: "None".to_owned(),
                     })
                     .program_counter
@@ -452,9 +452,9 @@ mod tests {
     fn test_create_bin_string1() {
         let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
-            opcode: String::new(),
+            opcode: String::default(),
             file_name: String::from("test"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             line_counter: 0,
             program_counter: 1,
             line_type: LineType::Start,
@@ -462,14 +462,14 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::from("1234"),
             file_name: String::from("test"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             line_counter: 0,
             program_counter: 3,
             line_type: LineType::Data,
         });
         pass2.push(Pass2 {
             opcode: String::from("4321"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             file_name: String::from("test"),
             line_counter: 0,
             program_counter: 5,
@@ -486,24 +486,24 @@ mod tests {
     fn test_create_bin_string2() {
         let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
-            opcode: String::new(),
+            opcode: String::default(),
             file_name: String::from("test"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             line_counter: 0,
             program_counter: 1,
             line_type: LineType::Start,
         });
         pass2.push(Pass2 {
-            opcode: String::new(),
+            opcode: String::default(),
             file_name: String::from("test"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             line_counter: 0,
             program_counter: 3,
             line_type: LineType::Start,
         });
         pass2.push(Pass2 {
             opcode: String::from("4321"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             file_name: String::from("test"),
             line_counter: 0,
             program_counter: 5,
@@ -524,9 +524,9 @@ mod tests {
     fn test_create_bin_string3() {
         let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
-            opcode: String::new(),
+            opcode: String::default(),
             file_name: String::from("test"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             line_counter: 0,
             program_counter: 1,
             line_type: LineType::Comment,
@@ -534,14 +534,14 @@ mod tests {
         pass2.push(Pass2 {
             opcode: String::from("1234"),
             file_name: String::from("test"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             line_counter: 0,
             program_counter: 3,
             line_type: LineType::Data,
         });
         pass2.push(Pass2 {
             opcode: String::from("4321"),
-            input_text_line: String::new(),
+            input_text_line: String::default(),
             file_name: String::from("test"),
             line_counter: 0,
             program_counter: 5,
@@ -614,10 +614,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = is_valid_line(opcodes, input);
         assert!(output);
@@ -630,10 +630,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PULL"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = is_valid_line(opcodes, input);
         assert!(!output);
@@ -647,10 +647,10 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
-            comment: String::new(),
+            comment: String::default(),
             variables: 0,
             registers: 0,
-            section: String::new(),
+            section: String::default(),
         });
         let output = line_type(&mut opcodes, &input);
         assert_eq!(output, LineType::Opcode);
@@ -675,7 +675,7 @@ mod tests {
     #[test]
     // Test for blank line type
     fn test_line_type4() {
-        let input = String::new();
+        let input = String::default();
         let opcodes = &mut Vec::<Opcode>::new();
         let output = line_type(opcodes, &input);
         assert_eq!(output, LineType::Blank);
@@ -747,7 +747,7 @@ mod tests {
     #[test]
     // Test for correct output from invalid data line
     fn test_data_as_bytes3() {
-        let input = String::new();
+        let input = String::default();
         let output = data_as_bytes(&input);
         assert_eq!(output, None);
     }

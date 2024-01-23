@@ -20,7 +20,7 @@ impl Default for &Label {
     fn default() -> &'static Label {
         static VALUE: Label = Label {
             program_counter: 0,
-            name: String::new(),
+            name: String::default(),
         };
         &VALUE
     }
