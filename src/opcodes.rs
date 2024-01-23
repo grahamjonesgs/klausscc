@@ -37,8 +37,8 @@ pub struct InputData {
 impl Default for &InputData {
     fn default() -> &'static InputData {
         static VALUE: InputData = InputData {
-            input: String::default(),
-            file_name: String::default(),
+            input: String::new(),
+            file_name: String::new(),
             line_counter: 0,
         };
         &VALUE
@@ -61,8 +61,8 @@ pub struct Pass0 {
 impl Default for &Pass0 {
     fn default() -> &'static Pass0 {
         static VALUE: Pass0 = Pass0 {
-            input_text_line: String::default(),
-            file_name: String::default(),
+            input_text_line: String::new(),
+            file_name: String::new(),
             line_counter: 0,
         };
         &VALUE
@@ -89,8 +89,8 @@ pub struct Pass1 {
 impl Default for &Pass1 {
     fn default() -> &'static Pass1 {
         static VALUE: Pass1 = Pass1 {
-            input_text_line: String::default(),
-            file_name: String::default(),
+            input_text_line: String::new(),
+            file_name: String::new(),
             line_counter: 0,
             program_counter: 0,
             line_type: LineType::Blank,
@@ -121,12 +121,12 @@ pub struct Pass2 {
 impl Default for &Pass2 {
     fn default() -> &'static Pass2 {
         static VALUE: Pass2 = Pass2 {
-            input_text_line: String::default(),
-            file_name: String::default(),
+            input_text_line: String::new(),
+            file_name: String::new(),
             line_counter: 0,
             program_counter: 0,
             line_type: LineType::Blank,
-            opcode: String::default(),
+            opcode: String::new(),
         };
         &VALUE
     }
@@ -375,8 +375,7 @@ pub fn add_registers(
 
     let mut opcode_found = {
         let this = return_opcode(&line.to_uppercase(), opcodes);
-        let default = String::default();
-        this.unwrap_or(default)
+        this.unwrap_or_default()
     };
 
     if opcode_found.len() != 8 {
@@ -442,8 +441,8 @@ pub fn add_arguments(
                     filename.to_owned(),
                     labels,
                 );
-                let default = "00000000".to_owned();
-                this.unwrap_or(default)
+                //let default = "00000000".to_owned();
+                this.unwrap_or_else(|| "00000000".to_owned())
             });
         }
         if i == num_registers as usize + 2 && num_arguments == 2 {
@@ -455,8 +454,7 @@ pub fn add_arguments(
                     filename.to_owned(),
                     labels,
                 );
-                let default = "00000000".to_owned();
-                this.unwrap_or(default)
+                this.unwrap_or_else(|| "00000000".to_owned())
             });
         }
         if i > num_registers as usize + num_arguments as usize {

@@ -32,7 +32,7 @@ pub struct Message {
 impl Default for &Message {
     fn default() -> &'static Message {
         static VALUE: Message = Message {
-            text: String::default(),
+            text: String::new(),
             file_name: None,
             line_number: None,
             level: MessageType::Information,

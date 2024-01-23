@@ -24,10 +24,10 @@ impl Default for &Macro {
     fn default() -> &'static Macro {
         /// Default macro as blank
         static VALUE: Macro = Macro {
-            name: String::default(),
+            name: String::new(),
             variables: 0,
             items: Vec::new(),
-            comment: String::default(),
+            comment: String::new(),
         };
         &VALUE
     }
