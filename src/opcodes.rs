@@ -376,7 +376,7 @@ pub fn add_registers(
     let mut opcode_found = {
         let this = return_opcode(&line.to_uppercase(), opcodes);
         let default = String::new();
-        this.map_or(default, |x| x)
+        this.unwrap_or(default)
     };
 
     if opcode_found.len() != 8 {
@@ -443,7 +443,7 @@ pub fn add_arguments(
                     labels,
                 );
                 let default = "00000000".to_owned();
-                this.map_or(default, |x| x)
+                this.unwrap_or(default)
             });
         }
         if i == num_registers as usize + 2 && num_arguments == 2 {
@@ -456,7 +456,7 @@ pub fn add_arguments(
                     labels,
                 );
                 let default = "00000000".to_owned();
-                this.map_or(default, |x| x)
+                this.unwrap_or(default)
             });
         }
         if i > num_registers as usize + num_arguments as usize {
