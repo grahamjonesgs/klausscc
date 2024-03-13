@@ -172,7 +172,7 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
             in_comment = false;
         }
 
-        old_file_name = line.file_name.clone();
+        old_file_name.clone_from(&line.file_name);
         let mut new_line = String::default();
         let mut in_char = false; // If in normal last was / or if in comment last was *
         for char in line.input.chars() {
@@ -324,7 +324,8 @@ fn output_opcodes_textmate(
     opcodes: &[Opcode],
     msg_list: &mut MsgList,
 ) -> Result<(), Error> {
-    let textmate_opcode_filename = filename_stem + "_textmate.txt";
+    let mut textmate_opcode_filename = filename_stem;
+    textmate_opcode_filename.push_str("_textmate.txt");
     msg_list.push(
         format!("Writing textmate opcode file to {textmate_opcode_filename}"),
         None,
@@ -351,7 +352,11 @@ fn output_opcodes_textmate(
     match json_opcode_file.write_all(
         opcodes
             .iter()
-            .fold(String::default(), |cur, nxt| cur + "|" + &nxt.text_name)
+            .fold(String::default(), |mut cur, nxt| {
+                cur.push('|');
+                cur.push_str(&nxt.text_name);
+                cur
+            })
             .strip_prefix('|')
             .unwrap_or("")
             .as_bytes(),
@@ -378,7 +383,8 @@ pub fn output_macros_opcodes_html(
 ) -> Result<(), Error> {
     use chrono::Local;
 
-    let html_filename = filename_stem.clone() + ".html";
+    let mut html_filename = filename_stem.clone();
+    html_filename.push_str(".html");
 
     if opcodes_flag {
         msg_list.push(
@@ -439,7 +445,7 @@ pub fn output_macros_opcodes_html(
                 )
                 .as_bytes(),
             )?;
-                old_section = opcode.section.clone();
+                old_section.clone_from(&opcode.section);
             }
             html_file.write_all(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
             opcode.text_name,

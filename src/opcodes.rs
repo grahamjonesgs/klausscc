@@ -149,7 +149,7 @@ pub fn parse_vh_file(
 
     for line in input_list {
         if let Some(section) = line.input.trim().strip_prefix("///") {
-            section_name = section.to_owned().trim().to_owned();
+            section.to_owned().trim().clone_into(&mut section_name);
         }
 
         match opcode_from_string(&line.input) {
@@ -388,10 +388,9 @@ pub fn add_registers(
         return "ERR     ".to_owned();
     }
 
-    opcode_found = opcode_found
-        .get(..(8 - num_registers) as usize)
-        .unwrap_or("")
-        .to_owned();
+    let cloned_opcode_found = opcode_found.get(..(8 - num_registers) as usize).unwrap_or("").to_owned();
+    opcode_found.clear();
+    opcode_found.push_str(&cloned_opcode_found);
 
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {

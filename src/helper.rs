@@ -374,9 +374,7 @@ pub fn trim_newline(input: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::LineType;
     use crate::labels::{return_label_value, Label};
-    use crate::opcodes::{Opcode, Pass2};
 
     #[test]
     // Test that correct checksum is calculated

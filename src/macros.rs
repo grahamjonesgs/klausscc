@@ -53,7 +53,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
         if i == 0 {
-            name = word.to_owned();
+            word.clone_into(&mut name);
         } else if word == "/" {
             items.push(item);
             item = String::default();
@@ -332,7 +332,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                             output_items.push(new_item);
                         }
                     }
-                    last_macro = input_macro_line.name.clone();
+                    last_macro.clone_from(&input_macro_line.name);
                     changed = true;
                 } else {
                     output_items.push(item);
@@ -347,7 +347,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
         }
         
         pass += 1;
-        input_macros = output_macros.clone();
+        input_macros.clone_from(&output_macros);
     }
     if changed {
         msg_list.push(
@@ -418,7 +418,6 @@ pub fn expand_macros(
 mod tests {
 
     use super::*;
-    use crate::messages::MsgList;
 
     #[test]
     // Test macro is returns if macro is found

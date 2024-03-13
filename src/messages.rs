@@ -42,7 +42,7 @@ impl Default for &Message {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 /// Struct for list of messages
 pub struct MsgList {
     /// Vector of messages
@@ -54,6 +54,7 @@ impl MsgList {
     /// Create new `MsgList`
     pub const fn new() -> Self {
         Self { list: Vec::new() }
+        
     }
 
     /// Push message to `MsgList`
@@ -79,6 +80,7 @@ impl MsgList {
         warnings
     }
 }
+
 
 /// Print out all messages
 ///
