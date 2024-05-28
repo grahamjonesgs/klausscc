@@ -352,6 +352,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
     }
     #[allow(clippy::integer_division)]
     #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::integer_division_remainder_used)]
     for data_pass in data_pass0 {
         pass1.push(Pass1 {
             input_text_line: data_pass.input_text_line.clone(),

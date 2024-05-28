@@ -269,6 +269,7 @@ pub fn write_code_output_file(
     );
     #[allow(clippy::integer_division)]
     #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::integer_division_remainder_used)]
     for pass in pass2 {
         out_line.clear();
         if pass.line_type == LineType::Opcode {

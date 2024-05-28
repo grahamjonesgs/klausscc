@@ -63,6 +63,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             // Length is based on multiples of 4
             #[allow(clippy::integer_division)]
             #[allow(clippy::arithmetic_side_effects)]
+            #[allow(clippy::integer_division_remainder_used)]  
             output_hex.push_str(
                 format!(
                     "{:08X}",
@@ -75,6 +76,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
                 output_hex.push_str(&hex);
             }
             #[allow(clippy::arithmetic_side_effects)]
+            #[allow(clippy::integer_division_remainder_used)]
             let needed_bytes = 8 - (output_hex.len() % 8);
             for _n in 0..needed_bytes {
                 output_hex.push('0');
@@ -225,6 +227,7 @@ pub fn return_comments(input: &str) -> String {
 /// Calculates the checksum from the string of hex values, removing control characters
 #[allow(clippy::modulo_arithmetic)]
 #[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::integer_division_remainder_used)]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string = String::default();
     let mut checksum: i32 = 0;
@@ -253,8 +256,8 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     }
 
     let mut position_index: u32 = 0;
-
     for (index, _) in stripped_string.chars().enumerate() {
+        #[allow(clippy::integer_division_remainder_used)]
         if index % 4 == 0 {
             let int_value =
                 i32::from_str_radix(stripped_string.get(index..index + 4).unwrap_or("    "), 16);
@@ -276,6 +279,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
             }
         }
     }
+    
     checksum =
         (checksum + position_index.try_into().unwrap_or(0_i32) - 1).abs() % (0xFFFF_i32 + 1_i32);
     format!("{checksum:04X}")

@@ -16,8 +16,11 @@ categories = ["development-tools"]
 clap = { version = "4.5"}
 chrono = { version = "0.4" }
 colored = { version = "2.1"}
-itertools = { version = "0.12"}
+itertools = { version = "0.13.0"}
 serialport = { version = "4.3", default-features = false}
 tempfile = "3.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = {version = "1.0"}
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
