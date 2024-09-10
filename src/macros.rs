@@ -5,6 +5,7 @@ use core::fmt::Write as _;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
+
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 /// Holds instance of macro from opcode definition file
 pub struct Macro {
@@ -98,7 +99,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
             .filter(|variable| !all_found_variables.contains(variable))
             .collect();
         let mut missing = String::default();
-
+        #[allow(clippy::unused_result_ok)]
         for i in difference_all_variables {
             if !missing.is_empty() {
                 missing.push(' ');

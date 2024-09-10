@@ -6,6 +6,10 @@
     clippy::cargo,
 )]
 
+#![allow(clippy::absolute_paths)]
+#![allow(clippy::or_fun_call)]
+#![allow(clippy::allow_attributes)]
+#![allow(clippy::allow_attributes_without_reason)]
 #![allow(clippy::implicit_return)]
 #![allow(clippy::string_add)]
 #![allow(clippy::as_conversions)]
