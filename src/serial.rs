@@ -1,12 +1,186 @@
 use crate::helper::trim_newline;
 use crate::messages::{MessageType, MsgList};
+use core::time::Duration;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::io::{Error, ErrorKind};
 use std::thread;
-use core::time::Duration;
 
 /// Used to define if a port request was not defined so is for auto
 pub const AUTO_SERIAL: &str = "auto_serial_requested";
+
+/// Return bool if port is possibly correct FDTI port
+///
+/// Checks the info to check the VID and PID of known boards
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
+fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
+    let vid_pi = format!("{:04x}:{:04x}", info.vid, info.pid);
+
+    if vid_pi == "0403:6001"
+        || vid_pi == "0403:6010"
+        || vid_pi == "0403:6011"
+        || vid_pi == "0403:6014"
+    {
+        return true;
+    }
+    false
+}
+
+/// Formats the USB Port information into a human readable form.
+///
+/// Gives more USB details
+#[allow(clippy::ref_patterns)]
+#[allow(clippy::arithmetic_side_effects)]
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
+fn extra_usb_info(info: &UsbPortInfo) -> String {
+    let mut output = String::default();
+    #[allow(clippy::format_push_string)]
+    output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
+
+    let mut extra_items = Vec::new();
+
+    if let Some(ref manufacturer) = info.manufacturer {
+        extra_items.push(format!("manufacturer '{manufacturer}'"));
+    }
+    if let Some(ref serial) = info.serial_number {
+        extra_items.push(format!("serial '{serial}'"));
+    }
+    if let Some(ref product) = info.product {
+        extra_items.push(format!("product '{product}'"));
+    }
+    if !extra_items.is_empty() {
+        output += " with ";
+        output += &extra_items.join(" ");
+    }
+    output
+}
+
+/// Checks all ports and returns option of last possible one
+///
+/// Lists all ports, checks if ISB and possible and returns some last one or none
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
+pub fn find_possible_port() -> Option<String> {
+    let mut suggested_port: Option<String> = None;
+    let available_ports = serialport::available_ports();
+    match available_ports {
+        Err(_) => {
+            return None;
+        }
+        Ok(ports) => {
+            for port in ports {
+                if let SerialPortType::UsbPort(info) = port.port_type {
+                    if check_usb_serial_possible(&info) {
+                        suggested_port = Some(port.port_name.clone());
+                    }
+                }
+            }
+        }
+    }
+    suggested_port
+}
+
+/// Return port from port name
+///
+/// If port name is `AUTO_SERIAL` then return the first USB serial port found
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
+fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn SerialPort>, Error> {
+    let mut local_port_name = port_name.to_owned();
+    if port_name == AUTO_SERIAL {
+        if let Some(suggested_port) = find_possible_port() {
+            msg_list.push(
+                format!("No port name given, using automatic port {suggested_port}"),
+                None,
+                None,
+                MessageType::Information,
+            );
+            local_port_name = suggested_port;
+        }
+    }
+
+    let port_result = serialport::new(local_port_name.clone(), 1_000_000)
+        .timeout(Duration::from_millis(100))
+        .open();
+    if let Err(err) = port_result {
+        if local_port_name != AUTO_SERIAL {
+            msg_list.push(
+                format!("Error opening serial port {local_port_name} error \"{err}\""),
+                None,
+                None,
+                MessageType::Error,
+            );
+        }
+        let mut all_ports = String::default();
+        let available_ports = serialport::available_ports();
+        let mut suggested_port: Option<String> = None;
+
+        return match available_ports {
+            Err(_) => {
+                msg_list.push(
+                    "Error opening serial port, no ports found".to_owned(),
+                    None,
+                    None,
+                    MessageType::Error,
+                );
+                Err(Error::new(ErrorKind::Other, "No ports found"))
+            }
+            Ok(ports) => {
+                let mut max_ports: i32 = -1;
+                for (port_count, port) in (0_u32..).zip(ports) {
+                    if port_count > 0 {
+                        all_ports.push_str(",\n");
+                    }
+                    #[allow(clippy::format_push_string)]
+                    if let SerialPortType::UsbPort(info) = port.port_type {
+                        all_ports.push_str(&format!(
+                            "USB Serial Device{} {}",
+                            extra_usb_info(&info),
+                            port.port_name
+                        ));
+                        if check_usb_serial_possible(&info) {
+                            suggested_port = Some(port.port_name.clone());
+                        }
+                    } else {
+                        all_ports.push_str(&format!(" Non USB Serial Device {}", port.port_name));
+                    }
+
+                    max_ports = port_count.try_into().unwrap_or_default();
+                }
+
+                let ports_msg = match max_ports {
+                    -1_i32 => "no ports were found".to_owned(),
+                    0_i32 => {
+                        format!("only port{all_ports} was found")
+                    }
+                    _ => {
+                        format!("the following {max_ports} ports were found:\n{all_ports}")
+                    }
+                };
+
+                msg_list.push(
+                    format!("Error opening serial port, {ports_msg}"),
+                    None,
+                    None,
+                    MessageType::Error,
+                );
+
+                if suggested_port.is_some() {
+                    msg_list.push(
+                        format!("Suggested port {}", suggested_port.unwrap_or_default()),
+                        None,
+                        None,
+                        MessageType::Information,
+                    );
+                }
+
+                Err(Error::new(ErrorKind::Other, "Failed to open port"))
+            }
+        };
+    }
+
+    let Ok(port) = port_result else {
+        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+    };
+    Ok(port)
+}
 
 /// Output the code details file to given serial port
 ///
@@ -18,7 +192,7 @@ pub fn write_to_board(
     port_name: &str,
     msg_list: &mut MsgList,
 ) -> Result<(), Error> {
-    use serialport::{StopBits,DataBits,Parity,FlowControl};
+    use serialport::{DataBits, FlowControl, Parity, StopBits};
 
     let mut read_buffer = [0; 1024];
     let mut port = return_port(port_name, msg_list)?;
@@ -79,185 +253,4 @@ pub fn write_to_board(
     );
 
     Ok(())
-}
-
-/// Return port from port name
-///
-/// If port name is `AUTO_SERIAL` then return the first USB serial port found
-#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-fn return_port(
-    port_name: &str,
-    msg_list: &mut MsgList,
-) -> Result<Box<dyn SerialPort>, Error> {
-    let mut local_port_name = port_name.to_owned();
-    if port_name == AUTO_SERIAL {
-        if let Some(suggested_port) = find_possible_port() {
-            msg_list.push(
-                format!("No port name given, using automatic port {suggested_port}"),
-                None,
-                None,
-                MessageType::Information,
-            );
-            local_port_name = suggested_port;
-        }
-    }
-
-    let port_result = serialport::new(local_port_name.clone(), 1_000_000)
-        .timeout(Duration::from_millis(100))
-        .open();
-    if let Err(err) = port_result {
-        if local_port_name != AUTO_SERIAL {
-            msg_list.push(
-                format!("Error opening serial port {local_port_name} error \"{err}\""),
-                None,
-                None,
-                MessageType::Error,
-            );
-        }
-        let mut all_ports = String::default();
-        let available_ports = serialport::available_ports();
-        let mut suggested_port: Option<String> = None;
-
-        return match available_ports {
-            Err(_) => {
-                msg_list.push(
-                    "Error opening serial port, no ports found".to_owned(),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
-                Err(Error::new(
-                    ErrorKind::Other,
-                    "No ports found",
-                ))
-            }
-            Ok(ports) => {
-                let mut max_ports: i32 = -1;
-                for (port_count, port) in (0_u32..).zip(ports) {
-                    if port_count > 0 {
-                        all_ports.push_str(",\n");
-                    }
-                    #[allow(clippy::format_push_string)]
-                    if let SerialPortType::UsbPort(info) = port.port_type {
-                        all_ports.push_str(&format!(
-                            "USB Serial Device{} {}",
-                            extra_usb_info(&info),
-                            port.port_name
-                        ));
-                        if check_usb_serial_possible(&info) {
-                            suggested_port = Some(port.port_name.clone());
-                        }
-                    } else {
-                        all_ports.push_str(&format!(" Non USB Serial Device {}", port.port_name));
-                    }
-
-                    max_ports = port_count.try_into().unwrap_or_default();
-                }
-
-                let ports_msg = match max_ports {
-                    -1_i32 => "no ports were found".to_owned(),
-                    0_i32 => {
-                        format!("only port{all_ports} was found")
-                    }
-                    _ => {
-                        format!("the following {max_ports} ports were found:\n{all_ports}")
-                    }
-                };
-
-                msg_list.push(
-                    format!("Error opening serial port, {ports_msg}"),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
-
-                if suggested_port.is_some() {
-                    msg_list.push(
-                        format!("Suggested port {}", suggested_port.unwrap_or_default()),
-                        None,
-                        None,
-                        MessageType::Information,
-                    );
-                }
-
-                Err(Error::new(
-                    ErrorKind::Other,
-                    "Failed to open port",
-                ))
-            }
-        }
-    }
-
-    let  Ok(port) = port_result else { return Err(Error::new(ErrorKind::Other, "Unknown error")) };
-    Ok(port)
-}
-
-/// Formats the USB Port information into a human readable form.
-///
-/// Gives more USB details
-#[allow(clippy::ref_patterns)]
-#[allow(clippy::arithmetic_side_effects)]
-#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-fn extra_usb_info(info: &UsbPortInfo) -> String {
-    let mut output = String::default();
-    #[allow(clippy::format_push_string)]
-    output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
-
-    let mut extra_items = Vec::new();
-
-    if let Some(ref manufacturer) = info.manufacturer {
-        extra_items.push(format!("manufacturer '{manufacturer}'"));
-    }
-    if let Some(ref serial) = info.serial_number {
-        extra_items.push(format!("serial '{serial}'"));
-    }
-    if let Some(ref product) = info.product {
-        extra_items.push(format!("product '{product}'"));
-    }
-    if !extra_items.is_empty() {
-        output += " with ";
-        output += &extra_items.join(" ");
-    }
-    output
-}
-
-/// Return bool if port is possibly correct FDTI port
-///
-/// Checks the info to check the VID and PID of known boards
-#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
-    let vid_pi = format!("{:04x}:{:04x}", info.vid, info.pid);
-
-    if vid_pi == "0403:6001"
-        || vid_pi == "0403:6010"
-        || vid_pi == "0403:6011"
-        || vid_pi == "0403:6014"
-    {
-        return true;
-    }
-    false
-}
-
-/// Checks all ports and returns option of last possible one
-///
-/// Lists all ports, checks if ISB and possible and returns some last one or none
-#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub fn find_possible_port() -> Option<String> {
-    let mut suggested_port: Option<String> = None;
-    let available_ports = serialport::available_ports();
-    match available_ports {
-        Err(_) => {
-            return None;
-        }
-        Ok(ports) => {
-            for port in ports {
-                if let SerialPortType::UsbPort(info) = port.port_type {
-                    if check_usb_serial_possible(&info) {
-                        suggested_port = Some(port.port_name.clone());
-                    }
-                }
-            }
-        }
-    }
-    suggested_port
 }

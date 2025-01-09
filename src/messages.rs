@@ -1,30 +1,29 @@
 use chrono::{Local, NaiveTime};
-use colored::{ColoredString, Colorize};
+use colored::{ColoredString, Colorize as _};
 
+#[derive(Debug)]
+/// Struct for message
+pub struct Message {
+    /// File name of file causing message if exists
+    pub file_name: Option<String>,
+    /// Message type
+    pub level: MessageType,
+    /// Line number in file causing message if exists
+    pub line_number: Option<u32>,
+    /// Text of message
+    pub text: String,
+    /// Time of message
+    pub time: Option<NaiveTime>,
+}
 #[derive(PartialEq, Eq, Debug)]
 /// Enum for message type
 pub enum MessageType {
     /// Error message
     Error,
-    /// Warning message
-    Warning,
     /// Information message
     Information,
-}
-
-#[derive(Debug)]
-/// Struct for message
-pub struct Message {
-    /// Text of message
-    pub text: String,
-    /// File name of file causing message if exists
-    pub file_name: Option<String>,
-    /// Line number in file causing message if exists
-    pub line_number: Option<u32>,
-    /// Message type
-    pub level: MessageType,
-    /// Time of message
-    pub time: Option<NaiveTime>,
+    /// Warning message
+    Warning,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -54,11 +53,18 @@ impl MsgList {
     /// Create new `MsgList`
     pub const fn new() -> Self {
         Self { list: Vec::new() }
-        
     }
 
-    /// Push message to `MsgList`
-    pub fn push(
+   
+
+    /// Returns number of warnings in `MsgList`
+    pub fn number_by_type(&self, msg_type: &MessageType) -> usize {
+        let warnings = self.list.iter().filter(|x| x.level == *msg_type).count();
+        warnings
+    }
+
+     /// Push message to `MsgList`
+     pub fn push(
         &mut self,
         name: String,
         line_number: Option<u32>,
@@ -73,14 +79,7 @@ impl MsgList {
             time: Some(Local::now().time()),
         });
     }
-
-    /// Returns number of warnings in `MsgList`
-    pub fn number_by_type(&self, msg_type: &MessageType) -> usize {
-        let warnings = self.list.iter().filter(|x| x.level == *msg_type).count();
-        warnings
-    }
 }
-
 
 /// Print out all messages
 ///

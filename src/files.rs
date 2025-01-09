@@ -15,128 +15,49 @@ use std::{
 #[allow(clippy::missing_docs_in_private_items)]
 /// Defines the type of line
 pub enum LineType {
-    Comment,
     Blank,
+    Comment,
+    Data,
+    Error,
     Label,
     Opcode,
-    Data,
     Start,
-    Error,
 }
 
-/// Open text file and return as vector of strings
+/// Return the stem of given filename
 ///
-/// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-pub fn read_file_to_vector(
-    filename: &str,
-    msg_list: &mut MsgList,
-    opened_files: &mut Vec<String>,
-) -> Option<Vec<InputData>> {
-    let file_result = File::open(filename);
-    if file_result.is_err() {
-        msg_list.push(
-            format!("Unable to open file {filename}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        return None;
-    }
+/// Looks for first dot in the string, and returns the slice before the dot
+pub fn filename_stem(full_name: &String) -> String {
+    let path = Path::new(full_name);
+    let stem = path.file_stem();
+    let parent = path
+        .parent()
+        .unwrap_or_else(|| Path::new(""))
+        .join(stem.unwrap_or_else(|| OsStr::new("")));
 
-    let Ok(file) = file_result else { return None };
-
-    for file_found in opened_files.clone() {
-        if file_found == filename {
-            msg_list.push(
-                format!("Recursive include of file {filename}"),
-                None,
-                None,
-                MessageType::Error,
-            );
-            return None;
-        }
-    }
-
-    opened_files.push(filename.to_owned());
-
-    let buf = BufReader::new(file);
-    let mut lines: Vec<InputData> = Vec::new();
-
-    let mut line_number = 0;
-    #[allow(clippy::arithmetic_side_effects)]
-    for line in buf.lines() {
-        match line {
-            Ok(line_contents) => {
-                line_number += 1;
-                if is_include(&line_contents) {
-                    let include_file = get_include_filename(&line_contents);
-                    if include_file.clone().unwrap_or_default() == String::default() {
-                        msg_list.push(
-                            format!("Missing include file name in {filename}"),
-                            Some(line_number),
-                            Some(filename.to_owned()),
-                            MessageType::Error,
-                        );
-                        return None;
-                    }
-
-                    // Get the include file from the same directory as the previous file
-                    let new_include_file = format!(
-                        "{}{}{}",
-                        Path::new(filename)
-                            .parent()
-                            .unwrap_or_else(|| Path::new(""))
-                            .to_str()
-                            .unwrap_or_default(),
-                        MAIN_SEPARATOR_STR,
-                        include_file.unwrap_or_default()
-                    );
-
-                    let include_lines =
-                        read_file_to_vector(&new_include_file, msg_list, opened_files);
-                    if include_lines.is_none() {
-                        msg_list.push(
-                            format!("Unable to open include file {new_include_file} in {filename}"),
-                            Some(line_number),
-                            Some(filename.to_owned()),
-                            MessageType::Error,
-                        );
-                        //return None;
-                        return Some(lines);
-                    }
-                    let unwrapped_include_lines = include_lines.unwrap_or_default();
-                    for included_line in unwrapped_include_lines {
-                        lines.push(included_line);
-                    }
-                } else {
-                    lines.push(InputData {
-                        input: line_contents,
-                        file_name: filename.to_owned(),
-                        line_counter: line_number,
-                    });
-                }
-            }
-            #[cfg(not(tarpaulin_include))] // Cannot test error reading file line in tarpaulin
-            Err(err) => msg_list.push(
-                format!("Error parsing opcode file: {err}"),
-                Some(line_number),
-                Some(filename.to_owned()),
-                MessageType::Error,
-            ),
-        }
-    }
-    opened_files.pop();
-    Some(lines)
+    parent.to_str().unwrap_or_default().to_owned()
 }
 
-/// Return true if string is !include
+/// Format a given string, adding spaces between groups of 4
 ///
-/// Checks if the string is include and returns true if it is
-pub fn is_include(line: &str) -> bool {
-    if line.trim().starts_with("!include") {
-        return true;
+/// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string
+pub fn format_opcodes(input: &String) -> String {
+    if input.len() == 4 {
+        return (*input).clone() + "              ";
     }
-    false
+    if input.len() == 8 {
+        return input.get(0..4).unwrap_or("    ").to_owned()
+            + input.get(4..8).unwrap_or("    ")
+            + "         ";
+    }
+    if input.len() == 16 {
+        return input.get(0..4).unwrap_or("    ").to_owned()
+            + input.get(4..8).unwrap_or("    ")
+            + " "
+            + input.get(8..12).unwrap_or("    ")
+            + input.get(12..16).unwrap_or("    ");
+    }
+    (*input).clone()
 }
 
 /// Return the filename from include string
@@ -152,221 +73,14 @@ pub fn get_include_filename(input_line: &str) -> Option<String> {
     Some(words.next().unwrap_or("").to_owned())
 }
 
-/// Remove comments from vector of strings
+/// Return true if string is !include
 ///
-/// Checks for /* */ and removes them from the vector of strings
-pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> Vec<InputData> {
-    let mut in_comment = false;
-    let mut new_lines: Vec<InputData> = Vec::new();
-    let mut old_file_name = String::default();
-    for line in lines {
-        if old_file_name != line.file_name {
-            if in_comment {
-                msg_list.push(
-                    format!("Comment not terminated in file {old_file_name}"),
-                    Some(line.line_counter),
-                    Some(line.file_name.clone()),
-                    MessageType::Error,
-                );
-            }
-            in_comment = false;
-        }
-
-        old_file_name.clone_from(&line.file_name);
-        let mut new_line = String::default();
-        let mut in_char = false; // If in normal last was / or if in comment last was *
-        for char in line.input.chars() {
-            if in_comment {
-                if char == '/' && in_char {
-                    in_comment = false;
-                } else {
-                    in_char = char == '*';
-                }; // Sets to true if c == '*'
-            } else if char == '*' && in_char {
-                in_comment = true;
-                new_line.pop();
-            } else if char == '/' {
-                in_char = true;
-                new_line.push(char);
-            } else {
-                in_char = false;
-                new_line.push(char);
-            }
-        }
-        new_lines.push(InputData {
-            input: new_line,
-            file_name: line.file_name,
-            line_counter: line.line_counter,
-        });
+/// Checks if the string is include and returns true if it is
+pub fn is_include(line: &str) -> bool {
+    if line.trim().starts_with("!include") {
+        return true;
     }
-    new_lines
-}
-
-/// Return the stem of given filename
-///
-/// Looks for first dot in the string, and returns the slice before the dot
-pub fn filename_stem(full_name: &String) -> String {
-    let path = Path::new(full_name);
-    let stem = path.file_stem();
-    let parent = path
-        .parent()
-        .unwrap_or_else(|| return Path::new(""))
-        .join(stem.unwrap_or_else(|| return OsStr::new("")));
-
-    return parent.to_str().unwrap_or_default().to_owned();
-}
-
-/// Output the bitcode to given file
-///
-/// Based on the bitcode string outputs to file
-#[allow(clippy::impl_trait_in_params)]
-pub fn write_binary_output_file(
-    filename: &impl AsRef<Path>,
-    output_string: &str,
-) -> Result<(), Error> {
-    match File::create(filename) {
-        Ok(mut file) => {
-            match file.write_all(output_string.as_bytes()) {
-                Ok(()) => {}
-                #[cfg(not(tarpaulin_include))] // Can't test error writing to files
-                Err(err) => return Err(err),
-            }
-        }
-        #[cfg(not(tarpaulin_include))] // Can't test error creating
-        Err(err) => {
-            // code to execute if File::create returned an error
-            return Err(err);
-        }
-    }
-
-    
-
-    Ok(())
-}
-
-/// Output the code details file to given filename
-///
-/// Writes all data to the detailed code file
-#[allow(clippy::impl_trait_in_params)]
-#[allow(clippy::arithmetic_side_effects)]
-pub fn write_code_output_file(
-    filename: impl AsRef<Path> + Copy,
-    pass2: &mut Vec<Pass2>,
-    msg_list: &mut MsgList,
-) -> Result<(), Error> {
-    let mut file = match File::create(filename) {
-        Ok(file) => file,
-        #[cfg(not(tarpaulin_include))] // Can't test error creating file
-        Err(err) => return Err(err),
-    };
-
-    let mut out_line = String::default();
-    msg_list.push(
-        format!("Writing code file to {}", filename.as_ref().display()),
-        None,
-        None,
-        MessageType::Information,
-    );
-    #[allow(clippy::integer_division)]
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::integer_division_remainder_used)]
-    for pass in pass2 {
-        out_line.clear();
-        if pass.line_type == LineType::Opcode {
-            out_line = format!(
-                "0x{:08X}: {:<17} -- {}\n",
-                pass.program_counter,
-                format_opcodes(&pass.opcode),
-                pass.input_text_line
-            );
-        } else if pass.line_type == LineType::Data {
-            for n in 0..pass.opcode.len() / 8 {
-                out_line.push_str(
-                    format!(
-                        "0x{:08X}: {:<16}  -- {}\n",
-                        pass.program_counter + n as u32,
-                        &mut pass.opcode.get(n * 8..n * 8 + 8).unwrap_or("        "),
-                        pass.input_text_line
-                    )
-                    .as_str(),
-                );
-            }
-        } else if pass.line_type == LineType::Label {
-            out_line = format!(
-                "0x{:08X}:                   -- {}\n",
-                pass.program_counter, pass.input_text_line
-            );
-        } else if pass.line_type == LineType::Error {
-            out_line = format!(
-                "Error                         -- {}\n",
-                pass.input_text_line
-            );
-        } else {
-            out_line = format!(
-                "                              -- {}\n",
-                pass.input_text_line
-            );
-        }
-        match file.write_all(out_line.as_bytes()) {
-            Ok(()) => {}
-            #[cfg(not(tarpaulin_include))] // Can't test error writing to file
-            Err(err) => return Err(err),
-        }
-    }
-    Ok(())
-}
-
-/// Output the opcodes for textmate to given filename
-///
-/// Writes all data of opcodes to textmate file
-#[cfg(not(tarpaulin_include))]
-fn output_opcodes_textmate(
-    filename_stem: String,
-    opcodes: &[Opcode],
-    msg_list: &mut MsgList,
-) -> Result<(), Error> {
-    let mut textmate_opcode_filename = filename_stem;
-    textmate_opcode_filename.push_str("_textmate.txt");
-    msg_list.push(
-        format!("Writing textmate opcode file to {textmate_opcode_filename}"),
-        None,
-        None,
-        MessageType::Information,
-    );
-
-    let textmate_opcode_output_file = File::create(textmate_opcode_filename.clone());
-    if textmate_opcode_output_file.is_err() {
-        msg_list.push(
-            format!("Error opening file {textmate_opcode_filename}"),
-            None,
-            None,
-            MessageType::Warning,
-        );
-        return Err(textmate_opcode_output_file
-            .err()
-            .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
-    }
-    let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
-        return Err(Error::new(ErrorKind::Other, "Unknown error"));
-    };
-    #[allow(clippy::arithmetic_side_effects)]
-    match json_opcode_file.write_all(
-        opcodes
-            .iter()
-            .fold(String::default(), |mut cur, nxt| {
-                cur.push('|');
-                cur.push_str(&nxt.text_name);
-                cur
-            })
-            .strip_prefix('|')
-            .unwrap_or("")
-            .as_bytes(),
-    ) {
-        Ok(()) => {}
-        Err(err) => return Err(err),
-    };
-
-    Ok(())
+    false
 }
 
 /// Outputs the opcodes and macros as html for documentation
@@ -571,30 +285,315 @@ pub fn output_macros_opcodes_json(
     Ok(())
 }
 
-/// Format a given string, adding spaces between groups of 4
+/// Output the opcodes for textmate to given filename
 ///
-/// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string
-pub fn format_opcodes(input: &String) -> String {
-    if input.len() == 4 {
-        return (*input).clone() + "              ";
+/// Writes all data of opcodes to textmate file
+#[cfg(not(tarpaulin_include))]
+fn output_opcodes_textmate(
+    filename_stem: String,
+    opcodes: &[Opcode],
+    msg_list: &mut MsgList,
+) -> Result<(), Error> {
+    let mut textmate_opcode_filename = filename_stem;
+    textmate_opcode_filename.push_str("_textmate.txt");
+    msg_list.push(
+        format!("Writing textmate opcode file to {textmate_opcode_filename}"),
+        None,
+        None,
+        MessageType::Information,
+    );
+
+    let textmate_opcode_output_file = File::create(textmate_opcode_filename.clone());
+    if textmate_opcode_output_file.is_err() {
+        msg_list.push(
+            format!("Error opening file {textmate_opcode_filename}"),
+            None,
+            None,
+            MessageType::Warning,
+        );
+        return Err(textmate_opcode_output_file
+            .err()
+            .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
     }
-    if input.len() == 8 {
-        return input.get(0..4).unwrap_or("    ").to_owned()
-            + input.get(4..8).unwrap_or("    ")
-            + "         ";
+    let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
+        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+    };
+    #[allow(clippy::arithmetic_side_effects)]
+    match json_opcode_file.write_all(
+        opcodes
+            .iter()
+            .fold(String::default(), |mut cur, nxt| {
+                cur.push('|');
+                cur.push_str(&nxt.text_name);
+                cur
+            })
+            .strip_prefix('|')
+            .unwrap_or("")
+            .as_bytes(),
+    ) {
+        Ok(()) => {}
+        Err(err) => return Err(err),
+    };
+
+    Ok(())
+}
+
+/// Open text file and return as vector of strings
+///
+/// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
+pub fn read_file_to_vector(
+    filename: &str,
+    msg_list: &mut MsgList,
+    opened_files: &mut Vec<String>,
+) -> Option<Vec<InputData>> {
+    let file_result = File::open(filename);
+    if file_result.is_err() {
+        msg_list.push(
+            format!("Unable to open file {filename}"),
+            None,
+            None,
+            MessageType::Error,
+        );
+        return None;
     }
-    if input.len() == 16 {
-        return input.get(0..4).unwrap_or("    ").to_owned()
-            + input.get(4..8).unwrap_or("    ")
-            + " "
-            + input.get(8..12).unwrap_or("    ")
-            + input.get(12..16).unwrap_or("    ");
+
+    let Ok(file) = file_result else { return None };
+
+    for file_found in opened_files.clone() {
+        if file_found == filename {
+            msg_list.push(
+                format!("Recursive include of file {filename}"),
+                None,
+                None,
+                MessageType::Error,
+            );
+            return None;
+        }
     }
-    (*input).clone()
+
+    opened_files.push(filename.to_owned());
+
+    let buf = BufReader::new(file);
+    let mut lines: Vec<InputData> = Vec::new();
+
+    let mut line_number = 0;
+    #[allow(clippy::arithmetic_side_effects)]
+    for line in buf.lines() {
+        match line {
+            Ok(line_contents) => {
+                line_number += 1;
+                if is_include(&line_contents) {
+                    let include_file = get_include_filename(&line_contents);
+                    if include_file.clone().unwrap_or_default() == String::default() {
+                        msg_list.push(
+                            format!("Missing include file name in {filename}"),
+                            Some(line_number),
+                            Some(filename.to_owned()),
+                            MessageType::Error,
+                        );
+                        return None;
+                    }
+
+                    // Get the include file from the same directory as the previous file
+                    let new_include_file = format!(
+                        "{}{}{}",
+                        Path::new(filename)
+                            .parent()
+                            .unwrap_or_else(|| Path::new(""))
+                            .to_str()
+                            .unwrap_or_default(),
+                        MAIN_SEPARATOR_STR,
+                        include_file.unwrap_or_default()
+                    );
+
+                    let include_lines =
+                        read_file_to_vector(&new_include_file, msg_list, opened_files);
+                    if include_lines.is_none() {
+                        msg_list.push(
+                            format!("Unable to open include file {new_include_file} in {filename}"),
+                            Some(line_number),
+                            Some(filename.to_owned()),
+                            MessageType::Error,
+                        );
+                        //return None;
+                        return Some(lines);
+                    }
+                    let unwrapped_include_lines = include_lines.unwrap_or_default();
+                    for included_line in unwrapped_include_lines {
+                        lines.push(included_line);
+                    }
+                } else {
+                    lines.push(InputData {
+                        input: line_contents,
+                        file_name: filename.to_owned(),
+                        line_counter: line_number,
+                    });
+                }
+            }
+            #[cfg(not(tarpaulin_include))] // Cannot test error reading file line in tarpaulin
+            Err(err) => msg_list.push(
+                format!("Error parsing opcode file: {err}"),
+                Some(line_number),
+                Some(filename.to_owned()),
+                MessageType::Error,
+            ),
+        }
+    }
+    opened_files.pop();
+    Some(lines)
+}
+
+/// Remove comments from vector of strings
+///
+/// Checks for /* */ and removes them from the vector of strings
+pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> Vec<InputData> {
+    let mut in_comment = false;
+    let mut new_lines: Vec<InputData> = Vec::new();
+    let mut old_file_name = String::default();
+    for line in lines {
+        if old_file_name != line.file_name {
+            if in_comment {
+                msg_list.push(
+                    format!("Comment not terminated in file {old_file_name}"),
+                    Some(line.line_counter),
+                    Some(line.file_name.clone()),
+                    MessageType::Error,
+                );
+            }
+            in_comment = false;
+        }
+
+        old_file_name.clone_from(&line.file_name);
+        let mut new_line = String::default();
+        let mut in_char = false; // If in normal last was / or if in comment last was *
+        for char in line.input.chars() {
+            if in_comment {
+                if char == '/' && in_char {
+                    in_comment = false;
+                } else {
+                    in_char = char == '*';
+                }; // Sets to true if c == '*'
+            } else if char == '*' && in_char {
+                in_comment = true;
+                new_line.pop();
+            } else if char == '/' {
+                in_char = true;
+                new_line.push(char);
+            } else {
+                in_char = false;
+                new_line.push(char);
+            }
+        }
+        new_lines.push(InputData {
+            input: new_line,
+            file_name: line.file_name,
+            line_counter: line.line_counter,
+        });
+    }
+    new_lines
+}
+
+/// Output the bitcode to given file
+///
+/// Based on the bitcode string outputs to file
+#[allow(clippy::impl_trait_in_params)]
+pub fn write_binary_output_file(
+    filename: &impl AsRef<Path>,
+    output_string: &str,
+) -> Result<(), Error> {
+    match File::create(filename) {
+        Ok(mut file) => {
+            match file.write_all(output_string.as_bytes()) {
+                Ok(()) => {}
+                #[cfg(not(tarpaulin_include))] // Can't test error writing to files
+                Err(err) => return Err(err),
+            }
+        }
+        #[cfg(not(tarpaulin_include))] // Can't test error creating
+        Err(err) => {
+            // code to execute if File::create returned an error
+            return Err(err);
+        }
+    }
+
+    Ok(())
+}
+
+/// Output the code details file to given filename
+///
+/// Writes all data to the detailed code file
+#[allow(clippy::impl_trait_in_params)]
+#[allow(clippy::arithmetic_side_effects)]
+pub fn write_code_output_file(
+    filename: impl AsRef<Path> + Copy,
+    pass2: &mut Vec<Pass2>,
+    msg_list: &mut MsgList,
+) -> Result<(), Error> {
+    let mut file = match File::create(filename) {
+        Ok(file) => file,
+        #[cfg(not(tarpaulin_include))] // Can't test error creating file
+        Err(err) => return Err(err),
+    };
+
+    let mut out_line = String::default();
+    msg_list.push(
+        format!("Writing code file to {}", filename.as_ref().display()),
+        None,
+        None,
+        MessageType::Information,
+    );
+    #[allow(clippy::integer_division)]
+    #[allow(clippy::cast_possible_truncation)]
+    #[allow(clippy::integer_division_remainder_used)]
+    for pass in pass2 {
+        out_line.clear();
+        if pass.line_type == LineType::Opcode {
+            out_line = format!(
+                "0x{:08X}: {:<17} -- {}\n",
+                pass.program_counter,
+                format_opcodes(&pass.opcode),
+                pass.input_text_line
+            );
+        } else if pass.line_type == LineType::Data {
+            for n in 0..pass.opcode.len() / 8 {
+                out_line.push_str(
+                    format!(
+                        "0x{:08X}: {:<16}  -- {}\n",
+                        pass.program_counter + n as u32,
+                        &mut pass.opcode.get(n * 8..n * 8 + 8).unwrap_or("        "),
+                        pass.input_text_line
+                    )
+                    .as_str(),
+                );
+            }
+        } else if pass.line_type == LineType::Label {
+            out_line = format!(
+                "0x{:08X}:                   -- {}\n",
+                pass.program_counter, pass.input_text_line
+            );
+        } else if pass.line_type == LineType::Error {
+            out_line = format!(
+                "Error                         -- {}\n",
+                pass.input_text_line
+            );
+        } else {
+            out_line = format!(
+                "                              -- {}\n",
+                pass.input_text_line
+            );
+        }
+        match file.write_all(out_line.as_bytes()) {
+            Ok(()) => {}
+            #[cfg(not(tarpaulin_include))] // Can't test error writing to file
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
+#[allow(clippy::arbitrary_source_item_ordering)]
 mod test {
     use std::fs;
 
@@ -957,7 +956,8 @@ mod test {
         assert_eq!(
             lines
                 .clone()
-                .unwrap_or_default().first()
+                .unwrap_or_default()
+                .first()
                 .unwrap_or_default()
                 .input,
             "Test line in file 1 line 0"

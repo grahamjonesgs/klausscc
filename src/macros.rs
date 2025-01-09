@@ -2,21 +2,21 @@ use crate::helper::{return_comments, strip_comments};
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Pass0};
 use core::fmt::Write as _;
-use itertools::Itertools;
+use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 /// Holds instance of macro from opcode definition file
 pub struct Macro {
+    /// Comment from definition
+    pub comment: String,
+    /// Items in macro as vector of strings
+    pub items: Vec<String>,
     /// Name of macro
     pub name: String,
     /// Number of variables
-    pub variables: u32,
-    /// Items in macro as vector of strings
-    pub items: Vec<String>,
-    /// Comment from definition
-    pub comment: String,
+    pub variables: u32,  
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -32,6 +32,183 @@ impl Default for &Macro {
         };
         &VALUE
     }
+}
+
+/// Multi pass to resolve embedded macros
+///
+/// Takes Vector of macros, and embeds macros recursively, up to 10 passes
+/// Will create errors message for more than 10 passes
+#[allow(clippy::too_many_lines)]
+#[allow(clippy::module_name_repetitions)]
+#[allow(clippy::arithmetic_side_effects)]
+pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
+    let mut pass: u32 = 0;
+    let mut changed = true;
+    let mut last_macro = String::default();
+
+    let mut input_macros = macros;
+
+    while pass < 10 && changed {
+        changed = false;
+        let mut output_macros: Vec<Macro> = Vec::new();
+        for input_macro_line in input_macros.clone() {
+            let mut output_items: Vec<String> = Vec::new();
+            for item in input_macro_line.items {
+                if return_macro(&item, &mut input_macros).is_some() {
+                    let mut item_line_array: Vec<String> = Vec::new();
+                    let item_words = item.split_whitespace();
+                    for item_word in item_words {
+                        item_line_array.push(item_word.to_owned());
+                    }
+                    #[allow(clippy::unwrap_used)]
+                    #[allow(clippy::arithmetic_side_effects)]
+                    if (return_macro(&item, &mut input_macros).unwrap().variables as usize)
+                        < item_line_array.len() - 1
+                    {
+                        msg_list.push(
+                            format!(
+                                "Too many variables in embedded macro \"{}\" in macro {}",
+                                item, input_macro_line.name,
+                            ),
+                            None,
+                            None,
+                            MessageType::Warning,
+                        );
+                    }
+                    #[allow(clippy::unwrap_used)]
+                    for new_item in return_macro(&item, &mut input_macros).unwrap().items {
+                        if new_item.contains('%') {
+                            // Replace %n in new items with the nth value in item
+
+                            let new_item_words = new_item.split_whitespace();
+                            let mut build_line = String::default();
+                            for item_word in new_item_words {
+                                if item_word.contains('%') {
+                                    let without_prefix = item_word.trim_start_matches('%');
+                                    let int_value = without_prefix.parse::<u32>();
+                                    #[allow(clippy::arithmetic_side_effects)]
+                                    if int_value.is_err() || int_value.clone().unwrap_or(0) < 1 {
+                                        msg_list.push(
+                                            format!(
+                                            "Invalid macro argument number {}, in embedded macro \"{}\" in {}",
+                                            without_prefix,
+                                            item,
+                                            input_macro_line.name,
+                                        ),
+                                            None,
+                                            None,
+                                            MessageType::Error,
+                                        );
+                                    } else if int_value.clone().unwrap_or(0) as usize
+                                        > item_line_array.len() - 1
+                                    {
+                                        msg_list.push(
+                                            format!(
+                                                "Missing argument {} for embedded macro \"{}\" in {}",
+                                                int_value.unwrap_or(0),
+                                                item,
+                                                input_macro_line.name,
+                                            ),
+                                            None,
+                                            None,
+                                            MessageType::Error,
+                                        );
+                                    } else {
+                                        build_line = build_line
+                                            + " "
+                                            + item_line_array
+                                                .get(int_value.clone().unwrap_or(0) as usize)
+                                                .unwrap_or(&String::default());
+                                    }
+                                } else {
+                                    build_line = build_line + " " + item_word;
+                                }
+                            }
+                            output_items.push(build_line.strip_prefix(' ').unwrap().to_owned());
+                        } else {
+                            output_items.push(new_item);
+                        }
+                    }
+                    last_macro.clone_from(&input_macro_line.name);
+                    changed = true;
+                } else {
+                    output_items.push(item);
+                }
+            }
+            output_macros.push(Macro {
+                name: input_macro_line.name,
+                variables: input_macro_line.variables,
+                items: output_items,
+                comment: input_macro_line.comment,
+            });
+        }
+        
+        pass += 1;
+        input_macros.clone_from(&output_macros);
+    }
+    if changed {
+        msg_list.push(
+            format!("Too many macro passes, check {last_macro}"),
+            None,
+            None,
+            MessageType::Error,
+        );
+    }
+    input_macros
+}
+
+/// Expands the input lines by expanding all macros
+///
+/// Takes the input list of all lines and macro vector and expands
+#[allow(clippy::module_name_repetitions)]
+pub fn expand_macros(
+    msg_list: &mut MsgList,
+    input_list: Vec<InputData>,
+    macro_list: &mut [Macro],
+) -> Vec<Pass0> {
+    let mut pass0: Vec<Pass0> = Vec::new();
+    for code_line in input_list {
+        if macro_name_from_string(&code_line.input).is_some() {
+            let items = return_macro_items_replace(
+                code_line.input.trim(),
+                macro_list,
+                code_line.line_counter,
+                &code_line.file_name,
+                msg_list,
+            );
+            #[allow(clippy::arithmetic_side_effects)]
+            if items.is_some() {
+                for item in Option::unwrap(items) {
+                    pass0.push(Pass0 {
+                        input_text_line: item
+                            + " // Macro expansion from "
+                            + &macro_name_from_string(&code_line.input).unwrap_or_default(),
+                        file_name: code_line.file_name.clone(),
+                        line_counter: code_line.line_counter,
+                    });
+                }
+            } else {
+                msg_list.push(
+                    format!("Macro not found {}", code_line.input),
+                    None,
+                    None,
+                    MessageType::Error,
+                );
+                pass0.push(Pass0 {
+                    file_name: code_line.file_name,
+                    input_text_line: code_line.input,
+                    line_counter: code_line.line_counter,
+                });
+            }
+        } else {
+            pass0.push(Pass0 {
+                file_name: code_line.file_name,
+                input_text_line: code_line.input,
+                line_counter: code_line.line_counter,
+            });
+        }
+    }
+    pass0
 }
 
 /// Parse opcode definition line to macro
@@ -238,184 +415,8 @@ pub fn return_macro_items_replace(
     None
 }
 
-/// Multi pass to resolve embedded macros
-///
-/// Takes Vector of macros, and embeds macros recursively, up to 10 passes
-/// Will create errors message for more than 10 passes
-#[allow(clippy::too_many_lines)]
-#[allow(clippy::module_name_repetitions)]
-#[allow(clippy::arithmetic_side_effects)]
-pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
-    let mut pass: u32 = 0;
-    let mut changed = true;
-    let mut last_macro = String::default();
-
-    let mut input_macros = macros;
-
-    while pass < 10 && changed {
-        changed = false;
-        let mut output_macros: Vec<Macro> = Vec::new();
-        for input_macro_line in input_macros.clone() {
-            let mut output_items: Vec<String> = Vec::new();
-            for item in input_macro_line.items {
-                if return_macro(&item, &mut input_macros).is_some() {
-                    let mut item_line_array: Vec<String> = Vec::new();
-                    let item_words = item.split_whitespace();
-                    for item_word in item_words {
-                        item_line_array.push(item_word.to_owned());
-                    }
-                    #[allow(clippy::unwrap_used)]
-                    #[allow(clippy::arithmetic_side_effects)]
-                    if (return_macro(&item, &mut input_macros).unwrap().variables as usize)
-                        < item_line_array.len() - 1
-                    {
-                        msg_list.push(
-                            format!(
-                                "Too many variables in embedded macro \"{}\" in macro {}",
-                                item, input_macro_line.name,
-                            ),
-                            None,
-                            None,
-                            MessageType::Warning,
-                        );
-                    }
-                    #[allow(clippy::unwrap_used)]
-                    for new_item in return_macro(&item, &mut input_macros).unwrap().items {
-                        if new_item.contains('%') {
-                            // Replace %n in new items with the nth value in item
-
-                            let new_item_words = new_item.split_whitespace();
-                            let mut build_line = String::default();
-                            for item_word in new_item_words {
-                                if item_word.contains('%') {
-                                    let without_prefix = item_word.trim_start_matches('%');
-                                    let int_value = without_prefix.parse::<u32>();
-                                    #[allow(clippy::arithmetic_side_effects)]
-                                    if int_value.is_err() || int_value.clone().unwrap_or(0) < 1 {
-                                        msg_list.push(
-                                            format!(
-                                            "Invalid macro argument number {}, in embedded macro \"{}\" in {}",
-                                            without_prefix,
-                                            item,
-                                            input_macro_line.name,
-                                        ),
-                                            None,
-                                            None,
-                                            MessageType::Error,
-                                        );
-                                    } else if int_value.clone().unwrap_or(0) as usize
-                                        > item_line_array.len() - 1
-                                    {
-                                        msg_list.push(
-                                            format!(
-                                                "Missing argument {} for embedded macro \"{}\" in {}",
-                                                int_value.unwrap_or(0),
-                                                item,
-                                                input_macro_line.name,
-                                            ),
-                                            None,
-                                            None,
-                                            MessageType::Error,
-                                        );
-                                    } else {
-                                        build_line = build_line
-                                            + " "
-                                            + item_line_array
-                                                .get(int_value.clone().unwrap_or(0) as usize)
-                                                .unwrap_or(&String::default());
-                                    }
-                                } else {
-                                    build_line = build_line + " " + item_word;
-                                }
-                            }
-                            output_items.push(build_line.strip_prefix(' ').unwrap().to_owned());
-                        } else {
-                            output_items.push(new_item);
-                        }
-                    }
-                    last_macro.clone_from(&input_macro_line.name);
-                    changed = true;
-                } else {
-                    output_items.push(item);
-                }
-            }
-            output_macros.push(Macro {
-                name: input_macro_line.name,
-                variables: input_macro_line.variables,
-                items: output_items,
-                comment: input_macro_line.comment,
-            });
-        }
-        
-        pass += 1;
-        input_macros.clone_from(&output_macros);
-    }
-    if changed {
-        msg_list.push(
-            format!("Too many macro passes, check {last_macro}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-    }
-    input_macros
-}
-
-/// Expands the input lines by expanding all macros
-///
-/// Takes the input list of all lines and macro vector and expands
-#[allow(clippy::module_name_repetitions)]
-pub fn expand_macros(
-    msg_list: &mut MsgList,
-    input_list: Vec<InputData>,
-    macro_list: &mut [Macro],
-) -> Vec<Pass0> {
-    let mut pass0: Vec<Pass0> = Vec::new();
-    for code_line in input_list {
-        if macro_name_from_string(&code_line.input).is_some() {
-            let items = return_macro_items_replace(
-                code_line.input.trim(),
-                macro_list,
-                code_line.line_counter,
-                &code_line.file_name,
-                msg_list,
-            );
-            #[allow(clippy::arithmetic_side_effects)]
-            if items.is_some() {
-                for item in Option::unwrap(items) {
-                    pass0.push(Pass0 {
-                        input_text_line: item
-                            + " // Macro expansion from "
-                            + &macro_name_from_string(&code_line.input).unwrap_or_default(),
-                        file_name: code_line.file_name.clone(),
-                        line_counter: code_line.line_counter,
-                    });
-                }
-            } else {
-                msg_list.push(
-                    format!("Macro not found {}", code_line.input),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
-                pass0.push(Pass0 {
-                    file_name: code_line.file_name,
-                    input_text_line: code_line.input,
-                    line_counter: code_line.line_counter,
-                });
-            }
-        } else {
-            pass0.push(Pass0 {
-                file_name: code_line.file_name,
-                input_text_line: code_line.input,
-                line_counter: code_line.line_counter,
-            });
-        }
-    }
-    pass0
-}
-
 #[cfg(test)]
+#[allow(clippy::arbitrary_source_item_ordering)]
 mod tests {
 
     use super::*;

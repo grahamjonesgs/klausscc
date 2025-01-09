@@ -5,10 +5,10 @@ use crate::opcodes::Pass1;
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Label struct
 pub struct Label {
-    /// Program counter derived from Pass1
-    pub program_counter: u32,
     /// Label name as text without colon
     pub name: String,
+    /// Program counter derived from Pass1
+    pub program_counter: u32,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -23,51 +23,6 @@ impl Default for &Label {
             name: String::new(),
         };
         &VALUE
-    }
-}
-
-/// Extracts label from string
-///
-/// Checks if end of first word is colon if so return label as option string
-pub fn label_name_from_string(line: &str) -> Option<String> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.ends_with(':') {
-        return Some(first_word.to_owned());
-    }
-    None
-}
-
-/// Return program counter for label
-///
-/// Return option of program counter for label if it exists, or None
-pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
-    for label in labels {
-        if label.name == line {
-            return Some(label.program_counter);
-        }
-    }
-    None
-}
-
-/// Check if label is duplicate
-///
-/// Check if label is duplicate, and output message if duplicate is found
-pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
-    let mut local_labels = labels.clone();
-    for label in labels {
-        let opt_found_line = return_label_value(&label.name, &mut local_labels);
-        if opt_found_line.unwrap_or(0) != label.program_counter {
-            msg_list.push(
-                format!(
-                    "Duplicate label {} found, with differing values",
-                    label.name
-                ),
-                None,
-                None,
-                MessageType::Error,
-            );
-        }
     }
 }
 
@@ -163,6 +118,27 @@ pub fn convert_argument(
     None
 }
 
+/// Check if label is duplicate
+///
+/// Check if label is duplicate, and output message if duplicate is found
+pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
+    let mut local_labels = labels.clone();
+    for label in labels {
+        let opt_found_line = return_label_value(&label.name, &mut local_labels);
+        if opt_found_line.unwrap_or(0) != label.program_counter {
+            msg_list.push(
+                format!(
+                    "Duplicate label {} found, with differing values",
+                    label.name
+                ),
+                None,
+                None,
+                MessageType::Error,
+            );
+        }
+    }
+}
+
 /// Create the vector of labels
 ///
 /// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels
@@ -237,7 +213,32 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     labels
 }
 
+/// Extracts label from string
+///
+/// Checks if end of first word is colon if so return label as option string
+pub fn label_name_from_string(line: &str) -> Option<String> {
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if first_word.ends_with(':') {
+        return Some(first_word.to_owned());
+    }
+    None
+}
+
+/// Return program counter for label
+///
+/// Return option of program counter for label if it exists, or None
+pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
+    for label in labels {
+        if label.name == line {
+            return Some(label.program_counter);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
+#[allow(clippy::arbitrary_source_item_ordering)]
 mod tests {
     use super::*;
     use crate::files::LineType;

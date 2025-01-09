@@ -2,226 +2,6 @@ use crate::files::LineType;
 use crate::labels::label_name_from_string;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{return_opcode, Opcode, Pass2};
-
-/// Extracts data name from string
-///
-/// Checks if start of first word is hash if so return data name as option string
-pub fn data_name_from_string(line: &str) -> Option<String> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.starts_with('#') {
-        return Some(first_word.to_owned());
-    }
-    None
-}
-
-/// Return number of bytes of data
-///
-/// From instruction name, option of number of bytes of data, or 0 is error
-pub fn num_data_bytes(
-    line: &str,
-    msg_list: &mut MsgList,
-    line_number: u32,
-    filename: String,
-) -> u32 {
-    data_as_bytes(line).map_or_else(
-        || {
-            msg_list.push(
-                format!("Error in data definition for {line}"),
-                Some(line_number),
-                Some(filename),
-                MessageType::Error,
-            );
-            0
-        },
-        |data| data.len().try_into().unwrap_or_default(),
-    )
-}
-
-/// Returns bytes for data element
-///
-/// Parses data element and returns data as bytes, or None if error
-pub fn data_as_bytes(line: &str) -> Option<String> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.is_empty() {
-        return None;
-    }
-
-    let second_word = words.next().unwrap_or("");
-    if second_word.is_empty() {
-        return None;
-    }
-
-    // Check if next word starts with quote
-    if second_word.starts_with('\"') {
-        let remaining_line = line.trim_start_matches(first_word).trim();
-
-        if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
-            let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
-            let mut output_hex = String::default();
-            // Length is based on multiples of 4
-            #[allow(clippy::integer_division)]
-            #[allow(clippy::arithmetic_side_effects)]
-            #[allow(clippy::integer_division_remainder_used)]  
-            output_hex.push_str(
-                format!(
-                    "{:08X}",
-                    (input_string.len() + 4 - input_string.len() % 4) / 4
-                )
-                .as_str(),
-            ); // Add length of string to start
-            for char in input_string.as_bytes() {
-                let hex = format!("{char:02X}");
-                output_hex.push_str(&hex);
-            }
-            #[allow(clippy::arithmetic_side_effects)]
-            #[allow(clippy::integer_division_remainder_used)]
-            let needed_bytes = 8 - (output_hex.len() % 8);
-            for _n in 0..needed_bytes {
-                output_hex.push('0');
-            }
-            return Some(output_hex);
-        }
-        None
-    } else {
-        // Check if next word is a number
-        // let int_value: i64;
-        let int_value = if second_word.len() >= 2
-            && (second_word.get(0..2).unwrap_or("  ") == "0x"
-                || second_word.get(0..2).unwrap_or("  ") == "0X")
-        {
-            let without_prefix1 = second_word.trim_start_matches("0x");
-            let without_prefix2 = without_prefix1.trim_start_matches("0X");
-            let int_value_result = i64::from_str_radix(&without_prefix2.replace('_', ""), 16);
-            int_value_result.unwrap_or(0)
-        } else {
-            let int_value_result = second_word.parse::<i64>();
-            int_value_result.unwrap_or(0)
-        };
-
-        if int_value == 0 {
-            None
-        } else {
-            let mut data = String::default();
-            for _ in 0..int_value {
-                data.push_str("00000000");
-            }
-            Some(data)
-        }
-    }
-}
-
-/// Returns enum of type of line
-///
-/// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error
-pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
-    if label_name_from_string(line).is_some() {
-        return LineType::Label;
-    };
-    if data_name_from_string(line).is_some() {
-        return LineType::Data;
-    };
-    if return_opcode(line, opcodes).is_some() {
-        return LineType::Opcode;
-    }
-    if is_blank(line) {
-        return LineType::Blank;
-    }
-    if is_start(line) {
-        return LineType::Start;
-    }
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if is_comment(word) && i == 0 {
-            return LineType::Comment;
-        }
-    }
-    LineType::Error
-}
-
-/// Check if line is valid
-///  
-/// Returns true if line is not error
-pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
-    let temp_line: String = line;
-    if line_type(opcodes, &temp_line) == LineType::Error {
-        return false;
-    }
-    true
-}
-
-/// Check if line is blank
-///
-/// Returns true if line if just whitespace
-pub fn is_blank(line: &str) -> bool {
-    let words = line.split_whitespace();
-
-    for word in words {
-        if !word.is_empty() {
-            return false;
-        }
-    }
-    true
-}
-
-/// Check if line is start
-///
-/// Returns true if line is start
-pub fn is_start(line: &str) -> bool {
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if i == 0 && word.to_uppercase() == "_START" {
-            return true;
-        }
-    }
-    false
-}
-
-/// Check if line is comment
-///
-/// Returns true if line if just comment
-pub fn is_comment(line: &str) -> bool {
-    let word = line.trim();
-    if word.len() < 2 {
-        return false;
-    }
-
-    let bytes = word.as_bytes();
-    let mut found_first = false;
-
-    for (i, &item) in bytes.iter().enumerate() {
-        if item == b'/' && i == 0 {
-            found_first = true;
-        }
-        if item == b'/' && i == 1 && found_first {
-            return true;
-        }
-    }
-    false
-}
-
-/// Strip trailing comments
-///
-///  Removes comments and starting and training whitespace
-pub fn strip_comments(input: &str) -> String {
-    return input.find("//").map_or_else(
-        || input.trim().to_owned(),
-        |location| input.get(0..location).unwrap_or("").trim().to_owned(),
-    );
-}
-
-/// Returns trailing comments
-///
-///  Removes comments and starting and training whitespace
-#[allow(clippy::arithmetic_side_effects)]
-pub fn return_comments(input: &str) -> String {
-    match input.find("//") {
-        None => String::default(),
-        Some(location) => return input.get(location + 2..).unwrap_or("").trim().to_owned(),
-    }
-}
-
 /// Find checksum
 ///
 /// Calculates the checksum from the string of hex values, removing control characters
@@ -357,6 +137,223 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     Some(output_string)
 }
 
+/// Returns bytes for data element
+///
+/// Parses data element and returns data as bytes, or None if error
+pub fn data_as_bytes(line: &str) -> Option<String> {
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if first_word.is_empty() {
+        return None;
+    }
+
+    let second_word = words.next().unwrap_or("");
+    if second_word.is_empty() {
+        return None;
+    }
+
+    // Check if next word starts with quote
+    if second_word.starts_with('\"') {
+        let remaining_line = line.trim_start_matches(first_word).trim();
+
+        if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
+            let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
+            let mut output_hex = String::default();
+            // Length is based on multiples of 4
+            #[allow(clippy::integer_division)]
+            #[allow(clippy::arithmetic_side_effects)]
+            #[allow(clippy::integer_division_remainder_used)]  
+            output_hex.push_str(
+                format!(
+                    "{:08X}",
+                    (input_string.len() + 4 - input_string.len() % 4) / 4
+                )
+                .as_str(),
+            ); // Add length of string to start
+            for char in input_string.as_bytes() {
+                let hex = format!("{char:02X}");
+                output_hex.push_str(&hex);
+            }
+            #[allow(clippy::arithmetic_side_effects)]
+            #[allow(clippy::integer_division_remainder_used)]
+            let needed_bytes = 8 - (output_hex.len() % 8);
+            for _n in 0..needed_bytes {
+                output_hex.push('0');
+            }
+            return Some(output_hex);
+        }
+        None
+    } else {
+        // Check if next word is a number
+        // let int_value: i64;
+        let int_value = if second_word.len() >= 2
+            && (second_word.get(0..2).unwrap_or("  ") == "0x"
+                || second_word.get(0..2).unwrap_or("  ") == "0X")
+        {
+            let without_prefix1 = second_word.trim_start_matches("0x");
+            let without_prefix2 = without_prefix1.trim_start_matches("0X");
+            let int_value_result = i64::from_str_radix(&without_prefix2.replace('_', ""), 16);
+            int_value_result.unwrap_or(0)
+        } else {
+            let int_value_result = second_word.parse::<i64>();
+            int_value_result.unwrap_or(0)
+        };
+
+        if int_value == 0 {
+            None
+        } else {
+            let mut data = String::default();
+            for _ in 0..int_value {
+                data.push_str("00000000");
+            }
+            Some(data)
+        }
+    }
+}
+
+/// Extracts data name from string
+///
+/// Checks if start of first word is hash if so return data name as option string
+pub fn data_name_from_string(line: &str) -> Option<String> {
+    let mut words = line.split_whitespace();
+    let first_word = words.next().unwrap_or("");
+    if first_word.starts_with('#') {
+        return Some(first_word.to_owned());
+    }
+    None
+}
+
+/// Check if line is blank
+///
+/// Returns true if line if just whitespace
+pub fn is_blank(line: &str) -> bool {
+    let words = line.split_whitespace();
+
+    for word in words {
+        if !word.is_empty() {
+            return false;
+        }
+    }
+    true
+}
+
+/// Check if line is comment
+///
+/// Returns true if line if just comment
+pub fn is_comment(line: &str) -> bool {
+    let word = line.trim();
+    if word.len() < 2 {
+        return false;
+    }
+
+    let bytes = word.as_bytes();
+    let mut found_first = false;
+
+    for (i, &item) in bytes.iter().enumerate() {
+        if item == b'/' && i == 0 {
+            found_first = true;
+        }
+        if item == b'/' && i == 1 && found_first {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if line is start
+///
+/// Returns true if line is start
+pub fn is_start(line: &str) -> bool {
+    let words = line.split_whitespace();
+    for (i, word) in words.enumerate() {
+        if i == 0 && word.to_uppercase() == "_START" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if line is valid
+///  
+/// Returns true if line is not error
+pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
+    let temp_line: String = line;
+    if line_type(opcodes, &temp_line) == LineType::Error {
+        return false;
+    }
+    true
+}
+
+/// Returns enum of type of line
+///
+/// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error
+pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
+    if label_name_from_string(line).is_some() {
+        return LineType::Label;
+    };
+    if data_name_from_string(line).is_some() {
+        return LineType::Data;
+    };
+    if return_opcode(line, opcodes).is_some() {
+        return LineType::Opcode;
+    }
+    if is_blank(line) {
+        return LineType::Blank;
+    }
+    if is_start(line) {
+        return LineType::Start;
+    }
+    let words = line.split_whitespace();
+    for (i, word) in words.enumerate() {
+        if is_comment(word) && i == 0 {
+            return LineType::Comment;
+        }
+    }
+    LineType::Error
+}
+
+/// Return number of bytes of data
+///
+/// From instruction name, option of number of bytes of data, or 0 is error
+pub fn num_data_bytes(
+    line: &str,
+    msg_list: &mut MsgList,
+    line_number: u32,
+    filename: String,
+) -> u32 {
+    data_as_bytes(line).map_or_else(
+        || {
+            msg_list.push(
+                format!("Error in data definition for {line}"),
+                Some(line_number),
+                Some(filename),
+                MessageType::Error,
+            );
+            0
+        },
+        |data| data.len().try_into().unwrap_or_default(),
+    )
+}
+
+/// Returns trailing comments
+///
+///  Removes comments and starting and training whitespace
+#[allow(clippy::arithmetic_side_effects)]
+pub fn return_comments(input: &str) -> String {
+    input.find("//").map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
+}
+
+/// Strip trailing comments
+///
+///  Removes comments and starting and training whitespace
+pub fn strip_comments(input: &str) -> String {
+    input.find("//").map_or_else(
+        || input.trim().to_owned(),
+        |location| input.get(0..location).unwrap_or("").trim().to_owned(),
+    )
+}
+
+
 /// Trim newline from string
 ///
 /// Removes newline from end of string
@@ -376,6 +373,7 @@ pub fn trim_newline(input: &mut String) {
 }
 
 #[cfg(test)]
+#[allow(clippy::arbitrary_source_item_ordering)]
 mod tests {
     use super::*;
     use crate::labels::{return_label_value, Label};

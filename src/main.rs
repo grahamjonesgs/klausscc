@@ -17,6 +17,8 @@
 #![allow(clippy::blanket_clippy_restriction_lints)]
 #![allow(clippy::multiple_crate_versions)]
 #![allow(clippy::single_call_fn)]
+#![allow(clippy::arbitrary_source_item_ordering)]
+
 
 //! Top level file for Klausscc
 
@@ -218,105 +220,6 @@ fn main() -> Result<(), i32> {
     Ok(())
 }
 
-/// Manages the CLI
-///
-/// Uses the Command from Clap to expand the CLI
-#[cfg(not(tarpaulin_include))] // Can not test CLI in tarpaulin
-#[must_use]
-pub fn set_matches() -> Command {
-    use clap::ArgAction;
-
-    Command::new("Klauss Assembler")
-        .version("0.0.1")
-        .author("Graham Jones")
-        .about("Assembler for FPGA_CPU")
-        .arg(
-            Arg::new("opcode_file")
-                .short('c')
-                .long("opcode")
-                .num_args(1)
-                .required(true)
-                .help("Opcode source file from Verilog"),
-        )
-        .arg(
-            Arg::new("input")
-                .short('i')
-                .long("input")
-                .required(true)
-                .conflicts_with("textmate")
-                .conflicts_with("opcodes")
-                .num_args(1)
-                .help("Input file to be assembled"),
-        )
-        .arg(
-            Arg::new("output")
-                .short('o')
-                .long("output")
-                .num_args(1)
-                .help("Output info file for assembled code"),
-        )
-        .arg(
-            Arg::new("bitcode")
-                .short('b')
-                .long("bitcode")
-                .num_args(1)
-                .help("Output bitcode file for assembled code"),
-        )
-        .arg(
-            Arg::new("opcodes")
-                .long("opcodes")
-                .action(ArgAction::SetTrue)
-                .help("Set if JSON output of opcode and macro list is required"),
-        )
-        .arg(
-            Arg::new("textmate")
-                .short('t')
-                .long("textmate")
-                .action(ArgAction::SetTrue)
-                .help(
-                    "Set if JSON output of opcodes for use in Textmate of vscode language formatter is required",
-                ),
-        )
-        .arg(
-            Arg::new("serial")
-                .short('s')
-                .long("serial")
-                .num_args(0..=1)
-                .default_missing_value(AUTO_SERIAL)
-                .help("Serial port for output"),
-        )
-}
-/// Prints results of assembly
-///
-/// Takes the message list and start time and prints the results to the users
-#[allow(clippy::print_stdout)]
-#[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
-pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
-    print_messages(msg_list);
-    #[allow(clippy::arithmetic_side_effects)]
-    let duration = Local::now().time() - start_time;
-    #[allow(clippy::float_arithmetic)]
-    #[allow(clippy::cast_precision_loss)]
-    let time_taken: f64 =
-        duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
-    println!(
-        "Completed with {} error{} and {} warning{} in {} seconds",
-        msg_list.number_by_type(&MessageType::Error),
-        if msg_list.number_by_type(&MessageType::Error) == 1 {
-            ""
-        } else {
-            "s"
-        },
-        msg_list.number_by_type(&MessageType::Error),
-        if msg_list.number_by_type(&MessageType::Warning) == 1 {
-            ""
-        } else {
-            "s"
-        },
-        time_taken,
-    );
-}
-
 /// Returns pass1 from pass0
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters
@@ -425,6 +328,130 @@ pub fn get_pass2(
     pass2
 }
 
+/// Prints results of assembly
+///
+/// Takes the message list and start time and prints the results to the users
+#[allow(clippy::print_stdout)]
+#[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
+pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
+    print_messages(msg_list);
+    #[allow(clippy::arithmetic_side_effects)]
+    let duration = Local::now().time() - start_time;
+    #[allow(clippy::float_arithmetic)]
+    #[allow(clippy::cast_precision_loss)]
+    let time_taken: f64 =
+        duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
+    println!(
+        "Completed with {} error{} and {} warning{} in {} seconds",
+        msg_list.number_by_type(&MessageType::Error),
+        if msg_list.number_by_type(&MessageType::Error) == 1 {
+            ""
+        } else {
+            "s"
+        },
+        msg_list.number_by_type(&MessageType::Error),
+        if msg_list.number_by_type(&MessageType::Warning) == 1 {
+            ""
+        } else {
+            "s"
+        },
+        time_taken,
+    );
+}
+
+/// Manages the CLI
+///
+/// Uses the Command from Clap to expand the CLI
+#[cfg(not(tarpaulin_include))] // Can not test CLI in tarpaulin
+#[must_use]
+pub fn set_matches() -> Command {
+    use clap::ArgAction;
+
+    Command::new("Klauss Assembler")
+        .version("0.0.1")
+        .author("Graham Jones")
+        .about("Assembler for FPGA_CPU")
+        .arg(
+            Arg::new("opcode_file")
+                .short('c')
+                .long("opcode")
+                .num_args(1)
+                .required(true)
+                .help("Opcode source file from Verilog"),
+        )
+        .arg(
+            Arg::new("input")
+                .short('i')
+                .long("input")
+                .required(true)
+                .conflicts_with("textmate")
+                .conflicts_with("opcodes")
+                .num_args(1)
+                .help("Input file to be assembled"),
+        )
+        .arg(
+            Arg::new("output")
+                .short('o')
+                .long("output")
+                .num_args(1)
+                .help("Output info file for assembled code"),
+        )
+        .arg(
+            Arg::new("bitcode")
+                .short('b')
+                .long("bitcode")
+                .num_args(1)
+                .help("Output bitcode file for assembled code"),
+        )
+        .arg(
+            Arg::new("opcodes")
+                .long("opcodes")
+                .action(ArgAction::SetTrue)
+                .help("Set if JSON output of opcode and macro list is required"),
+        )
+        .arg(
+            Arg::new("textmate")
+                .short('t')
+                .long("textmate")
+                .action(ArgAction::SetTrue)
+                .help(
+                    "Set if JSON output of opcodes for use in Textmate of vscode language formatter is required",
+                ),
+        )
+        .arg(
+            Arg::new("serial")
+                .short('s')
+                .long("serial")
+                .num_args(0..=1)
+                .default_missing_value(AUTO_SERIAL)
+                .help("Serial port for output"),
+        )
+}
+
+/// Writes the binary file
+///
+/// If not errors are found, write the binary output file
+#[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
+pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) {
+    msg_list.push(
+        format!("Writing binary file to {binary_file_name}"),
+        None,
+        None,
+        MessageType::Information,
+    );
+    if let Err(result_err) = write_binary_output_file(&binary_file_name, bin_string) {
+        msg_list.push(
+            format!(
+                "Unable to write to binary code file {:?}, error {}",
+                &binary_file_name, result_err
+            ),
+            None,
+            None,
+            MessageType::Error,
+        );
+    }
+}
+
 /// Send machine code to device
 ///
 /// Sends the resultant code on the serial device defined if no errors were found
@@ -456,30 +483,6 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
             None,
             None,
             MessageType::Warning,
-        );
-    }
-}
-
-/// Writes the binary file
-///
-/// If not errors are found, write the binary output file
-#[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) {
-    msg_list.push(
-        format!("Writing binary file to {binary_file_name}"),
-        None,
-        None,
-        MessageType::Information,
-    );
-    if let Err(result_err) = write_binary_output_file(&binary_file_name, bin_string) {
-        msg_list.push(
-            format!(
-                "Unable to write to binary code file {:?}, error {}",
-                &binary_file_name, result_err
-            ),
-            None,
-            None,
-            MessageType::Error,
         );
     }
 }

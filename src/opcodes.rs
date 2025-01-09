@@ -4,33 +4,34 @@ use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::messages::{MessageType, MsgList};
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Struct for opcode argument
+pub struct InputData {
+     /// File name of input file
+     pub file_name: String,
+    /// Text name of opcode
+    pub input: String,
+    /// Line number of input file
+    pub line_counter: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Struct for opcode
 pub struct Opcode {
-    /// Text name of opcode
-    pub text_name: String,
+    /// Comment from opcode definition file
+    pub comment: String,
     /// Hexadecimal opcode
     pub hex_code: String,
     /// Number of registers
     pub registers: u32,
-    /// Number of variables
-    pub variables: u32,
-    /// Comment from opcode definition file
-    pub comment: String,
     /// Section name from opcode definition file
     pub section: String,
+    /// Text name of opcode
+    pub text_name: String,
+    /// Number of variables
+    pub variables: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-/// Struct for opcode argument
-pub struct InputData {
-    /// Text name of opcode
-    pub input: String,
-    /// File name of input file
-    pub file_name: String,
-    /// Line number of input file
-    pub line_counter: u32,
-}
 
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items)]
@@ -48,10 +49,10 @@ impl Default for &InputData {
 #[derive(Debug)]
 /// Struct for Pass0
 pub struct Pass0 {
-    /// Line text
-    pub input_text_line: String,
     /// File name of input file
     pub file_name: String,
+    /// Line text
+    pub input_text_line: String,
     /// Line number of input file
     pub line_counter: u32,
 }
@@ -72,16 +73,17 @@ impl Default for &Pass0 {
 #[derive(Debug)]
 /// Struct for Pass1
 pub struct Pass1 {
+     /// File name of input file
+     pub file_name: String,
     /// Line text
     pub input_text_line: String,
-    /// File name of input file
-    pub file_name: String,
     /// Line number of input file
     pub line_counter: u32,
-    /// Program counter
-    pub program_counter: u32,
     /// Line type
     pub line_type: LineType,
+    /// Program counter
+    pub program_counter: u32,
+    
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -102,18 +104,18 @@ impl Default for &Pass1 {
 #[derive(Debug, Clone)]
 /// Struct for Pass2
 pub struct Pass2 {
+     /// File name of input file
+     pub file_name: String,
     /// Line text
     pub input_text_line: String,
-    /// File name of input file
-    pub file_name: String,
     /// Line number of input file
     pub line_counter: u32,
-    /// Program counter
-    pub program_counter: u32,
     /// Line type
     pub line_type: LineType,
-    /// Opcode as string
-    pub opcode: String,
+     /// Opcode as string
+     pub opcode: String,
+    /// Program counter
+    pub program_counter: u32,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -132,64 +134,183 @@ impl Default for &Pass2 {
     }
 }
 
-/// Parse file to opcode and macro vectors
+/// Return opcode with formatted arguments
 ///
-/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
-pub fn parse_vh_file(
-    input_list: Vec<InputData>,
+/// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values
+/// Converts label names to hex addresses
+pub fn add_arguments(
+    opcodes: &mut Vec<Opcode>,
+    line: &String,
     msg_list: &mut MsgList,
-) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
-    if input_list.is_empty() {
-        return (None, None);
-    }
+    line_number: u32,
+    filename: &str,
+    labels: &mut Vec<Label>,
+) -> String {
+    let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
+    let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
+    let mut arguments = String::default();
 
-    let mut opcodes: Vec<Opcode> = Vec::new();
-    let mut macros: Vec<Macro> = Vec::new();
-    let mut section_name = String::default();
-
-    for line in input_list {
-        if let Some(section) = line.input.trim().strip_prefix("///") {
-            section.to_owned().trim().clone_into(&mut section_name);
+    let words = line.split_whitespace();
+    #[allow(clippy::arithmetic_side_effects)]
+    for (i, word) in words.enumerate() {
+        if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
+            arguments.push_str(&{
+                let this = convert_argument(
+                    &word.to_owned().to_uppercase(),
+                    msg_list,
+                    line_number,
+                    filename.to_owned(),
+                    labels,
+                );
+                //let default = "00000000".to_owned();
+                this.unwrap_or_else(|| "00000000".to_owned())
+            });
         }
-
-        match opcode_from_string(&line.input) {
-            None => (),
-            Some(opcode) => {
-                if return_opcode(&opcode.text_name, &mut opcodes).is_some() {
-                    msg_list.push(
-                        format!("Duplicate Opcode {} found", opcode.text_name),
-                        Some(line.line_counter),
-                        Some(line.file_name.clone()),
-                        MessageType::Error,
-                    );
-                }
-                //opcodes.push(a);
-                opcodes.push(Opcode {
-                    text_name: opcode.text_name,
-                    hex_code: opcode.hex_code,
-                    registers: opcode.registers,
-                    variables: opcode.variables,
-                    comment: opcode.comment,
-                    section: section_name.clone(),
-                });
-            }
+        if i == num_registers as usize + 2 && num_arguments == 2 {
+            arguments.push_str(&{
+                let this = convert_argument(
+                    &word.to_owned().to_uppercase(),
+                    msg_list,
+                    line_number,
+                    filename.to_owned(),
+                    labels,
+                );
+                this.unwrap_or_else(|| "00000000".to_owned())
+            });
         }
-        match macro_from_string(&line.input, msg_list) {
-            None => (),
-            Some(found_macro) => {
-                if return_macro(&found_macro.name, &mut macros).is_some() {
-                    msg_list.push(
-                        format!("Duplicate Macro definition {} found", found_macro.name),
-                        Some(line.line_counter),
-                        Some(line.file_name),
-                        MessageType::Error,
-                    );
-                }
-                macros.push(found_macro);
-            }
+        if i > num_registers as usize + num_arguments as usize {
+            msg_list.push(
+                format!("Too many arguments found - \"{line}\""),
+                Some(line_number),
+                Some((filename).to_owned()),
+                MessageType::Warning,
+            );
         }
     }
-    (Some(opcodes), Some(macros))
+
+    // Can't be in tarpaulin as we can't test the error by passing wrong size
+    #[allow(clippy::arithmetic_side_effects)]
+    if arguments.len() != 8 * num_arguments as usize {
+        #[cfg(not(tarpaulin_include))]
+        msg_list.push(
+            format!("Incorrect argument definition - \"{line}\""),
+            Some(line_number),
+            Some(filename.to_owned()),
+            MessageType::Error,
+        );
+    }
+    arguments
+}
+
+/// Updates opcode with register
+///
+/// Returns the hex code operand from the line, adding register values
+#[allow(clippy::arithmetic_side_effects)]
+pub fn add_registers(
+    opcodes: &mut Vec<Opcode>,
+    line: &String,
+    filename: String,
+    msg_list: &mut MsgList,
+    line_number: u32,
+) -> String {
+    let num_registers = num_registers(opcodes, &(*line).to_uppercase()).unwrap_or(0);
+
+    let mut opcode_found = {
+        let this = return_opcode(&line.to_uppercase(), opcodes);
+        this.unwrap_or_default()
+    };
+
+    if opcode_found.len() != 8 {
+        msg_list.push(
+            format!("Incorrect register definition - \"{line}\""),
+            Some(line_number),
+            Some(filename),
+            MessageType::Error,
+        );
+        return "ERR     ".to_owned();
+    }
+
+    let cloned_opcode_found = opcode_found
+        .get(..(8 - num_registers) as usize)
+        .unwrap_or("")
+        .to_owned();
+    opcode_found.clear();
+    opcode_found.push_str(&cloned_opcode_found);
+
+    let words = line.split_whitespace();
+    for (i, word) in words.enumerate() {
+        if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
+        {
+            opcode_found.push_str(&map_reg_to_hex(word));
+        }
+    }
+
+    if opcode_found.len() != 8 || opcode_found.contains('X') {
+        msg_list.push(
+            format!("Incorrect register definition - \"{line}\""),
+            Some(line_number),
+            Some(filename),
+            MessageType::Error,
+        );
+        return "ERR     ".to_owned();
+    }
+    opcode_found
+}
+
+/// Register name to hex
+///
+/// Map the register to the hex code for the opcode
+fn map_reg_to_hex(input: &str) -> String {
+    match input.to_uppercase().as_str() {
+        "A" => "0".to_owned(),
+        "B" => "1".to_owned(),
+        "C" => "2".to_owned(),
+        "D" => "3".to_owned(),
+        "E" => "4".to_owned(),
+        "F" => "5".to_owned(),
+        "G" => "6".to_owned(),
+        "H" => "7".to_owned(),
+        "I" => "8".to_owned(),
+        "J" => "9".to_owned(),
+        "K" => "A".to_owned(),
+        "L" => "B".to_owned(),
+        "M" => "C".to_owned(),
+        "N" => "D".to_owned(),
+        "O" => "E".to_owned(),
+        "P" => "F".to_owned(),
+        _ => "X".to_owned(),
+    }
+}
+
+/// Returns number of args for opcode
+///
+/// From opcode name, option of number of arguments for opcode, or None
+pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
+    for opcode in opcodes {
+        let mut words = line.split_whitespace();
+        let first_word = words.next().unwrap_or("");
+        if first_word.to_uppercase() == opcode.text_name {
+            return Some(opcode.variables);
+        }
+    }
+    None
+}
+
+/// Returns number of registers for opcode
+///
+/// From opcode name, option of number of registers for opcode, or None
+fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
+    for opcode in opcodes {
+        let mut words = line.split_whitespace();
+        let first_word = words.next().unwrap_or("");
+        if first_word.is_empty() {
+            return None;
+        }
+        if first_word == opcode.text_name {
+            return Some(opcode.registers);
+        }
+    }
+    None
 }
 
 /// Parse opcode definition line to opcode
@@ -291,18 +412,64 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     })
 }
 
-/// Returns number of args for opcode
+/// Parse file to opcode and macro vectors
 ///
-/// From opcode name, option of number of arguments for opcode, or None
-pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
-    for opcode in opcodes {
-        let mut words = line.split_whitespace();
-        let first_word = words.next().unwrap_or("");
-        if first_word.to_uppercase() == opcode.text_name {
-            return Some(opcode.variables);
+/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
+pub fn parse_vh_file(
+    input_list: Vec<InputData>,
+    msg_list: &mut MsgList,
+) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+    if input_list.is_empty() {
+        return (None, None);
+    }
+
+    let mut opcodes: Vec<Opcode> = Vec::new();
+    let mut macros: Vec<Macro> = Vec::new();
+    let mut section_name = String::default();
+
+    for line in input_list {
+        if let Some(section) = line.input.trim().strip_prefix("///") {
+            section.to_owned().trim().clone_into(&mut section_name);
+        }
+
+        match opcode_from_string(&line.input) {
+            None => (),
+            Some(opcode) => {
+                if return_opcode(&opcode.text_name, &mut opcodes).is_some() {
+                    msg_list.push(
+                        format!("Duplicate Opcode {} found", opcode.text_name),
+                        Some(line.line_counter),
+                        Some(line.file_name.clone()),
+                        MessageType::Error,
+                    );
+                }
+                //opcodes.push(a);
+                opcodes.push(Opcode {
+                    text_name: opcode.text_name,
+                    hex_code: opcode.hex_code,
+                    registers: opcode.registers,
+                    variables: opcode.variables,
+                    comment: opcode.comment,
+                    section: section_name.clone(),
+                });
+            }
+        }
+        match macro_from_string(&line.input, msg_list) {
+            None => (),
+            Some(found_macro) => {
+                if return_macro(&found_macro.name, &mut macros).is_some() {
+                    msg_list.push(
+                        format!("Duplicate Macro definition {} found", found_macro.name),
+                        Some(line.line_counter),
+                        Some(line.file_name),
+                        MessageType::Error,
+                    );
+                }
+                macros.push(found_macro);
+            }
         }
     }
-    None
+    (Some(opcodes), Some(macros))
 }
 
 /// Returns hex opcode from name
@@ -319,168 +486,8 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
     None
 }
 
-/// Returns number of registers for opcode
-///
-/// From opcode name, option of number of registers for opcode, or None
-fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
-    for opcode in opcodes {
-        let mut words = line.split_whitespace();
-        let first_word = words.next().unwrap_or("");
-        if first_word.is_empty() {
-            return None;
-        }
-        if first_word == opcode.text_name {
-            return Some(opcode.registers);
-        }
-    }
-    None
-}
-/// Register name to hex
-///
-/// Map the register to the hex code for the opcode
-fn map_reg_to_hex(input: &str) -> String {
-    match input.to_uppercase().as_str() {
-        "A" => "0".to_owned(),
-        "B" => "1".to_owned(),
-        "C" => "2".to_owned(),
-        "D" => "3".to_owned(),
-        "E" => "4".to_owned(),
-        "F" => "5".to_owned(),
-        "G" => "6".to_owned(),
-        "H" => "7".to_owned(),
-        "I" => "8".to_owned(),
-        "J" => "9".to_owned(),
-        "K" => "A".to_owned(),
-        "L" => "B".to_owned(),
-        "M" => "C".to_owned(),
-        "N" => "D".to_owned(),
-        "O" => "E".to_owned(),
-        "P" => "F".to_owned(),
-        _ => "X".to_owned(),
-    }
-}
-
-/// Updates opcode with register
-///
-/// Returns the hex code operand from the line, adding register values
-#[allow(clippy::arithmetic_side_effects)]
-pub fn add_registers(
-    opcodes: &mut Vec<Opcode>,
-    line: &String,
-    filename: String,
-    msg_list: &mut MsgList,
-    line_number: u32,
-) -> String {
-    let num_registers = num_registers(opcodes, &(*line).to_uppercase()).unwrap_or(0);
-
-    let mut opcode_found = {
-        let this = return_opcode(&line.to_uppercase(), opcodes);
-        this.unwrap_or_default()
-    };
-
-    if opcode_found.len() != 8 {
-        msg_list.push(
-            format!("Incorrect register definition - \"{line}\""),
-            Some(line_number),
-            Some(filename),
-            MessageType::Error,
-        );
-        return "ERR     ".to_owned();
-    }
-
-    let cloned_opcode_found = opcode_found.get(..(8 - num_registers) as usize).unwrap_or("").to_owned();
-    opcode_found.clear();
-    opcode_found.push_str(&cloned_opcode_found);
-
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
-        {
-            opcode_found.push_str(&map_reg_to_hex(word));
-        }
-    }
-
-    if opcode_found.len() != 8 || opcode_found.contains('X') {
-        msg_list.push(
-            format!("Incorrect register definition - \"{line}\""),
-            Some(line_number),
-            Some(filename),
-            MessageType::Error,
-        );
-        return "ERR     ".to_owned();
-    }
-    opcode_found
-}
-
-/// Return opcode with formatted arguments
-///
-/// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values
-/// Converts label names to hex addresses
-pub fn add_arguments(
-    opcodes: &mut Vec<Opcode>,
-    line: &String,
-    msg_list: &mut MsgList,
-    line_number: u32,
-    filename: &str,
-    labels: &mut Vec<Label>,
-) -> String {
-    let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
-    let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
-    let mut arguments = String::default();
-
-    let words = line.split_whitespace();
-    #[allow(clippy::arithmetic_side_effects)]
-    for (i, word) in words.enumerate() {
-        if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
-            arguments.push_str(&{
-                let this = convert_argument(
-                    &word.to_owned().to_uppercase(),
-                    msg_list,
-                    line_number,
-                    filename.to_owned(),
-                    labels,
-                );
-                //let default = "00000000".to_owned();
-                this.unwrap_or_else(|| "00000000".to_owned())
-            });
-        }
-        if i == num_registers as usize + 2 && num_arguments == 2 {
-            arguments.push_str(&{
-                let this = convert_argument(
-                    &word.to_owned().to_uppercase(),
-                    msg_list,
-                    line_number,
-                    filename.to_owned(),
-                    labels,
-                );
-                this.unwrap_or_else(|| "00000000".to_owned())
-            });
-        }
-        if i > num_registers as usize + num_arguments as usize {
-            msg_list.push(
-                format!("Too many arguments found - \"{line}\""),
-                Some(line_number),
-                Some((filename).to_owned()),
-                MessageType::Warning,
-            );
-        }
-    }
-
-    // Can't be in tarpaulin as we can't test the error by passing wrong size
-    #[allow(clippy::arithmetic_side_effects)]
-    if arguments.len() != 8 * num_arguments as usize {
-        #[cfg(not(tarpaulin_include))]
-        msg_list.push(
-            format!("Incorrect argument definition - \"{line}\""),
-            Some(line_number),
-            Some(filename.to_owned()),
-            MessageType::Error,
-        );
-    }
-    arguments
-}
-
 #[cfg(test)]
+#[allow(clippy::arbitrary_source_item_ordering)]
 mod tests {
     use super::*;
     use crate::labels;
