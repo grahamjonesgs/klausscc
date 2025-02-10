@@ -205,7 +205,7 @@ pub fn write_to_board(
 
     thread::sleep(Duration::from_millis(500)); //Wait for board to reset
 
-    if port.flush().is_err() {};
+    port.flush()?;
 
     if port.read(&mut read_buffer[..]).is_err() { //clear any old messages in buffer
     }

@@ -114,7 +114,7 @@ pub fn convert_argument(
                 MessageType::Warning,
             );
         }
-    };
+    }
     None
 }
 

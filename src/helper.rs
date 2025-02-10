@@ -290,10 +290,10 @@ pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
 pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
     if label_name_from_string(line).is_some() {
         return LineType::Label;
-    };
+    }
     if data_name_from_string(line).is_some() {
         return LineType::Data;
-    };
+    }
     if return_opcode(line, opcodes).is_some() {
         return LineType::Opcode;
     }

@@ -333,7 +333,7 @@ fn output_opcodes_textmate(
     ) {
         Ok(()) => {}
         Err(err) => return Err(err),
-    };
+    }
 
     Ok(())
 }
@@ -472,7 +472,7 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
                     in_comment = false;
                 } else {
                     in_char = char == '*';
-                }; // Sets to true if c == '*'
+                } // Sets to true if c == '*'
             } else if char == '*' && in_char {
                 in_comment = true;
                 new_line.pop();
