@@ -2,7 +2,7 @@ use crate::helper::trim_newline;
 use crate::messages::{MessageType, MsgList};
 use core::time::Duration;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 use std::thread;
 
 /// Used to define if a port request was not defined so is for auto
@@ -120,7 +120,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
                     None,
                     MessageType::Error,
                 );
-                Err(Error::new(ErrorKind::Other, "No ports found"))
+                Err(Error::other("No ports found"))
             }
             Ok(ports) => {
                 let mut max_ports: i32 = -1;
@@ -171,13 +171,13 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
                     );
                 }
 
-                Err(Error::new(ErrorKind::Other, "Failed to open port"))
+                Err(Error::other("Failed to open port"))
             }
         };
     }
 
     let Ok(port) = port_result else {
-        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+        return Err(Error::other("Unknown error"));
     };
     Ok(port)
 }

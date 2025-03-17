@@ -2,7 +2,7 @@ use crate::helper::strip_comments;
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Opcode, Pass2};
-use std::io::{Error, ErrorKind};
+use std::io::Error;
 
 use std::ffi::OsStr;
 use std::{
@@ -120,10 +120,10 @@ pub fn output_macros_opcodes_html(
             );
             return Err(html_output_file
                 .err()
-                .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+                .unwrap_or_else(|| Error::other("Unknown error")));
         }
         let Ok(mut html_file) = html_output_file else {
-            return Err(Error::new(ErrorKind::Other, "Unknown error"));
+            return Err(Error::other("Unknown error"));
         };
         html_file.write_all(b"<!DOCTYPE html>\n")?;
         html_file.write_all(b"<html>\n<head>\n<style>\n")?;
@@ -250,10 +250,10 @@ pub fn output_macros_opcodes_json(
         );
         return Err(json_opcode_output_file
             .err()
-            .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+            .unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_opcode_file) = json_opcode_output_file else {
-        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+        return Err(Error::other("Unknown error"));
     };
     json_opcode_file.write_all(
         serde_json::to_string_pretty(&opcodes)
@@ -272,10 +272,10 @@ pub fn output_macros_opcodes_json(
         );
         return Err(json_macro_output_file
             .err()
-            .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+            .unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_macro_file) = json_macro_output_file else {
-        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+        return Err(Error::other("Unknown error"));
     };
     json_macro_file.write_all(
         serde_json::to_string_pretty(&macros)
@@ -313,10 +313,10 @@ fn output_opcodes_textmate(
         );
         return Err(textmate_opcode_output_file
             .err()
-            .unwrap_or_else(|| Error::new(ErrorKind::Other, "Unknown error")));
+            .unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
-        return Err(Error::new(ErrorKind::Other, "Unknown error"));
+        return Err(Error::other("Unknown error"));
     };
     #[allow(clippy::arithmetic_side_effects)]
     match json_opcode_file.write_all(
