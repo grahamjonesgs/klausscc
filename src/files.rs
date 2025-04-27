@@ -593,7 +593,6 @@ pub fn write_code_output_file(
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-#[allow(clippy::arbitrary_source_item_ordering)]
 mod test {
     use std::fs;
 

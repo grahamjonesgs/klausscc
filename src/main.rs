@@ -6,7 +6,7 @@
     clippy::cargo,
 )]
 
-#![allow(clippy::absolute_paths)]
+//#![allow(clippy::absolute_paths)]
 #![allow(clippy::or_fun_call)]
 #![allow(clippy::allow_attributes)]
 #![allow(clippy::allow_attributes_without_reason)]
@@ -17,7 +17,7 @@
 #![allow(clippy::blanket_clippy_restriction_lints)]
 #![allow(clippy::multiple_crate_versions)]
 #![allow(clippy::single_call_fn)]
-#![allow(clippy::arbitrary_source_item_ordering)]
+#![allow(clippy::redundant_test_prefix)]
 
 
 //! Top level file for Klausscc

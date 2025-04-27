@@ -36,6 +36,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     }
 
     let mut position_index: u32 = 0;
+    #[allow(clippy::char_indices_as_byte_indices)]
     for (index, _) in stripped_string.chars().enumerate() {
         #[allow(clippy::integer_division_remainder_used)]
         if index % 4 == 0 {

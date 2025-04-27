@@ -5,7 +5,6 @@ use core::fmt::Write as _;
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 /// Holds instance of macro from opcode definition file
 pub struct Macro {
@@ -16,7 +15,7 @@ pub struct Macro {
     /// Name of macro
     pub name: String,
     /// Number of variables
-    pub variables: u32,  
+    pub variables: u32,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -118,7 +117,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                             + " "
                                             + item_line_array
                                                 .get(int_value.clone().unwrap_or(0) as usize)
-                                                .unwrap_or(&String::default());
+                                                .unwrap_or(&String::new());
                                     }
                                 } else {
                                     build_line = build_line + " " + item_word;
@@ -142,7 +141,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                 comment: input_macro_line.comment,
             });
         }
-        
+
         pass += 1;
         input_macros.clone_from(&output_macros);
     }
@@ -261,10 +260,8 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
     }
 
     if max_variable
-        != TryInto::<u32>::try_into(
-            all_found_variables.clone().into_iter().unique().count(),
-        )
-        .unwrap_or_default()
+        != TryInto::<u32>::try_into(all_found_variables.clone().into_iter().unique().count())
+            .unwrap_or_default()
     {
         for i in 1..max_variable {
             all_variables.push(i.into());
@@ -836,30 +833,29 @@ mod tests {
         ];
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            strip_comments(& pass0.first().unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()),
             "MOV A"
         );
         assert_eq!(
-            strip_comments(& pass0.first().unwrap_or_default().file_name.clone()),
+            strip_comments(&pass0.first().unwrap_or_default().file_name.clone()),
             "File1"
         );
         assert_eq!(
-            strip_comments(& pass0.get(1).unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()),
             "RET B"
         );
         assert_eq!(
-            strip_comments(& pass0.get(2).unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()),
             "PUSH D"
         );
         assert_eq!(
-            strip_comments(& pass0.get(3).unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.get(3).unwrap_or_default().input_text_line.clone()),
             "POP C"
         );
         assert_eq!(
-            strip_comments(& pass0.get(3).unwrap_or_default().file_name.clone()),
+            strip_comments(&pass0.get(3).unwrap_or_default().file_name.clone()),
             "File2"
         );
-    
     }
 
     #[test]
@@ -896,19 +892,19 @@ mod tests {
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            strip_comments(& pass0.first().unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()),
             "MOV A"
         );
         assert_eq!(
-            strip_comments(& pass0.get(1).unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()),
             "RET B"
         );
         assert_eq!(
-            strip_comments(& pass0.get(2).unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()),
             "PUSH"
         );
         assert_eq!(
-            strip_comments(& pass0.get(3).unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.get(3).unwrap_or_default().input_text_line.clone()),
             "POP C"
         );
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
@@ -952,16 +948,15 @@ mod tests {
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            strip_comments(& pass0.first().unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()),
             "MOV A"
         );
         assert_eq!(
-            strip_comments(& pass0.get(1).unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()),
             "RET B"
         );
         assert_eq!(
-            strip_comments(&
-             pass0.get(2).unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()),
             "PUSH D"
         );
         assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
@@ -1037,7 +1032,7 @@ mod tests {
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(
-            strip_comments(& pass0.first().unwrap_or_default().input_text_line.clone()),
+            strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()),
             "OPCODE1 A B"
         );
     }

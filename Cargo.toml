@@ -2,8 +2,8 @@
 name = "klausscc"
 version = "0.1.1"
 edition = "2021"
-authors = ["Graham jones"]
-description = "Assembler for Klauss microcontroller defined in FPGA"
+authors = ["Graham Jones"]
+description = "Assembler for Klauss micro controller defined in FPGA"
 repository = "https://github.com/grahamjonesgs/klausscc.git"
 readme = "README.md"
 license = "MIT"
