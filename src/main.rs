@@ -6,18 +6,16 @@
     clippy::cargo,
 )]
 
-//#![allow(clippy::absolute_paths)]
-#![allow(clippy::or_fun_call)]
-#![allow(clippy::allow_attributes)]
-#![allow(clippy::allow_attributes_without_reason)]
-#![allow(clippy::implicit_return)]
-#![allow(clippy::string_add)]
-#![allow(clippy::as_conversions)]
-#![allow(clippy::separated_literal_suffix)]
-#![allow(clippy::blanket_clippy_restriction_lints)]
-#![allow(clippy::multiple_crate_versions)]
-#![allow(clippy::single_call_fn)]
-#![allow(clippy::redundant_test_prefix)]
+#![allow(clippy::or_fun_call, reason = "Needed for simplicity of code")]
+#![allow(clippy::allow_attributes, reason = "Needed to allow use of clippy restrictions")]
+#![allow(clippy::implicit_return, reason = "Needed for compatibility with code using implicit returns")]
+#![allow(clippy::string_add, reason = "Needed for simplicity of code string addition")]
+#![allow(clippy::as_conversions, reason = "Needed for data manipulation")]
+#![allow(clippy::separated_literal_suffix, reason = "Needed for data manipulation")]
+#![allow(clippy::blanket_clippy_restriction_lints, reason = "Needed to enable clippy restrictions")]
+#![allow(clippy::multiple_crate_versions, reason = "Needed for compatibility with dependencies using multiple versions")]
+#![allow(clippy::single_call_fn, reason = "Needed for code using single call functions")]
+#![allow(clippy::redundant_test_prefix, reason = "Needed for compatibility with test naming")]
 
 
 //! Top level file for Klausscc
@@ -57,7 +55,7 @@ use serial::{write_to_board, AUTO_SERIAL};
 ///
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, reason = "Main function requires many lines to handle CLI and file processing logic")]
 fn main() -> Result<(), i32> {
     use std::fs::remove_file;
 
@@ -246,7 +244,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
         if line_type(&mut oplist, &pass.input_text_line) == LineType::Opcode {
             let num_args = num_arguments(&mut oplist, &strip_comments(&pass.input_text_line));
-            #[allow(clippy::arithmetic_side_effects)]
+            #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct program counter calculation")]
             if let Some(arguments) = num_args {
                 program_counter = program_counter + arguments + 1;
             }
@@ -257,9 +255,9 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             pass1.pop();
         }
     }
-    #[allow(clippy::integer_division)]
-    #[allow(clippy::arithmetic_side_effects)]
-    #[allow(clippy::integer_division_remainder_used)]
+    #[allow(clippy::integer_division, reason = "Needed for correct duration calculation")]
+    #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct duration calculation")]
+    #[allow(clippy::integer_division_remainder_used, reason = "Needed for correct duration calculation")]
     for data_pass in data_pass0 {
         pass1.push(Pass1 {
             input_text_line: data_pass.input_text_line.clone(),
@@ -331,14 +329,14 @@ pub fn get_pass2(
 /// Prints results of assembly
 ///
 /// Takes the message list and start time and prints the results to the users
-#[allow(clippy::print_stdout)]
+#[allow(clippy::print_stdout, reason = "Printing to stdout is required for user feedback in this function")]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct duration calculation")]
     let duration = Local::now().time() - start_time;
-    #[allow(clippy::float_arithmetic)]
-    #[allow(clippy::cast_precision_loss)]
+    #[allow(clippy::float_arithmetic, reason = "Needed for correct duration calculation")]
+    #[allow(clippy::cast_precision_loss, reason = "Needed for correct duration calculation")]
     let time_taken: f64 =
         duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
     println!(
@@ -594,7 +592,7 @@ mod tests {
         );
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines, reason = "Test function requires many lines to cover all test cases")]
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
     fn test_get_pass2_1() {

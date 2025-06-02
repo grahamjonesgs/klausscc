@@ -12,7 +12,7 @@ use std::{
 };
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-#[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "Private items do not require documentation in this context")]
 /// Defines the type of line
 pub enum LineType {
     Blank,
@@ -87,7 +87,7 @@ pub fn is_include(line: &str) -> bool {
 ///
 /// Writes all data of opcodes and macros to html as tables
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-#[allow(clippy::question_mark_used)]
+#[allow(clippy::question_mark_used, reason = "Use of `?` is idiomatic for error handling in this function")]
 pub fn output_macros_opcodes_html(
     filename_stem: String,
     opcodes: &[Opcode],
@@ -176,7 +176,7 @@ pub fn output_macros_opcodes_html(
         let mut sorted_macros: Vec<Macro> = macros;
         sorted_macros.sort_by(|first, second| first.name.cmp(&second.name));
 
-        #[allow(clippy::arithmetic_side_effects)]
+        #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
         for macro_item in sorted_macros.clone() {
             html_file.write_all(
                 format!(
@@ -204,7 +204,7 @@ pub fn output_macros_opcodes_html(
         )?;
     }
     // Write out the Textmate
-    #[allow(clippy::print_stdout)]
+    #[allow(clippy::print_stdout, reason = "Printing to stdout is acceptable for this documentation output")]
     if textmate_flag {
         output_opcodes_textmate(filename_stem, opcodes, msg_list)?;
     }
@@ -215,7 +215,7 @@ pub fn output_macros_opcodes_html(
 ///
 /// Writes all macros and opcodes to JSON files
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-#[allow(clippy::question_mark_used)]
+#[allow(clippy::question_mark_used, reason = "Use of `?` is idiomatic for error handling in this function")]
 pub fn output_macros_opcodes_json(
     filename_stem: String,
     opcodes: &[Opcode],
@@ -318,7 +318,7 @@ fn output_opcodes_textmate(
     let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
         return Err(Error::other("Unknown error"));
     };
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
     match json_opcode_file.write_all(
         opcodes
             .iter()
@@ -377,7 +377,7 @@ pub fn read_file_to_vector(
     let mut lines: Vec<InputData> = Vec::new();
 
     let mut line_number = 0;
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
     for line in buf.lines() {
         match line {
             Ok(line_contents) => {
@@ -496,7 +496,7 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
 /// Output the bitcode to given file
 ///
 /// Based on the bitcode string outputs to file
-#[allow(clippy::impl_trait_in_params)]
+#[allow(clippy::impl_trait_in_params, reason = "Using impl trait in parameters is acceptable for this output function")]
 pub fn write_binary_output_file(
     filename: &impl AsRef<Path>,
     output_string: &str,
@@ -522,8 +522,8 @@ pub fn write_binary_output_file(
 /// Output the code details file to given filename
 ///
 /// Writes all data to the detailed code file
-#[allow(clippy::impl_trait_in_params)]
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::impl_trait_in_params, reason = "Using impl trait in parameters is acceptable for this output function")]
+#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
 pub fn write_code_output_file(
     filename: impl AsRef<Path> + Copy,
     pass2: &mut Vec<Pass2>,
@@ -542,9 +542,9 @@ pub fn write_code_output_file(
         None,
         MessageType::Information,
     );
-    #[allow(clippy::integer_division)]
-    #[allow(clippy::cast_possible_truncation)]
-    #[allow(clippy::integer_division_remainder_used)]
+    #[allow(clippy::integer_division, reason = "Integer division is intentional and safe in this context")]
+    #[allow(clippy::cast_possible_truncation, reason = "Casting is intentional and safe in this context")]
+    #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional and safe in this context")]
     for pass in pass2 {
         out_line.clear();
         if pass.line_type == LineType::Opcode {
@@ -592,7 +592,7 @@ pub fn write_code_output_file(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used)]
+#[allow(clippy::unwrap_used, reason = "unwrap is acceptable in test code for simplicity")]
 mod test {
     use std::fs;
 
@@ -898,7 +898,7 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::let_underscore_must_use)]
+    #[allow(clippy::let_underscore_must_use, reason = "let _ is used intentionally in test code to ignore unused results")]
     // Test for simple file added
     fn test_write_file_to_vec2() {
         let mut msg_list = MsgList::new();
@@ -927,7 +927,7 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::let_underscore_must_use)]
+    #[allow(clippy::let_underscore_must_use, reason = "let _ is used intentionally in test code to ignore unused results")]
     // Test for included file
     fn test_write_file_to_vec3() {
         let mut msg_list = MsgList::new();
@@ -987,7 +987,7 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::let_underscore_must_use)]
+    #[allow(clippy::let_underscore_must_use, reason = "let _ is used intentionally in test code to ignore unused results")]
     // Test for recursive file includes
     fn test_write_file_to_vec4() {
         let mut msg_list = MsgList::new();
@@ -1023,7 +1023,7 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::let_underscore_must_use)]
+    #[allow(clippy::let_underscore_must_use, reason = "let _ is used intentionally in test code to ignore unused results")]
     // Test for missing included file
     fn test_write_file_to_vec5() {
         let mut msg_list = MsgList::new();
@@ -1057,7 +1057,7 @@ mod test {
         _ = tmp_dir.close();
     }
     #[test]
-    #[allow(clippy::let_underscore_must_use)]
+    #[allow(clippy::let_underscore_must_use, reason = "let _ is used intentionally in test code to ignore unused results")]
     // Test for missing included file name
     fn test_write_file_to_vec6() {
         let mut msg_list = MsgList::new();
@@ -1085,7 +1085,7 @@ mod test {
     }
 
     #[test]
-    #[allow(clippy::let_underscore_must_use)]
+    #[allow(clippy::let_underscore_must_use, reason = "let _ is used intentionally in test code to ignore unused results")]
     // Test for double included file
     fn test_write_file_to_vec7() {
         let mut msg_list = MsgList::new();

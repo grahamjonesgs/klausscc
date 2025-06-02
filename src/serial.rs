@@ -28,12 +28,12 @@ fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
 /// Formats the USB Port information into a human readable form.
 ///
 /// Gives more USB details
-#[allow(clippy::ref_patterns)]
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::ref_patterns, reason = "Pattern matching on references is intentional for clarity")]
+#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn extra_usb_info(info: &UsbPortInfo) -> String {
     let mut output = String::default();
-    #[allow(clippy::format_push_string)]
+    #[allow(clippy::format_push_string, reason = "Using format! with push_str for clarity and explicitness")]
     output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
 
     let mut extra_items = Vec::new();
@@ -128,7 +128,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
                     if port_count > 0 {
                         all_ports.push_str(",\n");
                     }
-                    #[allow(clippy::format_push_string)]
+                    #[allow(clippy::format_push_string, reason = "Using format! with push_str for clarity and explicitness")]
                     if let SerialPortType::UsbPort(info) = port.port_type {
                         all_ports.push_str(&format!(
                             "USB Serial Device{} {}",
@@ -185,7 +185,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
 /// Output the code details file to given serial port
 ///
 /// Will send the program to the serial port, and wait for the response
-#[allow(clippy::question_mark_used)]
+#[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling is intentional and improves readability in this context")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_to_board(
     binary_output: &str,

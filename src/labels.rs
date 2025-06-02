@@ -12,7 +12,7 @@ pub struct Label {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "Private items in this module do not require documentation for internal use.")]
 /// Default for label
 /// 
 /// Sets default as empty label
@@ -142,7 +142,7 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
 /// Create the vector of labels
 ///
 /// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels
-#[allow(clippy::module_name_repetitions)]
+#[allow(clippy::module_name_repetitions, reason = "This function name is intentionally repetitive for clarity.")]
 pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     let labels: Vec<Label> = pass1
         .iter()
@@ -238,7 +238,7 @@ pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
 }
 
 #[cfg(test)]
-#[allow(clippy::arbitrary_source_item_ordering)]
+#[allow(clippy::arbitrary_source_item_ordering, reason = "Test module order does not affect correctness.")]
 mod tests {
     use super::*;
     use crate::files::LineType;
@@ -483,7 +483,7 @@ mod tests {
 
     #[test]
     // Test that the labels are correctly extracted from the pass1 list
-    #[allow(clippy::too_many_lines)]
+    #[allow(clippy::too_many_lines, reason = "Test function intentionally has many lines for coverage.")]
     fn test_get_labels() {
         let msglist = &mut MsgList::new();
         let pass1 = vec![

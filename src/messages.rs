@@ -27,7 +27,7 @@ pub enum MessageType {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "Default implementation for reference to Message is only used internally for tests")]
 impl Default for &Message {
     fn default() -> &'static Message {
         static VALUE: Message = Message {
@@ -84,8 +84,8 @@ impl MsgList {
 /// Print out all messages
 ///
 /// Prints all the message in passed `MsgList` vector to terminal with coloured messages
-#[allow(clippy::module_name_repetitions)]
-#[allow(clippy::print_stdout)]
+#[allow(clippy::module_name_repetitions, reason = "Function name matches module name for clarity in user-facing API")]
+#[allow(clippy::print_stdout, reason = "Printing to stdout is intended for user-facing message output")]
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
 pub fn print_messages(msg_list: &MsgList) {
     for msg in &msg_list.list {

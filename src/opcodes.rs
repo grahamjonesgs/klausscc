@@ -34,7 +34,7 @@ pub struct Opcode {
 
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &InputData {
     fn default() -> &'static InputData {
         static VALUE: InputData = InputData {
@@ -58,7 +58,7 @@ pub struct Pass0 {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass0 {
     fn default() -> &'static Pass0 {
         static VALUE: Pass0 = Pass0 {
@@ -87,7 +87,7 @@ pub struct Pass1 {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass1 {
     fn default() -> &'static Pass1 {
         static VALUE: Pass1 = Pass1 {
@@ -119,7 +119,7 @@ pub struct Pass2 {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items)]
+#[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass2 {
     fn default() -> &'static Pass2 {
         static VALUE: Pass2 = Pass2 {
@@ -151,7 +151,7 @@ pub fn add_arguments(
     let mut arguments = String::default();
 
     let words = line.split_whitespace();
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
     for (i, word) in words.enumerate() {
         if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
             arguments.push_str(&{
@@ -189,7 +189,7 @@ pub fn add_arguments(
     }
 
     // Can't be in tarpaulin as we can't test the error by passing wrong size
-    #[allow(clippy::arithmetic_side_effects)]
+    #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
     if arguments.len() != 8 * num_arguments as usize {
         #[cfg(not(tarpaulin_include))]
         msg_list.push(
@@ -205,7 +205,7 @@ pub fn add_arguments(
 /// Updates opcode with register
 ///
 /// Returns the hex code operand from the line, adding register values
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
     line: &String,
@@ -316,8 +316,8 @@ fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
 /// Parse opcode definition line to opcode
 ///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
-#[allow(clippy::useless_let_if_seq)]
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::useless_let_if_seq, reason = "Needed for compatibility with generated code or macro expansion")]
+#[allow(clippy::arithmetic_side_effects, reason = "Needed for compatibility with generated code or macro expansion")]
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_comment: usize;
     let pos_end_comment: usize;
@@ -487,7 +487,7 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::arbitrary_source_item_ordering)]
+#[allow(clippy::arbitrary_source_item_ordering, reason = "Test functions are intentionally not ordered")]
 mod tests {
     use super::*;
     use crate::labels;

@@ -5,9 +5,9 @@ use crate::opcodes::{return_opcode, Opcode, Pass2};
 /// Find checksum
 ///
 /// Calculates the checksum from the string of hex values, removing control characters
-#[allow(clippy::modulo_arithmetic)]
-#[allow(clippy::arithmetic_side_effects)]
-#[allow(clippy::integer_division_remainder_used)]
+#[allow(clippy::modulo_arithmetic, reason = "Modulo arithmetic is intentional for checksum calculation")]
+#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional in this checksum context")]
+#[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for this calculation")]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     let mut stripped_string = String::default();
     let mut checksum: i32 = 0;
@@ -36,9 +36,9 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     }
 
     let mut position_index: u32 = 0;
-    #[allow(clippy::char_indices_as_byte_indices)]
+    #[allow(clippy::char_indices_as_byte_indices, reason = "Using char indices as byte indices is intentional in this context de to nature of characters")]
     for (index, _) in stripped_string.chars().enumerate() {
-        #[allow(clippy::integer_division_remainder_used)]
+        #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for this calculation")]
         if index % 4 == 0 {
             let int_value =
                 i32::from_str_radix(stripped_string.get(index..index + 4).unwrap_or("    "), 16);
@@ -161,9 +161,9 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
             let mut output_hex = String::default();
             // Length is based on multiples of 4
-            #[allow(clippy::integer_division)]
-            #[allow(clippy::arithmetic_side_effects)]
-            #[allow(clippy::integer_division_remainder_used)]  
+            #[allow(clippy::integer_division, reason = "Integer division is intentional for string length calculation")]
+            #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional for string length calculation")]
+            #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for string length calculation")]  
             output_hex.push_str(
                 format!(
                     "{:08X}",
@@ -175,8 +175,8 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
                 let hex = format!("{char:02X}");
                 output_hex.push_str(&hex);
             }
-            #[allow(clippy::arithmetic_side_effects)]
-            #[allow(clippy::integer_division_remainder_used)]
+            #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional for string length calculation")]
+            #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for string length calculation")]
             let needed_bytes = 8 - (output_hex.len() % 8);
             for _n in 0..needed_bytes {
                 output_hex.push('0');
@@ -339,7 +339,7 @@ pub fn num_data_bytes(
 /// Returns trailing comments
 ///
 ///  Removes comments and starting and training whitespace
-#[allow(clippy::arithmetic_side_effects)]
+#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional for comment extraction")]
 pub fn return_comments(input: &str) -> String {
     input.find("//").map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
 }
@@ -374,7 +374,7 @@ pub fn trim_newline(input: &mut String) {
 }
 
 #[cfg(test)]
-#[allow(clippy::arbitrary_source_item_ordering)]
+#[allow(clippy::arbitrary_source_item_ordering, reason = "Test functions can be in any order")]
 mod tests {
     use super::*;
     use crate::labels::{return_label_value, Label};
