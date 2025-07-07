@@ -1,22 +1,14 @@
-#![warn(
-    clippy::all,
-    clippy::restriction,
-    clippy::pedantic,
-    clippy::nursery,
-    clippy::cargo,
-)]
+#![warn(clippy::all, clippy::restriction, clippy::pedantic, clippy::nursery, clippy::cargo)]
 
-#![allow(clippy::or_fun_call, reason = "Needed for simplicity of code")]
 #![allow(clippy::allow_attributes, reason = "Needed to allow use of clippy restrictions")]
 #![allow(clippy::implicit_return, reason = "Needed for compatibility with code using implicit returns")]
 #![allow(clippy::string_add, reason = "Needed for simplicity of code string addition")]
 #![allow(clippy::as_conversions, reason = "Needed for data manipulation")]
 #![allow(clippy::separated_literal_suffix, reason = "Needed for data manipulation")]
 #![allow(clippy::blanket_clippy_restriction_lints, reason = "Needed to enable clippy restrictions")]
-#![allow(clippy::multiple_crate_versions, reason = "Needed for compatibility with dependencies using multiple versions")]
+#![allow(clippy::multiple_crate_versions, reason = "Needed for compatibility with crates using multiple versions")]
 #![allow(clippy::single_call_fn, reason = "Needed for code using single call functions")]
 #![allow(clippy::redundant_test_prefix, reason = "Needed for compatibility with test naming")]
-
 
 //! Top level file for Klausscc
 
@@ -36,26 +28,23 @@ mod opcodes;
 mod serial;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
-use files::{
-    filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file,
-    write_code_output_file, LineType,
-};
-use helper::{
-    create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments,
-};
+use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
+use helper::{create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
-use opcodes::{
-    add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2,
-};
+use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
 use serial::{write_to_board, AUTO_SERIAL};
 
 /// Main function for Klausscc
 ///
 /// Main function to read CLI and call other functions
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
-#[allow(clippy::too_many_lines, reason = "Main function requires many lines to handle CLI and file processing logic")]
+#[allow(
+    clippy::too_many_lines,
+    reason = "Main function requires many lines to handle CLI and file processing logic"
+)]
+#[allow(clippy::or_fun_call, reason = "Needed for simplicity of setting up strings and file names")]
 fn main() -> Result<(), i32> {
     use std::fs::remove_file;
 
@@ -69,10 +58,7 @@ fn main() -> Result<(), i32> {
         .get_one::<String>("opcode_file")
         .unwrap_or(&"opcode_select.vh".to_owned())
         .replace(' ', "");
-    let input_file_name: String = matches
-        .get_one::<String>("input")
-        .unwrap_or(&String::default())
-        .replace(' ', "");
+    let input_file_name: String = matches.get_one::<String>("input").unwrap_or(&String::default()).replace(' ', "");
     let binary_file_name: String = matches
         .get_one::<String>("bitcode")
         .unwrap_or(&filename_stem(&input_file_name))
@@ -83,10 +69,7 @@ fn main() -> Result<(), i32> {
         .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "")
         + ".code";
-    let output_serial_port: String = matches
-        .get_one::<String>("serial")
-        .unwrap_or(&String::default())
-        .replace(' ', "");
+    let output_serial_port: String = matches.get_one::<String>("serial").unwrap_or(&String::default()).replace(' ', "");
     let opcodes_flag = matches.get_flag("opcodes");
     let textmate_flag = matches.get_flag("textmate");
 
@@ -106,8 +89,7 @@ fn main() -> Result<(), i32> {
         return Err(1_i32);
     }
     let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
-    let mut macro_list =
-        expand_embedded_macros(opt_macro_list.unwrap_or_else(|| [].to_vec()), &mut msg_list);
+    let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap_or_else(|| [].to_vec()), &mut msg_list);
 
     if let Err(result_err) = output_macros_opcodes_html(
         filename_stem(&opcode_file_name),
@@ -131,24 +113,15 @@ fn main() -> Result<(), i32> {
     }
 
     // Parse the input file
-    msg_list.push(
-        format!("Input file is {input_file_name}"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
     let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
-    let input_list_option =
-        read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
+    let input_list_option = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
     if input_list_option.is_none() {
         print_messages(&msg_list);
         return Err(1_i32);
     }
 
-    let input_list = remove_block_comments(
-        input_list_option.unwrap_or_else(|| [].to_vec()),
-        &mut msg_list,
-    );
+    let input_list = remove_block_comments(input_list_option.unwrap_or_else(|| [].to_vec()), &mut msg_list);
 
     // Pass 0 to add macros
     let pass0 = expand_macros(&mut msg_list, input_list, &mut macro_list);
@@ -163,10 +136,7 @@ fn main() -> Result<(), i32> {
 
     if let Err(result_err) = write_code_output_file(&output_file_name, &mut pass2, &mut msg_list) {
         msg_list.push(
-            format!(
-                "Unable to write to code file {}, error {}",
-                &output_file_name, result_err
-            ),
+            format!("Unable to write to code file {}, error {}", &output_file_name, result_err),
             None,
             None,
             MessageType::Error,
@@ -183,12 +153,7 @@ fn main() -> Result<(), i32> {
             }
         } else {
             if remove_file(&binary_file_name).is_ok() {
-                msg_list.push(
-                    "Removed old binary file".to_owned(),
-                    None,
-                    None,
-                    MessageType::Warning,
-                );
+                msg_list.push("Removed old binary file".to_owned(), None, None, MessageType::Warning);
             }
             msg_list.push(
                 "Not writing binary file due to assembly errors creating binary file".to_owned(),
@@ -199,12 +164,7 @@ fn main() -> Result<(), i32> {
         }
     } else {
         if remove_file(&binary_file_name).is_ok() {
-            msg_list.push(
-                "Removed old binary file".to_owned(),
-                None,
-                None,
-                MessageType::Warning,
-            );
+            msg_list.push("Removed old binary file".to_owned(), None, None, MessageType::Warning);
         }
         msg_list.push(
             "Not writing new binary file due to assembly errors".to_owned(),
@@ -266,13 +226,8 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             program_counter,
             line_type: line_type(&mut oplist, &data_pass.input_text_line),
         });
-        
-        program_counter += num_data_bytes(
-            &data_pass.input_text_line,
-            msg_list,
-            data_pass.line_counter,
-            data_pass.file_name,
-        ) / 8;
+
+        program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, data_pass.file_name) / 8;
     }
     pass1
 }
@@ -280,12 +235,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
 /// Returns pass2 from pass1
 ///
 /// Pass1 with program counters and returns vector of pass2, with final values
-pub fn get_pass2(
-    msg_list: &mut MsgList,
-    pass1: Vec<Pass1>,
-    mut oplist: Vec<Opcode>,
-    mut labels: Vec<Label>,
-) -> Vec<Pass2> {
+pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opcode>, mut labels: Vec<Label>) -> Vec<Pass2> {
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
@@ -315,11 +265,7 @@ pub fn get_pass2(
             file_name: line.file_name.clone(),
             line_counter: line.line_counter,
             program_counter: line.program_counter,
-            line_type: if new_opcode.contains("ERR") {
-                LineType::Error
-            } else {
-                line.line_type
-            },
+            line_type: if new_opcode.contains("ERR") { LineType::Error } else { line.line_type },
             opcode: new_opcode,
         });
     }
@@ -337,22 +283,13 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     let duration = Local::now().time() - start_time;
     #[allow(clippy::float_arithmetic, reason = "Needed for correct duration calculation")]
     #[allow(clippy::cast_precision_loss, reason = "Needed for correct duration calculation")]
-    let time_taken: f64 =
-        duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
+    let time_taken: f64 = duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
     println!(
         "Completed with {} error{} and {} warning{} in {} seconds",
         msg_list.number_by_type(&MessageType::Error),
-        if msg_list.number_by_type(&MessageType::Error) == 1 {
-            ""
-        } else {
-            "s"
-        },
+        if msg_list.number_by_type(&MessageType::Error) == 1 { "" } else { "s" },
         msg_list.number_by_type(&MessageType::Error),
-        if msg_list.number_by_type(&MessageType::Warning) == 1 {
-            ""
-        } else {
-            "s"
-        },
+        if msg_list.number_by_type(&MessageType::Warning) == 1 { "" } else { "s" },
         time_taken,
     );
 }
@@ -412,9 +349,7 @@ pub fn set_matches() -> Command {
                 .short('t')
                 .long("textmate")
                 .action(ArgAction::SetTrue)
-                .help(
-                    "Set if JSON output of opcodes for use in Textmate of vscode language formatter is required",
-                ),
+                .help("Set if JSON output of opcodes for use in Textmate of vscode language formatter is required"),
         )
         .arg(
             Arg::new("serial")
@@ -431,18 +366,10 @@ pub fn set_matches() -> Command {
 /// If not errors are found, write the binary output file
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) {
-    msg_list.push(
-        format!("Writing binary file to {binary_file_name}"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.push(format!("Writing binary file to {binary_file_name}"), None, None, MessageType::Information);
     if let Err(result_err) = write_binary_output_file(&binary_file_name, bin_string) {
         msg_list.push(
-            format!(
-                "Unable to write to binary code file {:?}, error {}",
-                &binary_file_name, result_err
-            ),
+            format!("Unable to write to binary code file {:?}, error {}", &binary_file_name, result_err),
             None,
             None,
             MessageType::Error,
@@ -459,20 +386,10 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
         let write_result = write_to_board(bin_string, output_serial_port, msg_list);
         match write_result {
             Ok(()) => {
-                msg_list.push(
-                    "Wrote to serial port".to_owned(),
-                    None,
-                    None,
-                    MessageType::Information,
-                );
+                msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
             }
             Err(err) => {
-                msg_list.push(
-                    format!("Failed to write to serial port, error \"{err}\""),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
+                msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
             }
         }
     } else {
@@ -586,10 +503,7 @@ mod tests {
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Error Test_not_code_line"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Error Test_not_code_line");
     }
 
     #[allow(clippy::too_many_lines, reason = "Test function requires many lines to cover all test cases")]
@@ -719,23 +633,14 @@ mod tests {
             opcodes.clone(),
             labels,
         );
-        assert_eq!(
-            pass2.first().unwrap_or_default().opcode,
-            "00000020EEEEEEEEFFFFFFFF"
-        );
+        assert_eq!(pass2.first().unwrap_or_default().opcode, "00000020EEEEEEEEFFFFFFFF");
         assert_eq!(pass2.get(1).unwrap_or_default().opcode, "0000004000000007");
         assert_eq!(pass2.get(2).unwrap_or_default().opcode, "00000010");
         assert_eq!(pass2.get(3).unwrap_or_default().opcode, "00000030");
         assert_eq!(pass2.get(4).unwrap_or_default().opcode, "00000030");
         assert_eq!(pass2.get(5).unwrap_or_default().opcode, "000000720000AAAA");
-        assert_eq!(
-            pass2.get(6).unwrap_or_default().opcode,
-            "00000A340000000A0000000B"
-        );
-        assert_eq!(
-            pass2.get(7).unwrap_or_default().opcode,
-            "0000000248454C4C4F000000"
-        );
+        assert_eq!(pass2.get(6).unwrap_or_default().opcode, "00000A340000000A0000000B");
+        assert_eq!(pass2.get(7).unwrap_or_default().opcode, "0000000248454C4C4F000000");
         assert_eq!(pass2.get(8).unwrap_or_default().opcode, "");
     }
 

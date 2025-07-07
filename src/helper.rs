@@ -20,7 +20,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     }
 
     // check if len is divisible by 4
-    if stripped_string.len() % 4 != 0 {
+    if !stripped_string.len().is_multiple_of(4) {
         msg_list.push(
             {
                 format!(
@@ -39,7 +39,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     #[allow(clippy::char_indices_as_byte_indices, reason = "Using char indices as byte indices is intentional in this context de to nature of characters")]
     for (index, _) in stripped_string.chars().enumerate() {
         #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for this calculation")]
-        if index % 4 == 0 {
+        if index.is_multiple_of(4) {
             let int_value =
                 i32::from_str_radix(stripped_string.get(index..index + 4).unwrap_or("    "), 16);
             if int_value.is_err() {
@@ -70,6 +70,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 ///
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010)
+#[allow(clippy::or_fun_call, reason = "Needed for simplicity of setting up default start address")]
 pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<String> {
     let mut output_string = String::default();
 
