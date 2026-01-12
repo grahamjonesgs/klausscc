@@ -5,30 +5,30 @@ use crate::messages::{MessageType, MsgList};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// Struct for opcode argument
+/// Struct for opcode argument.
 pub struct InputData {
-     /// File name of input file
+     /// File name of input file.
      pub file_name: String,
-    /// Text name of opcode
+    /// Text name of opcode.
     pub input: String,
-    /// Line number of input file
+    /// Line number of input file.
     pub line_counter: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-/// Struct for opcode
+/// Struct for opcode.
 pub struct Opcode {
-    /// Comment from opcode definition file
+    /// Comment from opcode definition file.
     pub comment: String,
-    /// Hexadecimal opcode
+    /// Hexadecimal opcode.
     pub hex_code: String,
-    /// Number of registers
+    /// Number of registers.
     pub registers: u32,
-    /// Section name from opcode definition file
+    /// Section name from opcode definition file.
     pub section: String,
-    /// Text name of opcode
+    /// Text name of opcode.
     pub text_name: String,
-    /// Number of variables
+    /// Number of variables.
     pub variables: u32,
 }
 
@@ -36,6 +36,7 @@ pub struct Opcode {
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &InputData {
+    #[inline]
     fn default() -> &'static InputData {
         static VALUE: InputData = InputData {
             input: String::new(),
@@ -47,19 +48,20 @@ impl Default for &InputData {
 }
 
 #[derive(Debug)]
-/// Struct for Pass0
+/// Struct for Pass0.
 pub struct Pass0 {
-    /// File name of input file
+    /// File name of input file.
     pub file_name: String,
-    /// Line text
+    /// Line text.
     pub input_text_line: String,
-    /// Line number of input file
+    /// Line number of input file.
     pub line_counter: u32,
 }
 
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass0 {
+    #[inline]
     fn default() -> &'static Pass0 {
         static VALUE: Pass0 = Pass0 {
             input_text_line: String::new(),
@@ -71,17 +73,17 @@ impl Default for &Pass0 {
 }
 
 #[derive(Debug)]
-/// Struct for Pass1
+/// Struct for Pass1.
 pub struct Pass1 {
-     /// File name of input file
+     /// File name of input file.
      pub file_name: String,
-    /// Line text
+    /// Line text.
     pub input_text_line: String,
-    /// Line number of input file
+    /// Line number of input file.
     pub line_counter: u32,
-    /// Line type
+    /// Line type.
     pub line_type: LineType,
-    /// Program counter
+    /// Program counter.
     pub program_counter: u32,
     
 }
@@ -89,6 +91,7 @@ pub struct Pass1 {
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass1 {
+    #[inline]
     fn default() -> &'static Pass1 {
         static VALUE: Pass1 = Pass1 {
             input_text_line: String::new(),
@@ -102,25 +105,26 @@ impl Default for &Pass1 {
 }
 
 #[derive(Debug, Clone)]
-/// Struct for Pass2
+/// Struct for Pass2.
 pub struct Pass2 {
-     /// File name of input file
+     /// File name of input file.
      pub file_name: String,
-    /// Line text
+    /// Line text.
     pub input_text_line: String,
-    /// Line number of input file
+    /// Line number of input file.
     pub line_counter: u32,
-    /// Line type
+    /// Line type.
     pub line_type: LineType,
-     /// Opcode as string
+     /// Opcode as string.
      pub opcode: String,
-    /// Program counter
+    /// Program counter.
     pub program_counter: u32,
 }
 
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass2 {
+    #[inline]
     fn default() -> &'static Pass2 {
         static VALUE: Pass2 = Pass2 {
             input_text_line: String::new(),
@@ -134,10 +138,10 @@ impl Default for &Pass2 {
     }
 }
 
-/// Return opcode with formatted arguments
+/// Return opcode with formatted arguments.
 ///
-/// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values
-/// Converts label names to hex addresses
+/// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values.
+/// Converts label names to hex addresses.
 pub fn add_arguments(
     opcodes: &mut Vec<Opcode>,
     line: &String,
@@ -202,9 +206,9 @@ pub fn add_arguments(
     arguments
 }
 
-/// Updates opcode with register
+/// Updates opcode with register.
 ///
-/// Returns the hex code operand from the line, adding register values
+/// Returns the hex code operand from the line, adding register values.
 #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
@@ -257,9 +261,9 @@ pub fn add_registers(
     opcode_found
 }
 
-/// Register name to hex
+/// Register name to hex.
 ///
-/// Map the register to the hex code for the opcode
+/// Map the register to the hex code for the opcode.
 fn map_reg_to_hex(input: &str) -> String {
     match input.to_uppercase().as_str() {
         "A" => "0".to_owned(),
@@ -282,9 +286,9 @@ fn map_reg_to_hex(input: &str) -> String {
     }
 }
 
-/// Returns number of args for opcode
+/// Returns number of args for opcode.
 ///
-/// From opcode name, option of number of arguments for opcode, or None
+/// From opcode name, option of number of arguments for opcode, or None.
 pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
@@ -296,9 +300,9 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
     None
 }
 
-/// Returns number of registers for opcode
+/// Returns number of registers for opcode.
 ///
-/// From opcode name, option of number of registers for opcode, or None
+/// From opcode name, option of number of registers for opcode, or None.
 fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
@@ -313,9 +317,9 @@ fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
     None
 }
 
-/// Parse opcode definition line to opcode
+/// Parse opcode definition line to opcode.
 ///
-/// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None
+/// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None.
 #[allow(clippy::useless_let_if_seq, reason = "Needed for compatibility with generated code or macro expansion")]
 #[allow(clippy::arithmetic_side_effects, reason = "Needed for compatibility with generated code or macro expansion")]
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
@@ -412,9 +416,9 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     })
 }
 
-/// Parse file to opcode and macro vectors
+/// Parse file to opcode and macro vectors.
 ///
-/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro)
+/// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro).
 pub fn parse_vh_file(
     input_list: Vec<InputData>,
     msg_list: &mut MsgList,
@@ -472,9 +476,9 @@ pub fn parse_vh_file(
     (Some(opcodes), Some(macros))
 }
 
-/// Returns hex opcode from name
+/// Returns hex opcode from name.
 ///
-/// Checks if first word is opcode and if so returns opcode hex value
+/// Checks if first word is opcode and if so returns opcode hex value.
 pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();

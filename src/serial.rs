@@ -5,12 +5,12 @@ use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::io::Error;
 use std::thread;
 
-/// Used to define if a port request was not defined so is for auto
+/// Used to define if a port request was not defined so is for auto.
 pub const AUTO_SERIAL: &str = "auto_serial_requested";
 
-/// Return bool if port is possibly correct FDTI port
+/// Return bool if port is possibly correct FDTI port.
 ///
-/// Checks the info to check the VID and PID of known boards
+/// Checks the info to check the VID and PID of known boards.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
     let vid_pi = format!("{:04x}:{:04x}", info.vid, info.pid);
@@ -27,7 +27,7 @@ fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
 
 /// Formats the USB Port information into a human readable form.
 ///
-/// Gives more USB details
+/// Gives more USB details.
 #[allow(clippy::ref_patterns, reason = "Pattern matching on references is intentional for clarity")]
 #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
@@ -54,9 +54,9 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
     output
 }
 
-/// Checks all ports and returns option of last possible one
+/// Checks all ports and returns option of last possible one.
 ///
-/// Lists all ports, checks if ISB and possible and returns some last one or none
+/// Lists all ports, checks if ISB and possible and returns some last one or none.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn find_possible_port() -> Option<String> {
     let mut suggested_port: Option<String> = None;
@@ -78,9 +78,9 @@ pub fn find_possible_port() -> Option<String> {
     suggested_port
 }
 
-/// Return port from port name
+/// Return port from port name.
 ///
-/// If port name is `AUTO_SERIAL` then return the first USB serial port found
+/// If port name is `AUTO_SERIAL` then return the first USB serial port found.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn SerialPort>, Error> {
     let mut local_port_name = port_name.to_owned();
@@ -182,9 +182,9 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
     Ok(port)
 }
 
-/// Output the code details file to given serial port
+/// Output the code details file to given serial port.
 ///
-/// Will send the program to the serial port, and wait for the response
+/// Will send the program to the serial port, and wait for the response.
 #[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling is intentional and improves readability in this context")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_to_board(

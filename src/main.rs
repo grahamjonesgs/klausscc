@@ -2,29 +2,28 @@
 
 #![allow(clippy::allow_attributes, reason = "Needed to allow use of clippy restrictions")]
 #![allow(clippy::implicit_return, reason = "Needed for compatibility with code using implicit returns")]
-#![allow(clippy::string_add, reason = "Needed for simplicity of code string addition")]
 #![allow(clippy::as_conversions, reason = "Needed for data manipulation")]
-#![allow(clippy::separated_literal_suffix, reason = "Needed for data manipulation")]
+#![allow(clippy::separated_literal_suffix, reason = "Needed for readability of numeric literals")]
 #![allow(clippy::blanket_clippy_restriction_lints, reason = "Needed to enable clippy restrictions")]
 #![allow(clippy::multiple_crate_versions, reason = "Needed for compatibility with crates using multiple versions")]
-#![allow(clippy::single_call_fn, reason = "Needed for code using single call functions")]
+#![allow(clippy::single_call_fn, reason = "Needed for code clarity")]
 #![allow(clippy::redundant_test_prefix, reason = "Needed for compatibility with test naming")]
 
-//! Top level file for Klausscc
+//! Top level file for Klausscc.
 
-/// Module to manage file read and write
+/// Module to manage file read and write.
 mod files;
-/// Module of helper functions
+/// Module of helper functions.
 mod helper;
-/// Module to manage labels
+/// Module to manage labels.
 mod labels;
-/// Module to manage macros
+/// Module to manage macros.
 mod macros;
-/// Module to manage messages
+/// Module to manage messages.
 mod messages;
-/// Module to manage opcodes
+/// Module to manage opcodes.
 mod opcodes;
-/// Module to write to serial and read response
+/// Module to write to serial and read response.
 mod serial;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
@@ -36,9 +35,9 @@ use messages::{print_messages, MessageType, MsgList};
 use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
 use serial::{write_to_board, AUTO_SERIAL};
 
-/// Main function for Klausscc
+/// Main function for Klausscc.
 ///
-/// Main function to read CLI and call other functions
+/// Main function to read CLI and call other functions.
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 #[allow(
     clippy::too_many_lines,
@@ -59,16 +58,16 @@ fn main() -> Result<(), i32> {
         .unwrap_or(&"opcode_select.vh".to_owned())
         .replace(' ', "");
     let input_file_name: String = matches.get_one::<String>("input").unwrap_or(&String::default()).replace(' ', "");
-    let binary_file_name: String = matches
+    let mut binary_file_name: String = matches
         .get_one::<String>("bitcode")
         .unwrap_or(&filename_stem(&input_file_name))
-        .replace(' ', "")
-        + ".kbt";
-    let output_file_name: String = matches
+        .replace(' ', "");
+    binary_file_name.push_str(".kbt");
+    let mut output_file_name: String = matches
         .get_one::<String>("output")
         .unwrap_or(&filename_stem(&input_file_name))
-        .replace(' ', "")
-        + ".code";
+        .replace(' ', "");
+    output_file_name.push_str(".code");
     let output_serial_port: String = matches.get_one::<String>("serial").unwrap_or(&String::default()).replace(' ', "");
     let opcodes_flag = matches.get_flag("opcodes");
     let textmate_flag = matches.get_flag("textmate");
@@ -178,9 +177,10 @@ fn main() -> Result<(), i32> {
     Ok(())
 }
 
-/// Returns pass1 from pass0
+/// Returns pass1 from pass0.
 ///
-/// Takes the macro expanded pass0 and returns vector of pass1, with the program counters
+/// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
+#[inline]
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
@@ -232,28 +232,32 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
     pass1
 }
 
-/// Returns pass2 from pass1
+/// Returns pass2 from pass1.
 ///
-/// Pass1 with program counters and returns vector of pass2, with final values
+/// Pass1 with program counters and returns vector of pass2, with final values.
+#[inline]
 pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opcode>, mut labels: Vec<Label>) -> Vec<Pass2> {
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
-            add_registers(
+            let mut opcode = add_registers(
                 &mut oplist,
                 &strip_comments(&line.input_text_line.clone()),
                 line.file_name.clone(),
                 msg_list,
                 line.line_counter,
-            ) + add_arguments(
-                &mut oplist,
-                &strip_comments(&line.input_text_line.clone()),
-                msg_list,
-                line.line_counter,
-                &line.file_name,
-                &mut labels,
-            )
-            .as_str()
+            );
+            opcode.push_str(
+                &add_arguments(
+                    &mut oplist,
+                    &strip_comments(&line.input_text_line.clone()),
+                    msg_list,
+                    line.line_counter,
+                    &line.file_name,
+                    &mut labels,
+                )
+            );
+            opcode
         } else if line.line_type == LineType::Data {
             data_as_bytes(line.input_text_line.as_str()).unwrap_or_default()
         } else {
@@ -272,9 +276,10 @@ pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opco
     pass2
 }
 
-/// Prints results of assembly
+/// Prints results of assembly.
 ///
-/// Takes the message list and start time and prints the results to the users
+/// Takes the message list and start time and prints the results to the users.
+#[inline]
 #[allow(clippy::print_stdout, reason = "Printing to stdout is required for user feedback in this function")]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
@@ -294,9 +299,10 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     );
 }
 
-/// Manages the CLI
+/// Manages the CLI.
 ///
-/// Uses the Command from Clap to expand the CLI
+/// Uses the Command from Clap to expand the CLI.
+#[inline]
 #[cfg(not(tarpaulin_include))] // Can not test CLI in tarpaulin
 #[must_use]
 pub fn set_matches() -> Command {
@@ -361,9 +367,10 @@ pub fn set_matches() -> Command {
         )
 }
 
-/// Writes the binary file
+/// Writes the binary file.
 ///
-/// If not errors are found, write the binary output file
+/// If not errors are found, write the binary output file.
+#[inline]
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) {
     msg_list.push(format!("Writing binary file to {binary_file_name}"), None, None, MessageType::Information);
@@ -377,9 +384,10 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
     }
 }
 
-/// Send machine code to device
+/// Send machine code to device.
 ///
-/// Sends the resultant code on the serial device defined if no errors were found
+/// Sends the resultant code on the serial device defined if no errors were found.
+#[inline]
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
     if msg_list.number_by_type(&MessageType::Error) == 0 {

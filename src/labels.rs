@@ -3,20 +3,21 @@ use crate::messages::{MessageType, MsgList};
 use crate::opcodes::Pass1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// Label struct
+/// Label struct.
 pub struct Label {
-    /// Label name as text without colon
+    /// Label name as text without colon.
     pub name: String,
-    /// Program counter derived from Pass1
+    /// Program counter derived from Pass1.
     pub program_counter: u32,
 }
 
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items, reason = "Private items in this module do not require documentation for internal use.")]
-/// Default for label
-/// 
-/// Sets default as empty label
+/// Default for label.
+///
+/// Sets default as empty label.
 impl Default for &Label {
+    #[inline]
     fn default() -> &'static Label {
         static VALUE: Label = Label {
             program_counter: 0,
@@ -26,9 +27,9 @@ impl Default for &Label {
     }
 }
 
-/// Gets address from label or absolute values
+/// Gets address from label or absolute values.
 ///
-/// Converts argument to label value or converts to Hex
+/// Converts argument to label value or converts to Hex.
 pub fn convert_argument(
     argument: &str,
     msg_list: &mut MsgList,
@@ -118,9 +119,9 @@ pub fn convert_argument(
     None
 }
 
-/// Check if label is duplicate
+/// Check if label is duplicate.
 ///
-/// Check if label is duplicate, and output message if duplicate is found
+/// Check if label is duplicate, and output message if duplicate is found.
 pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
     let mut local_labels = labels.clone();
     for label in labels {
@@ -139,9 +140,9 @@ pub fn find_duplicate_label(labels: &mut Vec<Label>, msg_list: &mut MsgList) {
     }
 }
 
-/// Create the vector of labels
+/// Create the vector of labels.
 ///
-/// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels
+/// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels.
 #[allow(clippy::module_name_repetitions, reason = "This function name is intentionally repetitive for clarity.")]
 pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     let labels: Vec<Label> = pass1
@@ -155,10 +156,7 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
                 program_counter: n.program_counter,
                 name: {
                     let this = label_name_from_string(&n.input_text_line);
-                    this.map_or_else(
-                        || data_name_from_string(&n.input_text_line).unwrap_or_default(),
-                        |x| x,
-                    )
+                    this.unwrap_or_else(|| data_name_from_string(&n.input_text_line).unwrap_or_default())
                 },
             }
         })
@@ -213,9 +211,9 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     labels
 }
 
-/// Extracts label from string
+/// Extracts label from string.
 ///
-/// Checks if end of first word is colon if so return label as option string
+/// Checks if end of first word is colon if so return label as option string.
 pub fn label_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -225,9 +223,9 @@ pub fn label_name_from_string(line: &str) -> Option<String> {
     None
 }
 
-/// Return program counter for label
+/// Return program counter for label.
 ///
-/// Return option of program counter for label if it exists, or None
+/// Return option of program counter for label if it exists, or None.
 pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
     for label in labels {
         if label.name == line {

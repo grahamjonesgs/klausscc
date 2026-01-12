@@ -13,7 +13,7 @@ use std::{
 
 #[derive(PartialEq, Eq, Debug, Clone)]
 #[allow(clippy::missing_docs_in_private_items, reason = "Private items do not require documentation in this context")]
-/// Defines the type of line
+/// Defines the type of line.
 pub enum LineType {
     Blank,
     Comment,
@@ -24,9 +24,9 @@ pub enum LineType {
     Start,
 }
 
-/// Return the stem of given filename
+/// Return the stem of given filename.
 ///
-/// Looks for first dot in the string, and returns the slice before the dot
+/// Looks for first dot in the string, and returns the slice before the dot.
 pub fn filename_stem(full_name: &String) -> String {
     let path = Path::new(full_name);
     let stem = path.file_stem();
@@ -38,31 +38,33 @@ pub fn filename_stem(full_name: &String) -> String {
     parent.to_str().unwrap_or_default().to_owned()
 }
 
-/// Format a given string, adding spaces between groups of 4
+/// Format a given string, adding spaces between groups of 4.
 ///
-/// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string
+/// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string.
 pub fn format_opcodes(input: &String) -> String {
     if input.len() == 4 {
-        return (*input).clone() + "              ";
+        return format!("{input}              ");
     }
     if input.len() == 8 {
-        return input.get(0..4).unwrap_or("    ").to_owned()
-            + input.get(4..8).unwrap_or("    ")
-            + "         ";
+        let mut result = input.get(0..4).unwrap_or("    ").to_owned();
+        result.push_str(input.get(4..8).unwrap_or("    "));
+        result.push_str("         ");
+        return result;
     }
     if input.len() == 16 {
-        return input.get(0..4).unwrap_or("    ").to_owned()
-            + input.get(4..8).unwrap_or("    ")
-            + " "
-            + input.get(8..12).unwrap_or("    ")
-            + input.get(12..16).unwrap_or("    ");
+        let mut result = input.get(0..4).unwrap_or("    ").to_owned();
+        result.push_str(input.get(4..8).unwrap_or("    "));
+        result.push(' ');
+        result.push_str(input.get(8..12).unwrap_or("    "));
+        result.push_str(input.get(12..16).unwrap_or("    "));
+        return result;
     }
     (*input).clone()
 }
 
-/// Return the filename from include string
+/// Return the filename from include string.
 ///
-/// Returns the filename from include string
+/// Returns the filename from include string.
 pub fn get_include_filename(input_line: &str) -> Option<String> {
     if !input_line.trim().starts_with("!include") {
         return None;
@@ -73,9 +75,9 @@ pub fn get_include_filename(input_line: &str) -> Option<String> {
     Some(words.next().unwrap_or("").to_owned())
 }
 
-/// Return true if string is !include
+/// Return true if string is !include.
 ///
-/// Checks if the string is include and returns true if it is
+/// Checks if the string is include and returns true if it is.
 pub fn is_include(line: &str) -> bool {
     if line.trim().starts_with("!include") {
         return true;
@@ -83,11 +85,12 @@ pub fn is_include(line: &str) -> bool {
     false
 }
 
-/// Outputs the opcodes and macros as html for documentation
+/// Outputs the opcodes and macros as html for documentation.
 ///
-/// Writes all data of opcodes and macros to html as tables
+/// Writes all data of opcodes and macros to html as tables.
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
 #[allow(clippy::question_mark_used, reason = "Use of `?` is idiomatic for error handling in this function")]
+#[allow(clippy::too_many_lines, reason = "Function is long due to output formatting")]
 pub fn output_macros_opcodes_html(
     filename_stem: String,
     opcodes: &[Opcode],
@@ -187,7 +190,11 @@ pub fn output_macros_opcodes_html(
                 macro_item
                     .items
                     .iter()
-                    .fold(String::default(), |cur, nxt| cur + "  " + nxt)
+                    .fold(String::default(), |mut cur, nxt| {
+                        cur.push_str("  ");
+                        cur.push_str(nxt);
+                        cur
+                    })
             )
                 .trim()
                 .as_bytes(),
@@ -211,9 +218,9 @@ pub fn output_macros_opcodes_html(
     Ok(())
 }
 
-/// Outputs the opcodes and macros as JSON files
+/// Outputs the opcodes and macros as JSON files.
 ///
-/// Writes all macros and opcodes to JSON files
+/// Writes all macros and opcodes to JSON files.
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
 #[allow(clippy::question_mark_used, reason = "Use of `?` is idiomatic for error handling in this function")]
 pub fn output_macros_opcodes_json(
@@ -222,8 +229,10 @@ pub fn output_macros_opcodes_json(
     macros: &[Macro],
     msg_list: &mut MsgList,
 ) -> Result<(), Error> {
-    let json_opcode_filename = filename_stem.clone() + "_opcodes.json";
-    let json_macro_filename = filename_stem + "_macros.json";
+    let mut json_opcode_filename = filename_stem.clone();
+    json_opcode_filename.push_str("_opcodes.json");
+    let mut json_macro_filename = filename_stem;
+    json_macro_filename.push_str("_macros.json");
 
     msg_list.push(
         format!("Writing JSON opcode file to {json_opcode_filename}"),
@@ -285,9 +294,9 @@ pub fn output_macros_opcodes_json(
     Ok(())
 }
 
-/// Output the opcodes for textmate to given filename
+/// Output the opcodes for textmate to given filename.
 ///
-/// Writes all data of opcodes to textmate file
+/// Writes all data of opcodes to textmate file.
 #[cfg(not(tarpaulin_include))]
 fn output_opcodes_textmate(
     filename_stem: String,
@@ -338,7 +347,7 @@ fn output_opcodes_textmate(
     Ok(())
 }
 
-/// Open text file and return as vector of strings
+/// Open text file and return as vector of strings.
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
 pub fn read_file_to_vector(
@@ -443,9 +452,9 @@ pub fn read_file_to_vector(
     Some(lines)
 }
 
-/// Remove comments from vector of strings
+/// Remove comments from vector of strings.
 ///
-/// Checks for /* */ and removes them from the vector of strings
+/// Checks for /* */ and removes them from the vector of strings.
 pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> Vec<InputData> {
     let mut in_comment = false;
     let mut new_lines: Vec<InputData> = Vec::new();
@@ -493,9 +502,9 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
     new_lines
 }
 
-/// Output the bitcode to given file
+/// Output the bitcode to given file.
 ///
-/// Based on the bitcode string outputs to file
+/// Based on the bitcode string outputs to file.
 #[allow(clippy::impl_trait_in_params, reason = "Using impl trait in parameters is acceptable for this output function")]
 pub fn write_binary_output_file(
     filename: &impl AsRef<Path>,
@@ -519,9 +528,9 @@ pub fn write_binary_output_file(
     Ok(())
 }
 
-/// Output the code details file to given filename
+/// Output the code details file to given filename.
 ///
-/// Writes all data to the detailed code file
+/// Writes all data to the detailed code file.
 #[allow(clippy::impl_trait_in_params, reason = "Using impl trait in parameters is acceptable for this output function")]
 #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
 pub fn write_code_output_file(

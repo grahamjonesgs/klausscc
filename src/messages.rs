@@ -2,33 +2,35 @@ use chrono::{Local, NaiveTime};
 use colored::{ColoredString, Colorize as _};
 
 #[derive(Debug)]
-/// Struct for message
+/// Struct for message.
 pub struct Message {
-    /// File name of file causing message if exists
+    /// File name of file causing message if exists.
     pub file_name: Option<String>,
-    /// Message type
+    /// Message type.
     pub level: MessageType,
-    /// Line number in file causing message if exists
+    /// Line number in file causing message if exists.
     pub line_number: Option<u32>,
-    /// Text of message
+    /// Text of message.
     pub text: String,
-    /// Time of message
+    /// Time of message.
     pub time: Option<NaiveTime>,
 }
 #[derive(PartialEq, Eq, Debug)]
-/// Enum for message type
+/// Enum for message type.
 pub enum MessageType {
-    /// Error message
+    /// Error message.
     Error,
-    /// Information message
+    /// Information message.
     Information,
-    /// Warning message
+    /// Warning message.
     Warning,
 }
+
 
 #[cfg(not(tarpaulin_include))]
 #[allow(clippy::missing_docs_in_private_items, reason = "Default implementation for reference to Message is only used internally for tests")]
 impl Default for &Message {
+    #[inline]
     fn default() -> &'static Message {
         static VALUE: Message = Message {
             text: String::new(),
@@ -42,28 +44,28 @@ impl Default for &Message {
 }
 
 #[derive(Debug, Default)]
-/// Struct for list of messages
+/// Struct for list of messages.
 pub struct MsgList {
-    /// Vector of messages
+    /// Vector of messages.
     pub list: Vec<Message>,
 }
 
-/// Implementation of `MsgList`
+/// Implementation of `MsgList`.
 impl MsgList {
-    /// Create new `MsgList`
+    /// Create new `MsgList`.
     pub const fn new() -> Self {
         Self { list: Vec::new() }
     }
 
    
 
-    /// Returns number of warnings in `MsgList`
+    /// Returns number of warnings in `MsgList`.
     pub fn number_by_type(&self, msg_type: &MessageType) -> usize {
         let warnings = self.list.iter().filter(|x| x.level == *msg_type).count();
         warnings
     }
 
-     /// Push message to `MsgList`
+     /// Push message to `MsgList`.
      pub fn push(
         &mut self,
         name: String,
@@ -81,9 +83,9 @@ impl MsgList {
     }
 }
 
-/// Print out all messages
+/// Print out all messages.
 ///
-/// Prints all the message in passed `MsgList` vector to terminal with coloured messages
+/// Prints all the message in passed `MsgList` vector to terminal with coloured messages.
 #[allow(clippy::module_name_repetitions, reason = "Function name matches module name for clarity in user-facing API")]
 #[allow(clippy::print_stdout, reason = "Printing to stdout is intended for user-facing message output")]
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal

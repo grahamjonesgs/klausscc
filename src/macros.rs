@@ -6,23 +6,24 @@ use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
-/// Holds instance of macro from opcode definition file
+/// Holds instance of macro from opcode definition file.
 pub struct Macro {
-    /// Comment from definition
+    /// Comment from definition.
     pub comment: String,
-    /// Items in macro as vector of strings
+    /// Items in macro as vector of strings.
     pub items: Vec<String>,
-    /// Name of macro
+    /// Name of macro.
     pub name: String,
-    /// Number of variables
+    /// Number of variables.
     pub variables: u32,
 }
 
 #[cfg(not(tarpaulin_include))]
-/// Default macro
+/// Default macro.
 impl Default for &Macro {
+    #[inline]
     fn default() -> &'static Macro {
-        /// Default macro as blank
+        /// Default macro as blank.
         static VALUE: Macro = Macro {
             name: String::new(),
             variables: 0,
@@ -33,10 +34,10 @@ impl Default for &Macro {
     }
 }
 
-/// Multi pass to resolve embedded macros
+/// Multi pass to resolve embedded macros.
 ///
-/// Takes Vector of macros, and embeds macros recursively, up to 10 passes
-/// Will create errors message for more than 10 passes
+/// Takes Vector of macros, and embeds macros recursively, up to 10 passes.
+/// Will create errors message for more than 10 passes.
 #[allow(clippy::too_many_lines, reason = "Function is complex due to macro expansion logic")]
 #[allow(clippy::module_name_repetitions, reason = "Module name repetition is acceptable for clarity in macro expansion context")]
 #[allow(clippy::arithmetic_side_effects, reason = "Macro expansion logic may involve arithmetic side effects")]
@@ -61,17 +62,27 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                     }
                     #[allow(clippy::unwrap_used, reason = "Unwrap is safe here due to prior check with is_some()")]
                     #[allow(clippy::arithmetic_side_effects, reason = "Macro expansion logic may involve arithmetic side effects")]
-                    if (return_macro(&item, &mut input_macros).unwrap().variables as usize)
-                        < item_line_array.len() - 1
-                    {
+                    if let Ok(variables_usize) = usize::try_from(return_macro(&item, &mut input_macros).unwrap().variables) {
+                        if variables_usize < item_line_array.len() - 1 {
+                            msg_list.push(
+                                format!(
+                                    "Too many variables in embedded macro \"{}\" in macro {}",
+                                    item, input_macro_line.name,
+                                ),
+                                None,
+                                None,
+                                MessageType::Warning,
+                            );
+                        }
+                    } else {
                         msg_list.push(
                             format!(
-                                "Too many variables in embedded macro \"{}\" in macro {}",
+                                "Failed to convert macro variable count to usize for embedded macro \"{}\" in macro {}",
                                 item, input_macro_line.name,
                             ),
                             None,
                             None,
-                            MessageType::Warning,
+                            MessageType::Error,
                         );
                     }
                     #[allow(clippy::unwrap_used, reason = "Unwrap is safe here due to prior check with is_some()")]
@@ -98,12 +109,31 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                             None,
                                             MessageType::Error,
                                         );
-                                    } else if int_value.clone().unwrap_or(0) as usize
-                                        > item_line_array.len() - 1
-                                    {
+                                    } else if let Ok(idx) = usize::try_from(int_value.clone().unwrap_or(0)) {
+                                        if idx > item_line_array.len() - 1 {
+                                            msg_list.push(
+                                                format!(
+                                                    "Missing argument {} for embedded macro \"{}\" in {}",
+                                                    int_value.unwrap_or(0),
+                                                    item,
+                                                    input_macro_line.name,
+                                                ),
+                                                None,
+                                                None,
+                                                MessageType::Error,
+                                            );
+                                        } else {
+                                            build_line.push(' ');
+                                            build_line.push_str(
+                                                item_line_array
+                                                    .get(idx)
+                                                    .unwrap_or(&String::new()),
+                                            );
+                                        }
+                                    } else {
                                         msg_list.push(
                                             format!(
-                                                "Missing argument {} for embedded macro \"{}\" in {}",
+                                                "Failed to convert macro argument number {} to usize in embedded macro \"{}\" in {}",
                                                 int_value.unwrap_or(0),
                                                 item,
                                                 input_macro_line.name,
@@ -112,15 +142,10 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                             None,
                                             MessageType::Error,
                                         );
-                                    } else {
-                                        build_line = build_line
-                                            + " "
-                                            + item_line_array
-                                                .get(int_value.clone().unwrap_or(0) as usize)
-                                                .unwrap_or(&String::new());
                                     }
                                 } else {
-                                    build_line = build_line + " " + item_word;
+                                    build_line.push(' ');
+                                    build_line.push_str(item_word);
                                 }
                             }
                             output_items.push(build_line.strip_prefix(' ').unwrap().to_owned());
@@ -156,9 +181,9 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
     input_macros
 }
 
-/// Expands the input lines by expanding all macros
+/// Expands the input lines by expanding all macros.
 ///
-/// Takes the input list of all lines and macro vector and expands
+/// Takes the input list of all lines and macro vector and expands.
 #[allow(clippy::module_name_repetitions, reason = "Module name repetition is acceptable for clarity in macro expansion context")]
 pub fn expand_macros(
     msg_list: &mut MsgList,
@@ -179,9 +204,11 @@ pub fn expand_macros(
             if items.is_some() {
                 for item in Option::unwrap(items) {
                     pass0.push(Pass0 {
-                        input_text_line: item
-                            + " // Macro expansion from "
-                            + &macro_name_from_string(&code_line.input).unwrap_or_default(),
+                        input_text_line: format!(
+                            "{} // Macro expansion from {}",
+                            item,
+                            macro_name_from_string(&code_line.input).unwrap_or_default()
+                        ),
                         file_name: code_line.file_name.clone(),
                         line_counter: code_line.line_counter,
                     });
@@ -210,9 +237,9 @@ pub fn expand_macros(
     pass0
 }
 
-/// Parse opcode definition line to macro
+/// Parse opcode definition line to macro.
 ///
-/// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None
+/// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None.
 pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Option<Macro> {
     // Find the macro if it exists
     if input_line_full.trim().find('$').unwrap_or(usize::MAX) != 0 {
@@ -247,11 +274,10 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
                 }
             }
 
-            if item.is_empty() {
-                item += word;
-            } else {
-                item = item + " " + word;
+            if !item.is_empty() {
+                item.push(' ');
             }
+            item.push_str(word);
         }
     }
 
@@ -297,9 +323,9 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
     })
 }
 
-/// Extracts macro from string
+/// Extracts macro from string.
 ///
-/// Checks if end of first word is colon if so return macro name as option string
+/// Checks if end of first word is colon if so return macro name as option string.
 pub fn macro_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -309,9 +335,9 @@ pub fn macro_name_from_string(line: &str) -> Option<String> {
     None
 }
 
-/// Returns Macro from name
+/// Returns Macro from name.
 ///
-/// Return option macro if it exists, or none
+/// Return option macro if it exists, or none.
 pub fn return_macro(line: &str, macros: &mut [Macro]) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -324,7 +350,7 @@ pub fn return_macro(line: &str, macros: &mut [Macro]) -> Option<Macro> {
     None
 }
 
-/// Update variables in a macro
+/// Update variables in a macro.
 ///
 /// Return option all vec string replacing %x with correct value.
 pub fn return_macro_items_replace(
@@ -392,14 +418,16 @@ pub fn return_macro_items_replace(
                                 MessageType::Error,
                             );
                         } else {
-                            build_line = build_line
-                                + " "
-                                + input_line_array
+                            build_line.push(' ');
+                            build_line.push_str(
+                                input_line_array
                                     .get(int_value.clone().unwrap_or(0) as usize)
-                                    .unwrap_or(&"");
+                                    .unwrap_or(&""),
+                            );
                         }
                     } else {
-                        build_line = build_line + " " + item_word;
+                        build_line.push(' ');
+                        build_line.push_str(item_word);
                     }
                 }
                 return_items.push(build_line.trim_start().to_owned());

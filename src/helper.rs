@@ -2,9 +2,9 @@ use crate::files::LineType;
 use crate::labels::label_name_from_string;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{return_opcode, Opcode, Pass2};
-/// Find checksum
+/// Find checksum.
 ///
-/// Calculates the checksum from the string of hex values, removing control characters
+/// Calculates the checksum from the string of hex values, removing control characters.
 #[allow(clippy::modulo_arithmetic, reason = "Modulo arithmetic is intentional for checksum calculation")]
 #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional in this checksum context")]
 #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for this calculation")]
@@ -66,10 +66,10 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     format!("{checksum:04X}")
 }
 
-/// Return String of bit codes with start/stop bytes and CRC
+/// Return String of bit codes with start/stop bytes and CRC.
 ///
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
-/// Currently only ever sets the stack to 16 bytes (Z0010)
+/// Currently only ever sets the stack to 16 bytes (Z0010).
 #[allow(clippy::or_fun_call, reason = "Needed for simplicity of setting up default start address")]
 pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<String> {
     let mut output_string = String::default();
@@ -139,9 +139,9 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     Some(output_string)
 }
 
-/// Returns bytes for data element
+/// Returns bytes for data element.
 ///
-/// Parses data element and returns data as bytes, or None if error
+/// Parses data element and returns data as bytes, or None if error.
 pub fn data_as_bytes(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -213,9 +213,9 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
     }
 }
 
-/// Extracts data name from string
+/// Extracts data name from string.
 ///
-/// Checks if start of first word is hash if so return data name as option string
+/// Checks if start of first word is hash if so return data name as option string.
 pub fn data_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
@@ -225,9 +225,9 @@ pub fn data_name_from_string(line: &str) -> Option<String> {
     None
 }
 
-/// Check if line is blank
+/// Check if line is blank.
 ///
-/// Returns true if line if just whitespace
+/// Returns true if line if just whitespace.
 pub fn is_blank(line: &str) -> bool {
     let words = line.split_whitespace();
 
@@ -239,9 +239,9 @@ pub fn is_blank(line: &str) -> bool {
     true
 }
 
-/// Check if line is comment
+/// Check if line is comment.
 ///
-/// Returns true if line if just comment
+/// Returns true if line if just comment.
 pub fn is_comment(line: &str) -> bool {
     let word = line.trim();
     if word.len() < 2 {
@@ -262,9 +262,9 @@ pub fn is_comment(line: &str) -> bool {
     false
 }
 
-/// Check if line is start
+/// Check if line is start.
 ///
-/// Returns true if line is start
+/// Returns true if line is start.
 pub fn is_start(line: &str) -> bool {
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
@@ -275,9 +275,9 @@ pub fn is_start(line: &str) -> bool {
     false
 }
 
-/// Check if line is valid
-///  
-/// Returns true if line is not error
+/// Check if line is valid.
+///
+/// Returns true if line is not error.
 pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
     let temp_line: String = line;
     if line_type(opcodes, &temp_line) == LineType::Error {
@@ -286,9 +286,9 @@ pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
     true
 }
 
-/// Returns enum of type of line
+/// Returns enum of type of line.
 ///
-/// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error
+/// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error.
 pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
     if label_name_from_string(line).is_some() {
         return LineType::Label;
@@ -314,9 +314,9 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
     LineType::Error
 }
 
-/// Return number of bytes of data
+/// Return number of bytes of data.
 ///
-/// From instruction name, option of number of bytes of data, or 0 is error
+/// From instruction name, option of number of bytes of data, or 0 is error.
 pub fn num_data_bytes(
     line: &str,
     msg_list: &mut MsgList,
@@ -337,17 +337,17 @@ pub fn num_data_bytes(
     )
 }
 
-/// Returns trailing comments
+/// Returns trailing comments.
 ///
-///  Removes comments and starting and training whitespace
+/// Removes comments and starting and training whitespace.
 #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional for comment extraction")]
 pub fn return_comments(input: &str) -> String {
     input.find("//").map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
 }
 
-/// Strip trailing comments
+/// Strip trailing comments.
 ///
-///  Removes comments and starting and training whitespace
+/// Removes comments and starting and training whitespace.
 pub fn strip_comments(input: &str) -> String {
     input.find("//").map_or_else(
         || input.trim().to_owned(),
@@ -356,9 +356,9 @@ pub fn strip_comments(input: &str) -> String {
 }
 
 
-/// Trim newline from string
+/// Trim newline from string.
 ///
-/// Removes newline from end of string
+/// Removes newline from end of string.
 pub fn trim_newline(input: &mut String) {
     if input.ends_with('\n') {
         input.pop();
