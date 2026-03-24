@@ -1,0 +1,99 @@
+// Test 11: I/O Peripherals
+// Tests: LEDV, LEDR, 7SEG1V, 7SEG2V, 7SEGR, 7SEGBLANK, SWR, RGB1V, RGB2V
+// Verification: Visual inspection of LEDs and 7-segment displays.
+//   Each step pauses with DELAYV so the result can be observed.
+//   UART outputs the step number for synchronisation.
+// Expected sequence:
+//   Step 1: LEDs show 0xAA (alternating pattern)
+//   Step 2: LEDs show 0x55 (inverse pattern)
+//   Step 3: LEDs show 0xFF (all on from register)
+//   Step 4: 7-Seg 1 shows 0x1111
+//   Step 5: 7-Seg 2 shows 0x2222
+//   Step 6: 7-Seg shows register value 0xABCD (both displays)
+//   Step 7: 7-Seg goes blank
+//   Step 8: RGB LED 1 set to 0xFF0000
+//   Step 9: RGB LED 2 set to 0x00FF00
+//   Step 10: Switch status read into register and displayed
+// Expected LEDs at end: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+NEWLINE
+
+// Step 1: LED alternating pattern
+SETR A 0x1
+TXR A
+NEWLINE
+LEDV 0xAA
+DELAYV 0xFFFF
+
+// Step 2: LED inverse pattern
+SETR A 0x2
+TXR A
+NEWLINE
+LEDV 0x55
+DELAYV 0xFFFF
+
+// Step 3: LED from register
+SETR A 0x3
+TXR A
+NEWLINE
+SETR B 0xFF
+LEDR B
+DELAYV 0xFFFF
+
+// Step 4: 7-Seg 1
+SETR A 0x4
+TXR A
+NEWLINE
+7SEG1V 0x1111
+DELAYV 0xFFFF
+
+// Step 5: 7-Seg 2
+SETR A 0x5
+TXR A
+NEWLINE
+7SEG2V 0x2222
+DELAYV 0xFFFF
+
+// Step 6: 7-Seg from register (both displays)
+SETR A 0x6
+TXR A
+NEWLINE
+SETR B 0xABCD
+7SEGR B
+DELAYV 0xFFFF
+
+// Step 7: 7-Seg blank
+SETR A 0x7
+TXR A
+NEWLINE
+7SEGBLANK
+DELAYV 0xFFFF
+
+// Step 8: RGB LED 1
+SETR A 0x8
+TXR A
+NEWLINE
+RGB1V 0xFF0000
+DELAYV 0xFFFF
+
+// Step 9: RGB LED 2
+SETR A 0x9
+TXR A
+NEWLINE
+RGB2V 0x00FF00
+DELAYV 0xFFFF
+
+// Step 10: Read switches and display
+SETR A 0xA
+TXR A
+NEWLINE
+SWR C                 // Read switch state
+7SEGR C               // Display on 7-seg
+TXR C                 // Output switch value on UART
+NEWLINE
+DELAYV 0xFFFF
+
+LEDV 0xFF
+HALT

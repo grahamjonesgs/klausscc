@@ -1,0 +1,84 @@
+// Test 10: Subroutine CALL and RET
+// Tests: CALL, RET, nested calls, register preservation across calls
+// Expected UART output:
+//   00000001  (simple CALL/RET executed, returned successfully)
+//   0000000A  (register preserved across call via push/pop)
+//   00000003  (nested call: main->func1->func2, result = 3)
+//   00000042  (conditional CALLE taken after CMPRR equal)
+//   00000099  (CALLNE not taken when equal, continues to output 0x99)
+// Expected 7SEG: 0x0A
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x0A
+NEWLINE
+
+// --- Simple CALL/RET ---
+SETR A 0x0
+CALL SIMPLE_FUNC:
+// If we get here, RET worked
+TXR A                 // Expect: 00000001 (set by SIMPLE_FUNC)
+NEWLINE
+
+// --- Register preservation across call ---
+SETR A 0x0A
+PUSH A                // Save A
+CALL CLOBBER_A:       // This function changes A
+POP A                 // Restore A
+TXR A                 // Expect: 0000000A (preserved)
+NEWLINE
+
+// --- Nested calls ---
+SETR A 0x0
+CALL NEST_OUTER:
+TXR A                 // Expect: 00000003 (incremented by 3 nested calls)
+NEWLINE
+
+// --- Conditional CALLE: call if equal ---
+SETR A 0x10
+SETR B 0x10
+CMPRR A B             // Equal
+CALLE COND_FUNC:      // Should be called
+TXR A                 // Expect: 00000042 (set by COND_FUNC)
+NEWLINE
+
+// --- Conditional CALLNE: should NOT call when equal ---
+SETR A 0x50
+SETR B 0x50
+CMPRR A B             // Equal
+CALLNE COND_FUNC:     // Should NOT be called
+SETR A 0x99
+TXR A                 // Expect: 00000099 (CALLNE was skipped)
+NEWLINE
+
+LEDV 0xFF
+HALT
+
+// --- Subroutines ---
+
+SIMPLE_FUNC:
+SETR A 0x1
+RET
+
+CLOBBER_A:
+SETR A 0xFF           // Clobbers A
+RET
+
+NEST_OUTER:
+INCR A                // A = 1
+CALL NEST_MIDDLE:
+RET
+
+NEST_MIDDLE:
+INCR A                // A = 2
+CALL NEST_INNER:
+RET
+
+NEST_INNER:
+INCR A                // A = 3
+RET
+
+COND_FUNC:
+SETR A 0x42
+RET

@@ -33,7 +33,7 @@ use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
-use serial::{write_to_board, AUTO_SERIAL};
+use serial::{monitor_serial, write_to_board, AUTO_SERIAL};
 
 /// Main function for Klausscc.
 ///
@@ -71,6 +71,7 @@ fn main() -> Result<(), i32> {
     let output_serial_port: String = matches.get_one::<String>("serial").unwrap_or(&String::default()).replace(' ', "");
     let opcodes_flag = matches.get_flag("opcodes");
     let textmate_flag = matches.get_flag("textmate");
+    let monitor_flag = matches.get_flag("monitor");
 
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
@@ -174,6 +175,30 @@ fn main() -> Result<(), i32> {
     }
 
     print_results(&msg_list, start_time);
+
+    // Monitor serial port after assembly and send if requested
+    if monitor_flag {
+        if output_serial_port.is_empty() {
+            msg_list.push(
+                "Monitor flag (-m) requires a serial port (-s)".to_owned(),
+                None,
+                None,
+                MessageType::Error,
+            );
+            print_messages(&msg_list);
+            return Err(1_i32);
+        }
+        if let Err(err) = monitor_serial(&output_serial_port, &mut msg_list) {
+            msg_list.push(
+                format!("Serial monitor stopped: \"{err}\""),
+                None,
+                None,
+                MessageType::Warning,
+            );
+            print_messages(&msg_list);
+        }
+    }
+
     Ok(())
 }
 
@@ -288,12 +313,12 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     let duration = Local::now().time() - start_time;
     #[allow(clippy::float_arithmetic, reason = "Needed for correct duration calculation")]
     #[allow(clippy::cast_precision_loss, reason = "Needed for correct duration calculation")]
-    let time_taken: f64 = duration.num_milliseconds() as f64 / 1000.0 + duration.num_seconds() as f64;
+    let time_taken: f64 = duration.num_milliseconds() as f64 / 1000.0;
     println!(
-        "Completed with {} error{} and {} warning{} in {} seconds",
+        "Completed with {} error{} and {} warning{} in {:.3} seconds",
         msg_list.number_by_type(&MessageType::Error),
         if msg_list.number_by_type(&MessageType::Error) == 1 { "" } else { "s" },
-        msg_list.number_by_type(&MessageType::Error),
+        msg_list.number_by_type(&MessageType::Warning),
         if msg_list.number_by_type(&MessageType::Warning) == 1 { "" } else { "s" },
         time_taken,
     );
@@ -364,6 +389,13 @@ pub fn set_matches() -> Command {
                 .num_args(0..=1)
                 .default_missing_value(AUTO_SERIAL)
                 .help("Serial port for output"),
+        )
+        .arg(
+            Arg::new("monitor")
+                .short('m')
+                .long("monitor")
+                .action(ArgAction::SetTrue)
+                .help("Monitor serial port for UART output after sending (Ctrl+C to stop)"),
         )
 }
 

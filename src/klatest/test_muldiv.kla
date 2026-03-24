@@ -1,0 +1,78 @@
+// Test 06: Multiply and Divide Operations
+// Tests: MULRR, MULURR, DIVRR, DIVURR, MODRR, MODURR, MULV, DIVV, MODV
+// Expected UART output:
+//   00000064  (MULRR: 10 * 10 = 100 = 0x64)
+//   00000064  (MULURR: 10 * 10 unsigned = 100)
+//   0000000A  (DIVRR: 100 / 10 = 10)
+//   0000000A  (DIVURR: 100 / 10 unsigned = 10)
+//   00000003  (MODRR: 10 % 7 = 3)
+//   00000003  (MODURR: 10 % 7 unsigned = 3)
+//   00000032  (MULV: 10 * 5 = 50 = 0x32)
+//   00000005  (DIVV: 50 / 10 = 5)
+//   00000002  (MODV: 17 % 5 = 2)
+// Expected 7SEG: 0x06
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x06
+NEWLINE
+
+// MULRR: signed multiply
+SETR A 10
+SETR B 10
+MULRR A
+TXR A                 // Expect: 00000064
+NEWLINE
+
+// MULURR: unsigned multiply
+SETR A 10
+MULURR A
+TXR A                 // Expect: 00000064
+NEWLINE
+
+// DIVRR: signed divide
+SETR A 100
+SETR B 10
+DIVRR A
+TXR A                 // Expect: 0000000A
+NEWLINE
+
+// DIVURR: unsigned divide
+SETR A 100
+DIVURR A
+TXR A                 // Expect: 0000000A
+NEWLINE
+
+// MODRR: signed modulo
+SETR A 10
+SETR B 7
+MODRR A
+TXR A                 // Expect: 00000003
+NEWLINE
+
+// MODURR: unsigned modulo
+SETR A 10
+MODURR A
+TXR A                 // Expect: 00000003
+NEWLINE
+
+// MULV: multiply by immediate
+SETR A 10
+MULV A 5
+TXR A                 // Expect: 00000032
+NEWLINE
+
+// DIVV: divide by immediate
+DIVV A 10
+TXR A                 // Expect: 00000005
+NEWLINE
+
+// MODV: modulo by immediate
+SETR A 17
+MODV A 5
+TXR A                 // Expect: 00000002
+NEWLINE
+
+LEDV 0xFF
+HALT

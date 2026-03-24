@@ -1,78 +1,78 @@
 [
   {
-    "name": "$IMBED1",
-    "variables": 0,
+    "comment": "",
     "items": [
       "DELAYV 0xFFFF"
     ],
-    "comment": ""
+    "name": "$IMBED1",
+    "variables": 0
   },
   {
-    "name": "$IMBED3",
-    "variables": 0,
+    "comment": "",
     "items": [
       "PUSH A",
       "PUSH B",
       "PUSH C",
       "DELAYV 0xFFFF"
     ],
-    "comment": ""
+    "name": "$IMBED3",
+    "variables": 0
   },
   {
-    "name": "$POPALL",
-    "variables": 0,
+    "comment": "",
     "items": [
       "POP A",
       "POP B",
       "POP C"
     ],
-    "comment": ""
+    "name": "$POPALL",
+    "variables": 0
   },
   {
-    "name": "$PUSHALL",
-    "variables": 0,
+    "comment": "",
     "items": [
       "PUSH A",
       "PUSH B",
       "PUSH C"
     ],
-    "comment": ""
+    "name": "$PUSHALL",
+    "variables": 0
   },
   {
+    "comment": "",
+    "items": [
+      "NOP",
+      "NOP",
+      "NOP"
+    ],
     "name": "$TESTM",
-    "variables": 0,
-    "items": [
-      "NOP",
-      "NOP",
-      "NOP"
-    ],
-    "comment": ""
+    "variables": 0
   },
   {
+    "comment": "",
+    "items": [
+      "NOP"
+    ],
     "name": "$TESTM2",
-    "variables": 0,
-    "items": [
-      "NOP"
-    ],
-    "comment": ""
+    "variables": 0
   },
   {
-    "name": "$UART_STRING",
-    "variables": 1,
+    "comment": "",
     "items": [
       "PUSH A",
       "PUSH B",
       "SETR A %1"
     ],
-    "comment": ""
+    "name": "$UART_STRING",
+    "variables": 1
   },
   {
-    "name": "$WAIT",
-    "variables": 2,
+    "comment": "",
     "items": [
       "DELAYV %1",
       "DELAYV %2"
     ],
-    "comment": ""
+    "name": "$WAIT",
+    "variables": 2
   }
 ]

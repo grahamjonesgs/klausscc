@@ -1,0 +1,70 @@
+// Test 09: Stack Operations
+// Tests: PUSH, POP, PUSHV, LIFO ordering, nested push/pop
+// Expected UART output:
+//   00000011  (push 0x11, pop back)
+//   00000022  (push 0x11 then 0x22, pop gets 0x22 first - LIFO)
+//   00000011  (second pop gets 0x11)
+//   000000FF  (PUSHV 0xFF, pop it back)
+//   0000000A  (push A=0xA, B=0xB, C=0xC, pop C gets 0xC)
+//   0000000B  (pop B gets 0xB)
+//   0000000A  (pop A gets 0xA)
+// Expected 7SEG: 0x09
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x09
+NEWLINE
+
+// Basic push/pop
+SETR A 0x11
+PUSH A
+SETR A 0x0            // Clear A
+POP A
+TXR A                 // Expect: 00000011
+NEWLINE
+
+// LIFO order test
+SETR A 0x11
+SETR B 0x22
+PUSH A                // Push 0x11 first
+PUSH B                // Push 0x22 second
+POP C                 // Should get 0x22 (last in, first out)
+TXR C                 // Expect: 00000022
+NEWLINE
+POP C                 // Should get 0x11
+TXR C                 // Expect: 00000011
+NEWLINE
+
+// PUSHV: push immediate value
+PUSHV 0xFF
+POP A
+TXR A                 // Expect: 000000FF
+NEWLINE
+
+// Triple push/pop: verify all three restore correctly
+SETR A 0xA
+SETR B 0xB
+SETR C 0xC
+PUSH A
+PUSH B
+PUSH C
+
+// Clear all registers
+SETR A 0x0
+SETR B 0x0
+SETR C 0x0
+
+// Pop in reverse order
+POP C
+TXR C                 // Expect: 0000000C
+NEWLINE
+POP B
+TXR B                 // Expect: 0000000B
+NEWLINE
+POP A
+TXR A                 // Expect: 0000000A
+NEWLINE
+
+LEDV 0xFF
+HALT

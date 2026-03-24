@@ -14,7 +14,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 
     // Remove S, Z and X
     for char in input_string.chars() {
-        if (char != 'S') && (char != 'Z') & (char != 'X') {
+        if (char != 'S') && (char != 'Z') && (char != 'X') {
             stripped_string.push(char);
         }
     }

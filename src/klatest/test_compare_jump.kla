@@ -1,0 +1,137 @@
+// Test 07: Comparison and Conditional Jumps
+// Tests: CMPRR, CMPRV, JMPZ, JMPNZ, JMPE, JMPNE, JMPS, JMPNS, JMPLT, JMPGT
+// Verification method: Each test outputs a PASS code via TXR.
+//   If a wrong branch is taken, that test outputs FAIL (0xFFFFFFFF) instead.
+// Expected UART output (all pass):
+//   00000001  (JMPZ: taken after DECR to zero)
+//   00000002  (JMPNZ: taken when register not zero)
+//   00000003  (JMPE: taken after CMPRR equal)
+//   00000004  (JMPNE: taken after CMPRR not equal)
+//   00000005  (JMPS: taken when result negative)
+//   00000006  (JMPNS: taken when result positive)
+//   00000007  (JMPLT: taken after signed less-than compare)
+//   00000008  (JMPGT: taken after signed greater-than compare)
+// Expected 7SEG: 0x07
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x07
+NEWLINE
+
+// --- Test JMPZ: jump if zero ---
+SETR A 1
+DECR A                // A = 0, zero flag set
+JMPZ T1_PASS:
+SETR P 0xFFFFFFFF     // FAIL
+TXR P
+NEWLINE
+JMP T2:
+T1_PASS:
+SETR P 0x1
+TXR P                 // Expect: 00000001
+NEWLINE
+
+// --- Test JMPNZ: jump if not zero ---
+T2:
+SETR A 5
+JMPNZ T2_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T3:
+T2_PASS:
+SETR P 0x2
+TXR P                 // Expect: 00000002
+NEWLINE
+
+// --- Test JMPE: jump if equal ---
+T3:
+SETR A 0x42
+SETR B 0x42
+CMPRR A B             // Equal flag set
+JMPE T3_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T4:
+T3_PASS:
+SETR P 0x3
+TXR P                 // Expect: 00000003
+NEWLINE
+
+// --- Test JMPNE: jump if not equal ---
+T4:
+SETR A 0x42
+SETR B 0x99
+CMPRR A B             // Not equal
+JMPNE T4_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T5:
+T4_PASS:
+SETR P 0x4
+TXR P                 // Expect: 00000004
+NEWLINE
+
+// --- Test JMPS: jump if sign (negative) ---
+T5:
+SETR A 0x0
+DECR A                // A = 0xFFFFFFFF (negative)
+JMPS T5_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T6:
+T5_PASS:
+SETR P 0x5
+TXR P                 // Expect: 00000005
+NEWLINE
+
+// --- Test JMPNS: jump if not sign (positive) ---
+T6:
+SETR A 0x1            // Positive
+JMPNS T6_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T7:
+T6_PASS:
+SETR P 0x6
+TXR P                 // Expect: 00000006
+NEWLINE
+
+// --- Test JMPLT: signed less than ---
+T7:
+SETR A 0x5
+SETR B 0x10
+CMPLTRR A             // A(5) < B(16)? yes
+JMPLT T7_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T8:
+T7_PASS:
+SETR P 0x7
+TXR P                 // Expect: 00000007
+NEWLINE
+
+// --- Test JMPGT: signed greater than ---
+T8:
+SETR A 0x10
+SETR B 0x5
+CMPGTRR A             // A(16) > B(5)? yes
+JMPGT T8_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP DONE:
+T8_PASS:
+SETR P 0x8
+TXR P                 // Expect: 00000008
+NEWLINE
+
+DONE:
+LEDV 0xFF
+HALT

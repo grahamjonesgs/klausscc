@@ -1,0 +1,55 @@
+// Test 14: Sign/Zero Extension and Type Conversion
+// Tests: SEXTB, SEXTH, ZEXTB, ZEXTH
+// Expected UART output:
+//   FFFFFF80  (SEXTB: 0x80 sign-extended from byte = 0xFFFFFF80)
+//   0000007F  (SEXTB: 0x7F sign-extended from byte = 0x0000007F, positive)
+//   FFFF8000  (SEXTH: 0x8000 sign-extended from halfword = 0xFFFF8000)
+//   00007FFF  (SEXTH: 0x7FFF sign-extended from halfword = 0x00007FFF)
+//   000000AB  (ZEXTB: 0x12AB zero-extended byte = 0x000000AB)
+//   0000CDEF  (ZEXTH: 0xABCDEF zero-extended halfword = 0x0000CDEF)
+// Expected 7SEG: 0x0E
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x0E
+NEWLINE
+
+// SEXTB: sign extend byte, negative (bit 7 set)
+SETR A 0x80
+SEXTB A
+TXR A                 // Expect: FFFFFF80
+NEWLINE
+
+// SEXTB: sign extend byte, positive (bit 7 clear)
+SETR A 0x7F
+SEXTB A
+TXR A                 // Expect: 0000007F
+NEWLINE
+
+// SEXTH: sign extend halfword, negative (bit 15 set)
+SETR A 0x8000
+SEXTH A
+TXR A                 // Expect: FFFF8000
+NEWLINE
+
+// SEXTH: sign extend halfword, positive
+SETR A 0x7FFF
+SEXTH A
+TXR A                 // Expect: 00007FFF
+NEWLINE
+
+// ZEXTB: zero extend byte (mask upper bits)
+SETR A 0x12AB
+ZEXTB A
+TXR A                 // Expect: 000000AB
+NEWLINE
+
+// ZEXTH: zero extend halfword
+SETR A 0xABCDEF
+ZEXTH A
+TXR A                 // Expect: 0000CDEF
+NEWLINE
+
+LEDV 0xFF
+HALT

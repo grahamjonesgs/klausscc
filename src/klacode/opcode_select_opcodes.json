@@ -1,578 +1,1162 @@
 [
   {
-    "text_name": "COPY",
-    "hex_opcode": "000001??",
-    "registers": 2,
-    "variables": 0,
     "comment": "Copy registers, first to second",
-    "section": "Register control 0xxx"
+    "hex_code": "000001??",
+    "registers": 2,
+    "section": "",
+    "text_name": "COPY",
+    "variables": 0
   },
   {
-    "text_name": "AND",
-    "hex_opcode": "000002??",
-    "registers": 2,
-    "variables": 0,
     "comment": "And registers, result in first register",
-    "section": "Register control 0xxx"
+    "hex_code": "000002??",
+    "registers": 2,
+    "section": "",
+    "text_name": "AND",
+    "variables": 0
   },
   {
-    "text_name": "OR",
-    "hex_opcode": "000003??",
-    "registers": 2,
-    "variables": 0,
     "comment": "Or registers, result in first register",
-    "section": "Register control 0xxx"
+    "hex_code": "000003??",
+    "registers": 2,
+    "section": "",
+    "text_name": "OR",
+    "variables": 0
   },
   {
-    "text_name": "XOR",
-    "hex_opcode": "000004??",
-    "registers": 2,
-    "variables": 0,
     "comment": "XOR registers, result in first register",
-    "section": "Register control 0xxx"
+    "hex_code": "000004??",
+    "registers": 2,
+    "section": "",
+    "text_name": "XOR",
+    "variables": 0
   },
   {
-    "text_name": "CMPRR",
-    "hex_opcode": "000005??",
-    "registers": 2,
-    "variables": 0,
     "comment": "Compare registers, result in equal flag",
-    "section": "Register control 0xxx"
+    "hex_code": "000005??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPRR",
+    "variables": 0
   },
   {
-    "text_name": "MINUSRR",
-    "hex_opcode": "000007??",
+    "comment": "Add registers, result in first register",
+    "hex_code": "000006??",
     "registers": 2,
-    "variables": 0,
+    "section": "",
+    "text_name": "ADDRR",
+    "variables": 0
+  },
+  {
     "comment": "Minus registers, result in first register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "SETR",
-    "hex_opcode": "0000080?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "Set register to a value",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "ADDV",
-    "hex_opcode": "0000081?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "Increment register by a value",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "MINUSV",
-    "hex_opcode": "0000082?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "Decrement register by a value",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "INCR",
-    "hex_opcode": "0000084?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Increment register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "DECR",
-    "hex_opcode": "0000085?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Decrement register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "ANDV",
-    "hex_opcode": "0000086?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "AND register with value, result in register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "ORV",
-    "hex_opcode": "0000087?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "OR register with value, result in register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "XORV",
-    "hex_opcode": "0000088?",
-    "registers": 1,
-    "variables": 1,
-    "comment": "XOR register with value,result in register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "SETFR",
-    "hex_opcode": "0000089?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Set register to flags value",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "NEGR",
-    "hex_opcode": "000008A?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Set register 2's compliments",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "SHLR",
-    "hex_opcode": "000008D?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Left shift register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "SHRR",
-    "hex_opcode": "000008E?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Right shift register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "SHLAR",
-    "hex_opcode": "000008F?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Left shift arithmetical register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "SHRAR",
-    "hex_opcode": "0000090?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Right shift arithmetical register",
-    "section": "Register control 0xxx"
-  },
-  {
-    "text_name": "JMP",
-    "hex_opcode": "00001000",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "JMPZ",
-    "hex_opcode": "00001001",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump if zero",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "JMPNZ",
-    "hex_opcode": "00001002",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump if not zero",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "JMPE",
-    "hex_opcode": "00001003",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump if equal",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "JMPNE",
-    "hex_opcode": "00001004",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump if not equal",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "JMPC",
-    "hex_opcode": "00001005",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump if carry",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "JMPNC",
-    "hex_opcode": "00001006",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump if not carry",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "JMPO",
-    "hex_opcode": "00001007",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump if overflow",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "JMPNO",
-    "hex_opcode": "00001008",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Jump if not overflow",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALL",
-    "hex_opcode": "00001009",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call function",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALLZ",
-    "hex_opcode": "0000100A",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call if zero",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALLNZ",
-    "hex_opcode": "0000100B",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call if not zero",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALLE",
-    "hex_opcode": "0000100C",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call if equal",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALLNE",
-    "hex_opcode": "0000100D",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call if not equal",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALLC",
-    "hex_opcode": "0000100E",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call if carry",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALLNC",
-    "hex_opcode": "0000100F",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call if not carry",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALLO",
-    "hex_opcode": "00001010",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call if overflow",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CALLNO",
-    "hex_opcode": "00001011",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Call if not overflow",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "RET",
-    "hex_opcode": "00001012",
-    "registers": 0,
-    "variables": 0,
-    "comment": "Return from call",
-    "section": "Flow control 1xxx"
-  },
-  {
-    "text_name": "CDCDMR",
-    "hex_opcode": "0000200?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "LCD command with register",
-    "section": "SPI LCD Control 2xxx"
-  },
-  {
-    "text_name": "LCDDATAR",
-    "hex_opcode": "0000201?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "LCD data with register",
-    "section": "SPI LCD Control 2xxx"
-  },
-  {
-    "text_name": "LCDCMDV",
-    "hex_opcode": "00002021",
-    "registers": 0,
-    "variables": 1,
-    "comment": "LCD write command value",
-    "section": "SPI LCD Control 2xxx"
-  },
-  {
-    "text_name": "LCDDATAV",
-    "hex_opcode": "00002022",
-    "registers": 0,
-    "variables": 1,
-    "comment": "LCD data with value",
-    "section": "SPI LCD Control 2xxx"
-  },
-  {
-    "text_name": "LCD",
-    "hex_opcode": "00002023",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Reset line",
-    "section": "SPI LCD Control 2xxx"
-  },
-  {
-    "text_name": "LEDR",
-    "hex_opcode": "0000300?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "set LEDs with register",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "SWR",
-    "hex_opcode": "0000301?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Get switch status into register",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "7SEG1R",
-    "hex_opcode": "0000302?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Set 7 Seg 1 to register",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "7SEG2R",
-    "hex_opcode": "0000303?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Set 7 Seg 2 to register",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "7SEGR",
-    "hex_opcode": "0000304?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Set 7 Seg to register",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "RGB1R",
-    "hex_opcode": "0000305?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "RGB 1 from register",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "RGB2R",
-    "hex_opcode": "0000306?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "RGB 2 from register",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "LEDV",
-    "hex_opcode": "00003070",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Set LED to value",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "7SEG1V",
-    "hex_opcode": "00003071",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Set 7 Seg 1 to value",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "7SEG2V",
-    "hex_opcode": "00003072",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Set 7 Seg 2 to value",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "7SEGBLANK",
-    "hex_opcode": "00003073",
-    "registers": 0,
-    "variables": 0,
-    "comment": "Blank 7 Seg",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "RGB1V",
-    "hex_opcode": "00003074",
-    "registers": 0,
-    "variables": 1,
-    "comment": "RGB 1 from value",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "RGB2V",
-    "hex_opcode": "00003075",
-    "registers": 0,
-    "variables": 1,
-    "comment": "RGB 2 from value",
-    "section": "Board LED and Switch 3xxx"
-  },
-  {
-    "text_name": "PUSH",
-    "hex_opcode": "0000400?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Push register onto stack",
-    "section": "Stack control 4xxx"
-  },
-  {
-    "text_name": "POP",
-    "hex_opcode": "0000401?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "Pop stack into register",
-    "section": "Stack control 4xxx"
-  },
-  {
-    "text_name": "PUSHV",
-    "hex_opcode": "00004020",
-    "registers": 0,
-    "variables": 1,
-    "comment": "Push value onto stack",
-    "section": "Stack control 4xxx"
-  },
-  {
-    "text_name": "TESTMSG",
-    "hex_opcode": "00005000",
-    "registers": 0,
-    "variables": 0,
-    "comment": "send test UART message",
-    "section": "Communication 5xxxx"
-  },
-  {
-    "text_name": "NEWLINE",
-    "hex_opcode": "00005001",
-    "registers": 0,
-    "variables": 0,
-    "comment": "send UART newline",
-    "section": "Communication 5xxxx"
-  },
-  {
-    "text_name": "TXMEM",
-    "hex_opcode": "00005002",
-    "registers": 0,
-    "variables": 1,
-    "comment": "send 8 bytes value of memory location",
-    "section": "Communication 5xxxx"
-  },
-  {
-    "text_name": "TXSTRMEM",
-    "hex_opcode": "00005003",
-    "registers": 0,
-    "variables": 1,
-    "comment": "send string at memory",
-    "section": "Communication 5xxxx"
-  },
-  {
-    "text_name": "TXR",
-    "hex_opcode": "0000501?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "send 8 bytes reg value in message",
-    "section": "Communication 5xxxx"
-  },
-  {
-    "text_name": "TXSTRMEMR",
-    "hex_opcode": "0000504?",
-    "registers": 1,
-    "variables": 0,
-    "comment": "send string at memory location from register",
-    "section": "Communication 5xxxx"
-  },
-  {
-    "text_name": "INTSETRR",
-    "hex_opcode": "000060??",
+    "hex_code": "000007??",
     "registers": 2,
-    "variables": 0,
-    "comment": "Set interrupt from registers",
-    "section": "CPU Setting 6xxxx"
+    "section": "",
+    "text_name": "MINUSRR",
+    "variables": 0
   },
   {
-    "text_name": "DELAYR",
-    "hex_opcode": "0000F00?",
+    "comment": "Set register to a value",
+    "hex_code": "0000080?",
     "registers": 1,
-    "variables": 0,
+    "section": "",
+    "text_name": "SETR",
+    "variables": 1
+  },
+  {
+    "comment": "Increment register by a value",
+    "hex_code": "0000081?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ADDV",
+    "variables": 1
+  },
+  {
+    "comment": "Decrement register by a value",
+    "hex_code": "0000082?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MINUSV",
+    "variables": 1
+  },
+  {
+    "comment": "Compare register to value, result in equal flag",
+    "hex_code": "0000083?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPRV",
+    "variables": 1
+  },
+  {
+    "comment": "Increment register",
+    "hex_code": "0000084?",
+    "registers": 1,
+    "section": "",
+    "text_name": "INCR",
+    "variables": 0
+  },
+  {
+    "comment": "Decrement register",
+    "hex_code": "0000085?",
+    "registers": 1,
+    "section": "",
+    "text_name": "DECR",
+    "variables": 0
+  },
+  {
+    "comment": "AND register with value, result in register",
+    "hex_code": "0000086?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ANDV",
+    "variables": 1
+  },
+  {
+    "comment": "OR register with value, result in register",
+    "hex_code": "0000087?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ORV",
+    "variables": 1
+  },
+  {
+    "comment": "XOR register with value, result in register",
+    "hex_code": "0000088?",
+    "registers": 1,
+    "section": "",
+    "text_name": "XORV",
+    "variables": 1
+  },
+  {
+    "comment": "Set register to flags value",
+    "hex_code": "0000089?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SETFR",
+    "variables": 0
+  },
+  {
+    "comment": "Set register 2's complement",
+    "hex_code": "000008A?",
+    "registers": 1,
+    "section": "",
+    "text_name": "NEGR",
+    "variables": 0
+  },
+  {
+    "comment": "Absolute value of register",
+    "hex_code": "000008B?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ABSR",
+    "variables": 0
+  },
+  {
+    "comment": "Sign extend byte to 32 bits",
+    "hex_code": "000008C?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SEXTB",
+    "variables": 0
+  },
+  {
+    "comment": "Left shift register by 1",
+    "hex_code": "000008D?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SHLR",
+    "variables": 0
+  },
+  {
+    "comment": "Right shift register by 1 (logical)",
+    "hex_code": "000008E?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SHRR",
+    "variables": 0
+  },
+  {
+    "comment": "Left shift arithmetical register",
+    "hex_code": "000008F?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SHLAR",
+    "variables": 0
+  },
+  {
+    "comment": "Right shift arithmetical register by 1",
+    "hex_code": "0000090?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SHRAR",
+    "variables": 0
+  },
+  {
+    "comment": "Left shift register by N bits",
+    "hex_code": "0000091?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SHLV",
+    "variables": 1
+  },
+  {
+    "comment": "Right shift register by N bits (logical)",
+    "hex_code": "0000092?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SHRV",
+    "variables": 1
+  },
+  {
+    "comment": "Right shift arithmetical by N bits",
+    "hex_code": "0000093?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SHRAV",
+    "variables": 1
+  },
+  {
+    "comment": "Sign extend halfword to 32 bits",
+    "hex_code": "0000094?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SEXTH",
+    "variables": 0
+  },
+  {
+    "comment": "Zero extend byte to 32 bits",
+    "hex_code": "0000095?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ZEXTB",
+    "variables": 0
+  },
+  {
+    "comment": "Zero extend halfword to 32 bits",
+    "hex_code": "0000096?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ZEXTH",
+    "variables": 0
+  },
+  {
+    "comment": "Byte swap (endian conversion)",
+    "hex_code": "0000097?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BSWAP",
+    "variables": 0
+  },
+  {
+    "comment": "Minimum of two registers (signed)",
+    "hex_code": "0000098?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MINRR",
+    "variables": 0
+  },
+  {
+    "comment": "Maximum of two registers (signed)",
+    "hex_code": "0000099?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MAXRR",
+    "variables": 0
+  },
+  {
+    "comment": "Minimum unsigned",
+    "hex_code": "000009A?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MINURR",
+    "variables": 0
+  },
+  {
+    "comment": "Maximum unsigned",
+    "hex_code": "000009B?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MAXURR",
+    "variables": 0
+  },
+  {
+    "comment": "Set bit N in register",
+    "hex_code": "00000A0?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BSET",
+    "variables": 1
+  },
+  {
+    "comment": "Clear bit N in register",
+    "hex_code": "00000A1?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BCLR",
+    "variables": 1
+  },
+  {
+    "comment": "Toggle bit N in register",
+    "hex_code": "00000A2?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BTGL",
+    "variables": 1
+  },
+  {
+    "comment": "Test bit N, result in zero flag",
+    "hex_code": "00000A3?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BTST",
+    "variables": 1
+  },
+  {
+    "comment": "Set bit (bit number in second reg)",
+    "hex_code": "00000A4?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BSETRR",
+    "variables": 0
+  },
+  {
+    "comment": "Clear bit (bit number in second reg)",
+    "hex_code": "00000A5?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BCLRRR",
+    "variables": 0
+  },
+  {
+    "comment": "Toggle bit (bit number in second reg)",
+    "hex_code": "00000A6?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BTGLRR",
+    "variables": 0
+  },
+  {
+    "comment": "Test bit (bit number in second reg)",
+    "hex_code": "00000A7?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BTSTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Population count (count 1 bits)",
+    "hex_code": "00000A8?",
+    "registers": 1,
+    "section": "",
+    "text_name": "POPCNT",
+    "variables": 0
+  },
+  {
+    "comment": "Count leading zeros",
+    "hex_code": "00000A9?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CLZ",
+    "variables": 0
+  },
+  {
+    "comment": "Count trailing zeros",
+    "hex_code": "00000AA?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CTZ",
+    "variables": 0
+  },
+  {
+    "comment": "Reverse all bits in register",
+    "hex_code": "00000AB?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BITREV",
+    "variables": 0
+  },
+  {
+    "comment": "Extract bit field (pos:8, len:8)",
+    "hex_code": "00000AC?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BEXTR",
+    "variables": 1
+  },
+  {
+    "comment": "Deposit bit field",
+    "hex_code": "00000AD?",
+    "registers": 1,
+    "section": "",
+    "text_name": "BDEP",
+    "variables": 1
+  },
+  {
+    "comment": "Multiply registers (signed), result in first",
+    "hex_code": "00000B0?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MULRR",
+    "variables": 0
+  },
+  {
+    "comment": "Multiply registers (unsigned)",
+    "hex_code": "00000B1?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MULURR",
+    "variables": 0
+  },
+  {
+    "comment": "Multiply high word (signed)",
+    "hex_code": "00000B2?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MULHRR",
+    "variables": 0
+  },
+  {
+    "comment": "Multiply high word (unsigned)",
+    "hex_code": "00000B3?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MULHURR",
+    "variables": 0
+  },
+  {
+    "comment": "Divide registers (signed)",
+    "hex_code": "00000B4?",
+    "registers": 1,
+    "section": "",
+    "text_name": "DIVRR",
+    "variables": 0
+  },
+  {
+    "comment": "Divide registers (unsigned)",
+    "hex_code": "00000B5?",
+    "registers": 1,
+    "section": "",
+    "text_name": "DIVURR",
+    "variables": 0
+  },
+  {
+    "comment": "Modulo registers (signed)",
+    "hex_code": "00000B6?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MODRR",
+    "variables": 0
+  },
+  {
+    "comment": "Modulo registers (unsigned)",
+    "hex_code": "00000B7?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MODURR",
+    "variables": 0
+  },
+  {
+    "comment": "Multiply register by value (signed)",
+    "hex_code": "00000B8?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MULV",
+    "variables": 1
+  },
+  {
+    "comment": "Divide register by value (signed)",
+    "hex_code": "00000B9?",
+    "registers": 1,
+    "section": "",
+    "text_name": "DIVV",
+    "variables": 1
+  },
+  {
+    "comment": "Modulo register by value (signed)",
+    "hex_code": "00000BA?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MODV",
+    "variables": 1
+  },
+  {
+    "comment": "Load indexed: first = mem[second + var1]",
+    "hex_code": "00000C??",
+    "registers": 2,
+    "section": "",
+    "text_name": "LDIDX",
+    "variables": 0
+  },
+  {
+    "comment": "Store indexed: mem[second + var1] = first",
+    "hex_code": "00000D??",
+    "registers": 2,
+    "section": "",
+    "text_name": "STIDX",
+    "variables": 0
+  },
+  {
+    "comment": "Store indexed: mem[second + third] = first",
+    "hex_code": "00000E0?",
+    "registers": 1,
+    "section": "",
+    "text_name": "STIDXR",
+    "variables": 0
+  },
+  {
+    "comment": "Load indexed: first = mem[second + third]",
+    "hex_code": "00000E??",
+    "registers": 2,
+    "section": "",
+    "text_name": "LDIDXR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare signed less-than",
+    "hex_code": "00000F0?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPLTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare signed less-or-equal",
+    "hex_code": "00000F1?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPLERR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare signed greater-than",
+    "hex_code": "00000F2?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPGTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare signed greater-or-equal",
+    "hex_code": "00000F3?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPGERR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare unsigned less-than",
+    "hex_code": "00000F4?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPULTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare unsigned less-or-equal",
+    "hex_code": "00000F5?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPULERR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare unsigned greater-than",
+    "hex_code": "00000F6?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPUGTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare unsigned greater-or-equal",
+    "hex_code": "00000F7?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CMPUGERR",
+    "variables": 0
+  },
+  {
+    "comment": "Rotate left by 1",
+    "hex_code": "00000F8?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ROLR",
+    "variables": 0
+  },
+  {
+    "comment": "Rotate right by 1",
+    "hex_code": "00000F9?",
+    "registers": 1,
+    "section": "",
+    "text_name": "RORR",
+    "variables": 0
+  },
+  {
+    "comment": "Rotate left through carry",
+    "hex_code": "00000FA?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ROLCR",
+    "variables": 0
+  },
+  {
+    "comment": "Rotate right through carry",
+    "hex_code": "00000FB?",
+    "registers": 1,
+    "section": "",
+    "text_name": "RORCR",
+    "variables": 0
+  },
+  {
+    "comment": "Rotate left by N bits",
+    "hex_code": "00000FC?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ROLV",
+    "variables": 1
+  },
+  {
+    "comment": "Rotate right by N bits",
+    "hex_code": "00000FD?",
+    "registers": 1,
+    "section": "",
+    "text_name": "RORV",
+    "variables": 1
+  },
+  {
+    "comment": "Rotate left by register amount",
+    "hex_code": "00000FE?",
+    "registers": 1,
+    "section": "",
+    "text_name": "ROLRR",
+    "variables": 0
+  },
+  {
+    "comment": "Rotate right by register amount",
+    "hex_code": "00000FF?",
+    "registers": 1,
+    "section": "",
+    "text_name": "RORRR",
+    "variables": 0
+  },
+  {
+    "comment": "Jump",
+    "hex_code": "00001000",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMP",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if zero",
+    "hex_code": "00001001",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPZ",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if not zero",
+    "hex_code": "00001002",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPNZ",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if equal",
+    "hex_code": "00001003",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPE",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if not equal",
+    "hex_code": "00001004",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPNE",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if carry",
+    "hex_code": "00001005",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPC",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if not carry",
+    "hex_code": "00001006",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPNC",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if overflow",
+    "hex_code": "00001007",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPO",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if not overflow",
+    "hex_code": "00001008",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPNO",
+    "variables": 1
+  },
+  {
+    "comment": "Call function",
+    "hex_code": "00001009",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALL",
+    "variables": 1
+  },
+  {
+    "comment": "Call if zero",
+    "hex_code": "0000100A",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALLZ",
+    "variables": 1
+  },
+  {
+    "comment": "Call if not zero",
+    "hex_code": "0000100B",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALLNZ",
+    "variables": 1
+  },
+  {
+    "comment": "Call if equal",
+    "hex_code": "0000100C",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALLE",
+    "variables": 1
+  },
+  {
+    "comment": "Call if not equal",
+    "hex_code": "0000100D",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALLNE",
+    "variables": 1
+  },
+  {
+    "comment": "Call if carry",
+    "hex_code": "0000100E",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALLC",
+    "variables": 1
+  },
+  {
+    "comment": "Call if not carry",
+    "hex_code": "0000100F",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALLNC",
+    "variables": 1
+  },
+  {
+    "comment": "Call if overflow",
+    "hex_code": "00001010",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALLO",
+    "variables": 1
+  },
+  {
+    "comment": "Call if not overflow",
+    "hex_code": "00001011",
+    "registers": 0,
+    "section": "",
+    "text_name": "CALLNO",
+    "variables": 1
+  },
+  {
+    "comment": "Return from call",
+    "hex_code": "00001012",
+    "registers": 0,
+    "section": "",
+    "text_name": "RET",
+    "variables": 0
+  },
+  {
+    "comment": "Jump if sign (negative)",
+    "hex_code": "00001013",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPS",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if not sign (positive)",
+    "hex_code": "00001014",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPNS",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if less-than (signed)",
+    "hex_code": "00001015",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPLT",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if less-or-equal",
+    "hex_code": "00001016",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPLE",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if greater-than",
+    "hex_code": "00001017",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPGT",
+    "variables": 1
+  },
+  {
+    "comment": "Jump if greater-or-equal",
+    "hex_code": "00001018",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPGE",
+    "variables": 1
+  },
+  {
+    "comment": "Jump to address in register",
+    "hex_code": "0000101?",
+    "registers": 1,
+    "section": "",
+    "text_name": "JMPR",
+    "variables": 0
+  },
+  {
+    "comment": "LCD command with register",
+    "hex_code": "0000200?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CDCDMR",
+    "variables": 0
+  },
+  {
+    "comment": "LCD data with register",
+    "hex_code": "0000201?",
+    "registers": 1,
+    "section": "",
+    "text_name": "LCDDATAR",
+    "variables": 0
+  },
+  {
+    "comment": "LCD write command value",
+    "hex_code": "00002021",
+    "registers": 0,
+    "section": "",
+    "text_name": "LCDCMDV",
+    "variables": 1
+  },
+  {
+    "comment": "LCD data with value",
+    "hex_code": "00002022",
+    "registers": 0,
+    "section": "",
+    "text_name": "LCDDATAV",
+    "variables": 1
+  },
+  {
+    "comment": "Reset line",
+    "hex_code": "00002023",
+    "registers": 0,
+    "section": "",
+    "text_name": "LCD",
+    "variables": 1
+  },
+  {
+    "comment": "set LEDs with register",
+    "hex_code": "0000300?",
+    "registers": 1,
+    "section": "",
+    "text_name": "LEDR",
+    "variables": 0
+  },
+  {
+    "comment": "Get switch status into register",
+    "hex_code": "0000301?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SWR",
+    "variables": 0
+  },
+  {
+    "comment": "Set 7 Seg 1 to register",
+    "hex_code": "0000302?",
+    "registers": 1,
+    "section": "",
+    "text_name": "7SEG1R",
+    "variables": 0
+  },
+  {
+    "comment": "Set 7 Seg 2 to register",
+    "hex_code": "0000303?",
+    "registers": 1,
+    "section": "",
+    "text_name": "7SEG2R",
+    "variables": 0
+  },
+  {
+    "comment": "Set 7 Seg to register",
+    "hex_code": "0000304?",
+    "registers": 1,
+    "section": "",
+    "text_name": "7SEGR",
+    "variables": 0
+  },
+  {
+    "comment": "RGB 1 from register",
+    "hex_code": "0000305?",
+    "registers": 1,
+    "section": "",
+    "text_name": "RGB1R",
+    "variables": 0
+  },
+  {
+    "comment": "RGB 2 from register",
+    "hex_code": "0000306?",
+    "registers": 1,
+    "section": "",
+    "text_name": "RGB2R",
+    "variables": 0
+  },
+  {
+    "comment": "Set LED to value",
+    "hex_code": "00003070",
+    "registers": 0,
+    "section": "",
+    "text_name": "LEDV",
+    "variables": 1
+  },
+  {
+    "comment": "Set 7 Seg 1 to value",
+    "hex_code": "00003071",
+    "registers": 0,
+    "section": "",
+    "text_name": "7SEG1V",
+    "variables": 1
+  },
+  {
+    "comment": "Set 7 Seg 2 to value",
+    "hex_code": "00003072",
+    "registers": 0,
+    "section": "",
+    "text_name": "7SEG2V",
+    "variables": 1
+  },
+  {
+    "comment": "Blank 7 Seg",
+    "hex_code": "00003073",
+    "registers": 0,
+    "section": "",
+    "text_name": "7SEGBLANK",
+    "variables": 0
+  },
+  {
+    "comment": "RGB 1 from value",
+    "hex_code": "00003074",
+    "registers": 0,
+    "section": "",
+    "text_name": "RGB1V",
+    "variables": 1
+  },
+  {
+    "comment": "RGB 2 from value",
+    "hex_code": "00003075",
+    "registers": 0,
+    "section": "",
+    "text_name": "RGB2V",
+    "variables": 1
+  },
+  {
+    "comment": "Push register onto stack",
+    "hex_code": "0000400?",
+    "registers": 1,
+    "section": "",
+    "text_name": "PUSH",
+    "variables": 0
+  },
+  {
+    "comment": "Pop stack into register",
+    "hex_code": "0000401?",
+    "registers": 1,
+    "section": "",
+    "text_name": "POP",
+    "variables": 0
+  },
+  {
+    "comment": "Push value onto stack",
+    "hex_code": "00004020",
+    "registers": 0,
+    "section": "",
+    "text_name": "PUSHV",
+    "variables": 1
+  },
+  {
+    "comment": "send test UART message",
+    "hex_code": "00005000",
+    "registers": 0,
+    "section": "",
+    "text_name": "TESTMSG",
+    "variables": 0
+  },
+  {
+    "comment": "send UART newline",
+    "hex_code": "00005001",
+    "registers": 0,
+    "section": "",
+    "text_name": "NEWLINE",
+    "variables": 0
+  },
+  {
+    "comment": "send 8 bytes value of memory location",
+    "hex_code": "00005002",
+    "registers": 0,
+    "section": "",
+    "text_name": "TXMEM",
+    "variables": 1
+  },
+  {
+    "comment": "send string at memory",
+    "hex_code": "00005003",
+    "registers": 0,
+    "section": "",
+    "text_name": "TXSTRMEM",
+    "variables": 1
+  },
+  {
+    "comment": "send 8 bytes reg value in message",
+    "hex_code": "0000501?",
+    "registers": 1,
+    "section": "",
+    "text_name": "TXR",
+    "variables": 0
+  },
+  {
+    "comment": "send 8 bytes value at memory of register value",
+    "hex_code": "0000502?",
+    "registers": 1,
+    "section": "",
+    "text_name": "TXMEMR",
+    "variables": 0
+  },
+  {
+    "comment": "send char at memory from register value",
+    "hex_code": "0000503?",
+    "registers": 1,
+    "section": "",
+    "text_name": "TXCHARMEMR",
+    "variables": 0
+  },
+  {
+    "comment": "send string at memory location from register",
+    "hex_code": "0000504?",
+    "registers": 1,
+    "section": "",
+    "text_name": "TXSTRMEMR",
+    "variables": 0
+  },
+  {
+    "comment": "Set interrupt from registers",
+    "hex_code": "000060??",
+    "registers": 2,
+    "section": "",
+    "text_name": "INTSETRR",
+    "variables": 0
+  },
+  {
+    "comment": "Set memory from register to register",
+    "hex_code": "000070??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMSETRR",
+    "variables": 0
+  },
+  {
+    "comment": "Set register from memory at register",
+    "hex_code": "000071??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMREADRR",
+    "variables": 0
+  },
+  {
+    "comment": "Set memory from value",
+    "hex_code": "0000720?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MEMSETR",
+    "variables": 1
+  },
+  {
+    "comment": "Set register from memory at value",
+    "hex_code": "0000721?",
+    "registers": 1,
+    "section": "",
+    "text_name": "MEMREADR",
+    "variables": 1
+  },
+  {
     "comment": "Delay by register",
-    "section": "Other Fxxx"
+    "hex_code": "0000F00?",
+    "registers": 1,
+    "section": "",
+    "text_name": "DELAYR",
+    "variables": 0
   },
   {
-    "text_name": "NOP",
-    "hex_opcode": "0000F010",
-    "registers": 0,
-    "variables": 0,
     "comment": "No operation",
-    "section": "Other Fxxx"
+    "hex_code": "0000F010",
+    "registers": 0,
+    "section": "",
+    "text_name": "NOP",
+    "variables": 0
   },
   {
-    "text_name": "HALT",
-    "hex_opcode": "0000F011",
-    "registers": 0,
-    "variables": 0,
     "comment": "Freeze and hang",
-    "section": "Other Fxxx"
+    "hex_code": "0000F011",
+    "registers": 0,
+    "section": "",
+    "text_name": "HALT",
+    "variables": 0
   },
   {
-    "text_name": "RESET",
-    "hex_opcode": "0000F012",
-    "registers": 0,
-    "variables": 0,
     "comment": "Reset",
-    "section": "Other Fxxx"
+    "hex_code": "0000F012",
+    "registers": 0,
+    "section": "",
+    "text_name": "RESET",
+    "variables": 0
   },
   {
-    "text_name": "DELAYV",
-    "hex_opcode": "0000F013",
+    "comment": "Set by value ",
+    "hex_code": "0000F013",
     "registers": 0,
-    "variables": 1,
-    "comment": "Set by value",
-    "section": "Other Fxxx"
+    "section": "",
+    "text_name": "DELAYV",
+    "variables": 1
   }
 ]

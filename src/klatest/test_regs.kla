@@ -1,0 +1,54 @@
+// Test 01: Register Operations
+// Tests: SETR, COPY, INCR, DECR, NEGR, ABSR
+// Verification: UART output of register values
+// Expected UART output:
+//   000000FF  (SETR A 0xFF)
+//   000000FF  (COPY A->B, B should equal A)
+//   00000100  (INCR A, 0xFF+1 = 0x100)
+//   000000FE  (DECR B, 0xFF-1 = 0xFE)
+//   FFFFFFFE  (NEGR C with C=2, twos complement = 0xFFFFFFFE)
+//   00000005  (ABSR D with D=-5, absolute = 5)
+// Expected 7SEG: 0x01 (test number)
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x01           // Test number on display
+NEWLINE
+
+// Test SETR
+SETR A 0xFF
+TXR A                 // Expect: 000000FF
+NEWLINE
+
+// Test COPY
+COPY A B
+TXR B                 // Expect: 000000FF
+NEWLINE
+
+// Test INCR
+INCR A
+TXR A                 // Expect: 00000100
+NEWLINE
+
+// Test DECR
+DECR B
+TXR B                 // Expect: 000000FE
+NEWLINE
+
+// Test NEGR (twos complement)
+SETR C 0x2
+NEGR C
+TXR C                 // Expect: FFFFFFFE
+NEWLINE
+
+// Test ABSR
+SETR D 0x2
+NEGR D                // D = -2 (0xFFFFFFFE)
+ABSR D
+TXR D                 // Expect: 00000002
+NEWLINE
+
+// All pass
+LEDV 0xFF
+HALT

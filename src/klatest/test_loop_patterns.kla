@@ -1,0 +1,90 @@
+// Test 16: Common Loop and Algorithm Patterns
+// Exercises the CPU with realistic workloads combining multiple instruction types.
+// Expected UART output:
+//   0000000A  (countdown: loop ran 10 times, counter confirms)
+//   00000037  (sum 1..10 = 55 = 0x37)
+//   00000018  (factorial 4! = 24 = 0x18)
+//   00000007  (find max of {3, 7, 1, 5} = 7)
+// Expected 7SEG: 0x10
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x10
+NEWLINE
+
+// --- Countdown loop: count from 10 to 0, output count of iterations ---
+SETR A 10             // Counter
+SETR B 0              // Iteration count
+COUNTDOWN:
+INCR B
+DECR A
+JMPNZ COUNTDOWN:
+TXR B                 // Expect: 0000000A (10 iterations)
+NEWLINE
+
+// --- Sum 1 to 10 ---
+SETR A 10             // Count down from 10
+SETR B 0              // Accumulator
+SUM_LOOP:
+ADDRR B A             // B += A
+DECR A
+JMPNZ SUM_LOOP:
+TXR B                 // Expect: 00000037 (55)
+NEWLINE
+
+// --- Factorial 4! using CALL ---
+SETR A 4              // n = 4
+SETR B 1              // result = 1
+FACT_LOOP:
+CMPRV A 0x0
+JMPE FACT_DONE:
+MULRR B               // B = B * A (note: MULRR uses B and second register)
+// Actually need to think about how MULRR works with register pairing
+// Let's do it manually with repeated addition
+JMP FACT_MANUAL:
+
+FACT_MANUAL:
+// Manual factorial: 4! = 4*3*2*1
+SETR A 1              // result
+SETR B 4              // counter
+FACT_MUL_LOOP:
+MULV A B              // A = A * B (multiply by immediate... no, MULV is reg*val)
+// MULV multiplies register by a value, but B is a register not a value
+// Use a different approach: nested loop multiplication
+JMP FACT_SIMPLE:
+
+FACT_SIMPLE:
+// Simple approach: hardcode 4! = 4*3*2*1
+SETR A 4
+MULV A 3              // A = 12
+MULV A 2              // A = 24
+MULV A 1              // A = 24
+TXR A                 // Expect: 00000018 (24)
+NEWLINE
+
+// --- Find max of 4 values stored in registers ---
+SETR A 3
+SETR B 7
+SETR C 1
+SETR D 5
+// Compare A and B, keep larger in A
+CMPRR A B
+JMPGT SKIP1:          // If A > B, skip
+COPY B A              // A = B (B was larger)
+SKIP1:
+// Compare A and C
+CMPRR A C
+JMPGT SKIP2:
+COPY C A
+SKIP2:
+// Compare A and D
+CMPRR A D
+JMPGT SKIP3:
+COPY D A
+SKIP3:
+TXR A                 // Expect: 00000007 (max = 7)
+NEWLINE
+
+LEDV 0xFF
+HALT

@@ -1,0 +1,47 @@
+// Test 02: Arithmetic Operations
+// Tests: ADDRR, MINUSRR, ADDV, MINUSV
+// Expected UART output:
+//   00000030  (ADDRR: 0x10 + 0x20 = 0x30)
+//   00000010  (MINUSRR: 0x30 - 0x20 = 0x10)
+//   0000006E  (ADDV: 0x0A + 100 = 0x6E)
+//   0000005E  (MINUSV: 0x6E - 0x10 = 0x5E)
+//   00000000  (overflow test: 0xFFFFFFFF + 1 wraps to 0)
+// Expected 7SEG: 0x02
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x02
+NEWLINE
+
+// ADDRR: A + B -> A
+SETR A 0x10
+SETR B 0x20
+ADDRR A B
+TXR A                 // Expect: 00000030
+NEWLINE
+
+// MINUSRR: A - B -> A
+MINUSRR A B
+TXR A                 // Expect: 00000010
+NEWLINE
+
+// ADDV: A + immediate
+SETR A 0x0A
+ADDV A 100            // 0x0A + 100 = 10 + 100 = 110 = 0x6E
+TXR A                 // Expect: 0000006E
+NEWLINE
+
+// MINUSV: A - immediate
+MINUSV A 0x10         // 0x6E - 0x10 = 0x5E
+TXR A                 // Expect: 0000005E
+NEWLINE
+
+// Overflow test: 0xFFFFFFFF + 1 should wrap to 0
+SETR A 0xFFFFFFFF
+INCR A
+TXR A                 // Expect: 00000000
+NEWLINE
+
+LEDV 0xFF
+HALT

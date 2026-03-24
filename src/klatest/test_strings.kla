@@ -1,0 +1,37 @@
+// Test 12: String Data and UART String Output
+// Tests: #DATA string storage, TXSTRMEM, TXSTRMEMR, string_print subroutine
+// Expected UART output:
+//   HELLO     (TXSTRMEMR prints string from data)
+//   ABCDEF    (second string)
+//   12345     (third string via string_print subroutine)
+// Expected 7SEG: 0x0C
+// Expected LEDs: 0xFF = all pass
+
+!include string_print.kla
+
+_start
+DELAYV 0x3000
+7SEG1V 0x0C
+NEWLINE
+
+// Print first string using TXSTRMEMR loop
+SETR A #STR1
+CALL STRING_PRINT:
+NEWLINE
+
+// Print second string
+SETR A #STR2
+CALL STRING_PRINT:
+NEWLINE
+
+// Print third string
+SETR A #STR3
+CALL STRING_PRINT:
+NEWLINE
+
+LEDV 0xFF
+HALT
+
+#STR1 "HELLO"
+#STR2 "ABCDEF"
+#STR3 "12345"

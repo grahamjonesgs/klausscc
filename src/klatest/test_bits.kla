@@ -1,0 +1,66 @@
+// Test 05: Bit Manipulation Operations
+// Tests: BSET, BCLR, BTGL, POPCNT, CLZ, CTZ, BITREV
+// Expected UART output:
+//   00000080  (BSET: set bit 7 of 0 = 0x80)
+//   00000000  (BCLR: clear bit 7 of 0x80 = 0)
+//   00000001  (BTGL: toggle bit 0 of 0 = 1)
+//   00000000  (BTGL: toggle bit 0 again = 0)
+//   00000008  (POPCNT: 0xFF has 8 bits set)
+//   00000018  (CLZ: 0x000000FF has 24 leading zeros)
+//   00000008  (CTZ: 0x0000FF00 has 8 trailing zeros)
+//   FF000000  (BITREV: 0x000000FF reversed = 0xFF000000)
+// Expected 7SEG: 0x05
+// Expected LEDs: 0xFF = all pass
+
+_start       
+DELAYV 0x2FFF
+7SEG1V 0x05
+NEWLINE
+
+// BSET: set bit 7
+SETR A 0x0
+BSET A 7
+TXR A                 // Expect: 00000080
+NEWLINE
+
+// BCLR: clear bit 7
+BCLR A 7
+TXR A                 // Expect: 00000000
+NEWLINE
+
+// BTGL: toggle bit 0
+BTGL A 0
+TXR A                 // Expect: 00000001
+NEWLINE
+
+// BTGL: toggle again
+BTGL A 0
+TXR A                 // Expect: 00000000
+NEWLINE
+
+// POPCNT: count set bits
+SETR A 0xFF
+POPCNT A
+TXR A                 // Expect: 00000008
+NEWLINE
+
+// CLZ: count leading zeros
+SETR A 0x000000FF
+CLZ A
+TXR A                 // Expect: 00000018 (24 leading zeros)
+NEWLINE
+
+// CTZ: count trailing zeros
+SETR A 0x0000FF00
+CTZ A
+TXR A                 // Expect: 00000008
+NEWLINE
+
+// BITREV: reverse bits
+SETR A 0x000000FF
+BITREV A
+TXR A                 // Expect: FF000000
+NEWLINE
+
+LEDV 0xFF
+HALT

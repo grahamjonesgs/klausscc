@@ -1,0 +1,62 @@
+// Test 03: Logic and Bitwise Operations
+// Tests: AND, OR, XOR, ANDV, ORV, XORV, BSWAP
+// Expected UART output:
+//   00000012  (AND: 0xFF & 0x12 = 0x12)
+//   0000FFFF  (OR: 0xFF00 | 0x00FF = 0xFFFF)
+//   0000FF00  (XOR: 0xFFFF ^ 0x00FF = 0xFF00)
+//   000000F0  (ANDV: 0xFF & 0xF0 = 0xF0)
+//   000000FF  (ORV: 0xF0 | 0x0F = 0xFF)
+//   000000F0  (XORV: 0xFF ^ 0x0F = 0xF0)
+//   78563412  (BSWAP: 0x12345678 -> 0x78563412)
+// Expected 7SEG: 0x03
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x03
+NEWLINE
+
+// AND registers
+SETR A 0xFF
+SETR B 0x12
+AND A B
+TXR A                 // Expect: 00000012
+NEWLINE
+
+// OR registers
+SETR A 0xFF00
+SETR B 0x00FF
+OR A B
+TXR A                 // Expect: 0000FFFF
+NEWLINE
+
+// XOR registers
+SETR B 0x00FF
+XOR A B
+TXR A                 // Expect: 0000FF00
+NEWLINE
+
+// ANDV with immediate
+SETR A 0xFF
+ANDV A 0xF0
+TXR A                 // Expect: 000000F0
+NEWLINE
+
+// ORV with immediate
+ORV A 0x0F
+TXR A                 // Expect: 000000FF
+NEWLINE
+
+// XORV with immediate
+XORV A 0x0F
+TXR A                 // Expect: 000000F0
+NEWLINE
+
+// BSWAP endian conversion
+SETR A 0x12345678
+BSWAP A
+TXR A                 // Expect: 78563412
+NEWLINE
+
+LEDV 0xFF
+HALT

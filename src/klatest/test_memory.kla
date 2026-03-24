@@ -1,0 +1,61 @@
+// Test 08: Memory Operations
+// Tests: MEMSETRR, MEMREADRR, MEMSETR, MEMREADR
+// Expected UART output:
+//   000000AA  (MEMSETRR/MEMREADRR: write 0xAA, read back)
+//   000000BB  (MEMSETR/MEMREADR: write 0xBB to fixed addr, read back)
+//   DEADBEEF  (write 0xDEADBEEF to data area, read back)
+//   00000003  (sequential write 1,2,3 then read third value)
+// Expected 7SEG: 0x08
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x08
+NEWLINE
+
+// Test MEMSETRR / MEMREADRR: register-addressed write and read
+SETR A #BUF1          // A = address of buffer
+SETR B 0xAA           // B = value to write
+MEMSETRR B A          // mem[A] = 0xAA
+SETR C 0x0            // Clear C
+MEMREADRR C A         // C = mem[A]
+TXR C                 // Expect: 000000AA
+NEWLINE
+
+// Test MEMSETR / MEMREADR: value-addressed write and read
+SETR B 0xBB
+MEMSETR B 0x100       // mem[0x100] = 0xBB
+SETR C 0x0
+MEMREADR C 0x100      // C = mem[0x100]
+TXR C                 // Expect: 000000BB
+NEWLINE
+
+// Test with larger value
+SETR A #BUF1
+SETR B 0xDEADBEEF
+MEMSETRR B A
+SETR C 0x0
+MEMREADRR C A
+TXR C                 // Expect: DEADBEEF
+NEWLINE
+
+// Test sequential memory: write 3 values, read back third
+SETR A #BUF2
+SETR B 0x1
+MEMSETRR B A          // mem[BUF2+0] = 1
+INCR A
+SETR B 0x2
+MEMSETRR B A          // mem[BUF2+1] = 2
+INCR A
+SETR B 0x3
+MEMSETRR B A          // mem[BUF2+2] = 3
+SETR C 0x0
+MEMREADRR C A         // Read back last written (3)
+TXR C                 // Expect: 00000003
+NEWLINE
+
+LEDV 0xFF
+HALT
+
+#BUF1 10
+#BUF2 10

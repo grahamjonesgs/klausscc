@@ -1,0 +1,73 @@
+// Test 04: Shift and Rotate Operations
+// Tests: SHLR, SHRR, SHLAR, SHRAR, SHLV, SHRV, SHRAV, ROLR, RORR
+// Expected UART output:
+//   00000002  (SHLR: 1 << 1 = 2)
+//   00000001  (SHRR: 2 >> 1 = 1)
+//   FFFFFFFE  (SHLAR: 0xFFFFFFFF << 1 arithmetic = 0xFFFFFFFE)
+//   FFFFFFFF  (SHRAR: 0xFFFFFFFE >> 1 arithmetic = 0xFFFFFFFF, sign extended)
+//   00000F00  (SHLV: 0x0F << 8 = 0xF00)
+//   0000000F  (SHRV: 0xF00 >> 8 = 0x0F)
+//   FFFFFF80  (SHRAV: 0xFF000000 >> 17 arithmetic = sign extended)
+//   00000003  (ROLR: 0x80000001 rotate left 1 = 0x00000003)
+//   80000000  (RORR: 0x00000001 rotate right 1 = 0x80000000)
+// Expected 7SEG: 0x04
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x04
+NEWLINE
+
+// SHLR: left shift by 1
+SETR A 0x1
+SHLR A
+TXR A                 // Expect: 00000002
+NEWLINE
+
+// SHRR: right shift by 1 (logical)
+SHRR A
+TXR A                 // Expect: 00000001
+NEWLINE
+
+// SHLAR: arithmetic left shift by 1
+SETR A 0xFFFFFFFF
+SHLAR A
+TXR A                 // Expect: FFFFFFFE
+NEWLINE
+
+// SHRAR: arithmetic right shift by 1 (sign-extending)
+SHRAR A
+TXR A                 // Expect: FFFFFFFF
+NEWLINE
+
+// SHLV: left shift by N
+SETR A 0x0F
+SHLV A 8
+TXR A                 // Expect: 00000F00
+NEWLINE
+
+// SHRV: right shift by N (logical)
+SHRV A 8
+TXR A                 // Expect: 0000000F
+NEWLINE
+
+// SHRAV: arithmetic right shift by N
+SETR A 0xFF000000
+SHRAV A 17
+TXR A                 // Expect: FFFFFF80
+NEWLINE
+
+// ROLR: rotate left by 1
+SETR A 0x80000001
+ROLR A
+TXR A                 // Expect: 00000003
+NEWLINE
+
+// RORR: rotate right by 1
+SETR A 0x00000001
+RORR A
+TXR A                 // Expect: 80000000
+NEWLINE
+
+LEDV 0xFF
+HALT

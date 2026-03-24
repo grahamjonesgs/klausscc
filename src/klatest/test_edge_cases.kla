@@ -1,0 +1,90 @@
+// Test 13: Edge Cases and Boundary Conditions
+// Tests: zero register operations, max values, sign boundaries, all 16 registers
+// Expected UART output:
+//   00000000  (INCR then DECR returns to 0)
+//   FFFFFFFF  (DECR 0 wraps to 0xFFFFFFFF)
+//   7FFFFFFF  (max positive signed 32-bit)
+//   80000000  (min negative signed 32-bit, max positive + 1)
+//   00000001  (register P, last register, stores and retrieves correctly)
+//   00000010  (all 16 registers: each set to index, P incremented to 0x10)
+//   00000079  (sum of all 16 register values: 0+1+..+14+16 = 121 = 0x79)
+// Expected 7SEG: 0x0D
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x0D
+NEWLINE
+
+// INCR then DECR cancels out
+SETR A 0x0
+INCR A
+DECR A
+TXR A                 // Expect: 00000000
+NEWLINE
+
+// DECR from zero wraps
+SETR A 0x0
+DECR A
+TXR A                 // Expect: FFFFFFFF
+NEWLINE
+
+// Max positive signed value
+SETR A 0x7FFFFFFF
+TXR A                 // Expect: 7FFFFFFF
+NEWLINE
+
+// Overflow from max positive to min negative
+INCR A
+TXR A                 // Expect: 80000000
+NEWLINE
+
+// Test register P (last register)
+SETR P 0x1
+TXR P                 // Expect: 00000001
+NEWLINE
+
+// Set all 16 registers to their index and verify P
+SETR A 0x0
+SETR B 0x1
+SETR C 0x2
+SETR D 0x3
+SETR E 0x4
+SETR F 0x5
+SETR G 0x6
+SETR H 0x7
+SETR I 0x8
+SETR J 0x9
+SETR K 0xA
+SETR L 0xB
+SETR M 0xC
+SETR N 0xD
+SETR O 0xE
+SETR P 0xF
+INCR P                // P = 0x10
+TXR P                 // Expect: 00000010
+NEWLINE
+
+// Sum all registers: A(0)+B(1)+C(2)+...+O(14)+P(16)
+// P is 16 (0xF + 1 from the INCR above), all others are their index
+// Sum = 0+1+2+3+4+5+6+7+8+9+10+11+12+13+14+16 = 120
+ADDRR A B             // A = 0+1 = 1
+ADDRR A C             // A = 1+2 = 3
+ADDRR A D             // A = 3+3 = 6
+ADDRR A E             // A = 6+4 = 10
+ADDRR A F             // A = 10+5 = 15
+ADDRR A G             // A = 15+6 = 21
+ADDRR A H             // A = 21+7 = 28
+ADDRR A I             // A = 28+8 = 36
+ADDRR A J             // A = 36+9 = 45
+ADDRR A K             // A = 45+10 = 55
+ADDRR A L             // A = 55+11 = 66
+ADDRR A M             // A = 66+12 = 78
+ADDRR A N             // A = 78+13 = 91
+ADDRR A O             // A = 91+14 = 105
+ADDRR A P             // A = 105+16 = 121
+TXR A                 // Expect: 00000079 (121 = 0x79)
+NEWLINE
+
+LEDV 0xFF
+HALT

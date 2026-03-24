@@ -201,8 +201,9 @@ pub fn expand_macros(
                 msg_list,
             );
             #[allow(clippy::arithmetic_side_effects, reason = "Macro expansion logic may involve arithmetic side effects")]
-            if items.is_some() {
-                for item in Option::unwrap(items) {
+            if let Some(items_vec) = items {
+                let macro_name = macro_name_from_string(&code_line.input).unwrap_or_default();
+                for item in items_vec {
                     pass0.push(Pass0 {
                         input_text_line: format!(
                             "{} // Macro expansion from {}",

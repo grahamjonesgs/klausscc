@@ -1,0 +1,49 @@
+// Test 15: Indexed Memory Operations
+// Tests: LDIDX, STIDX, LDIDXR, STIDXR
+// Sets up an array in memory, writes via indexed addressing, reads back.
+// Expected UART output:
+//   000000AA  (STIDX/LDIDX: store 0xAA at base+2, load back)
+//   000000BB  (STIDX at base+0, LDIDX back)
+//   000000CC  (STIDXR/LDIDXR: register-offset store and load)
+// Expected 7SEG: 0x0F
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x0F
+NEWLINE
+
+// Setup base address
+SETR A #ARRAY
+
+// STIDX: store 0xAA at array[2] (base + offset in second reg)
+SETR B 0xAA
+SETR C 0x2            // offset
+STIDX B A             // mem[A + var] = B -- actually uses register pair
+// LDIDX: load from array[2]
+SETR D 0x0
+LDIDX D A             // D = mem[A + var]
+TXR D                 // Expect: 000000AA
+NEWLINE
+
+// STIDX at offset 0
+SETR B 0xBB
+STIDX B A
+SETR D 0x0
+LDIDX D A
+TXR D                 // Expect: 000000BB
+NEWLINE
+
+// STIDXR/LDIDXR: register-based offset
+SETR B 0xCC           // Value to store
+SETR C 0x3            // Offset in register
+STIDXR B              // mem[A + C] = B (using register for offset)
+SETR D 0x0
+LDIDXR D A            // D = mem[A + C]
+TXR D                 // Expect: 000000CC
+NEWLINE
+
+LEDV 0xFF
+HALT
+
+#ARRAY 10

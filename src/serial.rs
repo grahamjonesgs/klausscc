@@ -2,7 +2,9 @@ use crate::helper::trim_newline;
 use crate::messages::{MessageType, MsgList};
 use core::time::Duration;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
-use std::io::Error;
+use std::io::{self, Error, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 
 /// Used to define if a port request was not defined so is for auto.
@@ -252,5 +254,62 @@ pub fn write_to_board(
         MessageType::Information,
     );
 
+    Ok(())
+}
+
+/// Monitor serial port for incoming UART data from the FPGA board.
+///
+/// Continuously reads from the serial port and prints received data to stdout.
+/// Runs until the user presses Ctrl+C, then closes the port cleanly.
+#[allow(clippy::print_stdout, reason = "Printing to stdout is required for serial monitor output")]
+#[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling")]
+#[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
+pub fn monitor_serial(port_name: &str, msg_list: &mut MsgList) -> Result<(), Error> {
+    let mut port = return_port(port_name, msg_list)?;
+    port.set_timeout(Duration::from_millis(500))?;
+
+    let running = Arc::new(AtomicBool::new(true));
+    let running_clone = Arc::clone(&running);
+
+    if let Err(err) = ctrlc::set_handler(move || {
+        running_clone.store(false, Ordering::Relaxed);
+    }) {
+        msg_list.push(
+            format!("Failed to set Ctrl+C handler: \"{err}\""),
+            None,
+            None,
+            MessageType::Warning,
+        );
+    }
+
+    println!("Monitoring serial port (Ctrl+C to stop)...");
+
+    let mut buffer = [0_u8; 1024];
+    while running.load(Ordering::Relaxed) {
+        match port.read(&mut buffer[..]) {
+            Ok(bytes_read) => {
+                if bytes_read > 0 {
+                    let text = String::from_utf8_lossy(buffer.get(..bytes_read).unwrap_or(&[]));
+                    print!("{text}");
+                    io::stdout().flush().unwrap_or(());
+                }
+            }
+            Err(ref err) if err.kind() == io::ErrorKind::TimedOut => {
+                // Timeout is normal when no data is available, just continue
+            }
+            Err(err) => {
+                msg_list.push(
+                    format!("Serial monitor error: \"{err}\""),
+                    None,
+                    None,
+                    MessageType::Error,
+                );
+                return Err(err);
+            }
+        }
+    }
+
+    println!("\nSerial monitor stopped.");
+    drop(port);
     Ok(())
 }
