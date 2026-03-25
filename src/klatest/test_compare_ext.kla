@@ -18,7 +18,7 @@
 // Expected LEDs: 0xFF = all pass
 
 _start
-DELAYV 0x3000
+DELAYV 0x0500
 7SEG1V 0x13
 NEWLINE
 
@@ -71,8 +71,8 @@ NEWLINE
 T4:
 SETR A 5
 SETR B 0xFFFFFFFF
-CMPULTRR A             // unsigned A < B? yes
-JMPLT T4_PASS:
+CMPULTRR A             // unsigned A < B? sets carry flag
+JMPC T4_PASS:
 SETR P 0xFFFFFFFF
 TXR P
 NEWLINE
@@ -86,7 +86,7 @@ NEWLINE
 T5:
 SETR A 0xFFFFFFFF
 SETR B 5
-CMPUGTRR A             // unsigned A > B? yes
+CMPUGTRR A             // unsigned A > B? sets greater flag
 JMPGT T5_PASS:
 SETR P 0xFFFFFFFF
 TXR P

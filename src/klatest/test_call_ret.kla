@@ -10,7 +10,7 @@
 // Expected LEDs: 0xFF = all pass
 
 _start
-DELAYV 0x3000
+DELAYV 0x0500
 7SEG1V 0x0A
 NEWLINE
 

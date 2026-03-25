@@ -18,7 +18,7 @@
                               -- // Expected LEDs: 0xFF = all pass
                               -- 
                               -- _start
-0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000000: 0000F013 00000500 -- DELAYV 0x0500
 0x00000002: 00003071 00000013 -- 7SEG1V 0x13
 0x00000004: 00005001          -- NEWLINE
                               -- 
@@ -71,8 +71,8 @@
 0x00000038:                   -- T4:
 0x00000038: 00000800 00000005 -- SETR A 5
 0x0000003A: 00000801 FFFFFFFF -- SETR B 0xFFFFFFFF
-0x0000003C: 00000F40          -- CMPULTRR A             // unsigned A < B? yes
-0x0000003D: 00001015 00000045 -- JMPLT T4_PASS:
+0x0000003C: 00000F40          -- CMPULTRR A             // unsigned A < B? sets carry flag
+0x0000003D: 00001005 00000045 -- JMPC T4_PASS:
 0x0000003F: 0000080F FFFFFFFF -- SETR P 0xFFFFFFFF
 0x00000041: 0000501F          -- TXR P
 0x00000042: 00005001          -- NEWLINE
@@ -86,7 +86,7 @@
 0x00000049:                   -- T5:
 0x00000049: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF
 0x0000004B: 00000801 00000005 -- SETR B 5
-0x0000004D: 00000F60          -- CMPUGTRR A             // unsigned A > B? yes
+0x0000004D: 00000F60          -- CMPUGTRR A             // unsigned A > B? sets greater flag
 0x0000004E: 00001017 00000056 -- JMPGT T5_PASS:
 0x00000050: 0000080F FFFFFFFF -- SETR P 0xFFFFFFFF
 0x00000052: 0000501F          -- TXR P

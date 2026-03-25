@@ -17,7 +17,7 @@
                               -- // Expected LEDs at end: 0xFF = all pass
                               -- 
                               -- _start
-0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000000: 0000F013 00000500 -- DELAYV 0x0500
 0x00000002: 00005001          -- NEWLINE
                               -- 
                               -- // Step 1: LED alternating pattern
