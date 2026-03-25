@@ -35,6 +35,7 @@ NEWLINE
 // --- Test JMPNZ: jump if not zero ---
 T2:
 SETR A 5
+ADDV A 0x0             // Clear stale zero flag (A=5, not zero)
 JMPNZ T2_PASS:
 SETR P 0xFFFFFFFF
 TXR P
@@ -91,7 +92,8 @@ NEWLINE
 
 // --- Test JMPNS: jump if not sign (positive) ---
 T6:
-SETR A 0x1            // Positive
+SETR A 0x1
+ADDV A 0x0             // Clear stale sign flag (A=1, positive)
 JMPNS T6_PASS:
 SETR P 0xFFFFFFFF
 TXR P

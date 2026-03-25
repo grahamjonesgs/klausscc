@@ -404,16 +404,13 @@ pub fn read_file_to_vector(
                     }
 
                     // Get the include file from the same directory as the previous file
-                    let new_include_file = format!(
-                        "{}{}{}",
-                        Path::new(filename)
-                            .parent()
-                            .unwrap_or_else(|| Path::new(""))
-                            .to_str()
-                            .unwrap_or_default(),
-                        MAIN_SEPARATOR_STR,
-                        include_file.unwrap_or_default()
-                    );
+                    let parent = Path::new(filename)
+                        .parent()
+                        .unwrap_or_else(|| Path::new(""));
+                    let new_include_file = parent
+                        .join(include_file.unwrap_or_default())
+                        .to_string_lossy()
+                        .into_owned();
 
                     let include_lines =
                         read_file_to_vector(&new_include_file, msg_list, opened_files);

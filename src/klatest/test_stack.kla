@@ -5,7 +5,7 @@
 //   00000022  (push 0x11 then 0x22, pop gets 0x22 first - LIFO)
 //   00000011  (second pop gets 0x11)
 //   000000FF  (PUSHV 0xFF, pop it back)
-//   0000000A  (push A=0xA, B=0xB, C=0xC, pop C gets 0xC)
+//   0000000C  (push A=0xA, B=0xB, C=0xC, pop C gets 0xC - LIFO)
 //   0000000B  (pop B gets 0xB)
 //   0000000A  (pop A gets 0xA)
 // Expected 7SEG: 0x09

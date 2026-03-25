@@ -1,9 +1,89 @@
-                              -- // Test 12: String Data and UART String Output
-                              -- // Tests: #DATA string storage, TXSTRMEM, TXSTRMEMR, string_print subroutine
+                              -- // Test 12: String Data Storage and Retrieval
+                              -- // Tests: #DATA string storage format, MEMREADRR word reads, TXSTRMEMR
+                              -- // Note: CPU is word-addressed (32 bits per address). String data is stored as:
+                              -- //   word 0: number of data words (length prefix)
+                              -- //   word 1+: characters packed 4 per word, big-endian, null-padded
                               -- // Expected UART output:
-                              -- //   HELLO     (TXSTRMEMR prints string from data)
-                              -- //   ABCDEF    (second string)
-                              -- //   12345     (third string via string_print subroutine)
+                              -- //   00000002  (length prefix of "HELLO": 2 data words)
+                              -- //   48454C4C  (packed "HELL")
+                              -- //   4F000000  (packed "O\0\0\0")
+                              -- //   00000002  (length prefix of "ABCDEF": 2 data words)
+                              -- //   41424344  (packed "ABCD")
+                              -- //   45460000  (packed "EF\0\0")
+                              -- //   00000002  (length prefix of "12345": 2 data words)
+                              -- //   31323334  (packed "1234")
+                              -- //   35000000  (packed "5\0\0\0")
                               -- // Expected 7SEG: 0x0C
                               -- // Expected LEDs: 0xFF = all pass
                               -- 
+                              -- _start
+0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000002: 00003071 0000000C -- 7SEG1V 0x0C
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // Verify packed string data for "HELLO"
+0x00000005: 00000800 0000003B -- SETR A #STR1
+0x00000007: 00007110          -- MEMREADRR B A         // B = length prefix
+0x00000008: 00005011          -- TXR B                 // Expect: 00000002
+0x00000009: 00005001          -- NEWLINE
+0x0000000A: 00000840          -- INCR A
+0x0000000B: 00007110          -- MEMREADRR B A         // B = "HELL" packed
+0x0000000C: 00005011          -- TXR B                 // Expect: 48454C4C
+0x0000000D: 00005001          -- NEWLINE
+0x0000000E: 00000840          -- INCR A
+0x0000000F: 00007110          -- MEMREADRR B A         // B = "O\0\0\0" packed
+0x00000010: 00005011          -- TXR B                 // Expect: 4F000000
+0x00000011: 00005001          -- NEWLINE
+                              -- 
+                              -- // Verify packed string data for "ABCDEF"
+0x00000012: 00000800 0000003E -- SETR A #STR2
+0x00000014: 00007110          -- MEMREADRR B A         // B = length prefix
+0x00000015: 00005011          -- TXR B                 // Expect: 00000002
+0x00000016: 00005001          -- NEWLINE
+0x00000017: 00000840          -- INCR A
+0x00000018: 00007110          -- MEMREADRR B A         // B = "ABCD" packed
+0x00000019: 00005011          -- TXR B                 // Expect: 41424344
+0x0000001A: 00005001          -- NEWLINE
+0x0000001B: 00000840          -- INCR A
+0x0000001C: 00007110          -- MEMREADRR B A         // B = "EF\0\0" packed
+0x0000001D: 00005011          -- TXR B                 // Expect: 45460000
+0x0000001E: 00005001          -- NEWLINE
+                              -- 
+                              -- // Verify packed string data for "12345"
+0x0000001F: 00000800 00000041 -- SETR A #STR3
+0x00000021: 00007110          -- MEMREADRR B A         // B = length prefix
+0x00000022: 00005011          -- TXR B                 // Expect: 00000002
+0x00000023: 00005001          -- NEWLINE
+0x00000024: 00000840          -- INCR A
+0x00000025: 00007110          -- MEMREADRR B A         // B = "1234" packed
+0x00000026: 00005011          -- TXR B                 // Expect: 31323334
+0x00000027: 00005001          -- NEWLINE
+0x00000028: 00000840          -- INCR A
+0x00000029: 00007110          -- MEMREADRR B A         // B = "5\0\0\0" packed
+0x0000002A: 00005011          -- TXR B                 // Expect: 35000000
+0x0000002B: 00005001          -- NEWLINE
+                              -- 
+                              -- // Visual test: TXSTRMEMR prints actual strings to UART
+                              -- // (character output is not hex, so ignored by test harness)
+0x0000002C: 00000800 0000003B -- SETR A #STR1
+0x0000002E: 00005040          -- TXSTRMEMR A           // Should print "HELLO"
+0x0000002F: 00005001          -- NEWLINE
+0x00000030: 00000800 0000003E -- SETR A #STR2
+0x00000032: 00005040          -- TXSTRMEMR A           // Should print "ABCDEF"
+0x00000033: 00005001          -- NEWLINE
+0x00000034: 00000800 00000041 -- SETR A #STR3
+0x00000036: 00005040          -- TXSTRMEMR A           // Should print "12345"
+0x00000037: 00005001          -- NEWLINE
+                              -- 
+0x00000038: 00003070 000000FF -- LEDV 0xFF
+0x0000003A: 0000F011          -- HALT
+                              -- 
+0x0000003B: 00000002          -- #STR1 "HELLO"
+0x0000003C: 48454C4C          -- #STR1 "HELLO"
+0x0000003D: 4F000000          -- #STR1 "HELLO"
+0x0000003E: 00000002          -- #STR2 "ABCDEF"
+0x0000003F: 41424344          -- #STR2 "ABCDEF"
+0x00000040: 45460000          -- #STR2 "ABCDEF"
+0x00000041: 00000002          -- #STR3 "12345"
+0x00000042: 31323334          -- #STR3 "12345"
+0x00000043: 35000000          -- #STR3 "12345"

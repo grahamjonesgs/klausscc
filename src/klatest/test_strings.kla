@@ -1,32 +1,78 @@
-// Test 12: String Data and UART String Output
-// Tests: #DATA string storage, TXSTRMEM, TXSTRMEMR, string_print subroutine
+// Test 12: String Data Storage and Retrieval
+// Tests: #DATA string storage format, MEMREADRR word reads, TXSTRMEMR
+// Note: CPU is word-addressed (32 bits per address). String data is stored as:
+//   word 0: number of data words (length prefix)
+//   word 1+: characters packed 4 per word, big-endian, null-padded
 // Expected UART output:
-//   HELLO     (TXSTRMEMR prints string from data)
-//   ABCDEF    (second string)
-//   12345     (third string via string_print subroutine)
+//   00000002  (length prefix of "HELLO": 2 data words)
+//   48454C4C  (packed "HELL")
+//   4F000000  (packed "O\0\0\0")
+//   00000002  (length prefix of "ABCDEF": 2 data words)
+//   41424344  (packed "ABCD")
+//   45460000  (packed "EF\0\0")
+//   00000002  (length prefix of "12345": 2 data words)
+//   31323334  (packed "1234")
+//   35000000  (packed "5\0\0\0")
 // Expected 7SEG: 0x0C
 // Expected LEDs: 0xFF = all pass
-
-!include string_print.kla
 
 _start
 DELAYV 0x3000
 7SEG1V 0x0C
 NEWLINE
 
-// Print first string using TXSTRMEMR loop
+// Verify packed string data for "HELLO"
 SETR A #STR1
-CALL STRING_PRINT:
+MEMREADRR B A         // B = length prefix
+TXR B                 // Expect: 00000002
+NEWLINE
+INCR A
+MEMREADRR B A         // B = "HELL" packed
+TXR B                 // Expect: 48454C4C
+NEWLINE
+INCR A
+MEMREADRR B A         // B = "O\0\0\0" packed
+TXR B                 // Expect: 4F000000
 NEWLINE
 
-// Print second string
+// Verify packed string data for "ABCDEF"
 SETR A #STR2
-CALL STRING_PRINT:
+MEMREADRR B A         // B = length prefix
+TXR B                 // Expect: 00000002
+NEWLINE
+INCR A
+MEMREADRR B A         // B = "ABCD" packed
+TXR B                 // Expect: 41424344
+NEWLINE
+INCR A
+MEMREADRR B A         // B = "EF\0\0" packed
+TXR B                 // Expect: 45460000
 NEWLINE
 
-// Print third string
+// Verify packed string data for "12345"
 SETR A #STR3
-CALL STRING_PRINT:
+MEMREADRR B A         // B = length prefix
+TXR B                 // Expect: 00000002
+NEWLINE
+INCR A
+MEMREADRR B A         // B = "1234" packed
+TXR B                 // Expect: 31323334
+NEWLINE
+INCR A
+MEMREADRR B A         // B = "5\0\0\0" packed
+TXR B                 // Expect: 35000000
+NEWLINE
+
+// Visual test: TXSTRMEMR prints actual strings to UART
+// (character output is not hex, so ignored by test harness)
+SETR A #STR1
+TXSTRMEMR A           // Should print "HELLO"
+NEWLINE
+SETR A #STR2
+TXSTRMEMR A           // Should print "ABCDEF"
+NEWLINE
+SETR A #STR3
+TXSTRMEMR A           // Should print "12345"
 NEWLINE
 
 LEDV 0xFF
