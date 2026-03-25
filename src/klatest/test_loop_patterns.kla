@@ -71,17 +71,17 @@ SETR D 5
 // Compare A and B, keep larger in A
 CMPRR A B
 JMPGT SKIP1:          // If A > B, skip
-COPY B A              // A = B (B was larger)
+COPY A B              // A = B (B was larger)
 SKIP1:
 // Compare A and C
 CMPRR A C
 JMPGT SKIP2:
-COPY C A
+COPY A C              // A = C (C was larger)
 SKIP2:
 // Compare A and D
 CMPRR A D
 JMPGT SKIP3:
-COPY D A
+COPY A D              // A = D (D was larger)
 SKIP3:
 TXR A                 // Expect: 00000007 (max = 7)
 NEWLINE

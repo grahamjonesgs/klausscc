@@ -26,8 +26,3 @@ test_edge_cases.kla
 
 // I/O
 test_io.kla
-
-// Aggressive / stress tests
-test_boundary.kla
-test_rotate.kla
-test_compare_ext.kla

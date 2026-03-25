@@ -71,17 +71,17 @@
                               -- // Compare A and B, keep larger in A
 0x0000003E: 00000501          -- CMPRR A B
 0x0000003F: 00001017 00000042 -- JMPGT SKIP1:          // If A > B, skip
-0x00000041: 00000110          -- COPY B A              // A = B (B was larger)
+0x00000041: 00000101          -- COPY A B              // A = B (B was larger)
 0x00000042:                   -- SKIP1:
                               -- // Compare A and C
 0x00000042: 00000502          -- CMPRR A C
 0x00000043: 00001017 00000046 -- JMPGT SKIP2:
-0x00000045: 00000120          -- COPY C A
+0x00000045: 00000102          -- COPY A C              // A = C (C was larger)
 0x00000046:                   -- SKIP2:
                               -- // Compare A and D
 0x00000046: 00000503          -- CMPRR A D
 0x00000047: 00001017 0000004A -- JMPGT SKIP3:
-0x00000049: 00000130          -- COPY D A
+0x00000049: 00000103          -- COPY A D              // A = D (D was larger)
 0x0000004A:                   -- SKIP3:
 0x0000004A: 00005010          -- TXR A                 // Expect: 00000007 (max = 7)
 0x0000004B: 00005001          -- NEWLINE

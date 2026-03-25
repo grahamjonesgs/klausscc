@@ -1,0 +1,81 @@
+// Test 18: Rotate Instructions
+// Tests: ROLR, RORR, ROLV, RORV, ROLRR, RORRR
+// Expected UART output:
+//   00000002  (ROLR: rotate 0x1 left 1)
+//   80000000  (RORR: rotate 0x1 right 1, bit wraps to MSB)
+//   00000100  (ROLV: rotate 0x1 left 8)
+//   01000000  (RORV: rotate 0x1 right 8)
+//   00000010  (ROLRR: rotate 0x1 left by B=4)
+//   10000000  (RORRR: rotate 0x1 right by B=4)
+//   FFFFFFFF  (ROLR: all-ones is rotate invariant)
+//   00000003  (ROLR: 0x80000001 left 1, MSB wraps to bit 0)
+//   C0000000  (RORR: 0x80000001 right 1, bit 0 wraps to MSB)
+// Expected 7SEG: 0x12
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x12
+NEWLINE
+
+// ROLR: rotate left by 1
+SETR A 0x00000001
+ROLR A
+TXR A                  // Expect: 00000002
+NEWLINE
+
+// RORR: rotate right by 1 (bit 0 wraps to bit 31)
+SETR A 0x00000001
+RORR A
+TXR A                  // Expect: 80000000
+NEWLINE
+
+// ROLV: rotate left by N bits
+SETR A 0x00000001
+ROLV A 8
+TXR A                  // Expect: 00000100
+NEWLINE
+
+// RORV: rotate right by N bits
+SETR A 0x00000001
+RORV A 8
+TXR A                  // Expect: 01000000
+NEWLINE
+
+// ROLRR: rotate left by register amount
+SETR A 0x00000001
+SETR B 4
+ROLRR A
+TXR A                  // Expect: 00000010
+NEWLINE
+
+// RORRR: rotate right by register amount
+SETR A 0x00000001
+SETR B 4
+RORRR A
+TXR A                  // Expect: 10000000
+NEWLINE
+
+// ROLR on all-ones: invariant
+SETR A 0xFFFFFFFF
+ROLR A
+TXR A                  // Expect: FFFFFFFF
+NEWLINE
+
+// ROLR with MSB set: 0x80000001 rotated left = 0x00000003
+// bit 31 wraps to bit 0, bit 0 moves to bit 1
+SETR A 0x80000001
+ROLR A
+TXR A                  // Expect: 00000003
+NEWLINE
+
+// RORR with bit 0 and MSB: 0x80000001 rotated right
+// bit 0 wraps to bit 31 (already set), bit 31 moves to bit 30
+// 1000...0001 -> 1100...0000 = 0xC0000000
+SETR A 0x80000001
+RORR A
+TXR A                  // Expect: C0000000
+NEWLINE
+
+LEDV 0xFF
+HALT

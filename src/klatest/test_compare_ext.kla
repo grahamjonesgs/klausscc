@@ -1,0 +1,168 @@
+// Test 19: Extended Comparisons, Min/Max, Conditional Calls
+// Tests: CMPLERR, CMPGERR, CMPULTRR, CMPULERR, CMPUGTRR, CMPUGERR,
+//        MINRR, MAXRR, MINURR, MAXURR, JMPR, CALLZ, CALLNZ
+// Expected UART output:
+//   00000001  (CMPLERR: 5 <= 10, jump taken)
+//   00000002  (CMPLERR: 5 <= 5, equal case, jump taken)
+//   00000003  (CMPGERR: 10 >= 5, jump taken)
+//   00000004  (CMPULTRR: unsigned 5 < 0xFFFFFFFF, jump taken)
+//   00000005  (CMPUGTRR: unsigned 0xFFFFFFFF > 5, jump taken)
+//   00000003  (MINRR: min(3, 7) = 3)
+//   00000007  (MAXRR: max(3, 7) = 7)
+//   00000005  (MINURR: unsigned min(5, 0xFFFFFFFF) = 5)
+//   FFFFFFFF  (MAXURR: unsigned max(5, 0xFFFFFFFF) = 0xFFFFFFFF)
+//   0000000A  (CALLZ: conditional call taken when zero flag set)
+//   0000000B  (CALLNZ: conditional call taken when zero flag clear)
+//   0000000C  (JMPR: jump to address in register)
+// Expected 7SEG: 0x13
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x13
+NEWLINE
+
+// --- CMPLERR: signed less-or-equal (5 <= 10) ---
+SETR A 5
+SETR B 10
+CMPLERR A              // A <= B? yes
+JMPLE T1_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T2:
+T1_PASS:
+SETR P 0x1
+TXR P                  // Expect: 00000001
+NEWLINE
+
+// --- CMPLERR: equal case (5 <= 5) ---
+T2:
+SETR A 5
+SETR B 5
+CMPLERR A              // A <= B? yes (equal)
+JMPLE T2_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T3:
+T2_PASS:
+SETR P 0x2
+TXR P                  // Expect: 00000002
+NEWLINE
+
+// --- CMPGERR: signed greater-or-equal (10 >= 5) ---
+T3:
+SETR A 10
+SETR B 5
+CMPGERR A              // A >= B? yes
+JMPGE T3_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T4:
+T3_PASS:
+SETR P 0x3
+TXR P                  // Expect: 00000003
+NEWLINE
+
+// --- CMPULTRR: unsigned less-than (5 < 0xFFFFFFFF) ---
+// In signed: 5 > -1, but unsigned: 5 < 4294967295
+T4:
+SETR A 5
+SETR B 0xFFFFFFFF
+CMPULTRR A             // unsigned A < B? yes
+JMPLT T4_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T5:
+T4_PASS:
+SETR P 0x4
+TXR P                  // Expect: 00000004
+NEWLINE
+
+// --- CMPUGTRR: unsigned greater-than (0xFFFFFFFF > 5) ---
+T5:
+SETR A 0xFFFFFFFF
+SETR B 5
+CMPUGTRR A             // unsigned A > B? yes
+JMPGT T5_PASS:
+SETR P 0xFFFFFFFF
+TXR P
+NEWLINE
+JMP T6:
+T5_PASS:
+SETR P 0x5
+TXR P                  // Expect: 00000005
+NEWLINE
+
+// --- MINRR: signed minimum ---
+T6:
+SETR A 3
+SETR B 7
+MINRR A                // A = min(A, B) = min(3, 7) = 3
+TXR A                  // Expect: 00000003
+NEWLINE
+
+// --- MAXRR: signed maximum ---
+SETR A 3
+SETR B 7
+MAXRR A                // A = max(A, B) = max(3, 7) = 7
+TXR A                  // Expect: 00000007
+NEWLINE
+
+// --- MINURR: unsigned minimum ---
+// 5 vs 0xFFFFFFFF: unsigned min = 5
+SETR A 5
+SETR B 0xFFFFFFFF
+MINURR A               // A = unsigned min(5, 0xFFFFFFFF) = 5
+TXR A                  // Expect: 00000005
+NEWLINE
+
+// --- MAXURR: unsigned maximum ---
+SETR A 5
+SETR B 0xFFFFFFFF
+MAXURR A               // A = unsigned max(5, 0xFFFFFFFF) = 0xFFFFFFFF
+TXR A                  // Expect: FFFFFFFF
+NEWLINE
+
+// --- CALLZ: conditional call when zero flag set ---
+SETR A 0x1
+DECR A                 // A = 0, zero flag set
+CALLZ SUB_RET_A:
+TXR A                  // Expect: 0000000A
+NEWLINE
+
+// --- CALLNZ: conditional call when zero flag clear ---
+SETR A 0x5
+ADDV A 0x0             // Clear stale zero flag (A=5, not zero)
+CALLNZ SUB_RET_B:
+TXR A                  // Expect: 0000000B
+NEWLINE
+
+// --- JMPR: jump to address in register ---
+SETR A JMPR_TARGET:
+JMPR A
+SETR P 0xFFFFFFFF      // FAIL: should not reach here
+TXR P
+NEWLINE
+JMP DONE:
+
+JMPR_TARGET:
+SETR P 0xC
+TXR P                  // Expect: 0000000C
+NEWLINE
+
+DONE:
+LEDV 0xFF
+HALT
+
+// Subroutines
+SUB_RET_A:
+SETR A 0xA
+RET
+
+SUB_RET_B:
+SETR A 0xB
+RET

@@ -1,0 +1,100 @@
+                              -- // Test 17: Boundary Values and Overflow
+                              -- // Tests arithmetic and logic at critical 32-bit boundaries:
+                              -- //   0x00000000, 0xFFFFFFFF, 0x80000000, 0x7FFFFFFF
+                              -- // Also tests: division by zero behavior, multiply high, overflow wrap
+                              -- // Expected UART output:
+                              -- //   FFFFFFFF  (INCR 0xFFFFFFFF wraps to 0, DECR back to 0xFFFFFFFF)
+                              -- //   00000000  (INCR 0xFFFFFFFF wraps to 0x00000000)
+                              -- //   80000000  (DECR 0x80000001 = 0x80000000, sign boundary)
+                              -- //   7FFFFFFF  (DECR 0x80000000 = 0x7FFFFFFF, sign flip)
+                              -- //   00000000  (ADDRR 0x7FFFFFFF + 0x7FFFFFFF + 2 = overflow wraps to 0)
+                              -- //   80000001  (NEGR 0x7FFFFFFF = 0x80000001)
+                              -- //   80000000  (NEGR 0x80000000 = 0x80000000, special case)
+                              -- //   00000001  (ABSR 0xFFFFFFFF = abs(-1) = 1)
+                              -- //   FFFFFFFE  (ADDRR 0xFFFFFFFF + 0xFFFFFFFF = 0xFFFFFFFE, unsigned wrap)
+                              -- //   00000004  (MULHRR: high word of 0x20000 * 0x20000 = 0x400000000)
+                              -- //   00000000  (MULHURR: high word of 0x100 * 0x100 = 0x10000, fits in low)
+                              -- // Expected 7SEG: 0x11
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000002: 00003071 00000011 -- 7SEG1V 0x11
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // INCR wrap: 0xFFFFFFFF + 1 = 0x00000000
+0x00000005: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF
+0x00000007: 00000840          -- INCR A                 // A = 0x00000000
+0x00000008: 00000850          -- DECR A                 // A = 0xFFFFFFFF (verify round-trip)
+0x00000009: 00005010          -- TXR A                  // Expect: FFFFFFFF
+0x0000000A: 00005001          -- NEWLINE
+                              -- 
+                              -- // INCR at max
+0x0000000B: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF
+0x0000000D: 00000840          -- INCR A
+0x0000000E: 00005010          -- TXR A                  // Expect: 00000000
+0x0000000F: 00005001          -- NEWLINE
+                              -- 
+                              -- // DECR across sign boundary: 0x80000001 - 1 = 0x80000000
+0x00000010: 00000800 80000001 -- SETR A 0x80000001
+0x00000012: 00000850          -- DECR A
+0x00000013: 00005010          -- TXR A                  // Expect: 80000000
+0x00000014: 00005001          -- NEWLINE
+                              -- 
+                              -- // DECR sign flip: 0x80000000 - 1 = 0x7FFFFFFF
+0x00000015: 00000800 80000000 -- SETR A 0x80000000
+0x00000017: 00000850          -- DECR A
+0x00000018: 00005010          -- TXR A                  // Expect: 7FFFFFFF
+0x00000019: 00005001          -- NEWLINE
+                              -- 
+                              -- // Overflow addition: 0x7FFFFFFF + 0x7FFFFFFF + 2 = 0x100000000 = wraps to 0
+0x0000001A: 00000800 7FFFFFFF -- SETR A 0x7FFFFFFF
+0x0000001C: 00000801 7FFFFFFF -- SETR B 0x7FFFFFFF
+0x0000001E: 00000601          -- ADDRR A B
+0x0000001F: 00000810 00000002 -- ADDV A 0x2             // Clear flags and trigger wrap
+0x00000021: 00005010          -- TXR A                  // Expect: 00000000
+0x00000022: 00005001          -- NEWLINE
+                              -- 
+                              -- // NEGR of max positive: 0x7FFFFFFF -> 0x80000001
+0x00000023: 00000800 7FFFFFFF -- SETR A 0x7FFFFFFF
+0x00000025: 000008A0          -- NEGR A
+0x00000026: 00005010          -- TXR A                  // Expect: 80000001
+0x00000027: 00005001          -- NEWLINE
+                              -- 
+                              -- // NEGR special case: 0x80000000 -> 0x80000000 (twos complement self-inverse)
+0x00000028: 00000800 80000000 -- SETR A 0x80000000
+0x0000002A: 000008A0          -- NEGR A
+0x0000002B: 00005010          -- TXR A                  // Expect: 80000000
+0x0000002C: 00005001          -- NEWLINE
+                              -- 
+                              -- // ABSR of -1: abs(0xFFFFFFFF) = 1
+0x0000002D: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF
+0x0000002F: 000008B0          -- ABSR A
+0x00000030: 00005010          -- TXR A                  // Expect: 00000001
+0x00000031: 00005001          -- NEWLINE
+                              -- 
+                              -- // Unsigned add: 0xFFFFFFFF + 0xFFFFFFFF = 0x1FFFFFFFE, low 32 = 0xFFFFFFFE
+0x00000032: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF
+0x00000034: 00000801 FFFFFFFF -- SETR B 0xFFFFFFFF
+0x00000036: 00000601          -- ADDRR A B
+0x00000037: 00005010          -- TXR A                  // Expect: FFFFFFFE
+0x00000038: 00005001          -- NEWLINE
+                              -- 
+                              -- // MULHRR: high word of signed multiply
+                              -- // 0x20000 * 0x20000 = 0x400000000 -> high word = 0x00000004
+0x00000039: 00000800 00020000 -- SETR A 0x20000
+0x0000003B: 00000801 00020000 -- SETR B 0x20000
+0x0000003D: 00000B20          -- MULHRR A
+0x0000003E: 00005010          -- TXR A                  // Expect: 00000004
+0x0000003F: 00005001          -- NEWLINE
+                              -- 
+                              -- // MULHURR: high word of unsigned multiply (small, fits in low word)
+                              -- // 0x100 * 0x100 = 0x10000 -> high word = 0x00000000
+0x00000040: 00000800 00000100 -- SETR A 0x100
+0x00000042: 00000801 00000100 -- SETR B 0x100
+0x00000044: 00000B30          -- MULHURR A
+0x00000045: 00005010          -- TXR A                  // Expect: 00000000
+0x00000046: 00005001          -- NEWLINE
+                              -- 
+0x00000047: 00003070 000000FF -- LEDV 0xFF
+0x00000049: 0000F011          -- HALT

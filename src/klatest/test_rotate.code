@@ -1,32 +1,15 @@
                               -- // Test 18: Rotate Instructions
-                              -- // Tests: ROLR, RORR, ROLV, RORV, ROLRR, RORRR, ROLCR, RORCR
+                              -- // Tests: ROLR, RORR, ROLV, RORV, ROLRR, RORRR
                               -- // Expected UART output:
-                              -- //   00000002  (ROLR: rotate 0x00000001 left by 1 = 0x00000002)
-                              -- //   80000000  (RORR: rotate 0x00000001 right by 1 = 0x80000000, bit wraps to MSB)
-                              -- //   00000080  (ROLV: rotate 0x00000001 left by 7 = 0x00000080)
-                              -- //   00800000  (RORV: rotate 0x00000001 right by 8 = 0x00800000... wait)
-                              -- //   01000000  (RORV: rotate 0x00000001 right by 8 = bit rotates to position 24)
-                              -- //   80000001  (ROLR: rotate 0x80000001... wait, let me recalc)
-                              -- // Recalculating all expected values carefully:
-                              -- //   00000002  (ROLR: 0x00000001 << 1 = 0x00000002)
-                              -- //   80000000  (RORR: 0x00000001 >> 1 with wrap = 0x80000000)
-                              -- //   00000100  (ROLV 8: 0x00000001 << 8 = 0x00000100)
-                              -- //   01000000  (RORV 8: 0x00000001 >> 8 with wrap = 0x01000000)
-                              -- //   00000010  (ROLRR: 0x00000001 << 4 via register = 0x00000010)
-                              -- //   10000000  (RORRR: 0x00000001 >> 4 via register = 0x10000000)
-                              -- //   FFFFFFFE  (ROLR on 0xFFFFFFFF = 0xFFFFFFFF... no, all bits set stays same)
-                              -- //   FFFFFFFF  (ROLR on 0xFFFFFFFF = 0xFFFFFFFF, all bits set is invariant)
-                              -- //   00000003  (ROLR on 0x80000001: MSB wraps to LSB = 0x00000003)
-                              -- // Expected UART output:
-                              -- //   00000002  (ROLR: rotate 0x00000001 left 1)
-                              -- //   80000000  (RORR: rotate 0x00000001 right 1)
-                              -- //   00000100  (ROLV: rotate 0x00000001 left 8)
-                              -- //   01000000  (RORV: rotate 0x00000001 right 8)
-                              -- //   00000010  (ROLRR: rotate 0x00000001 left by B=4)
-                              -- //   10000000  (RORRR: rotate 0x00000001 right by B=4)
+                              -- //   00000002  (ROLR: rotate 0x1 left 1)
+                              -- //   80000000  (RORR: rotate 0x1 right 1, bit wraps to MSB)
+                              -- //   00000100  (ROLV: rotate 0x1 left 8)
+                              -- //   01000000  (RORV: rotate 0x1 right 8)
+                              -- //   00000010  (ROLRR: rotate 0x1 left by B=4)
+                              -- //   10000000  (RORRR: rotate 0x1 right by B=4)
                               -- //   FFFFFFFF  (ROLR: all-ones is rotate invariant)
-                              -- //   00000003  (ROLR: rotate 0x80000001 left 1, MSB wraps to bit 0)
-                              -- //   C0000000  (RORR: rotate 0x80000001 right 1, bit 0 wraps to MSB)
+                              -- //   00000003  (ROLR: 0x80000001 left 1, MSB wraps to bit 0)
+                              -- //   C0000000  (RORR: 0x80000001 right 1, bit 0 wraps to MSB)
                               -- // Expected 7SEG: 0x12
                               -- // Expected LEDs: 0xFF = all pass
                               -- 
@@ -88,7 +71,7 @@
                               -- 
                               -- // RORR with bit 0 and MSB: 0x80000001 rotated right
                               -- // bit 0 wraps to bit 31 (already set), bit 31 moves to bit 30
-                              -- // 0x80000001 = 1000...0001 -> 1100...0000 = 0xC0000000
+                              -- // 1000...0001 -> 1100...0000 = 0xC0000000
 0x00000033: 00000800 80000001 -- SETR A 0x80000001
 0x00000035: 00000F90          -- RORR A
 0x00000036: 00005010          -- TXR A                  // Expect: C0000000
