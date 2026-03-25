@@ -7,7 +7,7 @@
 //   00000100  (INCR A, 0xFF+1 = 0x100)
 //   000000FE  (DECR B, 0xFF-1 = 0xFE)
 //   FFFFFFFE  (NEGR C with C=2, twos complement = 0xFFFFFFFE)
-//   00000005  (ABSR D with D=-5, absolute = 5)
+//   00000002  (ABSR D with D=-2, absolute = 2)
 // Expected 7SEG: 0x01 (test number)
 // Expected LEDs: 0xFF = all pass
 
@@ -21,8 +21,8 @@ SETR A 0xFF
 TXR A                 // Expect: 000000FF
 NEWLINE
 
-// Test COPY
-COPY A B
+// Test COPY (COPY dst src: first = second)
+COPY B A
 TXR B                 // Expect: 000000FF
 NEWLINE
 

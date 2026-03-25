@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 24/03/2026 09:25<h2>Opcode Table</h2>
+Created 25/03/2026 14:59<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -447,30 +447,23 @@ Created 24/03/2026 09:25<h2>Opcode Table</h2>
 <tr>
     <td>LDIDX</td>
     <td>00000C??</td>
-    <td>0</td>
+    <td>1</td>
     <td>2</td>
     <td>Load indexed: first = mem[second + var1]</td>
 </tr>
 <tr>
     <td>STIDX</td>
     <td>00000D??</td>
-    <td>0</td>
+    <td>1</td>
     <td>2</td>
     <td>Store indexed: mem[second + var1] = first</td>
 </tr>
 <tr>
-    <td>STIDXR</td>
-    <td>00000E0?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Store indexed: mem[second + third] = first</td>
-</tr>
-<tr>
     <td>LDIDXR</td>
     <td>00000E??</td>
-    <td>0</td>
+    <td>1</td>
     <td>2</td>
-    <td>Load indexed: first = mem[second + third]</td>
+    <td>Load indexed: first = mem[second + reg[var1]]</td>
 </tr>
 <tr>
     <td>CMPLTRR</td>
@@ -761,7 +754,7 @@ Created 24/03/2026 09:25<h2>Opcode Table</h2>
 </tr>
 <tr>
     <td>JMPR</td>
-    <td>0000101?</td>
+    <td>0000102?</td>
     <td>0</td>
     <td>1</td>
     <td>Jump to address in register</td>
@@ -1003,6 +996,13 @@ Created 24/03/2026 09:25<h2>Opcode Table</h2>
     <td>1</td>
     <td>1</td>
     <td>Set register from memory at value</td>
+</tr>
+<tr>
+    <td>STIDXR</td>
+    <td>000073??</td>
+    <td>1</td>
+    <td>2</td>
+    <td>Store indexed: mem[second + reg[var1]] = first</td>
 </tr>
 <tr>
     <td>DELAYR</td>

@@ -28,12 +28,12 @@ mod serial;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
-use helper::{create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments};
+use helper::{create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
-use serial::{monitor_serial, write_to_board, AUTO_SERIAL};
+use serial::{monitor_serial, run_test_monitor, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 
 /// Main function for Klausscc.
 ///
@@ -72,6 +72,12 @@ fn main() -> Result<(), i32> {
     let opcodes_flag = matches.get_flag("opcodes");
     let textmate_flag = matches.get_flag("textmate");
     let monitor_flag = matches.get_flag("monitor");
+    let test_flag = matches.get_flag("test");
+    let test_timeout: u64 = matches
+        .get_one::<String>("test_timeout")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(10);
+    let test_list_file: String = matches.get_one::<String>("test_list").unwrap_or(&String::default()).replace(' ', "");
 
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
@@ -112,6 +118,11 @@ fn main() -> Result<(), i32> {
         return Ok(());
     }
 
+    // Batch test list mode
+    if !test_list_file.is_empty() {
+        return run_test_list(&oplist, &macro_list, &test_list_file, &output_serial_port, test_timeout, &mut msg_list);
+    }
+
     // Parse the input file
     msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
     let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
@@ -149,6 +160,10 @@ fn main() -> Result<(), i32> {
         if let Some(bin_string) = create_bin_string(&pass2, &mut msg_list) {
             write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
             if !output_serial_port.is_empty() {
+                if test_flag {
+                    // Test mode: send to board, keep port open, then verify UART output
+                    return run_test_mode(&mut msg_list, &bin_string, &output_serial_port, &input_file_name, test_timeout, start_time);
+                }
                 write_to_device(&mut msg_list, &bin_string, &output_serial_port);
             }
         } else {
@@ -197,6 +212,18 @@ fn main() -> Result<(), i32> {
             );
             print_messages(&msg_list);
         }
+    }
+
+    // Check test flag requires serial port
+    if test_flag && output_serial_port.is_empty() {
+        msg_list.push(
+            "Test flag (-T) requires a serial port (-s)".to_owned(),
+            None,
+            None,
+            MessageType::Error,
+        );
+        print_messages(&msg_list);
+        return Err(1_i32);
     }
 
     Ok(())
@@ -349,7 +376,7 @@ pub fn set_matches() -> Command {
             Arg::new("input")
                 .short('i')
                 .long("input")
-                .required(true)
+                .required_unless_present_any(["textmate", "opcodes", "test_list"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .num_args(1)
@@ -395,7 +422,32 @@ pub fn set_matches() -> Command {
                 .short('m')
                 .long("monitor")
                 .action(ArgAction::SetTrue)
+                .conflicts_with("test")
                 .help("Monitor serial port for UART output after sending (Ctrl+C to stop)"),
+        )
+        .arg(
+            Arg::new("test")
+                .short('T')
+                .long("test")
+                .action(ArgAction::SetTrue)
+                .conflicts_with("monitor")
+                .help("Test mode: verify UART output against expected values in source comments"),
+        )
+        .arg(
+            Arg::new("test_timeout")
+                .long("test-timeout")
+                .num_args(1)
+                .default_value("10")
+                .help("Timeout in seconds for test mode UART capture (default: 10)"),
+        )
+        .arg(
+            Arg::new("test_list")
+                .short('L')
+                .long("test-list")
+                .num_args(1)
+                .conflicts_with("input")
+                .conflicts_with("monitor")
+                .help("File containing list of test .kla files to assemble and verify sequentially"),
         )
 }
 
@@ -439,6 +491,363 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
             None,
             MessageType::Warning,
         );
+    }
+}
+
+/// Run test verification mode.
+///
+/// Sends program to board, reads UART output, and verifies against expected values
+/// parsed from the source file comments.
+#[inline]
+#[allow(clippy::print_stdout, reason = "Printing to stdout is required for test result output")]
+#[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
+pub fn run_test_mode(
+    msg_list: &mut MsgList,
+    bin_string: &str,
+    output_serial_port: &str,
+    input_file_name: &str,
+    test_timeout: u64,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    // Parse expected values from the raw source file
+    let raw_lines: Vec<String> = std::fs::read_to_string(input_file_name)
+        .unwrap_or_default()
+        .lines()
+        .map(String::from)
+        .collect();
+    let expected_values = parse_expected_uart_values(&raw_lines);
+
+    if expected_values.is_empty() {
+        msg_list.push(
+            "No expected UART values found in source file comments".to_owned(),
+            None,
+            None,
+            MessageType::Error,
+        );
+        print_results(msg_list, start_time);
+        return Err(1_i32);
+    }
+
+    msg_list.push(
+        format!("Found {} expected UART values in source comments", expected_values.len()),
+        None,
+        None,
+        MessageType::Information,
+    );
+
+    // Send to board and keep port open
+    let port = match write_to_board_keep_port(bin_string, output_serial_port, msg_list) {
+        Ok(port) => {
+            msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+            port
+        }
+        Err(err) => {
+            msg_list.push(
+                format!("Failed to write to serial port, error \"{err}\""),
+                None,
+                None,
+                MessageType::Error,
+            );
+            print_results(msg_list, start_time);
+            return Err(1_i32);
+        }
+    };
+
+    print_results(msg_list, start_time);
+
+    // Run test verification
+    let result = run_test_monitor(port, &expected_values, test_timeout, msg_list);
+
+    // Print summary
+    println!(
+        "\nTest result: {}/{} passed, {}/{} failed{}",
+        result.passed,
+        result.total,
+        result.failed,
+        result.total,
+        if result.timed_out { " (TIMED OUT)" } else { "" },
+    );
+
+    if result.failed > 0 || result.timed_out {
+        Err(if result.timed_out { 3_i32 } else { 2_i32 })
+    } else {
+        Ok(())
+    }
+}
+
+/// Assemble a single input file and return the binary string.
+///
+/// Runs the full assembly pipeline (pass0 → pass1 → pass2 → binary) for one file.
+/// Returns `Some(binary_string)` on success, `None` on assembly error.
+#[inline]
+#[cfg(not(tarpaulin_include))]
+pub fn assemble_file(
+    input_file_name: &str,
+    oplist: &[Opcode],
+    macro_list: &[macros::Macro],
+    msg_list: &mut MsgList,
+) -> Option<String> {
+    msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
+    let mut opened_input_files: Vec<String> = Vec::new();
+    let input_list_option = read_file_to_vector(input_file_name, msg_list, &mut opened_input_files);
+    if input_list_option.is_none() {
+        return None;
+    }
+
+    let input_list = remove_block_comments(input_list_option.unwrap_or_else(|| [].to_vec()), msg_list);
+
+    let mut macro_list_clone = macro_list.to_vec();
+    let pass0 = expand_macros(msg_list, input_list, &mut macro_list_clone);
+    let pass1: Vec<Pass1> = get_pass1(msg_list, pass0, oplist.to_vec());
+    let mut labels = get_labels(&pass1, msg_list);
+    find_duplicate_label(&mut labels, msg_list);
+    let mut pass2 = get_pass2(msg_list, pass1, oplist.to_vec(), labels);
+
+    let output_file_name = format!("{}.code", filename_stem(&input_file_name.to_owned()));
+    if let Err(result_err) = write_code_output_file(&output_file_name, &mut pass2, msg_list) {
+        msg_list.push(
+            format!("Unable to write to code file {output_file_name}, error {result_err}"),
+            None,
+            None,
+            MessageType::Error,
+        );
+        return None;
+    }
+
+    if msg_list.number_by_type(&MessageType::Error) > 0 {
+        return None;
+    }
+
+    create_bin_string(&pass2, msg_list)
+}
+
+/// Result of a single test in a batch run.
+struct BatchTestResult {
+    /// File name of the test.
+    file_name: String,
+    /// Number of expected values that matched.
+    passed: usize,
+    /// Number of expected values that did not match.
+    failed: usize,
+    /// True if the test timed out.
+    timed_out: bool,
+    /// Total number of expected values.
+    total: usize,
+    /// True if the test could not be assembled or had no expected values.
+    skipped: bool,
+    /// Reason for skipping, if applicable.
+    skip_reason: String,
+}
+
+/// Read a test list file and return the list of test file paths.
+///
+/// Each line is a test file path. Blank lines and lines starting with `//` or `#` are ignored.
+/// Paths are resolved relative to the directory containing the list file.
+#[cfg(not(tarpaulin_include))]
+fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
+    let list_dir = std::path::Path::new(list_file)
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."));
+
+    let contents = match std::fs::read_to_string(list_file) {
+        Ok(c) => c,
+        Err(err) => {
+            msg_list.push(
+                format!("Error reading test list file {list_file}: \"{err}\""),
+                None,
+                None,
+                MessageType::Error,
+            );
+            return Vec::new();
+        }
+    };
+
+    contents
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with('#'))
+        .map(|line| {
+            let path = std::path::Path::new(line);
+            if path.is_absolute() {
+                line.to_owned()
+            } else {
+                list_dir.join(line).to_string_lossy().into_owned()
+            }
+        })
+        .collect()
+}
+
+/// Run a batch of tests from a test list file.
+///
+/// For each test file: assembles, sends to board, verifies UART output,
+/// and prints per-test and aggregate results.
+#[allow(clippy::print_stdout, reason = "Printing to stdout is required for batch test output")]
+#[allow(clippy::arithmetic_side_effects, reason = "Counter arithmetic is safe")]
+#[cfg(not(tarpaulin_include))]
+pub fn run_test_list(
+    oplist: &[Opcode],
+    macro_list: &[macros::Macro],
+    list_file: &str,
+    output_serial_port: &str,
+    test_timeout: u64,
+    msg_list: &mut MsgList,
+) -> Result<(), i32> {
+    if output_serial_port.is_empty() {
+        msg_list.push(
+            "Test list (-L) requires a serial port (-s)".to_owned(),
+            None,
+            None,
+            MessageType::Error,
+        );
+        print_messages(msg_list);
+        return Err(1_i32);
+    }
+
+    let test_files = read_test_list(list_file, msg_list);
+    if test_files.is_empty() {
+        msg_list.push(
+            "No test files found in test list".to_owned(),
+            None,
+            None,
+            MessageType::Error,
+        );
+        print_messages(msg_list);
+        return Err(1_i32);
+    }
+
+    println!("Running {} tests from {list_file}...\n", test_files.len());
+
+    let mut results: Vec<BatchTestResult> = Vec::new();
+
+    for (index, test_file) in test_files.iter().enumerate() {
+        println!("--- [{}/{}] {} ---", index + 1, test_files.len(), test_file);
+
+        // Fresh message list for each test to avoid error accumulation
+        let mut test_msg_list = MsgList::new();
+
+        // Assemble the test file
+        let bin_string = match assemble_file(test_file, oplist, macro_list, &mut test_msg_list) {
+            Some(bin) => bin,
+            None => {
+                println!("  SKIP: assembly failed");
+                print_messages(&test_msg_list);
+                results.push(BatchTestResult {
+                    file_name: test_file.clone(),
+                    passed: 0,
+                    failed: 0,
+                    timed_out: false,
+                    total: 0,
+                    skipped: true,
+                    skip_reason: "assembly error".to_owned(),
+                });
+                println!();
+                continue;
+            }
+        };
+
+        // Write binary file
+        let binary_file_name = format!("{}.kbt", filename_stem(test_file));
+        write_binary_file(&mut test_msg_list, &binary_file_name, &bin_string);
+
+        // Parse expected values
+        let raw_lines: Vec<String> = std::fs::read_to_string(test_file)
+            .unwrap_or_default()
+            .lines()
+            .map(String::from)
+            .collect();
+        let expected_values = parse_expected_uart_values(&raw_lines);
+
+        if expected_values.is_empty() {
+            println!("  SKIP: no expected UART values in source comments");
+            results.push(BatchTestResult {
+                file_name: test_file.clone(),
+                passed: 0,
+                failed: 0,
+                timed_out: false,
+                total: 0,
+                skipped: true,
+                skip_reason: "no expected values".to_owned(),
+            });
+            println!();
+            continue;
+        }
+
+        // Send to board and keep port open
+        let port = match write_to_board_keep_port(&bin_string, output_serial_port, &mut test_msg_list) {
+            Ok(port) => port,
+            Err(err) => {
+                println!("  SKIP: serial port error \"{err}\"");
+                results.push(BatchTestResult {
+                    file_name: test_file.clone(),
+                    passed: 0,
+                    failed: 0,
+                    timed_out: false,
+                    total: 0,
+                    skipped: true,
+                    skip_reason: format!("serial error: {err}"),
+                });
+                println!();
+                continue;
+            }
+        };
+
+        // Run test verification
+        let result = run_test_monitor(port, &expected_values, test_timeout, &mut test_msg_list);
+
+        println!(
+            "  Result: {}/{} passed{}",
+            result.passed,
+            result.total,
+            if result.timed_out { " (TIMED OUT)" } else { "" },
+        );
+
+        results.push(BatchTestResult {
+            file_name: test_file.clone(),
+            passed: result.passed,
+            failed: result.failed,
+            timed_out: result.timed_out,
+            total: result.total,
+            skipped: false,
+            skip_reason: String::new(),
+        });
+
+        println!();
+    }
+
+    // Print aggregate summary
+    println!("=== Test Suite Summary ===");
+    let mut total_failed: usize = 0;
+    let mut total_skipped: usize = 0;
+    let mut total_timed_out: usize = 0;
+    let mut files_all_pass: usize = 0;
+
+    for r in &results {
+        if r.skipped {
+            total_skipped += 1;
+            println!("  SKIP  {} ({})", r.file_name, r.skip_reason);
+        } else if r.failed > 0 || r.timed_out {
+            total_failed += 1;
+            if r.timed_out {
+                total_timed_out += 1;
+            }
+            println!("  FAIL  {} ({}/{} passed{})", r.file_name, r.passed, r.total,
+                if r.timed_out { ", timed out" } else { "" });
+        } else {
+            files_all_pass += 1;
+            println!("  PASS  {} ({}/{})", r.file_name, r.passed, r.total);
+        }
+    }
+
+    let total_files = results.len();
+    println!(
+        "\n{files_all_pass}/{total_files} test files passed, {total_failed} failed, {total_skipped} skipped{}",
+        if total_timed_out > 0 { format!(", {total_timed_out} timed out") } else { String::new() },
+    );
+
+    if total_failed > 0 || total_timed_out > 0 {
+        Err(2_i32)
+    } else {
+        Ok(())
     }
 }
 

@@ -1,0 +1,15 @@
+// String print subroutine
+// Input: A = pointer to null-terminated string in memory
+// Uses: A (pointer), B (character read)
+// Prints each character via TXCHARMEMR until a zero byte is found.
+
+STRING_PRINT:
+MEMREADRR B A          // B = mem[A] (read character)
+CMPRV B 0x0            // compare B to null terminator
+JMPE STRING_DONE:      // if zero, done
+TXCHARMEMR A           // send character at mem[A]
+INCR A                 // advance pointer
+JMP STRING_PRINT:      // loop
+
+STRING_DONE:
+RET

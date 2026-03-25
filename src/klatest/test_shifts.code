@@ -1,0 +1,73 @@
+                              -- // Test 04: Shift and Rotate Operations
+                              -- // Tests: SHLR, SHRR, SHLAR, SHRAR, SHLV, SHRV, SHRAV, ROLR, RORR
+                              -- // Expected UART output:
+                              -- //   00000002  (SHLR: 1 << 1 = 2)
+                              -- //   00000001  (SHRR: 2 >> 1 = 1)
+                              -- //   FFFFFFFE  (SHLAR: 0xFFFFFFFF << 1 arithmetic = 0xFFFFFFFE)
+                              -- //   FFFFFFFF  (SHRAR: 0xFFFFFFFE >> 1 arithmetic = 0xFFFFFFFF, sign extended)
+                              -- //   00000F00  (SHLV: 0x0F << 8 = 0xF00)
+                              -- //   0000000F  (SHRV: 0xF00 >> 8 = 0x0F)
+                              -- //   FFFFFF80  (SHRAV: 0xFF000000 >> 17 arithmetic = sign extended)
+                              -- //   00000003  (ROLR: 0x80000001 rotate left 1 = 0x00000003)
+                              -- //   80000000  (RORR: 0x00000001 rotate right 1 = 0x80000000)
+                              -- // Expected 7SEG: 0x04
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000002: 00003071 00000004 -- 7SEG1V 0x04
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // SHLR: left shift by 1
+0x00000005: 00000800 00000001 -- SETR A 0x1
+0x00000007: 000008D0          -- SHLR A
+0x00000008: 00005010          -- TXR A                 // Expect: 00000002
+0x00000009: 00005001          -- NEWLINE
+                              -- 
+                              -- // SHRR: right shift by 1 (logical)
+0x0000000A: 000008E0          -- SHRR A
+0x0000000B: 00005010          -- TXR A                 // Expect: 00000001
+0x0000000C: 00005001          -- NEWLINE
+                              -- 
+                              -- // SHLAR: arithmetic left shift by 1
+0x0000000D: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF
+0x0000000F: 000008F0          -- SHLAR A
+0x00000010: 00005010          -- TXR A                 // Expect: FFFFFFFE
+0x00000011: 00005001          -- NEWLINE
+                              -- 
+                              -- // SHRAR: arithmetic right shift by 1 (sign-extending)
+0x00000012: 00000900          -- SHRAR A
+0x00000013: 00005010          -- TXR A                 // Expect: FFFFFFFF
+0x00000014: 00005001          -- NEWLINE
+                              -- 
+                              -- // SHLV: left shift by N
+0x00000015: 00000800 0000000F -- SETR A 0x0F
+0x00000017: 00000910 00000008 -- SHLV A 8
+0x00000019: 00005010          -- TXR A                 // Expect: 00000F00
+0x0000001A: 00005001          -- NEWLINE
+                              -- 
+                              -- // SHRV: right shift by N (logical)
+0x0000001B: 00000920 00000008 -- SHRV A 8
+0x0000001D: 00005010          -- TXR A                 // Expect: 0000000F
+0x0000001E: 00005001          -- NEWLINE
+                              -- 
+                              -- // SHRAV: arithmetic right shift by N
+0x0000001F: 00000800 FF000000 -- SETR A 0xFF000000
+0x00000021: 00000930 00000011 -- SHRAV A 17
+0x00000023: 00005010          -- TXR A                 // Expect: FFFFFF80
+0x00000024: 00005001          -- NEWLINE
+                              -- 
+                              -- // ROLR: rotate left by 1
+0x00000025: 00000800 80000001 -- SETR A 0x80000001
+0x00000027: 00000F80          -- ROLR A
+0x00000028: 00005010          -- TXR A                 // Expect: 00000003
+0x00000029: 00005001          -- NEWLINE
+                              -- 
+                              -- // RORR: rotate right by 1
+0x0000002A: 00000800 00000001 -- SETR A 0x00000001
+0x0000002C: 00000F90          -- RORR A
+0x0000002D: 00005010          -- TXR A                 // Expect: 80000000
+0x0000002E: 00005001          -- NEWLINE
+                              -- 
+0x0000002F: 00003070 000000FF -- LEDV 0xFF
+0x00000031: 0000F011          -- HALT

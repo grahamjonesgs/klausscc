@@ -485,7 +485,7 @@
     "registers": 2,
     "section": "",
     "text_name": "LDIDX",
-    "variables": 0
+    "variables": 1
   },
   {
     "comment": "Store indexed: mem[second + var1] = first",
@@ -493,23 +493,15 @@
     "registers": 2,
     "section": "",
     "text_name": "STIDX",
-    "variables": 0
+    "variables": 1
   },
   {
-    "comment": "Store indexed: mem[second + third] = first",
-    "hex_code": "00000E0?",
-    "registers": 1,
-    "section": "",
-    "text_name": "STIDXR",
-    "variables": 0
-  },
-  {
-    "comment": "Load indexed: first = mem[second + third]",
+    "comment": "Load indexed: first = mem[second + reg[var1]]",
     "hex_code": "00000E??",
     "registers": 2,
     "section": "",
     "text_name": "LDIDXR",
-    "variables": 0
+    "variables": 1
   },
   {
     "comment": "Compare signed less-than",
@@ -841,7 +833,7 @@
   },
   {
     "comment": "Jump to address in register",
-    "hex_code": "0000101?",
+    "hex_code": "0000102?",
     "registers": 1,
     "section": "",
     "text_name": "JMPR",
@@ -1117,6 +1109,14 @@
     "registers": 1,
     "section": "",
     "text_name": "MEMREADR",
+    "variables": 1
+  },
+  {
+    "comment": "Store indexed: mem[second + reg[var1]] = first",
+    "hex_code": "000073??",
+    "registers": 2,
+    "section": "",
+    "text_name": "STIDXR",
     "variables": 1
   },
   {

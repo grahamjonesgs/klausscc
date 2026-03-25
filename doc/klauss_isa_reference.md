@@ -18,6 +18,8 @@ This document describes the Klauss Instruction Set Architecture (ISA) and its as
   - [Register Operations](#register-operations)
   - [Arithmetic](#arithmetic)
   - [Logic and Bitwise](#logic-and-bitwise)
+  - [Sign Extension and Type Conversion](#sign-extension-and-type-conversion)
+  - [Min/Max Operations](#minmax-operations)
   - [Shift and Rotate](#shift-and-rotate)
   - [Bit Manipulation](#bit-manipulation)
   - [Multiply and Divide](#multiply-and-divide)
@@ -29,6 +31,10 @@ This document describes the Klauss Instruction Set Architecture (ISA) and its as
   - [UART / Debug Output](#uart--debug-output)
   - [Interrupts](#interrupts)
   - [System](#system)
+- [Serial Communication](#serial-communication)
+  - [Monitoring UART Output](#monitoring-uart-output)
+  - [Automated Test Mode](#automated-test-mode)
+- [Writing Test Programs](#writing-test-programs)
 - [Complete Examples](#complete-examples)
 
 ---
@@ -76,9 +82,14 @@ klausscc [OPTIONS] -c <opcode_file>
 |------|-------------|
 | `-o`, `--output <name>` | Output info file name (default: input stem + `.code`) |
 | `-b`, `--bitcode <name>` | Output binary file name (default: input stem + `.kbt`) |
-| `-s`, `--serial [port]` | Serial port to write binary output to the FPGA board |
+| `-s`, `--serial [port]` | Serial port to write binary output to the FPGA board. If given without a value, auto-detects the FTDI USB serial device. |
+| `-m`, `--monitor` | After sending, stay connected and print all UART output from the board (Ctrl+C to stop) |
+| `-T`, `--test` | Test mode: assemble, send to board, and verify UART output against expected values declared in source file comments. See [Automated Test Mode](#automated-test-mode). |
+| `--test-timeout <secs>` | Timeout for test mode (default: 10 seconds) |
 | `--opcodes` | Output opcode/macro documentation as HTML and JSON, then exit |
 | `-t`, `--textmate` | Output opcode list for TextMate/VSCode syntax highlighting, then exit |
+
+Note: `-m` and `-T` are mutually exclusive. Both require `-s`.
 
 ### Examples
 
@@ -87,9 +98,19 @@ Assemble a program:
 klausscc -c opcode_select.vh -i count.kla
 ```
 
-Assemble and upload to FPGA board via serial:
+Assemble and upload to FPGA board via serial (auto-detect port):
 ```sh
-klausscc -c opcode_select.vh -i count.kla -s /dev/ttyUSB0
+klausscc -c opcode_select.vh -i count.kla -s
+```
+
+Assemble, upload, and monitor UART output:
+```sh
+klausscc -c opcode_select.vh -i count.kla -s -m
+```
+
+Assemble, upload, and run automated verification:
+```sh
+klausscc -c opcode_select.vh -i test_bits.kla -s --test
 ```
 
 Generate ISA documentation:
@@ -389,6 +410,32 @@ ANDV A 0xFF       // A = A & 0xFF  (mask lower byte)
 BSWAP A           // Reverse byte order of A
 ```
 
+### Sign Extension and Type Conversion
+
+| Instruction | Operands | Description |
+|-------------|----------|-------------|
+| `SEXTB` | Reg | Sign-extend byte (bits 0-7) to 32 bits |
+| `SEXTH` | Reg | Sign-extend halfword (bits 0-15) to 32 bits |
+| `ZEXTB` | Reg | Zero-extend byte to 32 bits |
+| `ZEXTH` | Reg | Zero-extend halfword to 32 bits |
+
+**Examples:**
+```
+SETR A 0x80            // A = 0x00000080
+SEXTB A                // A = 0xFFFFFF80 (sign-extended from byte)
+SETR B 0xFF
+ZEXTB B                // B = 0x000000FF (zero-extended)
+```
+
+### Min/Max Operations
+
+| Instruction | Operands | Description |
+|-------------|----------|-------------|
+| `MINRR` | Reg | Signed minimum of register and second register |
+| `MAXRR` | Reg | Signed maximum of register and second register |
+| `MINURR` | Reg | Unsigned minimum |
+| `MAXURR` | Reg | Unsigned maximum |
+
 ### Shift and Rotate
 
 | Instruction | Operands | Description |
@@ -494,16 +541,25 @@ CMPLTRR A         // Sets flags if A < (second register), signed
 
 ### Memory Access
 
+#### Direct Memory
+
 | Instruction | Operands | Description |
 |-------------|----------|-------------|
 | `MEMSETRR` | Reg1, Reg2 | Write Reg1 value to memory at address in Reg2 |
 | `MEMREADRR` | Reg1, Reg2 | Read memory at address in Reg2 into Reg1 |
 | `MEMSETR` | Reg, Val | Write register value to memory at immediate address |
 | `MEMREADR` | Reg, Val | Read memory at immediate address into register |
-| `LDIDX` | Reg1, Reg2 | Indexed load: Reg1 = mem[Reg2 + offset] |
-| `STIDX` | Reg1, Reg2 | Indexed store: mem[Reg2 + offset] = Reg1 |
-| `LDIDXR` | Reg1, Reg2 | Indexed load: Reg1 = mem[Reg2 + Reg3] |
-| `STIDXR` | Reg | Indexed store: mem[Reg2 + Reg3] = Reg1 |
+
+#### Indexed Memory (2-word instructions)
+
+| Instruction | Operands | Description |
+|-------------|----------|-------------|
+| `LDIDX` | Reg1, Reg2, Val | Indexed load: Reg1 = mem[Reg2 + Val] |
+| `STIDX` | Reg1, Reg2, Val | Indexed store: mem[Reg2 + Val] = Reg1 |
+| `LDIDXR` | Reg1, Reg2 | Indexed load: Reg1 = mem[Reg2 + offset register] |
+| `STIDXR` | Reg1, Reg2 | Indexed store: mem[Reg2 + offset register] = Reg1 |
+
+`LDIDX` and `STIDX` take an immediate offset value as their third operand. `LDIDXR` and `STIDXR` use a register-based offset.
 
 **Examples:**
 ```
@@ -516,6 +572,18 @@ MEMREADRR C A        // C = mem[A]  (C is now 0x42)
 // Direct memory access
 MEMSETR B 0x100      // mem[0x100] = B
 MEMREADR C 0x200     // C = mem[0x200]
+
+// Indexed memory with immediate offset
+SETR A #ARRAY        // A = base address
+SETR B 0xAA
+STIDX B A 0x0        // mem[A + 0] = 0xAA
+STIDX B A 0x2        // mem[A + 2] = 0xAA
+LDIDX D A 0x2        // D = mem[A + 2]
+
+// Indexed memory with register offset
+SETR B 0xCC
+STIDXR B A           // mem[A + offset_reg] = 0xCC
+LDIDXR D A           // D = mem[A + offset_reg]
 ```
 
 ### Flow Control (Jumps and Calls)
@@ -694,6 +762,203 @@ NOP               // Do nothing for one cycle
 DELAYV 0xFFFF     // Long delay
 HALT              // Stop execution
 ```
+
+---
+
+## Serial Communication
+
+The assembler can upload compiled programs to the FPGA board via UART serial and interact with the board's output.
+
+### Uploading Programs
+
+Use `-s` to send the compiled binary to the board after assembly:
+
+```sh
+klausscc -c opcode_select.vh -i myprogram.kla -s /dev/ttyUSB0
+```
+
+If `-s` is given without a port name, the assembler auto-detects the first FTDI USB serial device (VID/PID 0403:6001, 6010, 6011, or 6014):
+
+```sh
+klausscc -c opcode_select.vh -i myprogram.kla -s
+```
+
+The upload protocol sends an `S` character to reset the board, waits for the board to respond, then transmits the binary byte-by-byte. The board responds with an acknowledgment message (e.g. "Load Complete OK") when the program is loaded.
+
+### Monitoring UART Output
+
+Use `-m` alongside `-s` to monitor the board's UART output after uploading. This is useful for programs that send debug output via `TXR`, `NEWLINE`, `TXSTRMEMR`, etc:
+
+```sh
+klausscc -c opcode_select.vh -i myprogram.kla -s -m
+```
+
+The monitor prints all received serial data to stdout in real time. Press **Ctrl+C** to stop monitoring -- the serial port is closed cleanly so it can be reused immediately.
+
+### Automated Test Mode
+
+Use `-T` (or `--test`) to automatically verify the board's UART output against expected values declared in the source file's comments:
+
+```sh
+klausscc -c opcode_select.vh -i test_bits.kla -s --test
+```
+
+The assembler:
+1. Parses expected hex values from the `// Expected UART output:` comment block in the source file
+2. Assembles and uploads the program
+3. Captures UART output and compares each 8-digit hex value against the expected sequence
+4. Reports per-line PASS/FAIL and an overall summary
+
+Example output:
+```
+Test mode: expecting 8 UART values (timeout 10s)...
+  PASS [1/8]: 00000080 == 00000080
+  PASS [2/8]: 00000000 == 00000000
+  PASS [3/8]: 00000001 == 00000001
+  FAIL [4/8]: got 00000002, expected 00000000
+  ...
+
+Test result: 7/8 passed, 1/8 failed
+```
+
+Use `--test-timeout` to adjust the wait time (default 10 seconds):
+
+```sh
+klausscc -c opcode_select.vh -i test_bits.kla -s --test --test-timeout 20
+```
+
+**Exit codes:**
+- `0` -- all tests passed
+- `1` -- assembly error or no expected values found
+- `2` -- one or more test values did not match
+- `3` -- timed out before all expected values were received
+
+---
+
+## Writing Test Programs
+
+Test programs follow a standard structure that enables both manual observation and automated verification. The test files in `src/klatest/` demonstrate this pattern.
+
+### Test File Structure
+
+```
+// Test NN: Description of what is being tested
+// Tests: INSTRUCTION1, INSTRUCTION2, ...
+// Expected UART output:
+//   XXXXXXXX  (description of first expected value)
+//   XXXXXXXX  (description of second expected value)
+// Expected 7SEG: 0xNN
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000          // Wait for UART to be ready after upload
+
+7SEG1V 0xNN            // Display test number on 7-segment
+NEWLINE                 // Initial newline for clean output
+
+// --- Test case 1 ---
+SETR A 0xFF
+// ... perform operation ...
+TXR A                   // Send result via UART
+NEWLINE
+
+// --- Test case 2 ---
+// ... more tests ...
+
+LEDV 0xFF               // All LEDs on = all pass
+HALT
+```
+
+### Key Conventions
+
+1. **Initial delay**: Start with `DELAYV 0x3000` to let the board's upload acknowledgment finish transmitting before your program sends UART output.
+
+2. **Expected UART comments**: Declare expected hex values in a comment block matching this exact format:
+   ```
+   // Expected UART output:
+   //   XXXXXXXX  (description)
+   ```
+   Each value must be exactly 8 uppercase hex characters. The automated test mode (`--test`) parses these comments and compares them against the actual UART output.
+
+3. **TXR for verification**: Use `TXR` to send register values as 8-digit hex strings over UART. Follow each `TXR` with `NEWLINE` to separate values.
+
+4. **Visual indicators**: Use `7SEG1V` with a unique test number so you can identify which test is running on the board. Use `LEDV 0xFF` at the end to indicate all tests passed.
+
+5. **Data sections**: Declare any data arrays at the bottom of the file with `#NAME count`. The assembler automatically moves data to the end of the program.
+
+### Example Test Program
+
+This test verifies register operations:
+
+```
+// Test 01: Register Operations
+// Tests: SETR, COPY, INCR, DECR, NEGR
+// Expected UART output:
+//   000000FF  (SETR A 0xFF)
+//   000000FF  (COPY A->B, B should equal A)
+//   00000100  (INCR A, 0xFF+1 = 0x100)
+//   000000FE  (DECR B, 0xFF-1 = 0xFE)
+//   FFFFFFFE  (NEGR C with C=2, twos complement)
+// Expected 7SEG: 0x01
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x3000
+7SEG1V 0x01
+NEWLINE
+
+SETR A 0xFF
+TXR A                  // Expect: 000000FF
+NEWLINE
+
+COPY A B
+TXR B                  // Expect: 000000FF
+NEWLINE
+
+INCR A
+TXR A                  // Expect: 00000100
+NEWLINE
+
+DECR B
+TXR B                  // Expect: 000000FE
+NEWLINE
+
+SETR C 0x2
+NEGR C
+TXR C                  // Expect: FFFFFFFE
+NEWLINE
+
+LEDV 0xFF
+HALT
+```
+
+Run it with automated verification:
+```sh
+klausscc -c opcode_select.vh -i test_regs.kla -s --test
+```
+
+### Available Test Programs
+
+The `src/klatest/` directory contains test programs covering the full ISA:
+
+| File | Description |
+|------|-------------|
+| `test_regs.kla` | Register operations (SETR, COPY, INCR, DECR, NEGR, ABSR) |
+| `test_arithmetic.kla` | Arithmetic (ADDRR, MINUSRR, ADDV, MINUSV) |
+| `test_logic.kla` | Logic operations (AND, OR, XOR, ANDV, ORV, XORV) |
+| `test_shifts.kla` | Shift and rotate operations |
+| `test_bits.kla` | Bit manipulation (BSET, BCLR, BTGL, POPCNT, CLZ, CTZ, BITREV) |
+| `test_muldiv.kla` | Multiply and divide |
+| `test_compare_jump.kla` | Comparison and conditional jumps |
+| `test_memory.kla` | Memory access (MEMSETRR, MEMREADRR, MEMSETR, MEMREADR) |
+| `test_stack.kla` | Stack operations (PUSH, POP, PUSHV) |
+| `test_call_ret.kla` | Subroutine calls and returns |
+| `test_strings.kla` | String output via UART |
+| `test_edge_cases.kla` | Boundary conditions and corner cases |
+| `test_sign_extend.kla` | Sign/zero extension (SEXTB, SEXTH, ZEXTB, ZEXTH, BSWAP) |
+| `test_indexed_mem.kla` | Indexed memory operations (LDIDX, STIDX, LDIDXR, STIDXR) |
+| `test_io.kla` | I/O peripherals (LEDs, 7-segment, switches) |
+| `test_loop_patterns.kla` | Loop patterns and control flow |
 
 ---
 

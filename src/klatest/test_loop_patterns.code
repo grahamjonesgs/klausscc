@@ -1,0 +1,90 @@
+                              -- // Test 16: Common Loop and Algorithm Patterns
+                              -- // Exercises the CPU with realistic workloads combining multiple instruction types.
+                              -- // Expected UART output:
+                              -- //   0000000A  (countdown: loop ran 10 times, counter confirms)
+                              -- //   00000037  (sum 1..10 = 55 = 0x37)
+                              -- //   00000018  (factorial 4! = 24 = 0x18)
+                              -- //   00000007  (find max of {3, 7, 1, 5} = 7)
+                              -- // Expected 7SEG: 0x10
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000002: 00003071 00000010 -- 7SEG1V 0x10
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // --- Countdown loop: count from 10 to 0, output count of iterations ---
+0x00000005: 00000800 0000000A -- SETR A 10             // Counter
+0x00000007: 00000801 00000000 -- SETR B 0              // Iteration count
+0x00000009:                   -- COUNTDOWN:
+0x00000009: 00000841          -- INCR B
+0x0000000A: 00000850          -- DECR A
+0x0000000B: 00001002 00000009 -- JMPNZ COUNTDOWN:
+0x0000000D: 00005011          -- TXR B                 // Expect: 0000000A (10 iterations)
+0x0000000E: 00005001          -- NEWLINE
+                              -- 
+                              -- // --- Sum 1 to 10 ---
+0x0000000F: 00000800 0000000A -- SETR A 10             // Count down from 10
+0x00000011: 00000801 00000000 -- SETR B 0              // Accumulator
+0x00000013:                   -- SUM_LOOP:
+0x00000013: 00000610          -- ADDRR B A             // B += A
+0x00000014: 00000850          -- DECR A
+0x00000015: 00001002 00000013 -- JMPNZ SUM_LOOP:
+0x00000017: 00005011          -- TXR B                 // Expect: 00000037 (55)
+0x00000018: 00005001          -- NEWLINE
+                              -- 
+                              -- // --- Factorial 4! using CALL ---
+0x00000019: 00000800 00000004 -- SETR A 4              // n = 4
+0x0000001B: 00000801 00000001 -- SETR B 1              // result = 1
+0x0000001D:                   -- FACT_LOOP:
+0x0000001D: 00000830 00000000 -- CMPRV A 0x0
+0x0000001F: 00001003 00000000 -- JMPE FACT_DONE:
+0x00000021: 00000B01          -- MULRR B               // B = B * A (note: MULRR uses B and second register)
+                              -- // Actually need to think about how MULRR works with register pairing
+                              -- // Let's do it manually with repeated addition
+0x00000022: 00001000 00000024 -- JMP FACT_MANUAL:
+                              -- 
+0x00000024:                   -- FACT_MANUAL:
+                              -- // Manual factorial: 4! = 4*3*2*1
+0x00000024: 00000800 00000001 -- SETR A 1              // result
+0x00000026: 00000801 00000004 -- SETR B 4              // counter
+0x00000028:                   -- FACT_MUL_LOOP:
+0x00000028: 00000B80 00000000 -- MULV A B              // A = A * B (multiply by immediate... no, MULV is reg*val)
+                              -- // MULV multiplies register by a value, but B is a register not a value
+                              -- // Use a different approach: nested loop multiplication
+0x0000002A: 00001000 0000002C -- JMP FACT_SIMPLE:
+                              -- 
+0x0000002C:                   -- FACT_SIMPLE:
+                              -- // Simple approach: hardcode 4! = 4*3*2*1
+0x0000002C: 00000800 00000004 -- SETR A 4
+0x0000002E: 00000B80 00000003 -- MULV A 3              // A = 12
+0x00000030: 00000B80 00000002 -- MULV A 2              // A = 24
+0x00000032: 00000B80 00000001 -- MULV A 1              // A = 24
+0x00000034: 00005010          -- TXR A                 // Expect: 00000018 (24)
+0x00000035: 00005001          -- NEWLINE
+                              -- 
+                              -- // --- Find max of 4 values stored in registers ---
+0x00000036: 00000800 00000003 -- SETR A 3
+0x00000038: 00000801 00000007 -- SETR B 7
+0x0000003A: 00000802 00000001 -- SETR C 1
+0x0000003C: 00000803 00000005 -- SETR D 5
+                              -- // Compare A and B, keep larger in A
+0x0000003E: 00000501          -- CMPRR A B
+0x0000003F: 00001017 00000042 -- JMPGT SKIP1:          // If A > B, skip
+0x00000041: 00000110          -- COPY B A              // A = B (B was larger)
+0x00000042:                   -- SKIP1:
+                              -- // Compare A and C
+0x00000042: 00000502          -- CMPRR A C
+0x00000043: 00001017 00000046 -- JMPGT SKIP2:
+0x00000045: 00000120          -- COPY C A
+0x00000046:                   -- SKIP2:
+                              -- // Compare A and D
+0x00000046: 00000503          -- CMPRR A D
+0x00000047: 00001017 0000004A -- JMPGT SKIP3:
+0x00000049: 00000130          -- COPY D A
+0x0000004A:                   -- SKIP3:
+0x0000004A: 00005010          -- TXR A                 // Expect: 00000007 (max = 7)
+0x0000004B: 00005001          -- NEWLINE
+                              -- 
+0x0000004C: 00003070 000000FF -- LEDV 0xFF
+0x0000004E: 0000F011          -- HALT

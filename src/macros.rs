@@ -202,7 +202,7 @@ pub fn expand_macros(
             );
             #[allow(clippy::arithmetic_side_effects, reason = "Macro expansion logic may involve arithmetic side effects")]
             if let Some(items_vec) = items {
-                let macro_name = macro_name_from_string(&code_line.input).unwrap_or_default();
+                //let macro_name = macro_name_from_string(&code_line.input).unwrap_or_default();
                 for item in items_vec {
                     pass0.push(Pass0 {
                         input_text_line: format!(

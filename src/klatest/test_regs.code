@@ -1,0 +1,54 @@
+                              -- // Test 01: Register Operations
+                              -- // Tests: SETR, COPY, INCR, DECR, NEGR, ABSR
+                              -- // Verification: UART output of register values
+                              -- // Expected UART output:
+                              -- //   000000FF  (SETR A 0xFF)
+                              -- //   000000FF  (COPY A->B, B should equal A)
+                              -- //   00000100  (INCR A, 0xFF+1 = 0x100)
+                              -- //   000000FE  (DECR B, 0xFF-1 = 0xFE)
+                              -- //   FFFFFFFE  (NEGR C with C=2, twos complement = 0xFFFFFFFE)
+                              -- //   00000002  (ABSR D with D=-2, absolute = 2)
+                              -- // Expected 7SEG: 0x01 (test number)
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000002: 00003071 00000001 -- 7SEG1V 0x01           // Test number on display
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // Test SETR
+0x00000005: 00000800 000000FF -- SETR A 0xFF
+0x00000007: 00005010          -- TXR A                 // Expect: 000000FF
+0x00000008: 00005001          -- NEWLINE
+                              -- 
+                              -- // Test COPY (COPY dst src: first = second)
+0x00000009: 00000110          -- COPY B A
+0x0000000A: 00005011          -- TXR B                 // Expect: 000000FF
+0x0000000B: 00005001          -- NEWLINE
+                              -- 
+                              -- // Test INCR
+0x0000000C: 00000840          -- INCR A
+0x0000000D: 00005010          -- TXR A                 // Expect: 00000100
+0x0000000E: 00005001          -- NEWLINE
+                              -- 
+                              -- // Test DECR
+0x0000000F: 00000851          -- DECR B
+0x00000010: 00005011          -- TXR B                 // Expect: 000000FE
+0x00000011: 00005001          -- NEWLINE
+                              -- 
+                              -- // Test NEGR (twos complement)
+0x00000012: 00000802 00000002 -- SETR C 0x2
+0x00000014: 000008A2          -- NEGR C
+0x00000015: 00005012          -- TXR C                 // Expect: FFFFFFFE
+0x00000016: 00005001          -- NEWLINE
+                              -- 
+                              -- // Test ABSR
+0x00000017: 00000803 00000002 -- SETR D 0x2
+0x00000019: 000008A3          -- NEGR D                // D = -2 (0xFFFFFFFE)
+0x0000001A: 000008B3          -- ABSR D
+0x0000001B: 00005013          -- TXR D                 // Expect: 00000002
+0x0000001C: 00005001          -- NEWLINE
+                              -- 
+                              -- // All pass
+0x0000001D: 00003070 000000FF -- LEDV 0xFF
+0x0000001F: 0000F011          -- HALT

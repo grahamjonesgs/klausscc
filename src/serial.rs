@@ -184,16 +184,16 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
     Ok(port)
 }
 
-/// Output the code details file to given serial port.
+/// Output the code details file to given serial port, keeping the port open.
 ///
-/// Will send the program to the serial port, and wait for the response.
+/// Will send the program to the serial port, wait for the response, and return the open port.
 #[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling is intentional and improves readability in this context")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub fn write_to_board(
+pub fn write_to_board_keep_port(
     binary_output: &str,
     port_name: &str,
     msg_list: &mut MsgList,
-) -> Result<(), Error> {
+) -> Result<Box<dyn SerialPort>, Error> {
     use serialport::{DataBits, FlowControl, Parity, StopBits};
 
     let mut read_buffer = [0; 1024];
@@ -228,7 +228,7 @@ pub fn write_to_board(
             None,
             MessageType::Warning,
         );
-        return Ok(());
+        return Ok(port);
     }
 
     let ret_msg = String::from_utf8(read_buffer.get(..ret_msg_size).unwrap_or(b"").to_vec());
@@ -240,7 +240,7 @@ pub fn write_to_board(
             None,
             MessageType::Warning,
         );
-        return Ok(());
+        return Ok(port);
     }
 
     let mut print_ret_msg = ret_msg.unwrap_or_else(|_| String::default());
@@ -254,6 +254,20 @@ pub fn write_to_board(
         MessageType::Information,
     );
 
+    Ok(port)
+}
+
+/// Output the code details file to given serial port.
+///
+/// Will send the program to the serial port, and wait for the response.
+#[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling is intentional and improves readability in this context")]
+#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
+pub fn write_to_board(
+    binary_output: &str,
+    port_name: &str,
+    msg_list: &mut MsgList,
+) -> Result<(), Error> {
+    let _port = write_to_board_keep_port(binary_output, port_name, msg_list)?;
     Ok(())
 }
 
@@ -312,4 +326,158 @@ pub fn monitor_serial(port_name: &str, msg_list: &mut MsgList) -> Result<(), Err
     println!("\nSerial monitor stopped.");
     drop(port);
     Ok(())
+}
+
+/// Result of a test verification run.
+pub struct TestResult {
+    /// Number of expected values that matched.
+    pub passed: usize,
+    /// Number of expected values that did not match.
+    pub failed: usize,
+    /// True if the test timed out before all expected values were received.
+    pub timed_out: bool,
+    /// Total number of expected values.
+    pub total: usize,
+}
+
+/// Extract an 8-digit uppercase hex value from a UART line.
+///
+/// Returns Some if the trimmed line starts with exactly 8 uppercase hex digits.
+fn extract_hex_value(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.len() >= 8 {
+        let candidate = trimmed.get(..8).unwrap_or("");
+        if candidate.len() == 8
+            && candidate.chars().all(|c| c.is_ascii_hexdigit())
+            && candidate == candidate.to_ascii_uppercase()
+        {
+            return Some(candidate.to_owned());
+        }
+    }
+    None
+}
+
+/// Run test verification by monitoring serial output against expected values.
+///
+/// Reads UART output from the FPGA board and compares each hex line against the
+/// expected values in order. Stops when all expected values are matched or timeout.
+#[allow(clippy::print_stdout, reason = "Printing to stdout is required for test result output")]
+#[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling")]
+#[allow(clippy::arithmetic_side_effects, reason = "Index arithmetic is safe within bounds checks")]
+#[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
+pub fn run_test_monitor(
+    mut port: Box<dyn SerialPort>,
+    expected_values: &[String],
+    timeout_secs: u64,
+    msg_list: &mut MsgList,
+) -> TestResult {
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+
+    port.set_timeout(Duration::from_millis(500)).unwrap_or(());
+
+    let mut buffer = [0_u8; 1024];
+    let mut line_buffer = String::new();
+    let mut expected_index: usize = 0;
+    let mut passed: usize = 0;
+    let mut failed: usize = 0;
+
+    println!("Test mode: expecting {} UART values (timeout {}s)...", expected_values.len(), timeout_secs);
+
+    while expected_index < expected_values.len() && start.elapsed() < timeout {
+        match port.read(&mut buffer[..]) {
+            Ok(bytes_read) => {
+                if bytes_read > 0 {
+                    let text = String::from_utf8_lossy(buffer.get(..bytes_read).unwrap_or(&[]));
+                    line_buffer.push_str(&text);
+                }
+            }
+            Err(ref err) if err.kind() == io::ErrorKind::TimedOut => {
+                continue;
+            }
+            Err(err) => {
+                msg_list.push(
+                    format!("Serial read error during test: \"{err}\""),
+                    None,
+                    None,
+                    MessageType::Error,
+                );
+                break;
+            }
+        }
+
+        // Process complete lines from the buffer
+        while let Some(newline_pos) = line_buffer.find('\n') {
+            let line: String = line_buffer.get(..newline_pos).unwrap_or("").to_owned();
+            line_buffer = line_buffer.get(newline_pos + 1..).unwrap_or("").to_owned();
+
+            let trimmed = line.trim();
+
+            // Skip blank lines and board acknowledgment messages
+            if trimmed.is_empty() || trimmed.contains("Complete") {
+                continue;
+            }
+
+            if let Some(hex_value) = extract_hex_value(trimmed) {
+                if expected_index < expected_values.len() {
+                    let empty = String::new();
+                    let expected = expected_values.get(expected_index).unwrap_or(&empty).as_str();
+                    if hex_value == expected {
+                        println!("  PASS [{}/{}]: {} == {}", expected_index + 1, expected_values.len(), hex_value, expected);
+                        passed += 1;
+                    } else {
+                        println!("  FAIL [{}/{}]: got {}, expected {}", expected_index + 1, expected_values.len(), hex_value, expected);
+                        failed += 1;
+                    }
+                    expected_index += 1;
+                }
+            }
+        }
+    }
+
+    let timed_out = expected_index < expected_values.len();
+
+    if timed_out {
+        let remaining = expected_values.len() - expected_index;
+        msg_list.push(
+            format!("Test timed out after {timeout_secs}s: {remaining} expected values not received"),
+            None,
+            None,
+            MessageType::Warning,
+        );
+    }
+
+    drop(port);
+
+    TestResult {
+        passed,
+        failed,
+        timed_out,
+        total: expected_values.len(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_hex_value_valid() {
+        assert_eq!(extract_hex_value("00000080"), Some("00000080".to_owned()));
+        assert_eq!(extract_hex_value("FF000000"), Some("FF000000".to_owned()));
+        assert_eq!(extract_hex_value("  0000ABCD  "), Some("0000ABCD".to_owned()));
+    }
+
+    #[test]
+    fn test_extract_hex_value_invalid() {
+        assert_eq!(extract_hex_value(""), None);
+        assert_eq!(extract_hex_value("0x05"), None);
+        assert_eq!(extract_hex_value("ZZZZZZZZ"), None);
+        assert_eq!(extract_hex_value("0000abc"), None); // too short
+    }
+
+    #[test]
+    fn test_extract_hex_value_lowercase_rejected() {
+        assert_eq!(extract_hex_value("0000abcd"), None);
+    }
 }

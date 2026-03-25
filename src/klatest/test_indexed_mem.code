@@ -1,0 +1,60 @@
+                              -- // Test 15: Indexed Memory Operations
+                              -- // Tests: STIDX, LDIDX, STIDXR, LDIDXR, MEMSETRR, MEMREADRR
+                              -- // Sets up an array in memory, writes via indexed addressing, reads back.
+                              -- // LDIDX/STIDX use an immediate offset (var1).
+                              -- // LDIDXR/STIDXR use register-based offset (var1 = register index holding offset).
+                              -- // Expected UART output:
+                              -- //   000000AA  (STIDX/LDIDX: store 0xAA at base+0, load back)
+                              -- //   000000BB  (STIDX/LDIDX: store 0xBB at base+2, load back)
+                              -- //   000000CC  (STIDXR/LDIDXR: register-offset store and load at base+1)
+                              -- //   000000BB  (LDIDX: verify base+2 still intact after other writes)
+                              -- // Expected 7SEG: 0x0F
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000002: 00003071 0000000F -- 7SEG1V 0x0F
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // Setup base address
+0x00000005: 00000800 00000030 -- SETR A #ARRAY
+                              -- 
+                              -- // STIDX/LDIDX: store 0xAA at array[0] (base + offset 0)
+0x00000007: 00000801 000000AA -- SETR B 0xAA
+0x00000009: 00000D10 00000000 -- STIDX B A 0x0          // mem[A + 0] = B = 0xAA
+0x0000000B: 00000803 00000000 -- SETR D 0x0
+0x0000000D: 00000C30 00000000 -- LDIDX D A 0x0          // D = mem[A + 0]
+0x0000000F: 00005013          -- TXR D                  // Expect: 000000AA
+0x00000010: 00005001          -- NEWLINE
+                              -- 
+                              -- // STIDX/LDIDX: store 0xBB at array[2] (base + offset 2)
+0x00000011: 00000801 000000BB -- SETR B 0xBB
+0x00000013: 00000D10 00000002 -- STIDX B A 0x2          // mem[A + 2] = B = 0xBB
+0x00000015: 00000803 00000000 -- SETR D 0x0
+0x00000017: 00000C30 00000002 -- LDIDX D A 0x2          // D = mem[A + 2]
+0x00000019: 00005013          -- TXR D                  // Expect: 000000BB
+0x0000001A: 00005001          -- NEWLINE
+                              -- 
+                              -- // STIDXR/LDIDXR: store 0xCC at array[1] via register offset
+                              -- // C holds offset value, 0x2 = register C's index for reg[var1]
+0x0000001B: 00000802 00000001 -- SETR C 0x1
+0x0000001D: 00000801 000000CC -- SETR B 0xCC
+0x0000001F: 00007310 00000002 -- STIDXR B A 0x2         // mem[A + C] = B = 0xCC  (C=1, so array[1])
+0x00000021: 00000803 00000000 -- SETR D 0x0
+0x00000023: 00000E30 00000002 -- LDIDXR D A 0x2         // D = mem[A + C]          (C=1, so array[1])
+0x00000025: 00005013          -- TXR D                  // Expect: 000000CC
+0x00000026: 00005001          -- NEWLINE
+                              -- 
+                              -- // Verify array[2] still holds 0xBB (not corrupted by other writes)
+0x00000027: 00000803 00000000 -- SETR D 0x0
+0x00000029: 00000C30 00000002 -- LDIDX D A 0x2          // D = mem[A + 2]
+0x0000002B: 00005013          -- TXR D                  // Expect: 000000BB
+0x0000002C: 00005001          -- NEWLINE
+                              -- 
+0x0000002D: 00003070 000000FF -- LEDV 0xFF
+0x0000002F: 0000F011          -- HALT
+                              -- 
+0x00000030: 00000000          -- #ARRAY 4
+0x00000031: 00000000          -- #ARRAY 4
+0x00000032: 00000000          -- #ARRAY 4
+0x00000033: 00000000          -- #ARRAY 4

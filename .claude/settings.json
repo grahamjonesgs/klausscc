@@ -5,7 +5,9 @@
       "Bash(cargo test:*)",
       "Bash(for f:*)",
       "Bash(do sed:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(cargo run:*)",
+      "Bash(cargo clean:*)"
     ]
   }
 }

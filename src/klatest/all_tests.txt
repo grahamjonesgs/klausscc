@@ -1,0 +1,28 @@
+// Klauss CPU test suite
+// Run with: klausscc -c opcode_select.vh -L all_tests.txt -s
+
+// Register and arithmetic
+test_regs.kla
+test_arithmetic.kla
+test_logic.kla
+test_shifts.kla
+test_bits.kla
+test_muldiv.kla
+
+// Comparison and flow control
+test_compare_jump.kla
+test_call_ret.kla
+test_loop_patterns.kla
+
+// Memory
+test_memory.kla
+test_stack.kla
+test_indexed_mem.kla
+
+// Data types and extensions
+test_sign_extend.kla
+test_strings.kla
+test_edge_cases.kla
+
+// I/O
+test_io.kla

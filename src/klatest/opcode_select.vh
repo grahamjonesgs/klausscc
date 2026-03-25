@@ -93,10 +93,9 @@ task t_opcode_select;
          //=====================================================================
          // Indexed memory access 0C0x-0CFx
          //=====================================================================
-         16'h0C??: t_load_indexed;                          // LDIDX Load indexed: first = mem[second + var1]
-         16'h0D??: t_store_indexed;                         // STIDX Store indexed: mem[second + var1] = first
-         16'h0E??: t_load_indexed_reg;                      // LDIDXR Load indexed: first = mem[second + third]
-         16'h0E0?: t_store_indexed_reg;                     // STIDXR Store indexed: mem[second + third] = first
+         16'h0C??: t_load_indexed(w_var1);                   // LDIDX Load indexed: first = mem[second + var1]
+         16'h0D??: t_store_indexed(w_var1);                  // STIDX Store indexed: mem[second + var1] = first
+         16'h0E??: t_load_indexed_reg(w_var1);               // LDIDXR Load indexed: first = mem[second + reg[var1]]
 
          //=====================================================================
          // Comparison operations 0F0x-0F7x
@@ -151,7 +150,7 @@ task t_opcode_select;
          16'h1016: t_cond_jump(w_var1, r_less_flag | r_equal_flag); // JMPLE Jump if less-or-equal
          16'h1017: t_cond_jump(w_var1, !r_less_flag & !r_equal_flag); // JMPGT Jump if greater-than
          16'h1018: t_cond_jump(w_var1, !r_less_flag);       // JMPGE Jump if greater-or-equal
-         16'h101?: t_jump_reg;                              // JMPR Jump to address in register
+         16'h102?: t_jump_reg;                              // JMPR Jump to address in register
 
          //=====================================================================
          // SPI LCD Control 2xxx
@@ -210,6 +209,7 @@ task t_opcode_select;
          16'h71??: t_set_reg_from_mem_reg;                  // MEMREADRR Set register from memory at register
          16'h720?: t_set_mem_from_value_reg(w_var1);        // MEMSETR Set memory from value
          16'h721?: t_set_reg_from_mem_value(w_var1);        // MEMREADR Set register from memory at value
+         16'h73??: t_store_indexed_reg(w_var1);              // STIDXR Store indexed: mem[second + reg[var1]] = first
 
          //=====================================================================
          // Other Fxxx

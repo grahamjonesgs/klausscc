@@ -1,0 +1,55 @@
+                              -- // Test 14: Sign/Zero Extension and Type Conversion
+                              -- // Tests: SEXTB, SEXTH, ZEXTB, ZEXTH
+                              -- // Expected UART output:
+                              -- //   FFFFFF80  (SEXTB: 0x80 sign-extended from byte = 0xFFFFFF80)
+                              -- //   0000007F  (SEXTB: 0x7F sign-extended from byte = 0x0000007F, positive)
+                              -- //   FFFF8000  (SEXTH: 0x8000 sign-extended from halfword = 0xFFFF8000)
+                              -- //   00007FFF  (SEXTH: 0x7FFF sign-extended from halfword = 0x00007FFF)
+                              -- //   000000AB  (ZEXTB: 0x12AB zero-extended byte = 0x000000AB)
+                              -- //   0000CDEF  (ZEXTH: 0xABCDEF zero-extended halfword = 0x0000CDEF)
+                              -- // Expected 7SEG: 0x0E
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000002: 00003071 0000000E -- 7SEG1V 0x0E
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // SEXTB: sign extend byte, negative (bit 7 set)
+0x00000005: 00000800 00000080 -- SETR A 0x80
+0x00000007: 000008C0          -- SEXTB A
+0x00000008: 00005010          -- TXR A                 // Expect: FFFFFF80
+0x00000009: 00005001          -- NEWLINE
+                              -- 
+                              -- // SEXTB: sign extend byte, positive (bit 7 clear)
+0x0000000A: 00000800 0000007F -- SETR A 0x7F
+0x0000000C: 000008C0          -- SEXTB A
+0x0000000D: 00005010          -- TXR A                 // Expect: 0000007F
+0x0000000E: 00005001          -- NEWLINE
+                              -- 
+                              -- // SEXTH: sign extend halfword, negative (bit 15 set)
+0x0000000F: 00000800 00008000 -- SETR A 0x8000
+0x00000011: 00000940          -- SEXTH A
+0x00000012: 00005010          -- TXR A                 // Expect: FFFF8000
+0x00000013: 00005001          -- NEWLINE
+                              -- 
+                              -- // SEXTH: sign extend halfword, positive
+0x00000014: 00000800 00007FFF -- SETR A 0x7FFF
+0x00000016: 00000940          -- SEXTH A
+0x00000017: 00005010          -- TXR A                 // Expect: 00007FFF
+0x00000018: 00005001          -- NEWLINE
+                              -- 
+                              -- // ZEXTB: zero extend byte (mask upper bits)
+0x00000019: 00000800 000012AB -- SETR A 0x12AB
+0x0000001B: 00000950          -- ZEXTB A
+0x0000001C: 00005010          -- TXR A                 // Expect: 000000AB
+0x0000001D: 00005001          -- NEWLINE
+                              -- 
+                              -- // ZEXTH: zero extend halfword
+0x0000001E: 00000800 00ABCDEF -- SETR A 0xABCDEF
+0x00000020: 00000960          -- ZEXTH A
+0x00000021: 00005010          -- TXR A                 // Expect: 0000CDEF
+0x00000022: 00005001          -- NEWLINE
+                              -- 
+0x00000023: 00003070 000000FF -- LEDV 0xFF
+0x00000025: 0000F011          -- HALT

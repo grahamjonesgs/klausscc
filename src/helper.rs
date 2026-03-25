@@ -356,6 +356,31 @@ pub fn strip_comments(input: &str) -> String {
 }
 
 
+/// Parse expected UART hex values from source file comment headers.
+///
+/// Extracts 8-digit uppercase hex values from lines matching the pattern `//   XXXXXXXX  (`.
+#[allow(clippy::arithmetic_side_effects, reason = "Slice indexing is safe after length check")]
+pub fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
+    let mut expected: Vec<String> = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("//") {
+            continue;
+        }
+        let comment_body = trimmed.get(2..).unwrap_or("").trim();
+        if comment_body.len() >= 8 {
+            let candidate = comment_body.get(..8).unwrap_or("");
+            if candidate.len() == 8
+                && candidate.chars().all(|c| c.is_ascii_hexdigit())
+                && candidate == candidate.to_ascii_uppercase()
+            {
+                expected.push(candidate.to_owned());
+            }
+        }
+    }
+    expected
+}
+
 /// Trim newline from string.
 ///
 /// Removes newline from end of string.
@@ -845,5 +870,56 @@ mod tests {
         let input = String::from("LOOP2:");
         let output = return_label_value(&input, labels);
         assert_eq!(output, None);
+    }
+
+    #[test]
+    // Test parsing expected UART values from typical test file header
+    fn test_parse_expected_uart_values1() {
+        let lines = vec![
+            "// Test 05: Bit Manipulation".to_owned(),
+            "// Expected UART output:".to_owned(),
+            "//   00000080  (BSET: set bit 7)".to_owned(),
+            "//   000000FF  (result)".to_owned(),
+            "//   FF000000  (BITREV)".to_owned(),
+            "// Expected 7SEG: 0x05".to_owned(),
+            "_start".to_owned(),
+            "SETR A 0x0".to_owned(),
+        ];
+        let result = parse_expected_uart_values(&lines);
+        assert_eq!(result, vec!["00000080", "000000FF", "FF000000"]);
+    }
+
+    #[test]
+    // Test parsing returns empty vec when no expected values
+    fn test_parse_expected_uart_values2() {
+        let lines = vec![
+            "// This is a comment".to_owned(),
+            "// No hex values here".to_owned(),
+            "_start".to_owned(),
+        ];
+        let result = parse_expected_uart_values(&lines);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    // Test parsing ignores non-comment lines and short hex values
+    fn test_parse_expected_uart_values3() {
+        let lines = vec![
+            "00000080".to_owned(),              // not a comment
+            "// 0x05".to_owned(),               // too short
+            "//   ZZZZZZZZ  (invalid)".to_owned(), // not hex
+            "//   0000abcd  (lowercase)".to_owned(), // lowercase hex - should not match
+            "//   0000ABCD  (uppercase)".to_owned(), // valid
+        ];
+        let result = parse_expected_uart_values(&lines);
+        assert_eq!(result, vec!["0000ABCD"]);
+    }
+
+    #[test]
+    // Test parsing with empty input
+    fn test_parse_expected_uart_values4() {
+        let lines: Vec<String> = Vec::new();
+        let result = parse_expected_uart_values(&lines);
+        assert!(result.is_empty());
     }
 }

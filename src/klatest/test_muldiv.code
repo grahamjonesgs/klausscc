@@ -1,0 +1,78 @@
+                              -- // Test 06: Multiply and Divide Operations
+                              -- // Tests: MULRR, MULURR, DIVRR, DIVURR, MODRR, MODURR, MULV, DIVV, MODV
+                              -- // Expected UART output:
+                              -- //   00000064  (MULRR: 10 * 10 = 100 = 0x64)
+                              -- //   00000064  (MULURR: 10 * 10 unsigned = 100)
+                              -- //   0000000A  (DIVRR: 100 / 10 = 10)
+                              -- //   0000000A  (DIVURR: 100 / 10 unsigned = 10)
+                              -- //   00000003  (MODRR: 10 % 7 = 3)
+                              -- //   00000003  (MODURR: 10 % 7 unsigned = 3)
+                              -- //   00000032  (MULV: 10 * 5 = 50 = 0x32)
+                              -- //   00000005  (DIVV: 50 / 10 = 5)
+                              -- //   00000002  (MODV: 17 % 5 = 2)
+                              -- // Expected 7SEG: 0x06
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00003000 -- DELAYV 0x3000
+0x00000002: 00003071 00000006 -- 7SEG1V 0x06
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // MULRR: signed multiply
+0x00000005: 00000800 0000000A -- SETR A 10
+0x00000007: 00000801 0000000A -- SETR B 10
+0x00000009: 00000B00          -- MULRR A
+0x0000000A: 00005010          -- TXR A                 // Expect: 00000064
+0x0000000B: 00005001          -- NEWLINE
+                              -- 
+                              -- // MULURR: unsigned multiply
+0x0000000C: 00000800 0000000A -- SETR A 10
+0x0000000E: 00000B10          -- MULURR A
+0x0000000F: 00005010          -- TXR A                 // Expect: 00000064
+0x00000010: 00005001          -- NEWLINE
+                              -- 
+                              -- // DIVRR: signed divide
+0x00000011: 00000800 00000064 -- SETR A 100
+0x00000013: 00000801 0000000A -- SETR B 10
+0x00000015: 00000B40          -- DIVRR A
+0x00000016: 00005010          -- TXR A                 // Expect: 0000000A
+0x00000017: 00005001          -- NEWLINE
+                              -- 
+                              -- // DIVURR: unsigned divide
+0x00000018: 00000800 00000064 -- SETR A 100
+0x0000001A: 00000B50          -- DIVURR A
+0x0000001B: 00005010          -- TXR A                 // Expect: 0000000A
+0x0000001C: 00005001          -- NEWLINE
+                              -- 
+                              -- // MODRR: signed modulo
+0x0000001D: 00000800 0000000A -- SETR A 10
+0x0000001F: 00000801 00000007 -- SETR B 7
+0x00000021: 00000B60          -- MODRR A
+0x00000022: 00005010          -- TXR A                 // Expect: 00000003
+0x00000023: 00005001          -- NEWLINE
+                              -- 
+                              -- // MODURR: unsigned modulo
+0x00000024: 00000800 0000000A -- SETR A 10
+0x00000026: 00000B70          -- MODURR A
+0x00000027: 00005010          -- TXR A                 // Expect: 00000003
+0x00000028: 00005001          -- NEWLINE
+                              -- 
+                              -- // MULV: multiply by immediate
+0x00000029: 00000800 0000000A -- SETR A 10
+0x0000002B: 00000B80 00000005 -- MULV A 5
+0x0000002D: 00005010          -- TXR A                 // Expect: 00000032
+0x0000002E: 00005001          -- NEWLINE
+                              -- 
+                              -- // DIVV: divide by immediate
+0x0000002F: 00000B90 0000000A -- DIVV A 10
+0x00000031: 00005010          -- TXR A                 // Expect: 00000005
+0x00000032: 00005001          -- NEWLINE
+                              -- 
+                              -- // MODV: modulo by immediate
+0x00000033: 00000800 00000011 -- SETR A 17
+0x00000035: 00000BA0 00000005 -- MODV A 5
+0x00000037: 00005010          -- TXR A                 // Expect: 00000002
+0x00000038: 00005001          -- NEWLINE
+                              -- 
+0x00000039: 00003070 000000FF -- LEDV 0xFF
+0x0000003B: 0000F011          -- HALT

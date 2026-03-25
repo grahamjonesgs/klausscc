@@ -1,10 +1,13 @@
 // Test 15: Indexed Memory Operations
-// Tests: LDIDX, STIDX, LDIDXR, STIDXR
+// Tests: STIDX, LDIDX, STIDXR, LDIDXR, MEMSETRR, MEMREADRR
 // Sets up an array in memory, writes via indexed addressing, reads back.
+// LDIDX/STIDX use an immediate offset (var1).
+// LDIDXR/STIDXR use register-based offset (var1 = register index holding offset).
 // Expected UART output:
-//   000000AA  (STIDX/LDIDX: store 0xAA at base+2, load back)
-//   000000BB  (STIDX at base+0, LDIDX back)
-//   000000CC  (STIDXR/LDIDXR: register-offset store and load)
+//   000000AA  (STIDX/LDIDX: store 0xAA at base+0, load back)
+//   000000BB  (STIDX/LDIDX: store 0xBB at base+2, load back)
+//   000000CC  (STIDXR/LDIDXR: register-offset store and load at base+1)
+//   000000BB  (LDIDX: verify base+2 still intact after other writes)
 // Expected 7SEG: 0x0F
 // Expected LEDs: 0xFF = all pass
 
@@ -16,34 +19,39 @@ NEWLINE
 // Setup base address
 SETR A #ARRAY
 
-// STIDX: store 0xAA at array[2] (base + offset in second reg)
+// STIDX/LDIDX: store 0xAA at array[0] (base + offset 0)
 SETR B 0xAA
-SETR C 0x2            // offset
-STIDX B A             // mem[A + var] = B -- actually uses register pair
-// LDIDX: load from array[2]
+STIDX B A 0x0          // mem[A + 0] = B = 0xAA
 SETR D 0x0
-LDIDX D A             // D = mem[A + var]
-TXR D                 // Expect: 000000AA
+LDIDX D A 0x0          // D = mem[A + 0]
+TXR D                  // Expect: 000000AA
 NEWLINE
 
-// STIDX at offset 0
+// STIDX/LDIDX: store 0xBB at array[2] (base + offset 2)
 SETR B 0xBB
-STIDX B A
+STIDX B A 0x2          // mem[A + 2] = B = 0xBB
 SETR D 0x0
-LDIDX D A
-TXR D                 // Expect: 000000BB
+LDIDX D A 0x2          // D = mem[A + 2]
+TXR D                  // Expect: 000000BB
 NEWLINE
 
-// STIDXR/LDIDXR: register-based offset
-SETR B 0xCC           // Value to store
-SETR C 0x3            // Offset in register
-STIDXR B              // mem[A + C] = B (using register for offset)
+// STIDXR/LDIDXR: store 0xCC at array[1] via register offset
+// C holds offset value, 0x2 = register C's index for reg[var1]
+SETR C 0x1
+SETR B 0xCC
+STIDXR B A 0x2         // mem[A + C] = B = 0xCC  (C=1, so array[1])
 SETR D 0x0
-LDIDXR D A            // D = mem[A + C]
-TXR D                 // Expect: 000000CC
+LDIDXR D A 0x2         // D = mem[A + C]          (C=1, so array[1])
+TXR D                  // Expect: 000000CC
+NEWLINE
+
+// Verify array[2] still holds 0xBB (not corrupted by other writes)
+SETR D 0x0
+LDIDX D A 0x2          // D = mem[A + 2]
+TXR D                  // Expect: 000000BB
 NEWLINE
 
 LEDV 0xFF
 HALT
 
-#ARRAY 10
+#ARRAY 4
