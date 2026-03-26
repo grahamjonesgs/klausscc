@@ -21,39 +21,39 @@ NEWLINE
 // MULRR: signed multiply
 SETR A 10
 SETR B 10
-MULRR A
+MULRR A B
 TXR A                 // Expect: 00000064
 NEWLINE
 
 // MULURR: unsigned multiply
 SETR A 10
-MULURR A
+MULURR A B
 TXR A                 // Expect: 00000064
 NEWLINE
 
 // DIVRR: signed divide
 SETR A 100
 SETR B 10
-DIVRR A
+DIVRR A B
 TXR A                 // Expect: 0000000A
 NEWLINE
 
 // DIVURR: unsigned divide
 SETR A 100
-DIVURR A
+DIVURR A B
 TXR A                 // Expect: 0000000A
 NEWLINE
 
 // MODRR: signed modulo
 SETR A 10
 SETR B 7
-MODRR A
+MODRR A B
 TXR A                 // Expect: 00000003
 NEWLINE
 
 // MODURR: unsigned modulo
 SETR A 10
-MODURR A
+MODURR A B
 TXR A                 // Expect: 00000003
 NEWLINE
 

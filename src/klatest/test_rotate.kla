@@ -45,14 +45,14 @@ NEWLINE
 // ROLRR: rotate left by register amount
 SETR A 0x00000001
 SETR B 4
-ROLRR A
+ROLRR A B
 TXR A                  // Expect: 00000010
 NEWLINE
 
 // RORRR: rotate right by register amount
 SETR A 0x00000001
 SETR B 4
-RORRR A
+RORRR A B
 TXR A                  // Expect: 10000000
 NEWLINE
 

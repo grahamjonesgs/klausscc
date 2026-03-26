@@ -54,6 +54,11 @@ klausscc -c ../klacode/opcode_select.vh -i test_regs.kla
 | 14 | `test_sign_extend.kla` | Type conversion | SEXTB, SEXTH, ZEXTB, ZEXTH |
 | 15 | `test_indexed_mem.kla` | Indexed memory | LDIDX, STIDX, LDIDXR, STIDXR |
 | 16 | `test_loop_patterns.kla` | Algorithms | Countdown, sum, factorial, find-max (integration test) |
+| 17 | `test_boundary.kla` | Stress | Boundary conditions, max values, overflow, MULHRR |
+| 18 | `test_rotate.kla` | Shifts/Rotates | ROLV, RORV, ROLRR, RORRR edge cases |
+| 19 | `test_compare_ext.kla` | Comparison | CMPLERR, CMPGERR, CMPULTRR, CMPUGTRR, MINRR, MAXRR, MINURR, MAXURR |
+| 20 | `test_algorithms.kla` | Algorithms | Fibonacci, bubble sort, GCD, prime detection |
+| 21 | `test_benchmark.kla` | Stress | Binary search, bit ops, extended multiply, carry flags, indexed memory |
 
 ## Expected Output Quick Reference
 
@@ -195,9 +200,89 @@ FFFFFFFF
 00000007
 ```
 
+### test_boundary (17)
+```
+FFFFFFFF
+00000000
+80000000
+7FFFFFFF
+00000000
+80000001
+80000000
+00000001
+FFFFFFFE
+00000004
+00000000
+```
+
+### test_rotate (18)
+```
+00000002
+80000000
+00000100
+01000000
+00000010
+10000000
+FFFFFFFF
+00000003
+C0000000
+```
+
+### test_compare_ext (19)
+```
+00000001
+00000002
+00000003
+00000004
+00000005
+00000003
+00000007
+00000005
+FFFFFFFF
+0000000A
+0000000B
+0000000C
+```
+
+### test_algorithms (20)
+```
+00000037
+0000000A
+00000001
+00000009
+00000006
+00000015
+00000008
+00000013
+```
+
+### test_benchmark (21)
+```
+00000037
+00000005
+00000001
+00000009
+00000002
+FFFFFFFF
+0000ABCD
+0000000B
+00000055
+B3D50000
+00000008
+0000000A
+00000010
+FFFFFFFE
+00000001
+00000002
+00000006
+00000008
+00000013
+```
+
 ## Notes
 
 - Tests 11 (I/O) and 12 (strings) require visual/terminal inspection rather than fixed hex comparison
 - Test 12 requires `string_print.kla` from `../klacode/` -- copy it to this directory or adjust the include path
-- Test 15 (indexed memory) may need adjustment depending on how `LDIDX`/`STIDX` encode their register/offset operands in the hardware
+- Two-register instructions (MULRR, DIVRR, MODRR, CMPGTRR, CMPLERR, MINRR, BSETRR, ROLRR, etc.) require both registers to be specified, e.g. `MULRR A B`, `CMPGTRR A B`
 - Some expected values depend on exact CPU flag behaviour -- if a test fails, check whether the flag semantics match your Verilog implementation
+- All tests can be assembled and verified in batch via `all_tests.txt`

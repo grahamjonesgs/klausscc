@@ -25,7 +25,7 @@ NEWLINE
 // --- CMPLERR: signed less-or-equal (5 <= 10) ---
 SETR A 5
 SETR B 10
-CMPLERR A              // A <= B? yes
+CMPLERR A B            // A <= B? yes
 JMPLE T1_PASS:
 SETR P 0xFFFFFFFF
 TXR P
@@ -40,7 +40,7 @@ NEWLINE
 T2:
 SETR A 5
 SETR B 5
-CMPLERR A              // A <= B? yes (equal)
+CMPLERR A B            // A <= B? yes (equal)
 JMPLE T2_PASS:
 SETR P 0xFFFFFFFF
 TXR P
@@ -55,7 +55,7 @@ NEWLINE
 T3:
 SETR A 10
 SETR B 5
-CMPGERR A              // A >= B? yes
+CMPGERR A B            // A >= B? yes
 JMPGE T3_PASS:
 SETR P 0xFFFFFFFF
 TXR P
@@ -71,7 +71,7 @@ NEWLINE
 T4:
 SETR A 5
 SETR B 0xFFFFFFFF
-CMPULTRR A             // unsigned A < B? sets carry flag
+CMPULTRR A B           // unsigned A < B? sets carry flag
 JMPC T4_PASS:
 SETR P 0xFFFFFFFF
 TXR P
@@ -86,7 +86,7 @@ NEWLINE
 T5:
 SETR A 0xFFFFFFFF
 SETR B 5
-CMPUGTRR A             // unsigned A > B? sets greater flag
+CMPUGTRR A B           // unsigned A > B? sets greater flag
 JMPGT T5_PASS:
 SETR P 0xFFFFFFFF
 TXR P
@@ -101,14 +101,14 @@ NEWLINE
 T6:
 SETR A 3
 SETR B 7
-MINRR A                // A = min(A, B) = min(3, 7) = 3
+MINRR A B              // A = min(A, B) = min(3, 7) = 3
 TXR A                  // Expect: 00000003
 NEWLINE
 
 // --- MAXRR: signed maximum ---
 SETR A 3
 SETR B 7
-MAXRR A                // A = max(A, B) = max(3, 7) = 7
+MAXRR A B              // A = max(A, B) = max(3, 7) = 7
 TXR A                  // Expect: 00000007
 NEWLINE
 
@@ -116,14 +116,14 @@ NEWLINE
 // 5 vs 0xFFFFFFFF: unsigned min = 5
 SETR A 5
 SETR B 0xFFFFFFFF
-MINURR A               // A = unsigned min(5, 0xFFFFFFFF) = 5
+MINURR A B             // A = unsigned min(5, 0xFFFFFFFF) = 5
 TXR A                  // Expect: 00000005
 NEWLINE
 
 // --- MAXURR: unsigned maximum ---
 SETR A 5
 SETR B 0xFFFFFFFF
-MAXURR A               // A = unsigned max(5, 0xFFFFFFFF) = 0xFFFFFFFF
+MAXURR A B             // A = unsigned max(5, 0xFFFFFFFF) = 0xFFFFFFFF
 TXR A                  // Expect: FFFFFFFF
 NEWLINE
 

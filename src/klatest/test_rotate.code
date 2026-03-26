@@ -45,14 +45,14 @@
                               -- // ROLRR: rotate left by register amount
 0x0000001B: 00000800 00000001 -- SETR A 0x00000001
 0x0000001D: 00000801 00000004 -- SETR B 4
-0x0000001F: 00000FE0          -- ROLRR A
+0x0000001F: 0000B001          -- ROLRR A B
 0x00000020: 00005010          -- TXR A                  // Expect: 00000010
 0x00000021: 00005001          -- NEWLINE
                               -- 
                               -- // RORRR: rotate right by register amount
 0x00000022: 00000800 00000001 -- SETR A 0x00000001
 0x00000024: 00000801 00000004 -- SETR B 4
-0x00000026: 00000FF0          -- RORRR A
+0x00000026: 0000B101          -- RORRR A B
 0x00000027: 00005010          -- TXR A                  // Expect: 10000000
 0x00000028: 00005001          -- NEWLINE
                               -- 

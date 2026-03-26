@@ -33,34 +33,17 @@ JMPNZ SUM_LOOP:
 TXR B                 // Expect: 00000037 (55)
 NEWLINE
 
-// --- Factorial 4! using CALL ---
+// --- Factorial 4! using loop with MULRR ---
 SETR A 4              // n = 4
 SETR B 1              // result = 1
 FACT_LOOP:
 CMPRV A 0x0
 JMPE FACT_DONE:
-MULRR B               // B = B * A (note: MULRR uses B and second register)
-// Actually need to think about how MULRR works with register pairing
-// Let's do it manually with repeated addition
-JMP FACT_MANUAL:
-
-FACT_MANUAL:
-// Manual factorial: 4! = 4*3*2*1
-SETR A 1              // result
-SETR B 4              // counter
-FACT_MUL_LOOP:
-MULV A B              // A = A * B (multiply by immediate... no, MULV is reg*val)
-// MULV multiplies register by a value, but B is a register not a value
-// Use a different approach: nested loop multiplication
-JMP FACT_SIMPLE:
-
-FACT_SIMPLE:
-// Simple approach: hardcode 4! = 4*3*2*1
-SETR A 4
-MULV A 3              // A = 12
-MULV A 2              // A = 24
-MULV A 1              // A = 24
-TXR A                 // Expect: 00000018 (24)
+MULRR B A             // B = B * A
+DECR A
+JMP FACT_LOOP:
+FACT_DONE:
+TXR B                 // Expect: 00000018 (24)
 NEWLINE
 
 // --- Find max of 4 values stored in registers ---

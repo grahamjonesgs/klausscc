@@ -1,0 +1,263 @@
+// Test 20: Multi-Algorithm CPU Benchmark
+// Runs four algorithms in sequence to stress-test the CPU:
+//   Phase 1 - Fibonacci sequence generation (loops, memory writes, addition)
+//   Phase 2 - Bubble sort on an unsorted array (memory read/write, compare, swap)
+//   Phase 3 - GCD via Euclidean algorithm (subroutine, modulo, iteration)
+//   Phase 4 - Prime counting via trial division (nested subroutine, division, modulo)
+// Tests: CALL, RET, PUSH, POP, MODRR, MEMSETRR, MEMREADRR, ADDRR, ADDV,
+//        CMPRR, CMPRV, JMPGT, JMPE, JMPNE, JMPNZ, COPY, SETR, INCR, DECR
+// Expected UART output:
+//   00000037  (fibonacci: 10th number = 55)
+//   0000000A  (fibonacci: count generated = 10)
+//   00000001  (bubble sort: smallest of {9,3,7,1,5} after sort)
+//   00000009  (bubble sort: largest after sort)
+//   00000006  (GCD: gcd(48, 18) = 6)
+//   00000015  (GCD: gcd(252, 105) = 21)
+//   00000008  (primes: count of primes from 2 to 20 = 8)
+//   00000013  (primes: largest prime <= 20 = 19)
+// Expected 7SEG: 0x14
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x0500
+7SEG1V 0x14
+NEWLINE
+
+// ================================================================
+// PHASE 1: FIBONACCI SEQUENCE
+// Generate first 10 fibonacci numbers and store in memory.
+// Sequence: 1, 1, 2, 3, 5, 8, 13, 21, 34, 55
+// ================================================================
+
+SETR A #FIB_BUF        // A = base address of fibonacci buffer
+SETR B 1               // B = fib(n-2) = 1
+SETR C 1               // C = fib(n-1) = 1
+MEMSETRR B A           // FIB_BUF[0] = 1
+INCR A
+MEMSETRR C A           // FIB_BUF[1] = 1
+SETR E 8               // 8 more to generate (10 total)
+
+FIB_LOOP:
+CMPRV E 0x0
+JMPE FIB_DONE:
+
+COPY D B               // D = fib(n-2)
+ADDRR D C              // D = fib(n-2) + fib(n-1) = fib(n)
+COPY B C               // shift: B = old fib(n-1)
+COPY C D               // shift: C = new fib(n)
+
+INCR A
+MEMSETRR D A           // store fib(n) in buffer
+
+DECR E
+JMP FIB_LOOP:
+
+FIB_DONE:
+TXR C                  // Output last fib = 55 = 0x37
+NEWLINE
+SETR A 10
+TXR A                  // Output count = 10 = 0x0A
+NEWLINE
+
+// ================================================================
+// PHASE 2: BUBBLE SORT
+// Initialize array {9, 3, 7, 1, 5}, sort ascending.
+// Result: {1, 3, 5, 7, 9}
+// ================================================================
+
+// --- Initialize sort buffer ---
+SETR A #SORT_BUF
+SETR B 9
+MEMSETRR B A
+INCR A
+SETR B 3
+MEMSETRR B A
+INCR A
+SETR B 7
+MEMSETRR B A
+INCR A
+SETR B 1
+MEMSETRR B A
+INCR A
+SETR B 5
+MEMSETRR B A
+
+// --- Bubble sort (ascending) ---
+SETR H 4               // passes remaining (n - 1)
+
+BS_OUTER:
+CMPRV H 0x0
+JMPE BS_DONE:
+
+SETR F 0               // swap flag: 0 = no swaps this pass
+SETR A #SORT_BUF       // reset array pointer to start
+COPY E H               // E = comparisons to make this pass
+
+BS_INNER:
+// Load adjacent pair
+MEMREADRR B A          // B = arr[i]
+INCR A
+MEMREADRR C A          // C = arr[i+1]
+
+// If arr[i] > arr[i+1], swap them
+CMPRR B C
+JMPGT BS_DO_SWAP:
+JMP BS_SKIP_SWAP:
+
+BS_DO_SWAP:
+DECR A                 // A -> arr[i]
+MEMSETRR C A           // arr[i] = smaller value
+INCR A                 // A -> arr[i+1]
+MEMSETRR B A           // arr[i+1] = larger value
+SETR F 1               // mark swap occurred
+
+BS_SKIP_SWAP:
+DECR E
+JMPNZ BS_INNER:
+
+// End of inner loop - check if any swaps happened
+CMPRV F 0x0
+JMPE BS_DONE:          // no swaps = array is sorted, exit early
+
+DECR H                 // fewer comparisons needed next pass
+JMP BS_OUTER:
+
+BS_DONE:
+// Output first (smallest) and last (largest) elements
+SETR A #SORT_BUF
+MEMREADRR B A
+TXR B                  // Expect: 00000001 (smallest)
+NEWLINE
+ADDV A 4               // point to last element (index 4)
+MEMREADRR B A
+TXR B                  // Expect: 00000009 (largest)
+NEWLINE
+
+// ================================================================
+// PHASE 3: GCD (EUCLIDEAN ALGORITHM)
+// Compute GCD of two pairs of numbers via subroutine.
+// ================================================================
+
+// GCD(48, 18) = 6
+SETR A 48
+SETR B 18
+CALL GCD_FUNC:
+TXR A                  // Expect: 00000006
+NEWLINE
+
+// GCD(252, 105) = 21
+SETR A 252
+SETR B 105
+CALL GCD_FUNC:
+TXR A                  // Expect: 00000015
+NEWLINE
+
+// ================================================================
+// PHASE 4: PRIME NUMBER DETECTION (TRIAL DIVISION)
+// Count primes from 2 to 20 using IS_PRIME subroutine.
+// Primes: 2, 3, 5, 7, 11, 13, 17, 19 = 8 primes
+// ================================================================
+
+SETR E 2               // current candidate
+SETR F 0               // prime count
+SETR G 0               // last prime found
+SETR H 20              // upper limit
+
+PRIME_LOOP:
+CMPRR E H
+JMPGT PRIME_DONE:
+
+COPY A E               // A = candidate for IS_PRIME
+CALL IS_PRIME:         // returns A = 1 (prime) or 0 (not prime)
+
+CMPRV A 0x1
+JMPNE PRIME_NEXT:      // not prime, skip
+
+INCR F                 // prime count++
+COPY G E               // record this prime as last found
+
+PRIME_NEXT:
+INCR E                 // next candidate
+JMP PRIME_LOOP:
+
+PRIME_DONE:
+TXR F                  // Expect: 00000008 (8 primes found)
+NEWLINE
+TXR G                  // Expect: 00000013 (largest prime = 19)
+NEWLINE
+
+// ================================================================
+// ALL PHASES COMPLETE
+// ================================================================
+
+LEDV 0xFF
+HALT
+
+// ================================================================
+// SUBROUTINES
+// ================================================================
+
+// ----------------------------------------------------------------
+// GCD_FUNC: Euclidean algorithm
+// Input:  A = first number, B = second number
+// Output: A = GCD(A, B)
+// Clobbers: B, C
+// Algorithm: while B != 0: r = A % B; A = B; B = r
+// ----------------------------------------------------------------
+GCD_FUNC:
+PUSH C
+GCD_LOOP:
+CMPRV B 0x0
+JMPE GCD_RET:
+MODRR A B              // A = A % B (remainder)
+COPY C A               // C = remainder
+COPY A B               // A = old divisor
+COPY B C               // B = remainder
+JMP GCD_LOOP:
+GCD_RET:
+POP C
+RET
+
+// ----------------------------------------------------------------
+// IS_PRIME: Trial division primality test
+// Input:  A = candidate number (must be >= 2)
+// Output: A = 1 if prime, 0 if not prime
+// Clobbers: B
+// Preserves: C (via push/pop)
+// Algorithm: try dividing by 2, 3, ..., candidate-1
+// ----------------------------------------------------------------
+IS_PRIME:
+PUSH C
+COPY C A               // C = candidate (save)
+SETR B 2               // start divisor at 2
+
+IP_LOOP:
+// If divisor >= candidate, no factors found -> prime
+CMPRR C B
+JMPGT IP_CONTINUE:     // candidate > divisor -> keep checking
+JMP IP_IS_PRIME:       // candidate <= divisor -> it's prime
+
+IP_CONTINUE:
+COPY A C               // A = candidate
+MODRR A B              // A = candidate % divisor
+CMPRV A 0x0
+JMPE IP_NOT_PRIME:     // remainder is 0 -> divisible -> not prime
+
+INCR B                 // try next divisor
+JMP IP_LOOP:
+
+IP_IS_PRIME:
+SETR A 1
+POP C
+RET
+
+IP_NOT_PRIME:
+SETR A 0
+POP C
+RET
+
+// ================================================================
+// DATA BUFFERS
+// ================================================================
+#FIB_BUF 10
+#SORT_BUF 5

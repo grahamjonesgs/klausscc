@@ -1,0 +1,432 @@
+// Test 21: Extended Multi-Algorithm CPU Benchmark
+// Stress-tests the CPU across seven phases, exercising instructions that have
+// no coverage or minimal coverage in the existing test suite.
+//
+// Untested opcodes exercised: BSETRR, JMPNC, PUSHV
+// Barely-tested opcodes exercised: STIDX, STIDXR, LDIDX, LDIDXR, ORV, ANDV,
+//   XORV, SHLV, SHRV, BITREV, MULHURR, DIVV, CMPLERR, CMPGERR, CMPGTRR,
+//   JMPLE, JMPGE, JMPC, POPCNT, CLZ
+//
+// Expected UART output:
+//   00000037  (fibonacci: fib[9] = 55)
+//   00000005  (fibonacci: fib[4] = 5)
+//   00000001  (bubble sort: smallest of {9,3,7,1,5})
+//   00000009  (bubble sort: largest after sort)
+//   00000002  (binary search: index of 5 in sorted {1,3,5,7,9})
+//   FFFFFFFF  (binary search: 6 not found)
+//   0000ABCD  (bit ops: pack nibbles via SHLV + ORV)
+//   0000000B  (bit ops: extract nibble via SHRV + ANDV)
+//   00000055  (bit ops: 0xFF XORV 0xAA)
+//   B3D50000  (bit ops: BITREV of 0x0000ABCD)
+//   00000008  (bit ops: BSETRR set bit 3 of zero = 8)
+//   0000000A  (bit ops: POPCNT of 0xABCD = 10)
+//   00000010  (bit ops: CLZ of 0x0000ABCD = 16)
+//   FFFFFFFE  (multiply: MULHURR high of 0xFFFFFFFF * 0xFFFFFFFF)
+//   00000001  (multiply: MULURR low word)
+//   00000002  (flags: JMPC + JMPNC both passed)
+//   00000006  (GCD: gcd(48, 18) = 6)
+//   00000008  (primes: count from 2 to 20)
+//   00000013  (primes: largest prime <= 20 = 19)
+// Expected 7SEG: 0x15
+// Expected LEDs: 0xFF = all pass
+
+_start
+DELAYV 0x0500
+7SEG1V 0x15
+NEWLINE
+
+// ================================================================
+// PHASE 1: FIBONACCI SEQUENCE
+// Uses STIDX, STIDXR, LDIDX, CMPRR+JMPGE
+// Register I holds array base throughout sort/search phases.
+// ================================================================
+
+SETR I #FIB_BUF        // I = base address (kept in I, freeing A)
+SETR B 1               // fib(n-2) = 1
+SETR C 1               // fib(n-1) = 1
+STIDX B I 0x0          // fib[0] = 1 (STIDX with immediate offset)
+STIDX C I 0x1          // fib[1] = 1
+SETR E 2               // current index
+SETR F 10              // total count
+
+FIB_LOOP:
+CMPRR E F              // index vs limit
+JMPGE FIB_DONE:        // if index >= 10, done (exercises JMPGE)
+
+COPY D B               // D = fib(n-2)
+ADDRR D C              // D = fib(n-2) + fib(n-1)
+COPY B C               // shift window
+COPY C D
+
+STIDXR D I 0x4         // mem[I + E] = D (STIDXR: 0x4 = register E index)
+INCR E
+JMP FIB_LOOP:
+
+FIB_DONE:
+// Read back results using LDIDX
+LDIDX D I 0x9          // D = fib[9] = 55
+TXR D                  // Output: 00000037
+NEWLINE
+
+LDIDX D I 0x4          // D = fib[4] = 5
+TXR D                  // Output: 00000005
+NEWLINE
+
+// ================================================================
+// PHASE 2: BUBBLE SORT
+// Uses LDIDXR, STIDXR, CMPGTRR+JMPGT
+// Single-register ops (CMPGTRR) require register A.
+// ================================================================
+
+SETR I #SORT_BUF       // I = sort array base
+SETR B 9
+STIDX B I 0x0
+SETR B 3
+STIDX B I 0x1
+SETR B 7
+STIDX B I 0x2
+SETR B 1
+STIDX B I 0x3
+SETR B 5
+STIDX B I 0x4
+
+SETR G 4               // outer passes remaining (n-1)
+
+BS_OUTER:
+CMPRV G 0x0
+JMPE BS_SORT_DONE:
+
+SETR H 0               // swap flag
+SETR E 0               // index into array
+COPY F G               // F = comparisons this pass
+
+BS_INNER:
+LDIDXR D I 0x4         // D = arr[E] (LDIDXR: register index 4 = E)
+INCR E
+LDIDXR C I 0x4         // C = arr[E] = arr[i+1]
+
+// Compare arr[i] > arr[i+1] using CMPGTRR (requires register A)
+COPY A D               // A = arr[i]
+COPY B C               // B = arr[i+1] (implicit operand for CMPGTRR)
+CMPGTRR A B            // A > B? (arr[i] > arr[i+1]?)
+JMPGT BS_DO_SWAP:
+JMP BS_NO_SWAP:
+
+BS_DO_SWAP:
+// E = i+1. Swap via STIDXR (D and C still hold original values)
+STIDXR D I 0x4         // arr[i+1] = D (larger)
+DECR E
+STIDXR C I 0x4         // arr[i] = C (smaller)
+INCR E                 // restore E to i+1
+SETR H 1               // mark swap
+
+BS_NO_SWAP:
+DECR F
+JMPNZ BS_INNER:
+
+// Early exit if no swaps this pass
+CMPRV H 0x0
+JMPE BS_SORT_DONE:
+
+DECR G
+JMP BS_OUTER:
+
+BS_SORT_DONE:
+LDIDX D I 0x0          // arr[0] = 1 (smallest)
+TXR D                  // Output: 00000001
+NEWLINE
+LDIDX D I 0x4          // arr[4] = 9 (largest)
+TXR D                  // Output: 00000009
+NEWLINE
+
+// ================================================================
+// PHASE 3: BINARY SEARCH
+// Uses CMPLERR+JMPLE, CMPGERR+JMPGE, DIVV, LDIDXR
+// Register I still holds #SORT_BUF. Array is now {1,3,5,7,9}.
+// Single-register ops use register A via COPY.
+// ================================================================
+
+// Search for 5 -> expect index 2
+SETR G 5               // target
+SETR C 0               // low
+SETR F 4               // high
+CALL BSEARCH_FUNC:
+TXR E                  // Output: 00000002
+NEWLINE
+
+// Search for 6 -> not found
+SETR G 6
+SETR C 0
+SETR F 4
+CALL BSEARCH_FUNC:
+TXR E                  // Output: FFFFFFFF
+NEWLINE
+
+// ================================================================
+// PHASE 4: BIT MANIPULATION
+// Uses SHLV, ORV, SHRV, ANDV, XORV, BITREV, BSETRR, POPCNT, CLZ
+// ================================================================
+
+// Pack 0xABCD using SHLV + ORV
+SETR A 0xA
+SHLV A 4               // A = 0xA0
+ORV A 0xB              // A = 0xAB
+SHLV A 4               // A = 0xAB0
+ORV A 0xC              // A = 0xABC
+SHLV A 4               // A = 0xABC0
+ORV A 0xD              // A = 0xABCD
+TXR A                  // Output: 0000ABCD
+NEWLINE
+
+// Extract nibble B (bits 11:8) using SHRV + ANDV
+COPY B A               // B = 0xABCD
+SHRV B 8               // B = 0x00000ABC
+ANDV B 0xF             // B = 0x0000000B
+TXR B                  // Output: 0000000B
+NEWLINE
+
+// XOR test using XORV
+SETR A 0xFF
+XORV A 0xAA            // A = 0xFF ^ 0xAA = 0x55
+TXR A                  // Output: 00000055
+NEWLINE
+
+// BITREV: reverse all bits
+SETR A 0xABCD
+BITREV A               // 0x0000ABCD reversed = 0xB3D50000
+TXR A                  // Output: B3D50000
+NEWLINE
+
+// BSETRR: set bit N where N is in register B
+SETR A 0x0
+SETR B 3               // bit number 3
+BSETRR A B             // set bit B(3) in A -> A = 0x00000008
+TXR A                  // Output: 00000008
+NEWLINE
+
+// POPCNT: count set bits in 0xABCD
+// 0xA(2) + 0xB(3) + 0xC(2) + 0xD(3) = 10
+SETR A 0xABCD
+POPCNT A
+TXR A                  // Output: 0000000A
+NEWLINE
+
+// CLZ: count leading zeros of 0x0000ABCD = 16
+SETR A 0xABCD
+CLZ A
+TXR A                  // Output: 00000010
+NEWLINE
+
+// ================================================================
+// PHASE 5: EXTENDED PRECISION MULTIPLY
+// Uses MULHURR, MULURR (single-register, must use A)
+// 0xFFFFFFFF * 0xFFFFFFFF (unsigned) = 0xFFFFFFFE_00000001
+// ================================================================
+
+SETR A 0xFFFFFFFF
+SETR B 0xFFFFFFFF
+MULHURR A B            // A = upper 32 bits = 0xFFFFFFFE
+TXR A                  // Output: FFFFFFFE
+NEWLINE
+
+SETR A 0xFFFFFFFF      // reload A (clobbered by MULHURR)
+MULURR A B             // A = lower 32 bits = 0x00000001
+TXR A                  // Output: 00000001
+NEWLINE
+
+// ================================================================
+// PHASE 6: CARRY FLAG DETECTION
+// Uses JMPC (barely tested), JMPNC (untested)
+// ================================================================
+
+SETR C 0               // score counter
+
+// Test JMPC: overflow addition sets carry
+SETR A 0xFFFFFFFF
+ADDV A 1               // wraps to 0, carry flag set
+JMPC CF_PASS1:
+JMP CF_CHECK2:
+CF_PASS1:
+INCR C                 // score = 1
+
+CF_CHECK2:
+// Test JMPNC: non-overflow addition clears carry
+SETR A 5
+ADDV A 3               // A = 8, no carry
+JMPNC CF_PASS2:
+JMP CF_DONE:
+CF_PASS2:
+INCR C                 // score = 2
+
+CF_DONE:
+TXR C                  // Output: 00000002 (both carry tests passed)
+NEWLINE
+
+// ================================================================
+// PHASE 7: GCD + PRIME DETECTION
+// Uses MODRR (must use A), PUSHV (untested), CALL/RET
+// ================================================================
+
+// GCD(48, 18) = 6
+SETR A 48
+SETR B 18
+CALL GCD_FUNC:
+TXR A                  // Output: 00000006
+NEWLINE
+
+// Count primes from 2 to 20
+SETR E 2               // candidate
+SETR F 0               // prime count
+SETR G 0               // last prime found
+SETR H 20              // upper limit
+
+PRIME_LOOP:
+CMPRR E H
+JMPGT PRIME_DONE:
+
+COPY A E
+CALL IS_PRIME:         // A = 1 if prime, 0 if not
+
+CMPRV A 0x1
+JMPNE PRIME_NEXT:
+
+INCR F                 // count++
+COPY G E               // record last prime
+
+PRIME_NEXT:
+INCR E
+JMP PRIME_LOOP:
+
+PRIME_DONE:
+TXR F                  // Output: 00000008 (8 primes)
+NEWLINE
+TXR G                  // Output: 00000013 (largest = 19)
+NEWLINE
+
+// ================================================================
+LEDV 0xFF
+HALT
+
+// ================================================================
+// SUBROUTINES
+// ================================================================
+
+// ----------------------------------------------------------------
+// BSEARCH_FUNC: Binary search on sorted array
+// Input:  I = base address, G = target, C = low index, F = high index
+// Output: E = index of target, or 0xFFFFFFFF if not found
+// Uses CMPLERR+JMPLE, CMPGERR+JMPGE, DIVV, LDIDXR
+// Note: CMPLERR/CMPGERR require register A, so values are COPY'd to A.
+// ----------------------------------------------------------------
+BSEARCH_FUNC:
+PUSH H
+
+BSR_CHECK:
+// Is low <= high? (CMPLERR compares A with implicit B)
+COPY A C               // A = low
+COPY B F               // B = high
+CMPLERR A B            // A <= B? (low <= high?)
+JMPLE BSR_SEARCH:      // yes -> keep searching
+JMP BSR_NOT_FOUND:     // no -> target absent
+
+BSR_SEARCH:
+// mid = (low + high) / 2
+COPY E C
+ADDRR E F              // E = low + high
+DIVV E 2               // E = mid (DIVV: divide by immediate)
+
+// Load arr[mid] via LDIDXR (0x4 = register E index)
+LDIDXR D I 0x4         // D = mem[I + E] = arr[mid]
+
+// Compare arr[mid] with target
+COPY A D               // A = arr[mid]
+COPY B G               // B = target
+CMPRR A B              // sets flags for equal check
+JMPE BSR_FOUND:        // arr[mid] == target
+
+// Decide search direction: CMPGERR + JMPGE
+CMPGERR A B            // A >= B? (arr[mid] >= target?)
+JMPGE BSR_LEFT:        // yes -> search left half
+
+// arr[mid] < target -> search right half
+COPY C E
+INCR C                 // low = mid + 1
+JMP BSR_CHECK:
+
+BSR_LEFT:
+COPY F E
+DECR F                 // high = mid - 1
+JMP BSR_CHECK:
+
+BSR_FOUND:
+POP H
+RET
+
+BSR_NOT_FOUND:
+SETR E 0xFFFFFFFF
+POP H
+RET
+
+// ----------------------------------------------------------------
+// GCD_FUNC: Euclidean GCD
+// Input:  A = first, B = second
+// Output: A = GCD(A, B)
+// Uses MODRR (must use register A)
+// ----------------------------------------------------------------
+GCD_FUNC:
+PUSH C
+GCD_LOOP:
+CMPRV B 0x0
+JMPE GCD_RET:
+MODRR A B              // A = A % B
+COPY C A               // C = remainder
+COPY A B               // A = old divisor
+COPY B C               // B = remainder
+JMP GCD_LOOP:
+GCD_RET:
+POP C
+RET
+
+// ----------------------------------------------------------------
+// IS_PRIME: Trial division primality test
+// Input:  A = candidate (>= 2)
+// Output: A = 1 if prime, 0 if not
+// Uses PUSHV (untested) to load starting divisor via stack.
+// Uses MODRR (must use register A).
+// ----------------------------------------------------------------
+IS_PRIME:
+PUSH C
+COPY C A               // C = candidate (saved)
+PUSHV 2                // exercise PUSHV: push starting divisor
+POP B                  // B = 2
+
+IP_LOOP:
+// If divisor >= candidate, no factors -> prime
+CMPRR C B              // candidate vs divisor
+JMPGT IP_CONTINUE:     // candidate > divisor -> keep testing
+JMP IP_IS_PRIME:       // candidate <= divisor -> prime
+
+IP_CONTINUE:
+COPY A C               // A = candidate
+MODRR A B              // A = candidate % B (divisor)
+CMPRV A 0x0
+JMPE IP_NOT_PRIME:     // divisible -> not prime
+
+INCR B                 // next divisor
+JMP IP_LOOP:
+
+IP_IS_PRIME:
+SETR A 1
+POP C
+RET
+
+IP_NOT_PRIME:
+SETR A 0
+POP C
+RET
+
+// ================================================================
+// DATA BUFFERS
+// ================================================================
+#FIB_BUF 10
+#SORT_BUF 5

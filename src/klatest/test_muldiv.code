@@ -21,39 +21,39 @@
                               -- // MULRR: signed multiply
 0x00000005: 00000800 0000000A -- SETR A 10
 0x00000007: 00000801 0000000A -- SETR B 10
-0x00000009: 00000B00          -- MULRR A
+0x00000009: 00008001          -- MULRR A B
 0x0000000A: 00005010          -- TXR A                 // Expect: 00000064
 0x0000000B: 00005001          -- NEWLINE
                               -- 
                               -- // MULURR: unsigned multiply
 0x0000000C: 00000800 0000000A -- SETR A 10
-0x0000000E: 00000B10          -- MULURR A
+0x0000000E: 00008101          -- MULURR A B
 0x0000000F: 00005010          -- TXR A                 // Expect: 00000064
 0x00000010: 00005001          -- NEWLINE
                               -- 
                               -- // DIVRR: signed divide
 0x00000011: 00000800 00000064 -- SETR A 100
 0x00000013: 00000801 0000000A -- SETR B 10
-0x00000015: 00000B40          -- DIVRR A
+0x00000015: 00008401          -- DIVRR A B
 0x00000016: 00005010          -- TXR A                 // Expect: 0000000A
 0x00000017: 00005001          -- NEWLINE
                               -- 
                               -- // DIVURR: unsigned divide
 0x00000018: 00000800 00000064 -- SETR A 100
-0x0000001A: 00000B50          -- DIVURR A
+0x0000001A: 00008501          -- DIVURR A B
 0x0000001B: 00005010          -- TXR A                 // Expect: 0000000A
 0x0000001C: 00005001          -- NEWLINE
                               -- 
                               -- // MODRR: signed modulo
 0x0000001D: 00000800 0000000A -- SETR A 10
 0x0000001F: 00000801 00000007 -- SETR B 7
-0x00000021: 00000B60          -- MODRR A
+0x00000021: 00008601          -- MODRR A B
 0x00000022: 00005010          -- TXR A                 // Expect: 00000003
 0x00000023: 00005001          -- NEWLINE
                               -- 
                               -- // MODURR: unsigned modulo
 0x00000024: 00000800 0000000A -- SETR A 10
-0x00000026: 00000B70          -- MODURR A
+0x00000026: 00008701          -- MODURR A B
 0x00000027: 00005010          -- TXR A                 // Expect: 00000003
 0x00000028: 00005001          -- NEWLINE
                               -- 

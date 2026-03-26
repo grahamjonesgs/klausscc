@@ -31,3 +31,5 @@ test_io.kla
 test_boundary.kla
 test_rotate.kla
 test_compare_ext.kla
+test_algorithms.kla
+test_benchmark.kla

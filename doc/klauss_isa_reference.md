@@ -431,10 +431,18 @@ ZEXTB B                // B = 0x000000FF (zero-extended)
 
 | Instruction | Operands | Description |
 |-------------|----------|-------------|
-| `MINRR` | Reg | Signed minimum of register and second register |
-| `MAXRR` | Reg | Signed maximum of register and second register |
-| `MINURR` | Reg | Unsigned minimum |
-| `MAXURR` | Reg | Unsigned maximum |
+| `MINRR` | Reg1, Reg2 | Reg1 = signed minimum of Reg1 and Reg2 |
+| `MAXRR` | Reg1, Reg2 | Reg1 = signed maximum of Reg1 and Reg2 |
+| `MINURR` | Reg1, Reg2 | Reg1 = unsigned minimum of Reg1 and Reg2 |
+| `MAXURR` | Reg1, Reg2 | Reg1 = unsigned maximum of Reg1 and Reg2 |
+
+**Examples:**
+```
+SETR A 3
+SETR B 7
+MINRR A B             // A = min(3, 7) = 3
+MAXRR A B             // A = max(3, 7) = 7
+```
 
 ### Shift and Rotate
 
@@ -453,8 +461,8 @@ ZEXTB B                // B = 0x000000FF (zero-extended)
 | `RORCR` | Reg | Rotate right through carry |
 | `ROLV` | Reg, Val | Rotate left by N bits |
 | `RORV` | Reg, Val | Rotate right by N bits |
-| `ROLRR` | Reg | Rotate left by amount in second register |
-| `RORRR` | Reg | Rotate right by amount in second register |
+| `ROLRR` | Reg1, Reg2 | Rotate Reg1 left by Reg2 bits |
+| `RORRR` | Reg1, Reg2 | Rotate Reg1 right by Reg2 bits |
 
 **Examples:**
 ```
@@ -472,10 +480,10 @@ ROLV D 8          // Rotate D left by 8 bits
 | `BCLR` | Reg, Val | Clear bit N in register |
 | `BTGL` | Reg, Val | Toggle bit N in register |
 | `BTST` | Reg, Val | Test bit N, result in zero flag |
-| `BSETRR` | Reg | Set bit (bit number in second register) |
-| `BCLRRR` | Reg | Clear bit (bit number in second register) |
-| `BTGLRR` | Reg | Toggle bit (bit number in second register) |
-| `BTSTRR` | Reg | Test bit (bit number in second register) |
+| `BSETRR` | Reg1, Reg2 | Set bit Reg2 in Reg1 |
+| `BCLRRR` | Reg1, Reg2 | Clear bit Reg2 in Reg1 |
+| `BTGLRR` | Reg1, Reg2 | Toggle bit Reg2 in Reg1 |
+| `BTSTRR` | Reg1, Reg2 | Test bit Reg2 in Reg1, result in zero flag |
 | `POPCNT` | Reg | Population count (count set bits) |
 | `CLZ` | Reg | Count leading zeros |
 | `CTZ` | Reg | Count trailing zeros |
@@ -496,21 +504,24 @@ CLZ A             // A = number of leading zeros in A
 
 | Instruction | Operands | Description |
 |-------------|----------|-------------|
-| `MULRR` | Reg | Signed multiply, result in first register (low word) |
-| `MULURR` | Reg | Unsigned multiply |
-| `MULHRR` | Reg | Signed multiply, high word |
-| `MULHURR` | Reg | Unsigned multiply, high word |
-| `DIVRR` | Reg | Signed divide |
-| `DIVURR` | Reg | Unsigned divide |
-| `MODRR` | Reg | Signed modulo |
-| `MODURR` | Reg | Unsigned modulo |
+| `MULRR` | Reg1, Reg2 | Reg1 = Reg1 * Reg2 (signed, low word) |
+| `MULURR` | Reg1, Reg2 | Reg1 = Reg1 * Reg2 (unsigned, low word) |
+| `MULHRR` | Reg1, Reg2 | Reg1 = high word of Reg1 * Reg2 (signed) |
+| `MULHURR` | Reg1, Reg2 | Reg1 = high word of Reg1 * Reg2 (unsigned) |
+| `DIVRR` | Reg1, Reg2 | Reg1 = Reg1 / Reg2 (signed) |
+| `DIVURR` | Reg1, Reg2 | Reg1 = Reg1 / Reg2 (unsigned) |
+| `MODRR` | Reg1, Reg2 | Reg1 = Reg1 % Reg2 (signed) |
+| `MODURR` | Reg1, Reg2 | Reg1 = Reg1 % Reg2 (unsigned) |
 | `MULV` | Reg, Val | Multiply register by immediate (signed) |
 | `DIVV` | Reg, Val | Divide register by immediate (signed) |
 | `MODV` | Reg, Val | Modulo register by immediate (signed) |
 
 **Examples:**
 ```
-MULRR A           // A = A * (second register), signed
+MULRR A B         // A = A * B (signed)
+MULHURR A B       // A = high word of A * B (unsigned)
+DIVRR A B         // A = A / B (signed)
+MODRR A B         // A = A % B (signed)
 DIVV B 10         // B = B / 10
 MODV C 0x100      // C = C % 256
 ```
@@ -521,14 +532,14 @@ MODV C 0x100      // C = C % 256
 |-------------|----------|-------------|
 | `CMPRR` | Reg1, Reg2 | Compare registers, sets equal flag |
 | `CMPRV` | Reg, Val | Compare register to value, sets equal flag |
-| `CMPLTRR` | Reg | Signed less-than |
-| `CMPLERR` | Reg | Signed less-or-equal |
-| `CMPGTRR` | Reg | Signed greater-than |
-| `CMPGERR` | Reg | Signed greater-or-equal |
-| `CMPULTRR` | Reg | Unsigned less-than |
-| `CMPULERR` | Reg | Unsigned less-or-equal |
-| `CMPUGTRR` | Reg | Unsigned greater-than |
-| `CMPUGERR` | Reg | Unsigned greater-or-equal |
+| `CMPLTRR` | Reg1, Reg2 | Signed less-than: Reg1 < Reg2 |
+| `CMPLERR` | Reg1, Reg2 | Signed less-or-equal: Reg1 <= Reg2 |
+| `CMPGTRR` | Reg1, Reg2 | Signed greater-than: Reg1 > Reg2 |
+| `CMPGERR` | Reg1, Reg2 | Signed greater-or-equal: Reg1 >= Reg2 |
+| `CMPULTRR` | Reg1, Reg2 | Unsigned less-than: Reg1 < Reg2 |
+| `CMPULERR` | Reg1, Reg2 | Unsigned less-or-equal: Reg1 <= Reg2 |
+| `CMPUGTRR` | Reg1, Reg2 | Unsigned greater-than: Reg1 > Reg2 |
+| `CMPUGERR` | Reg1, Reg2 | Unsigned greater-or-equal: Reg1 >= Reg2 |
 
 Comparison instructions set CPU flags (zero, equal, carry, overflow, sign) which are then used by conditional jumps and calls.
 
@@ -536,7 +547,8 @@ Comparison instructions set CPU flags (zero, equal, carry, overflow, sign) which
 ```
 CMPRR A B         // Compare A and B, sets equal flag
 CMPRV A 0x10      // Compare A to 16, sets equal flag
-CMPLTRR A         // Sets flags if A < (second register), signed
+CMPLTRR A B       // Sets flags if A < B (signed)
+CMPGTRR A B       // Sets flags if A > B (signed)
 ```
 
 ### Memory Access
@@ -959,6 +971,11 @@ The `src/klatest/` directory contains test programs covering the full ISA:
 | `test_indexed_mem.kla` | Indexed memory operations (LDIDX, STIDX, LDIDXR, STIDXR) |
 | `test_io.kla` | I/O peripherals (LEDs, 7-segment, switches) |
 | `test_loop_patterns.kla` | Loop patterns and control flow |
+| `test_boundary.kla` | Boundary conditions (max values, overflow, high multiply) |
+| `test_rotate.kla` | Rotate operations (ROLV, RORV, ROLRR, RORRR) |
+| `test_compare_ext.kla` | Extended comparisons (CMPLERR, CMPGERR, CMPULTRR, MINRR, MAXRR) |
+| `test_algorithms.kla` | Multi-algorithm benchmark (fibonacci, bubble sort, GCD, primes) |
+| `test_benchmark.kla` | Extended benchmark (binary search, bit ops, carry flags, indexed memory) |
 
 ---
 

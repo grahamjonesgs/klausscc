@@ -33,58 +33,41 @@
 0x00000017: 00005011          -- TXR B                 // Expect: 00000037 (55)
 0x00000018: 00005001          -- NEWLINE
                               -- 
-                              -- // --- Factorial 4! using CALL ---
+                              -- // --- Factorial 4! using loop with MULRR ---
 0x00000019: 00000800 00000004 -- SETR A 4              // n = 4
 0x0000001B: 00000801 00000001 -- SETR B 1              // result = 1
 0x0000001D:                   -- FACT_LOOP:
 0x0000001D: 00000830 00000000 -- CMPRV A 0x0
-0x0000001F: 00001003 00000000 -- JMPE FACT_DONE:
-0x00000021: 00000B01          -- MULRR B               // B = B * A (note: MULRR uses B and second register)
-                              -- // Actually need to think about how MULRR works with register pairing
-                              -- // Let's do it manually with repeated addition
-0x00000022: 00001000 00000024 -- JMP FACT_MANUAL:
-                              -- 
-0x00000024:                   -- FACT_MANUAL:
-                              -- // Manual factorial: 4! = 4*3*2*1
-0x00000024: 00000800 00000001 -- SETR A 1              // result
-0x00000026: 00000801 00000004 -- SETR B 4              // counter
-0x00000028:                   -- FACT_MUL_LOOP:
-0x00000028: 00000B80 00000000 -- MULV A B              // A = A * B (multiply by immediate... no, MULV is reg*val)
-                              -- // MULV multiplies register by a value, but B is a register not a value
-                              -- // Use a different approach: nested loop multiplication
-0x0000002A: 00001000 0000002C -- JMP FACT_SIMPLE:
-                              -- 
-0x0000002C:                   -- FACT_SIMPLE:
-                              -- // Simple approach: hardcode 4! = 4*3*2*1
-0x0000002C: 00000800 00000004 -- SETR A 4
-0x0000002E: 00000B80 00000003 -- MULV A 3              // A = 12
-0x00000030: 00000B80 00000002 -- MULV A 2              // A = 24
-0x00000032: 00000B80 00000001 -- MULV A 1              // A = 24
-0x00000034: 00005010          -- TXR A                 // Expect: 00000018 (24)
-0x00000035: 00005001          -- NEWLINE
+0x0000001F: 00001003 00000025 -- JMPE FACT_DONE:
+0x00000021: 00008010          -- MULRR B A             // B = B * A
+0x00000022: 00000850          -- DECR A
+0x00000023: 00001000 0000001D -- JMP FACT_LOOP:
+0x00000025:                   -- FACT_DONE:
+0x00000025: 00005011          -- TXR B                 // Expect: 00000018 (24)
+0x00000026: 00005001          -- NEWLINE
                               -- 
                               -- // --- Find max of 4 values stored in registers ---
-0x00000036: 00000800 00000003 -- SETR A 3
-0x00000038: 00000801 00000007 -- SETR B 7
-0x0000003A: 00000802 00000001 -- SETR C 1
-0x0000003C: 00000803 00000005 -- SETR D 5
+0x00000027: 00000800 00000003 -- SETR A 3
+0x00000029: 00000801 00000007 -- SETR B 7
+0x0000002B: 00000802 00000001 -- SETR C 1
+0x0000002D: 00000803 00000005 -- SETR D 5
                               -- // Compare A and B, keep larger in A
-0x0000003E: 00000501          -- CMPRR A B
-0x0000003F: 00001017 00000042 -- JMPGT SKIP1:          // If A > B, skip
-0x00000041: 00000101          -- COPY A B              // A = B (B was larger)
-0x00000042:                   -- SKIP1:
+0x0000002F: 00000501          -- CMPRR A B
+0x00000030: 00001017 00000033 -- JMPGT SKIP1:          // If A > B, skip
+0x00000032: 00000101          -- COPY A B              // A = B (B was larger)
+0x00000033:                   -- SKIP1:
                               -- // Compare A and C
-0x00000042: 00000502          -- CMPRR A C
-0x00000043: 00001017 00000046 -- JMPGT SKIP2:
-0x00000045: 00000102          -- COPY A C              // A = C (C was larger)
-0x00000046:                   -- SKIP2:
+0x00000033: 00000502          -- CMPRR A C
+0x00000034: 00001017 00000037 -- JMPGT SKIP2:
+0x00000036: 00000102          -- COPY A C              // A = C (C was larger)
+0x00000037:                   -- SKIP2:
                               -- // Compare A and D
-0x00000046: 00000503          -- CMPRR A D
-0x00000047: 00001017 0000004A -- JMPGT SKIP3:
-0x00000049: 00000103          -- COPY A D              // A = D (D was larger)
-0x0000004A:                   -- SKIP3:
-0x0000004A: 00005010          -- TXR A                 // Expect: 00000007 (max = 7)
-0x0000004B: 00005001          -- NEWLINE
+0x00000037: 00000503          -- CMPRR A D
+0x00000038: 00001017 0000003B -- JMPGT SKIP3:
+0x0000003A: 00000103          -- COPY A D              // A = D (D was larger)
+0x0000003B:                   -- SKIP3:
+0x0000003B: 00005010          -- TXR A                 // Expect: 00000007 (max = 7)
+0x0000003C: 00005001          -- NEWLINE
                               -- 
-0x0000004C: 00003070 000000FF -- LEDV 0xFF
-0x0000004E: 0000F011          -- HALT
+0x0000003D: 00003070 000000FF -- LEDV 0xFF
+0x0000003F: 0000F011          -- HALT

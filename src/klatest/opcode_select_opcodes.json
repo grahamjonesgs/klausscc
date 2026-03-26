@@ -1,6 +1,6 @@
 [
   {
-    "comment": "Copy registers, first to second",
+    "comment": "Copy second register into first",
     "hex_code": "000001??",
     "registers": 2,
     "section": "",
@@ -32,7 +32,7 @@
     "variables": 0
   },
   {
-    "comment": "Compare registers, result in equal flag",
+    "comment": "Compare registers, sets equal/less/sign flags",
     "hex_code": "000005??",
     "registers": 2,
     "section": "",
@@ -64,7 +64,7 @@
     "variables": 1
   },
   {
-    "comment": "Increment register by a value",
+    "comment": "Add value to register",
     "hex_code": "0000081?",
     "registers": 1,
     "section": "",
@@ -72,7 +72,7 @@
     "variables": 1
   },
   {
-    "comment": "Decrement register by a value",
+    "comment": "Subtract value from register",
     "hex_code": "0000082?",
     "registers": 1,
     "section": "",
@@ -80,7 +80,7 @@
     "variables": 1
   },
   {
-    "comment": "Compare register to value, result in equal flag",
+    "comment": "Compare register to value, sets equal/less/sign flags",
     "hex_code": "0000083?",
     "registers": 1,
     "section": "",
@@ -248,38 +248,6 @@
     "variables": 0
   },
   {
-    "comment": "Minimum of two registers (signed)",
-    "hex_code": "0000098?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MINRR",
-    "variables": 0
-  },
-  {
-    "comment": "Maximum of two registers (signed)",
-    "hex_code": "0000099?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MAXRR",
-    "variables": 0
-  },
-  {
-    "comment": "Minimum unsigned",
-    "hex_code": "000009A?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MINURR",
-    "variables": 0
-  },
-  {
-    "comment": "Maximum unsigned",
-    "hex_code": "000009B?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MAXURR",
-    "variables": 0
-  },
-  {
     "comment": "Set bit N in register",
     "hex_code": "00000A0?",
     "registers": 1,
@@ -310,38 +278,6 @@
     "section": "",
     "text_name": "BTST",
     "variables": 1
-  },
-  {
-    "comment": "Set bit (bit number in second reg)",
-    "hex_code": "00000A4?",
-    "registers": 1,
-    "section": "",
-    "text_name": "BSETRR",
-    "variables": 0
-  },
-  {
-    "comment": "Clear bit (bit number in second reg)",
-    "hex_code": "00000A5?",
-    "registers": 1,
-    "section": "",
-    "text_name": "BCLRRR",
-    "variables": 0
-  },
-  {
-    "comment": "Toggle bit (bit number in second reg)",
-    "hex_code": "00000A6?",
-    "registers": 1,
-    "section": "",
-    "text_name": "BTGLRR",
-    "variables": 0
-  },
-  {
-    "comment": "Test bit (bit number in second reg)",
-    "hex_code": "00000A7?",
-    "registers": 1,
-    "section": "",
-    "text_name": "BTSTRR",
-    "variables": 0
   },
   {
     "comment": "Population count (count 1 bits)",
@@ -392,70 +328,6 @@
     "variables": 1
   },
   {
-    "comment": "Multiply registers (signed), result in first",
-    "hex_code": "00000B0?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MULRR",
-    "variables": 0
-  },
-  {
-    "comment": "Multiply registers (unsigned)",
-    "hex_code": "00000B1?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MULURR",
-    "variables": 0
-  },
-  {
-    "comment": "Multiply high word (signed)",
-    "hex_code": "00000B2?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MULHRR",
-    "variables": 0
-  },
-  {
-    "comment": "Multiply high word (unsigned)",
-    "hex_code": "00000B3?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MULHURR",
-    "variables": 0
-  },
-  {
-    "comment": "Divide registers (signed)",
-    "hex_code": "00000B4?",
-    "registers": 1,
-    "section": "",
-    "text_name": "DIVRR",
-    "variables": 0
-  },
-  {
-    "comment": "Divide registers (unsigned)",
-    "hex_code": "00000B5?",
-    "registers": 1,
-    "section": "",
-    "text_name": "DIVURR",
-    "variables": 0
-  },
-  {
-    "comment": "Modulo registers (signed)",
-    "hex_code": "00000B6?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MODRR",
-    "variables": 0
-  },
-  {
-    "comment": "Modulo registers (unsigned)",
-    "hex_code": "00000B7?",
-    "registers": 1,
-    "section": "",
-    "text_name": "MODURR",
-    "variables": 0
-  },
-  {
     "comment": "Multiply register by value (signed)",
     "hex_code": "00000B8?",
     "registers": 1,
@@ -504,70 +376,6 @@
     "variables": 1
   },
   {
-    "comment": "Compare signed less-than",
-    "hex_code": "00000F0?",
-    "registers": 1,
-    "section": "",
-    "text_name": "CMPLTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare signed less-or-equal",
-    "hex_code": "00000F1?",
-    "registers": 1,
-    "section": "",
-    "text_name": "CMPLERR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare signed greater-than",
-    "hex_code": "00000F2?",
-    "registers": 1,
-    "section": "",
-    "text_name": "CMPGTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare signed greater-or-equal",
-    "hex_code": "00000F3?",
-    "registers": 1,
-    "section": "",
-    "text_name": "CMPGERR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare unsigned less-than",
-    "hex_code": "00000F4?",
-    "registers": 1,
-    "section": "",
-    "text_name": "CMPULTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare unsigned less-or-equal",
-    "hex_code": "00000F5?",
-    "registers": 1,
-    "section": "",
-    "text_name": "CMPULERR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare unsigned greater-than",
-    "hex_code": "00000F6?",
-    "registers": 1,
-    "section": "",
-    "text_name": "CMPUGTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare unsigned greater-or-equal",
-    "hex_code": "00000F7?",
-    "registers": 1,
-    "section": "",
-    "text_name": "CMPUGERR",
-    "variables": 0
-  },
-  {
     "comment": "Rotate left by 1",
     "hex_code": "00000F8?",
     "registers": 1,
@@ -614,22 +422,6 @@
     "section": "",
     "text_name": "RORV",
     "variables": 1
-  },
-  {
-    "comment": "Rotate left by register amount",
-    "hex_code": "00000FE?",
-    "registers": 1,
-    "section": "",
-    "text_name": "ROLRR",
-    "variables": 0
-  },
-  {
-    "comment": "Rotate right by register amount",
-    "hex_code": "00000FF?",
-    "registers": 1,
-    "section": "",
-    "text_name": "RORRR",
-    "variables": 0
   },
   {
     "comment": "Jump",
@@ -1080,7 +872,7 @@
     "variables": 0
   },
   {
-    "comment": "Set memory from register to register",
+    "comment": "mem[second] = first",
     "hex_code": "000070??",
     "registers": 2,
     "section": "",
@@ -1088,7 +880,7 @@
     "variables": 0
   },
   {
-    "comment": "Set register from memory at register",
+    "comment": "first = mem[second]",
     "hex_code": "000071??",
     "registers": 2,
     "section": "",
@@ -1118,6 +910,214 @@
     "section": "",
     "text_name": "STIDXR",
     "variables": 1
+  },
+  {
+    "comment": "Multiply first * second (signed), result in first",
+    "hex_code": "000080??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MULRR",
+    "variables": 0
+  },
+  {
+    "comment": "Multiply first * second (unsigned), result in first",
+    "hex_code": "000081??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MULURR",
+    "variables": 0
+  },
+  {
+    "comment": "Multiply high word first * second (signed), result in first",
+    "hex_code": "000082??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MULHRR",
+    "variables": 0
+  },
+  {
+    "comment": "Multiply high word first * second (unsigned), result in first",
+    "hex_code": "000083??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MULHURR",
+    "variables": 0
+  },
+  {
+    "comment": "Divide first / second (signed), result in first",
+    "hex_code": "000084??",
+    "registers": 2,
+    "section": "",
+    "text_name": "DIVRR",
+    "variables": 0
+  },
+  {
+    "comment": "Divide first / second (unsigned), result in first",
+    "hex_code": "000085??",
+    "registers": 2,
+    "section": "",
+    "text_name": "DIVURR",
+    "variables": 0
+  },
+  {
+    "comment": "Modulo first % second (signed), result in first",
+    "hex_code": "000086??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MODRR",
+    "variables": 0
+  },
+  {
+    "comment": "Modulo first % second (unsigned), result in first",
+    "hex_code": "000087??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MODURR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare first < second (signed), sets less/equal flags",
+    "hex_code": "000090??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPLTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare first <= second (signed), sets less/equal flags",
+    "hex_code": "000091??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPLERR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare first > second (signed), sets less/equal flags",
+    "hex_code": "000092??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPGTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare first >= second (signed), sets less/equal flags",
+    "hex_code": "000093??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPGERR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare first < second (unsigned), sets carry/equal flags",
+    "hex_code": "000094??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPULTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare first <= second (unsigned), sets carry/equal flags",
+    "hex_code": "000095??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPULERR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare first > second (unsigned), sets carry/equal flags",
+    "hex_code": "000096??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPUGTRR",
+    "variables": 0
+  },
+  {
+    "comment": "Compare first >= second (unsigned), sets carry/equal flags",
+    "hex_code": "000097??",
+    "registers": 2,
+    "section": "",
+    "text_name": "CMPUGERR",
+    "variables": 0
+  },
+  {
+    "comment": "Minimum of first and second (signed), result in first",
+    "hex_code": "0000A0??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MINRR",
+    "variables": 0
+  },
+  {
+    "comment": "Maximum of first and second (signed), result in first",
+    "hex_code": "0000A1??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MAXRR",
+    "variables": 0
+  },
+  {
+    "comment": "Minimum of first and second (unsigned), result in first",
+    "hex_code": "0000A2??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MINURR",
+    "variables": 0
+  },
+  {
+    "comment": "Maximum of first and second (unsigned), result in first",
+    "hex_code": "0000A3??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MAXURR",
+    "variables": 0
+  },
+  {
+    "comment": "Rotate first left by second bits",
+    "hex_code": "0000B0??",
+    "registers": 2,
+    "section": "",
+    "text_name": "ROLRR",
+    "variables": 0
+  },
+  {
+    "comment": "Rotate first right by second bits",
+    "hex_code": "0000B1??",
+    "registers": 2,
+    "section": "",
+    "text_name": "RORRR",
+    "variables": 0
+  },
+  {
+    "comment": "Set bit in first (bit number in second)",
+    "hex_code": "0000B2??",
+    "registers": 2,
+    "section": "",
+    "text_name": "BSETRR",
+    "variables": 0
+  },
+  {
+    "comment": "Clear bit in first (bit number in second)",
+    "hex_code": "0000B3??",
+    "registers": 2,
+    "section": "",
+    "text_name": "BCLRRR",
+    "variables": 0
+  },
+  {
+    "comment": "Toggle bit in first (bit number in second)",
+    "hex_code": "0000B4??",
+    "registers": 2,
+    "section": "",
+    "text_name": "BTGLRR",
+    "variables": 0
+  },
+  {
+    "comment": "Test bit in first (bit number in second), result in zero flag",
+    "hex_code": "0000B5??",
+    "registers": 2,
+    "section": "",
+    "text_name": "BTSTRR",
+    "variables": 0
   },
   {
     "comment": "Delay by register",
@@ -1152,7 +1152,7 @@
     "variables": 0
   },
   {
-    "comment": "Set by value ",
+    "comment": "Delay by value",
     "hex_code": "0000F013",
     "registers": 0,
     "section": "",

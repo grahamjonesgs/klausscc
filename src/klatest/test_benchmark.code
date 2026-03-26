@@ -1,0 +1,445 @@
+                              -- // Test 21: Extended Multi-Algorithm CPU Benchmark
+                              -- // Stress-tests the CPU across seven phases, exercising instructions that have
+                              -- // no coverage or minimal coverage in the existing test suite.
+                              -- //
+                              -- // Untested opcodes exercised: BSETRR, JMPNC, PUSHV
+                              -- // Barely-tested opcodes exercised: STIDX, STIDXR, LDIDX, LDIDXR, ORV, ANDV,
+                              -- //   XORV, SHLV, SHRV, BITREV, MULHURR, DIVV, CMPLERR, CMPGERR, CMPGTRR,
+                              -- //   JMPLE, JMPGE, JMPC, POPCNT, CLZ
+                              -- //
+                              -- // Expected UART output:
+                              -- //   00000037  (fibonacci: fib[9] = 55)
+                              -- //   00000005  (fibonacci: fib[4] = 5)
+                              -- //   00000001  (bubble sort: smallest of {9,3,7,1,5})
+                              -- //   00000009  (bubble sort: largest after sort)
+                              -- //   00000002  (binary search: index of 5 in sorted {1,3,5,7,9})
+                              -- //   FFFFFFFF  (binary search: 6 not found)
+                              -- //   0000ABCD  (bit ops: pack nibbles via SHLV + ORV)
+                              -- //   0000000B  (bit ops: extract nibble via SHRV + ANDV)
+                              -- //   00000055  (bit ops: 0xFF XORV 0xAA)
+                              -- //   B3D50000  (bit ops: BITREV of 0x0000ABCD)
+                              -- //   00000008  (bit ops: BSETRR set bit 3 of zero = 8)
+                              -- //   0000000A  (bit ops: POPCNT of 0xABCD = 10)
+                              -- //   00000010  (bit ops: CLZ of 0x0000ABCD = 16)
+                              -- //   FFFFFFFE  (multiply: MULHURR high of 0xFFFFFFFF * 0xFFFFFFFF)
+                              -- //   00000001  (multiply: MULURR low word)
+                              -- //   00000002  (flags: JMPC + JMPNC both passed)
+                              -- //   00000006  (GCD: gcd(48, 18) = 6)
+                              -- //   00000008  (primes: count from 2 to 20)
+                              -- //   00000013  (primes: largest prime <= 20 = 19)
+                              -- // Expected 7SEG: 0x15
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00000500 -- DELAYV 0x0500
+0x00000002: 00003071 00000015 -- 7SEG1V 0x15
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 1: FIBONACCI SEQUENCE
+                              -- // Uses STIDX, STIDXR, LDIDX, CMPRR+JMPGE
+                              -- // Register I holds array base throughout sort/search phases.
+                              -- // ================================================================
+                              -- 
+0x00000005: 00000808 00000149 -- SETR I #FIB_BUF        // I = base address (kept in I, freeing A)
+0x00000007: 00000801 00000001 -- SETR B 1               // fib(n-2) = 1
+0x00000009: 00000802 00000001 -- SETR C 1               // fib(n-1) = 1
+0x0000000B: 00000D18 00000000 -- STIDX B I 0x0          // fib[0] = 1 (STIDX with immediate offset)
+0x0000000D: 00000D28 00000001 -- STIDX C I 0x1          // fib[1] = 1
+0x0000000F: 00000804 00000002 -- SETR E 2               // current index
+0x00000011: 00000805 0000000A -- SETR F 10              // total count
+                              -- 
+0x00000013:                   -- FIB_LOOP:
+0x00000013: 00000545          -- CMPRR E F              // index vs limit
+0x00000014: 00001018 0000001F -- JMPGE FIB_DONE:        // if index >= 10, done (exercises JMPGE)
+                              -- 
+0x00000016: 00000131          -- COPY D B               // D = fib(n-2)
+0x00000017: 00000632          -- ADDRR D C              // D = fib(n-2) + fib(n-1)
+0x00000018: 00000112          -- COPY B C               // shift window
+0x00000019: 00000123          -- COPY C D
+                              -- 
+0x0000001A: 00007338 00000004 -- STIDXR D I 0x4         // mem[I + E] = D (STIDXR: 0x4 = register E index)
+0x0000001C: 00000844          -- INCR E
+0x0000001D: 00001000 00000013 -- JMP FIB_LOOP:
+                              -- 
+0x0000001F:                   -- FIB_DONE:
+                              -- // Read back results using LDIDX
+0x0000001F: 00000C38 00000009 -- LDIDX D I 0x9          // D = fib[9] = 55
+0x00000021: 00005013          -- TXR D                  // Output: 00000037
+0x00000022: 00005001          -- NEWLINE
+                              -- 
+0x00000023: 00000C38 00000004 -- LDIDX D I 0x4          // D = fib[4] = 5
+0x00000025: 00005013          -- TXR D                  // Output: 00000005
+0x00000026: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 2: BUBBLE SORT
+                              -- // Uses LDIDXR, STIDXR, CMPGTRR+JMPGT
+                              -- // Single-register ops (CMPGTRR) require register A.
+                              -- // ================================================================
+                              -- 
+0x00000027: 00000808 00000153 -- SETR I #SORT_BUF       // I = sort array base
+0x00000029: 00000801 00000009 -- SETR B 9
+0x0000002B: 00000D18 00000000 -- STIDX B I 0x0
+0x0000002D: 00000801 00000003 -- SETR B 3
+0x0000002F: 00000D18 00000001 -- STIDX B I 0x1
+0x00000031: 00000801 00000007 -- SETR B 7
+0x00000033: 00000D18 00000002 -- STIDX B I 0x2
+0x00000035: 00000801 00000001 -- SETR B 1
+0x00000037: 00000D18 00000003 -- STIDX B I 0x3
+0x00000039: 00000801 00000005 -- SETR B 5
+0x0000003B: 00000D18 00000004 -- STIDX B I 0x4
+                              -- 
+0x0000003D: 00000806 00000004 -- SETR G 4               // outer passes remaining (n-1)
+                              -- 
+0x0000003F:                   -- BS_OUTER:
+0x0000003F: 00000836 00000000 -- CMPRV G 0x0
+0x00000041: 00001003 00000066 -- JMPE BS_SORT_DONE:
+                              -- 
+0x00000043: 00000807 00000000 -- SETR H 0               // swap flag
+0x00000045: 00000804 00000000 -- SETR E 0               // index into array
+0x00000047: 00000156          -- COPY F G               // F = comparisons this pass
+                              -- 
+0x00000048:                   -- BS_INNER:
+0x00000048: 00000E38 00000004 -- LDIDXR D I 0x4         // D = arr[E] (LDIDXR: register index 4 = E)
+0x0000004A: 00000844          -- INCR E
+0x0000004B: 00000E28 00000004 -- LDIDXR C I 0x4         // C = arr[E] = arr[i+1]
+                              -- 
+                              -- // Compare arr[i] > arr[i+1] using CMPGTRR (requires register A)
+0x0000004D: 00000103          -- COPY A D               // A = arr[i]
+0x0000004E: 00000112          -- COPY B C               // B = arr[i+1] (implicit operand for CMPGTRR)
+0x0000004F: 00009201          -- CMPGTRR A B            // A > B? (arr[i] > arr[i+1]?)
+0x00000050: 00001017 00000054 -- JMPGT BS_DO_SWAP:
+0x00000052: 00001000 0000005C -- JMP BS_NO_SWAP:
+                              -- 
+0x00000054:                   -- BS_DO_SWAP:
+                              -- // E = i+1. Swap via STIDXR (D and C still hold original values)
+0x00000054: 00007338 00000004 -- STIDXR D I 0x4         // arr[i+1] = D (larger)
+0x00000056: 00000854          -- DECR E
+0x00000057: 00007328 00000004 -- STIDXR C I 0x4         // arr[i] = C (smaller)
+0x00000059: 00000844          -- INCR E                 // restore E to i+1
+0x0000005A: 00000807 00000001 -- SETR H 1               // mark swap
+                              -- 
+0x0000005C:                   -- BS_NO_SWAP:
+0x0000005C: 00000855          -- DECR F
+0x0000005D: 00001002 00000048 -- JMPNZ BS_INNER:
+                              -- 
+                              -- // Early exit if no swaps this pass
+0x0000005F: 00000837 00000000 -- CMPRV H 0x0
+0x00000061: 00001003 00000066 -- JMPE BS_SORT_DONE:
+                              -- 
+0x00000063: 00000856          -- DECR G
+0x00000064: 00001000 0000003F -- JMP BS_OUTER:
+                              -- 
+0x00000066:                   -- BS_SORT_DONE:
+0x00000066: 00000C38 00000000 -- LDIDX D I 0x0          // arr[0] = 1 (smallest)
+0x00000068: 00005013          -- TXR D                  // Output: 00000001
+0x00000069: 00005001          -- NEWLINE
+0x0000006A: 00000C38 00000004 -- LDIDX D I 0x4          // arr[4] = 9 (largest)
+0x0000006C: 00005013          -- TXR D                  // Output: 00000009
+0x0000006D: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 3: BINARY SEARCH
+                              -- // Uses CMPLERR+JMPLE, CMPGERR+JMPGE, DIVV, LDIDXR
+                              -- // Register I still holds #SORT_BUF. Array is now {1,3,5,7,9}.
+                              -- // Single-register ops use register A via COPY.
+                              -- // ================================================================
+                              -- 
+                              -- // Search for 5 -> expect index 2
+0x0000006E: 00000806 00000005 -- SETR G 5               // target
+0x00000070: 00000802 00000000 -- SETR C 0               // low
+0x00000072: 00000805 00000004 -- SETR F 4               // high
+0x00000074: 00001009 000000FD -- CALL BSEARCH_FUNC:
+0x00000076: 00005014          -- TXR E                  // Output: 00000002
+0x00000077: 00005001          -- NEWLINE
+                              -- 
+                              -- // Search for 6 -> not found
+0x00000078: 00000806 00000006 -- SETR G 6
+0x0000007A: 00000802 00000000 -- SETR C 0
+0x0000007C: 00000805 00000004 -- SETR F 4
+0x0000007E: 00001009 000000FD -- CALL BSEARCH_FUNC:
+0x00000080: 00005014          -- TXR E                  // Output: FFFFFFFF
+0x00000081: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 4: BIT MANIPULATION
+                              -- // Uses SHLV, ORV, SHRV, ANDV, XORV, BITREV, BSETRR, POPCNT, CLZ
+                              -- // ================================================================
+                              -- 
+                              -- // Pack 0xABCD using SHLV + ORV
+0x00000082: 00000800 0000000A -- SETR A 0xA
+0x00000084: 00000910 00000004 -- SHLV A 4               // A = 0xA0
+0x00000086: 00000870 0000000B -- ORV A 0xB              // A = 0xAB
+0x00000088: 00000910 00000004 -- SHLV A 4               // A = 0xAB0
+0x0000008A: 00000870 0000000C -- ORV A 0xC              // A = 0xABC
+0x0000008C: 00000910 00000004 -- SHLV A 4               // A = 0xABC0
+0x0000008E: 00000870 0000000D -- ORV A 0xD              // A = 0xABCD
+0x00000090: 00005010          -- TXR A                  // Output: 0000ABCD
+0x00000091: 00005001          -- NEWLINE
+                              -- 
+                              -- // Extract nibble B (bits 11:8) using SHRV + ANDV
+0x00000092: 00000110          -- COPY B A               // B = 0xABCD
+0x00000093: 00000921 00000008 -- SHRV B 8               // B = 0x00000ABC
+0x00000095: 00000861 0000000F -- ANDV B 0xF             // B = 0x0000000B
+0x00000097: 00005011          -- TXR B                  // Output: 0000000B
+0x00000098: 00005001          -- NEWLINE
+                              -- 
+                              -- // XOR test using XORV
+0x00000099: 00000800 000000FF -- SETR A 0xFF
+0x0000009B: 00000880 000000AA -- XORV A 0xAA            // A = 0xFF ^ 0xAA = 0x55
+0x0000009D: 00005010          -- TXR A                  // Output: 00000055
+0x0000009E: 00005001          -- NEWLINE
+                              -- 
+                              -- // BITREV: reverse all bits
+0x0000009F: 00000800 0000ABCD -- SETR A 0xABCD
+0x000000A1: 00000AB0          -- BITREV A               // 0x0000ABCD reversed = 0xB3D50000
+0x000000A2: 00005010          -- TXR A                  // Output: B3D50000
+0x000000A3: 00005001          -- NEWLINE
+                              -- 
+                              -- // BSETRR: set bit N where N is in register B
+0x000000A4: 00000800 00000000 -- SETR A 0x0
+0x000000A6: 00000801 00000003 -- SETR B 3               // bit number 3
+0x000000A8: 0000B201          -- BSETRR A B             // set bit B(3) in A -> A = 0x00000008
+0x000000A9: 00005010          -- TXR A                  // Output: 00000008
+0x000000AA: 00005001          -- NEWLINE
+                              -- 
+                              -- // POPCNT: count set bits in 0xABCD
+                              -- // 0xA(2) + 0xB(3) + 0xC(2) + 0xD(3) = 10
+0x000000AB: 00000800 0000ABCD -- SETR A 0xABCD
+0x000000AD: 00000A80          -- POPCNT A
+0x000000AE: 00005010          -- TXR A                  // Output: 0000000A
+0x000000AF: 00005001          -- NEWLINE
+                              -- 
+                              -- // CLZ: count leading zeros of 0x0000ABCD = 16
+0x000000B0: 00000800 0000ABCD -- SETR A 0xABCD
+0x000000B2: 00000A90          -- CLZ A
+0x000000B3: 00005010          -- TXR A                  // Output: 00000010
+0x000000B4: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 5: EXTENDED PRECISION MULTIPLY
+                              -- // Uses MULHURR, MULURR (single-register, must use A)
+                              -- // 0xFFFFFFFF * 0xFFFFFFFF (unsigned) = 0xFFFFFFFE_00000001
+                              -- // ================================================================
+                              -- 
+0x000000B5: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF
+0x000000B7: 00000801 FFFFFFFF -- SETR B 0xFFFFFFFF
+0x000000B9: 00008301          -- MULHURR A B            // A = upper 32 bits = 0xFFFFFFFE
+0x000000BA: 00005010          -- TXR A                  // Output: FFFFFFFE
+0x000000BB: 00005001          -- NEWLINE
+                              -- 
+0x000000BC: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF      // reload A (clobbered by MULHURR)
+0x000000BE: 00008101          -- MULURR A B             // A = lower 32 bits = 0x00000001
+0x000000BF: 00005010          -- TXR A                  // Output: 00000001
+0x000000C0: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 6: CARRY FLAG DETECTION
+                              -- // Uses JMPC (barely tested), JMPNC (untested)
+                              -- // ================================================================
+                              -- 
+0x000000C1: 00000802 00000000 -- SETR C 0               // score counter
+                              -- 
+                              -- // Test JMPC: overflow addition sets carry
+0x000000C3: 00000800 FFFFFFFF -- SETR A 0xFFFFFFFF
+0x000000C5: 00000810 00000001 -- ADDV A 1               // wraps to 0, carry flag set
+0x000000C7: 00001005 000000CB -- JMPC CF_PASS1:
+0x000000C9: 00001000 000000CC -- JMP CF_CHECK2:
+0x000000CB:                   -- CF_PASS1:
+0x000000CB: 00000842          -- INCR C                 // score = 1
+                              -- 
+0x000000CC:                   -- CF_CHECK2:
+                              -- // Test JMPNC: non-overflow addition clears carry
+0x000000CC: 00000800 00000005 -- SETR A 5
+0x000000CE: 00000810 00000003 -- ADDV A 3               // A = 8, no carry
+0x000000D0: 00001006 000000D4 -- JMPNC CF_PASS2:
+0x000000D2: 00001000 000000D5 -- JMP CF_DONE:
+0x000000D4:                   -- CF_PASS2:
+0x000000D4: 00000842          -- INCR C                 // score = 2
+                              -- 
+0x000000D5:                   -- CF_DONE:
+0x000000D5: 00005012          -- TXR C                  // Output: 00000002 (both carry tests passed)
+0x000000D6: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 7: GCD + PRIME DETECTION
+                              -- // Uses MODRR (must use A), PUSHV (untested), CALL/RET
+                              -- // ================================================================
+                              -- 
+                              -- // GCD(48, 18) = 6
+0x000000D7: 00000800 00000030 -- SETR A 48
+0x000000D9: 00000801 00000012 -- SETR B 18
+0x000000DB: 00001009 00000121 -- CALL GCD_FUNC:
+0x000000DD: 00005010          -- TXR A                  // Output: 00000006
+0x000000DE: 00005001          -- NEWLINE
+                              -- 
+                              -- // Count primes from 2 to 20
+0x000000DF: 00000804 00000002 -- SETR E 2               // candidate
+0x000000E1: 00000805 00000000 -- SETR F 0               // prime count
+0x000000E3: 00000806 00000000 -- SETR G 0               // last prime found
+0x000000E5: 00000807 00000014 -- SETR H 20              // upper limit
+                              -- 
+0x000000E7:                   -- PRIME_LOOP:
+0x000000E7: 00000547          -- CMPRR E H
+0x000000E8: 00001017 000000F6 -- JMPGT PRIME_DONE:
+                              -- 
+0x000000EA: 00000104          -- COPY A E
+0x000000EB: 00001009 0000012E -- CALL IS_PRIME:         // A = 1 if prime, 0 if not
+                              -- 
+0x000000ED: 00000830 00000001 -- CMPRV A 0x1
+0x000000EF: 00001004 000000F3 -- JMPNE PRIME_NEXT:
+                              -- 
+0x000000F1: 00000845          -- INCR F                 // count++
+0x000000F2: 00000164          -- COPY G E               // record last prime
+                              -- 
+0x000000F3:                   -- PRIME_NEXT:
+0x000000F3: 00000844          -- INCR E
+0x000000F4: 00001000 000000E7 -- JMP PRIME_LOOP:
+                              -- 
+0x000000F6:                   -- PRIME_DONE:
+0x000000F6: 00005015          -- TXR F                  // Output: 00000008 (8 primes)
+0x000000F7: 00005001          -- NEWLINE
+0x000000F8: 00005016          -- TXR G                  // Output: 00000013 (largest = 19)
+0x000000F9: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+0x000000FA: 00003070 000000FF -- LEDV 0xFF
+0x000000FC: 0000F011          -- HALT
+                              -- 
+                              -- // ================================================================
+                              -- // SUBROUTINES
+                              -- // ================================================================
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // BSEARCH_FUNC: Binary search on sorted array
+                              -- // Input:  I = base address, G = target, C = low index, F = high index
+                              -- // Output: E = index of target, or 0xFFFFFFFF if not found
+                              -- // Uses CMPLERR+JMPLE, CMPGERR+JMPGE, DIVV, LDIDXR
+                              -- // Note: CMPLERR/CMPGERR require register A, so values are COPY'd to A.
+                              -- // ----------------------------------------------------------------
+0x000000FD:                   -- BSEARCH_FUNC:
+0x000000FD: 00004007          -- PUSH H
+                              -- 
+0x000000FE:                   -- BSR_CHECK:
+                              -- // Is low <= high? (CMPLERR compares A with implicit B)
+0x000000FE: 00000102          -- COPY A C               // A = low
+0x000000FF: 00000115          -- COPY B F               // B = high
+0x00000100: 00009101          -- CMPLERR A B            // A <= B? (low <= high?)
+0x00000101: 00001016 00000105 -- JMPLE BSR_SEARCH:      // yes -> keep searching
+0x00000103: 00001000 0000011D -- JMP BSR_NOT_FOUND:     // no -> target absent
+                              -- 
+0x00000105:                   -- BSR_SEARCH:
+                              -- // mid = (low + high) / 2
+0x00000105: 00000142          -- COPY E C
+0x00000106: 00000645          -- ADDRR E F              // E = low + high
+0x00000107: 00000B94 00000002 -- DIVV E 2               // E = mid (DIVV: divide by immediate)
+                              -- 
+                              -- // Load arr[mid] via LDIDXR (0x4 = register E index)
+0x00000109: 00000E38 00000004 -- LDIDXR D I 0x4         // D = mem[I + E] = arr[mid]
+                              -- 
+                              -- // Compare arr[mid] with target
+0x0000010B: 00000103          -- COPY A D               // A = arr[mid]
+0x0000010C: 00000116          -- COPY B G               // B = target
+0x0000010D: 00000501          -- CMPRR A B              // sets flags for equal check
+0x0000010E: 00001003 0000011B -- JMPE BSR_FOUND:        // arr[mid] == target
+                              -- 
+                              -- // Decide search direction: CMPGERR + JMPGE
+0x00000110: 00009301          -- CMPGERR A B            // A >= B? (arr[mid] >= target?)
+0x00000111: 00001018 00000117 -- JMPGE BSR_LEFT:        // yes -> search left half
+                              -- 
+                              -- // arr[mid] < target -> search right half
+0x00000113: 00000124          -- COPY C E
+0x00000114: 00000842          -- INCR C                 // low = mid + 1
+0x00000115: 00001000 000000FE -- JMP BSR_CHECK:
+                              -- 
+0x00000117:                   -- BSR_LEFT:
+0x00000117: 00000154          -- COPY F E
+0x00000118: 00000855          -- DECR F                 // high = mid - 1
+0x00000119: 00001000 000000FE -- JMP BSR_CHECK:
+                              -- 
+0x0000011B:                   -- BSR_FOUND:
+0x0000011B: 00004017          -- POP H
+0x0000011C: 00001012          -- RET
+                              -- 
+0x0000011D:                   -- BSR_NOT_FOUND:
+0x0000011D: 00000804 FFFFFFFF -- SETR E 0xFFFFFFFF
+0x0000011F: 00004017          -- POP H
+0x00000120: 00001012          -- RET
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // GCD_FUNC: Euclidean GCD
+                              -- // Input:  A = first, B = second
+                              -- // Output: A = GCD(A, B)
+                              -- // Uses MODRR (must use register A)
+                              -- // ----------------------------------------------------------------
+0x00000121:                   -- GCD_FUNC:
+0x00000121: 00004002          -- PUSH C
+0x00000122:                   -- GCD_LOOP:
+0x00000122: 00000831 00000000 -- CMPRV B 0x0
+0x00000124: 00001003 0000012C -- JMPE GCD_RET:
+0x00000126: 00008601          -- MODRR A B              // A = A % B
+0x00000127: 00000120          -- COPY C A               // C = remainder
+0x00000128: 00000101          -- COPY A B               // A = old divisor
+0x00000129: 00000112          -- COPY B C               // B = remainder
+0x0000012A: 00001000 00000122 -- JMP GCD_LOOP:
+0x0000012C:                   -- GCD_RET:
+0x0000012C: 00004012          -- POP C
+0x0000012D: 00001012          -- RET
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // IS_PRIME: Trial division primality test
+                              -- // Input:  A = candidate (>= 2)
+                              -- // Output: A = 1 if prime, 0 if not
+                              -- // Uses PUSHV (untested) to load starting divisor via stack.
+                              -- // Uses MODRR (must use register A).
+                              -- // ----------------------------------------------------------------
+0x0000012E:                   -- IS_PRIME:
+0x0000012E: 00004002          -- PUSH C
+0x0000012F: 00000120          -- COPY C A               // C = candidate (saved)
+0x00000130: 00004020 00000002 -- PUSHV 2                // exercise PUSHV: push starting divisor
+0x00000132: 00004011          -- POP B                  // B = 2
+                              -- 
+0x00000133:                   -- IP_LOOP:
+                              -- // If divisor >= candidate, no factors -> prime
+0x00000133: 00000521          -- CMPRR C B              // candidate vs divisor
+0x00000134: 00001017 00000138 -- JMPGT IP_CONTINUE:     // candidate > divisor -> keep testing
+0x00000136: 00001000 00000141 -- JMP IP_IS_PRIME:       // candidate <= divisor -> prime
+                              -- 
+0x00000138:                   -- IP_CONTINUE:
+0x00000138: 00000102          -- COPY A C               // A = candidate
+0x00000139: 00008601          -- MODRR A B              // A = candidate % B (divisor)
+0x0000013A: 00000830 00000000 -- CMPRV A 0x0
+0x0000013C: 00001003 00000145 -- JMPE IP_NOT_PRIME:     // divisible -> not prime
+                              -- 
+0x0000013E: 00000841          -- INCR B                 // next divisor
+0x0000013F: 00001000 00000133 -- JMP IP_LOOP:
+                              -- 
+0x00000141:                   -- IP_IS_PRIME:
+0x00000141: 00000800 00000001 -- SETR A 1
+0x00000143: 00004012          -- POP C
+0x00000144: 00001012          -- RET
+                              -- 
+0x00000145:                   -- IP_NOT_PRIME:
+0x00000145: 00000800 00000000 -- SETR A 0
+0x00000147: 00004012          -- POP C
+0x00000148: 00001012          -- RET
+                              -- 
+                              -- // ================================================================
+                              -- // DATA BUFFERS
+                              -- // ================================================================
+0x00000149: 00000000          -- #FIB_BUF 10
+0x0000014A: 00000000          -- #FIB_BUF 10
+0x0000014B: 00000000          -- #FIB_BUF 10
+0x0000014C: 00000000          -- #FIB_BUF 10
+0x0000014D: 00000000          -- #FIB_BUF 10
+0x0000014E: 00000000          -- #FIB_BUF 10
+0x0000014F: 00000000          -- #FIB_BUF 10
+0x00000150: 00000000          -- #FIB_BUF 10
+0x00000151: 00000000          -- #FIB_BUF 10
+0x00000152: 00000000          -- #FIB_BUF 10
+0x00000153: 00000000          -- #SORT_BUF 5
+0x00000154: 00000000          -- #SORT_BUF 5
+0x00000155: 00000000          -- #SORT_BUF 5
+0x00000156: 00000000          -- #SORT_BUF 5
+0x00000157: 00000000          -- #SORT_BUF 5

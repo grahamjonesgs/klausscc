@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 25/03/2026 14:59<h2>Opcode Table</h2>
+Created 26/03/2026 10:09<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -29,7 +29,7 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>000001??</td>
     <td>0</td>
     <td>2</td>
-    <td>Copy registers, first to second</td>
+    <td>Copy second register into first</td>
 </tr>
 <tr>
     <td>AND</td>
@@ -57,7 +57,7 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>000005??</td>
     <td>0</td>
     <td>2</td>
-    <td>Compare registers, result in equal flag</td>
+    <td>Compare registers, sets equal/less/sign flags</td>
 </tr>
 <tr>
     <td>ADDRR</td>
@@ -85,21 +85,21 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>0000081?</td>
     <td>1</td>
     <td>1</td>
-    <td>Increment register by a value</td>
+    <td>Add value to register</td>
 </tr>
 <tr>
     <td>MINUSV</td>
     <td>0000082?</td>
     <td>1</td>
     <td>1</td>
-    <td>Decrement register by a value</td>
+    <td>Subtract value from register</td>
 </tr>
 <tr>
     <td>CMPRV</td>
     <td>0000083?</td>
     <td>1</td>
     <td>1</td>
-    <td>Compare register to value, result in equal flag</td>
+    <td>Compare register to value, sets equal/less/sign flags</td>
 </tr>
 <tr>
     <td>INCR</td>
@@ -242,34 +242,6 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>Byte swap (endian conversion)</td>
 </tr>
 <tr>
-    <td>MINRR</td>
-    <td>0000098?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Minimum of two registers (signed)</td>
-</tr>
-<tr>
-    <td>MAXRR</td>
-    <td>0000099?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Maximum of two registers (signed)</td>
-</tr>
-<tr>
-    <td>MINURR</td>
-    <td>000009A?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Minimum unsigned</td>
-</tr>
-<tr>
-    <td>MAXURR</td>
-    <td>000009B?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Maximum unsigned</td>
-</tr>
-<tr>
     <td>BSET</td>
     <td>00000A0?</td>
     <td>1</td>
@@ -296,34 +268,6 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>1</td>
     <td>1</td>
     <td>Test bit N, result in zero flag</td>
-</tr>
-<tr>
-    <td>BSETRR</td>
-    <td>00000A4?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Set bit (bit number in second reg)</td>
-</tr>
-<tr>
-    <td>BCLRRR</td>
-    <td>00000A5?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Clear bit (bit number in second reg)</td>
-</tr>
-<tr>
-    <td>BTGLRR</td>
-    <td>00000A6?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Toggle bit (bit number in second reg)</td>
-</tr>
-<tr>
-    <td>BTSTRR</td>
-    <td>00000A7?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Test bit (bit number in second reg)</td>
 </tr>
 <tr>
     <td>POPCNT</td>
@@ -368,62 +312,6 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>Deposit bit field</td>
 </tr>
 <tr>
-    <td>MULRR</td>
-    <td>00000B0?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Multiply registers (signed), result in first</td>
-</tr>
-<tr>
-    <td>MULURR</td>
-    <td>00000B1?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Multiply registers (unsigned)</td>
-</tr>
-<tr>
-    <td>MULHRR</td>
-    <td>00000B2?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Multiply high word (signed)</td>
-</tr>
-<tr>
-    <td>MULHURR</td>
-    <td>00000B3?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Multiply high word (unsigned)</td>
-</tr>
-<tr>
-    <td>DIVRR</td>
-    <td>00000B4?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Divide registers (signed)</td>
-</tr>
-<tr>
-    <td>DIVURR</td>
-    <td>00000B5?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Divide registers (unsigned)</td>
-</tr>
-<tr>
-    <td>MODRR</td>
-    <td>00000B6?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Modulo registers (signed)</td>
-</tr>
-<tr>
-    <td>MODURR</td>
-    <td>00000B7?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Modulo registers (unsigned)</td>
-</tr>
-<tr>
     <td>MULV</td>
     <td>00000B8?</td>
     <td>1</td>
@@ -466,62 +354,6 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>Load indexed: first = mem[second + reg[var1]]</td>
 </tr>
 <tr>
-    <td>CMPLTRR</td>
-    <td>00000F0?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Compare signed less-than</td>
-</tr>
-<tr>
-    <td>CMPLERR</td>
-    <td>00000F1?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Compare signed less-or-equal</td>
-</tr>
-<tr>
-    <td>CMPGTRR</td>
-    <td>00000F2?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Compare signed greater-than</td>
-</tr>
-<tr>
-    <td>CMPGERR</td>
-    <td>00000F3?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Compare signed greater-or-equal</td>
-</tr>
-<tr>
-    <td>CMPULTRR</td>
-    <td>00000F4?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Compare unsigned less-than</td>
-</tr>
-<tr>
-    <td>CMPULERR</td>
-    <td>00000F5?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Compare unsigned less-or-equal</td>
-</tr>
-<tr>
-    <td>CMPUGTRR</td>
-    <td>00000F6?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Compare unsigned greater-than</td>
-</tr>
-<tr>
-    <td>CMPUGERR</td>
-    <td>00000F7?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Compare unsigned greater-or-equal</td>
-</tr>
-<tr>
     <td>ROLR</td>
     <td>00000F8?</td>
     <td>0</td>
@@ -562,20 +394,6 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>1</td>
     <td>1</td>
     <td>Rotate right by N bits</td>
-</tr>
-<tr>
-    <td>ROLRR</td>
-    <td>00000FE?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Rotate left by register amount</td>
-</tr>
-<tr>
-    <td>RORRR</td>
-    <td>00000FF?</td>
-    <td>0</td>
-    <td>1</td>
-    <td>Rotate right by register amount</td>
 </tr>
 <tr>
     <td>JMP</td>
@@ -974,14 +792,14 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>000070??</td>
     <td>0</td>
     <td>2</td>
-    <td>Set memory from register to register</td>
+    <td>mem[second] = first</td>
 </tr>
 <tr>
     <td>MEMREADRR</td>
     <td>000071??</td>
     <td>0</td>
     <td>2</td>
-    <td>Set register from memory at register</td>
+    <td>first = mem[second]</td>
 </tr>
 <tr>
     <td>MEMSETR</td>
@@ -1003,6 +821,188 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>1</td>
     <td>2</td>
     <td>Store indexed: mem[second + reg[var1]] = first</td>
+</tr>
+<tr>
+    <td>MULRR</td>
+    <td>000080??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Multiply first * second (signed), result in first</td>
+</tr>
+<tr>
+    <td>MULURR</td>
+    <td>000081??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Multiply first * second (unsigned), result in first</td>
+</tr>
+<tr>
+    <td>MULHRR</td>
+    <td>000082??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Multiply high word first * second (signed), result in first</td>
+</tr>
+<tr>
+    <td>MULHURR</td>
+    <td>000083??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Multiply high word first * second (unsigned), result in first</td>
+</tr>
+<tr>
+    <td>DIVRR</td>
+    <td>000084??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Divide first / second (signed), result in first</td>
+</tr>
+<tr>
+    <td>DIVURR</td>
+    <td>000085??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Divide first / second (unsigned), result in first</td>
+</tr>
+<tr>
+    <td>MODRR</td>
+    <td>000086??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Modulo first % second (signed), result in first</td>
+</tr>
+<tr>
+    <td>MODURR</td>
+    <td>000087??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Modulo first % second (unsigned), result in first</td>
+</tr>
+<tr>
+    <td>CMPLTRR</td>
+    <td>000090??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Compare first < second (signed), sets less/equal flags</td>
+</tr>
+<tr>
+    <td>CMPLERR</td>
+    <td>000091??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Compare first <= second (signed), sets less/equal flags</td>
+</tr>
+<tr>
+    <td>CMPGTRR</td>
+    <td>000092??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Compare first > second (signed), sets less/equal flags</td>
+</tr>
+<tr>
+    <td>CMPGERR</td>
+    <td>000093??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Compare first >= second (signed), sets less/equal flags</td>
+</tr>
+<tr>
+    <td>CMPULTRR</td>
+    <td>000094??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Compare first < second (unsigned), sets carry/equal flags</td>
+</tr>
+<tr>
+    <td>CMPULERR</td>
+    <td>000095??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Compare first <= second (unsigned), sets carry/equal flags</td>
+</tr>
+<tr>
+    <td>CMPUGTRR</td>
+    <td>000096??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Compare first > second (unsigned), sets carry/equal flags</td>
+</tr>
+<tr>
+    <td>CMPUGERR</td>
+    <td>000097??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Compare first >= second (unsigned), sets carry/equal flags</td>
+</tr>
+<tr>
+    <td>MINRR</td>
+    <td>0000A0??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Minimum of first and second (signed), result in first</td>
+</tr>
+<tr>
+    <td>MAXRR</td>
+    <td>0000A1??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Maximum of first and second (signed), result in first</td>
+</tr>
+<tr>
+    <td>MINURR</td>
+    <td>0000A2??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Minimum of first and second (unsigned), result in first</td>
+</tr>
+<tr>
+    <td>MAXURR</td>
+    <td>0000A3??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Maximum of first and second (unsigned), result in first</td>
+</tr>
+<tr>
+    <td>ROLRR</td>
+    <td>0000B0??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Rotate first left by second bits</td>
+</tr>
+<tr>
+    <td>RORRR</td>
+    <td>0000B1??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Rotate first right by second bits</td>
+</tr>
+<tr>
+    <td>BSETRR</td>
+    <td>0000B2??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Set bit in first (bit number in second)</td>
+</tr>
+<tr>
+    <td>BCLRRR</td>
+    <td>0000B3??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Clear bit in first (bit number in second)</td>
+</tr>
+<tr>
+    <td>BTGLRR</td>
+    <td>0000B4??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Toggle bit in first (bit number in second)</td>
+</tr>
+<tr>
+    <td>BTSTRR</td>
+    <td>0000B5??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>Test bit in first (bit number in second), result in zero flag</td>
 </tr>
 <tr>
     <td>DELAYR</td>
@@ -1037,7 +1037,7 @@ Created 25/03/2026 14:59<h2>Opcode Table</h2>
     <td>0000F013</td>
     <td>1</td>
     <td>0</td>
-    <td>Set by value </td>
+    <td>Delay by value</td>
 </tr>
 
 </table><h2>Macro Table</h2>

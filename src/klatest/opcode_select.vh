@@ -20,18 +20,18 @@ task t_opcode_select;
          //=====================================================================
          // Register control 0xxx
          //=====================================================================
-         16'h01??: t_copy_regs;                             // COPY Copy registers, first to second
+         16'h01??: t_copy_regs;                             // COPY Copy second register into first
          16'h02??: t_and_regs;                              // AND And registers, result in first register
          16'h03??: t_or_regs;                               // OR Or registers, result in first register
          16'h04??: t_xor_regs;                              // XOR XOR registers, result in first register
-         16'h05??: t_compare_regs;                          // CMPRR Compare registers, result in equal flag
+         16'h05??: t_compare_regs;                          // CMPRR Compare registers, sets equal/less/sign flags
          16'h06??: t_add_regs;                              // ADDRR Add registers, result in first register
          16'h07??: t_minus_regs;                            // MINUSRR Minus registers, result in first register
          
          16'h080?: t_set_reg(w_var1);                       // SETR Set register to a value
-         16'h081?: t_add_value(w_var1);                     // ADDV Increment register by a value
-         16'h082?: t_minus_value(w_var1);                   // MINUSV Decrement register by a value
-         16'h083?: t_compare_reg_value(w_var1);             // CMPRV Compare register to value, result in equal flag
+         16'h081?: t_add_value(w_var1);                     // ADDV Add value to register
+         16'h082?: t_minus_value(w_var1);                   // MINUSV Subtract value from register
+         16'h083?: t_compare_reg_value(w_var1);             // CMPRV Compare register to value, sets equal/less/sign flags
          16'h084?: t_inc_reg;                               // INCR Increment register
          16'h085?: t_dec_reg;                               // DECR Decrement register
          16'h086?: t_and_reg_value(w_var1);                 // ANDV AND register with value, result in register
@@ -52,10 +52,7 @@ task t_opcode_select;
          16'h095?: t_zero_extend_byte;                      // ZEXTB Zero extend byte to 32 bits
          16'h096?: t_zero_extend_half;                      // ZEXTH Zero extend halfword to 32 bits
          16'h097?: t_byte_swap;                             // BSWAP Byte swap (endian conversion)
-         16'h098?: t_min_regs;                              // MINRR Minimum of two registers (signed)
-         16'h099?: t_max_regs;                              // MAXRR Maximum of two registers (signed)
-         16'h09A?: t_minu_regs;                             // MINURR Minimum unsigned
-         16'h09B?: t_maxu_regs;                             // MAXURR Maximum unsigned
+         // MINRR/MAXRR moved to A0??-A3?? for full two-register encoding
 
          //=====================================================================
          // Bit manipulation 0A0x-0AFx
@@ -64,10 +61,7 @@ task t_opcode_select;
          16'h0A1?: t_bit_clear_value(w_var1);               // BCLR Clear bit N in register
          16'h0A2?: t_bit_toggle_value(w_var1);              // BTGL Toggle bit N in register
          16'h0A3?: t_bit_test_value(w_var1);                // BTST Test bit N, result in zero flag
-         16'h0A4?: t_bit_set_reg;                           // BSETRR Set bit (bit number in second reg)
-         16'h0A5?: t_bit_clear_reg;                         // BCLRRR Clear bit (bit number in second reg)
-         16'h0A6?: t_bit_toggle_reg;                        // BTGLRR Toggle bit (bit number in second reg)
-         16'h0A7?: t_bit_test_reg;                          // BTSTRR Test bit (bit number in second reg)
+         // BSETRR/BCLRRR/BTGLRR/BTSTRR moved to B2??-B5?? for full two-register encoding
          16'h0A8?: t_popcnt;                                // POPCNT Population count (count 1 bits)
          16'h0A9?: t_clz;                                   // CLZ Count leading zeros
          16'h0AA?: t_ctz;                                   // CTZ Count trailing zeros
@@ -76,16 +70,9 @@ task t_opcode_select;
          16'h0AD?: t_deposit_bits(w_var1);                  // BDEP Deposit bit field
          
          //=====================================================================
-         // Hardware multiply/divide 0B0x-0BFx (using DSP)
+         // Hardware multiply/divide by value (using DSP)
          //=====================================================================
-         16'h0B0?: t_mul_regs_hw;                           // MULRR Multiply registers (signed), result in first
-         16'h0B1?: t_mulu_regs_hw;                          // MULURR Multiply registers (unsigned)
-         16'h0B2?: t_mulh_regs_hw;                          // MULHRR Multiply high word (signed)
-         16'h0B3?: t_mulhu_regs_hw;                         // MULHURR Multiply high word (unsigned)
-         16'h0B4?: t_div_regs_hw;                           // DIVRR Divide registers (signed)
-         16'h0B5?: t_divu_regs_hw;                          // DIVURR Divide registers (unsigned)
-         16'h0B6?: t_mod_regs_hw;                           // MODRR Modulo registers (signed)
-         16'h0B7?: t_modu_regs_hw;                          // MODURR Modulo registers (unsigned)
+         // MULRR/DIVRR etc. moved to 80??-87?? for full two-register encoding
          16'h0B8?: t_mul_value_hw(w_var1);                  // MULV Multiply register by value (signed)
          16'h0B9?: t_div_value_hw(w_var1);                  // DIVV Divide register by value (signed)
          16'h0BA?: t_mod_value_hw(w_var1);                  // MODV Modulo register by value (signed)
@@ -97,20 +84,10 @@ task t_opcode_select;
          16'h0D??: t_store_indexed(w_var1);                  // STIDX Store indexed: mem[second + var1] = first
          16'h0E??: t_load_indexed_reg(w_var1);               // LDIDXR Load indexed: first = mem[second + reg[var1]]
 
+         // CMPLTRR etc. moved to 90??-97?? for full two-register encoding
+
          //=====================================================================
-         // Comparison operations 0F0x-0F7x
-         //=====================================================================
-         16'h0F0?: t_cmp_lt_regs;                           // CMPLTRR Compare signed less-than
-         16'h0F1?: t_cmp_le_regs;                           // CMPLERR Compare signed less-or-equal
-         16'h0F2?: t_cmp_gt_regs;                           // CMPGTRR Compare signed greater-than
-         16'h0F3?: t_cmp_ge_regs;                           // CMPGERR Compare signed greater-or-equal
-         16'h0F4?: t_cmp_ult_regs;                          // CMPULTRR Compare unsigned less-than
-         16'h0F5?: t_cmp_ule_regs;                          // CMPULERR Compare unsigned less-or-equal
-         16'h0F6?: t_cmp_ugt_regs;                          // CMPUGTRR Compare unsigned greater-than
-         16'h0F7?: t_cmp_uge_regs;                          // CMPUGERR Compare unsigned greater-or-equal
-         
-         //=====================================================================
-         // Rotate operations 0F8x-0FFx
+         // Rotate operations 0F8x-0FDx
          //=====================================================================
          16'h0F8?: t_rotate_left;                           // ROLR Rotate left by 1
          16'h0F9?: t_rotate_right;                          // RORR Rotate right by 1
@@ -118,8 +95,7 @@ task t_opcode_select;
          16'h0FB?: t_rotate_right_carry;                    // RORCR Rotate right through carry
          16'h0FC?: t_rotate_left_n(w_var1);                 // ROLV Rotate left by N bits
          16'h0FD?: t_rotate_right_n(w_var1);                // RORV Rotate right by N bits
-         16'h0FE?: t_rotate_left_reg;                       // ROLRR Rotate left by register amount
-         16'h0FF?: t_rotate_right_reg;                      // RORRR Rotate right by register amount
+         // ROLRR/RORRR moved to B0??-B1?? for full two-register encoding
 
          //=====================================================================
          // Flow control 1xxx
@@ -145,7 +121,7 @@ task t_opcode_select;
          16'h1012: t_ret;                                   // RET Return from call
          16'h1013: t_cond_jump(w_var1, r_sign_flag);        // JMPS Jump if sign (negative)
          16'h1014: t_cond_jump(w_var1, !r_sign_flag);       // JMPNS Jump if not sign (positive)
-         // New signed comparison jumps
+         // Signed comparison jumps (use after CMPLTRR/CMPRR etc.)
          16'h1015: t_cond_jump(w_var1, r_less_flag);        // JMPLT Jump if less-than (signed)
          16'h1016: t_cond_jump(w_var1, r_less_flag | r_equal_flag); // JMPLE Jump if less-or-equal
          16'h1017: t_cond_jump(w_var1, !r_less_flag & !r_equal_flag); // JMPGT Jump if greater-than
@@ -186,7 +162,7 @@ task t_opcode_select;
          16'h4020: t_stack_push_value(w_var1);              // PUSHV Push value onto stack
 
          //=====================================================================
-         // Communication 5xxxx
+         // Communication 5xxx
          //=====================================================================
          16'h5000: t_test_message;                          // TESTMSG send test UART message
          16'h5001: t_tx_newline;                            // NEWLINE send UART newline
@@ -198,18 +174,64 @@ task t_opcode_select;
          16'h504?: t_tx_string_at_reg;                      // TXSTRMEMR send string at memory location from register
 
          //=====================================================================
-         // CPU Setting 6xxxx
+         // CPU Setting 6xxx
          //=====================================================================
          16'h60??: t_set_interrupt_regs;                    // INTSETRR Set interrupt from registers
 
          //=====================================================================
          // Memory actions 7xxx
          //=====================================================================
-         16'h70??: t_set_mem_from_reg_reg;                  // MEMSETRR Set memory from register to register
-         16'h71??: t_set_reg_from_mem_reg;                  // MEMREADRR Set register from memory at register
+         16'h70??: t_set_mem_from_reg_reg;                  // MEMSETRR mem[second] = first
+         16'h71??: t_set_reg_from_mem_reg;                  // MEMREADRR first = mem[second]
          16'h720?: t_set_mem_from_value_reg(w_var1);        // MEMSETR Set memory from value
          16'h721?: t_set_reg_from_mem_value(w_var1);        // MEMREADR Set register from memory at value
          16'h73??: t_store_indexed_reg(w_var1);              // STIDXR Store indexed: mem[second + reg[var1]] = first
+
+         //=====================================================================
+         // Hardware multiply/divide registers 8xxx (using DSP)
+         //=====================================================================
+         16'h80??: t_mul_regs_hw;                           // MULRR Multiply first * second (signed), result in first
+         16'h81??: t_mulu_regs_hw;                          // MULURR Multiply first * second (unsigned), result in first
+         16'h82??: t_mulh_regs_hw;                          // MULHRR Multiply high word first * second (signed), result in first
+         16'h83??: t_mulhu_regs_hw;                         // MULHURR Multiply high word first * second (unsigned), result in first
+         16'h84??: t_div_regs_hw;                           // DIVRR Divide first / second (signed), result in first
+         16'h85??: t_divu_regs_hw;                          // DIVURR Divide first / second (unsigned), result in first
+         16'h86??: t_mod_regs_hw;                           // MODRR Modulo first % second (signed), result in first
+         16'h87??: t_modu_regs_hw;                          // MODURR Modulo first % second (unsigned), result in first
+
+         //=====================================================================
+         // Extended comparison 9xxx (two registers)
+         //=====================================================================
+         16'h90??: t_cmp_lt_regs;                           // CMPLTRR Compare first < second (signed), sets less/equal flags
+         16'h91??: t_cmp_le_regs;                           // CMPLERR Compare first <= second (signed), sets less/equal flags
+         16'h92??: t_cmp_gt_regs;                           // CMPGTRR Compare first > second (signed), sets less/equal flags
+         16'h93??: t_cmp_ge_regs;                           // CMPGERR Compare first >= second (signed), sets less/equal flags
+         16'h94??: t_cmp_ult_regs;                          // CMPULTRR Compare first < second (unsigned), sets carry/equal flags
+         16'h95??: t_cmp_ule_regs;                          // CMPULERR Compare first <= second (unsigned), sets carry/equal flags
+         16'h96??: t_cmp_ugt_regs;                          // CMPUGTRR Compare first > second (unsigned), sets carry/equal flags
+         16'h97??: t_cmp_uge_regs;                          // CMPUGERR Compare first >= second (unsigned), sets carry/equal flags
+
+         //=====================================================================
+         // Min/Max Axxx (two registers)
+         //=====================================================================
+         16'hA0??: t_min_regs;                              // MINRR Minimum of first and second (signed), result in first
+         16'hA1??: t_max_regs;                              // MAXRR Maximum of first and second (signed), result in first
+         16'hA2??: t_minu_regs;                             // MINURR Minimum of first and second (unsigned), result in first
+         16'hA3??: t_maxu_regs;                             // MAXURR Maximum of first and second (unsigned), result in first
+
+         //=====================================================================
+         // Rotate by register Bxxx (two registers)
+         //=====================================================================
+         16'hB0??: t_rotate_left_reg;                       // ROLRR Rotate first left by second bits
+         16'hB1??: t_rotate_right_reg;                      // RORRR Rotate first right by second bits
+
+         //=====================================================================
+         // Bit manipulation by register Bxxx (two registers)
+         //=====================================================================
+         16'hB2??: t_bit_set_reg;                           // BSETRR Set bit in first (bit number in second)
+         16'hB3??: t_bit_clear_reg;                         // BCLRRR Clear bit in first (bit number in second)
+         16'hB4??: t_bit_toggle_reg;                        // BTGLRR Toggle bit in first (bit number in second)
+         16'hB5??: t_bit_test_reg;                          // BTSTRR Test bit in first (bit number in second), result in zero flag
 
          //=====================================================================
          // Other Fxxx
@@ -218,7 +240,7 @@ task t_opcode_select;
          16'hF010: t_nop;                                   // NOP No operation
          16'hF011: t_halt;                                  // HALT Freeze and hang
          16'hF012: t_reset;                                 // RESET Reset
-         16'hF013: t_delay(w_var1);                         // DELAYV Set by value 
+         16'hF013: t_delay(w_var1);                         // DELAYV Delay by value
 
          default: begin
             r_SM <= HCF_1;  // Halt and catch fire error 1

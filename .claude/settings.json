@@ -7,7 +7,9 @@
       "Bash(do sed:*)",
       "Bash(done)",
       "Bash(cargo run:*)",
-      "Bash(cargo clean:*)"
+      "Bash(cargo clean:*)",
+      "Read(//Users/gjonesblackcyton/Documents/src/rust/**)",
+      "Read(//Users/gjonesblackcyton/Documents/src/FPGA_CPU_32_DDR_cache/FPGA_CPU_32_DDR_cache.srcs/sources_1/new/**)"
     ]
   }
 }

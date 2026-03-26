@@ -108,7 +108,7 @@ NEWLINE
 T7:
 SETR A 0x5
 SETR B 0x10
-CMPLTRR A             // A(5) < B(16)? yes
+CMPLTRR A B           // A(5) < B(16)? yes
 JMPLT T7_PASS:
 SETR P 0xFFFFFFFF
 TXR P
@@ -123,7 +123,7 @@ NEWLINE
 T8:
 SETR A 0x10
 SETR B 0x5
-CMPGTRR A             // A(16) > B(5)? yes
+CMPGTRR A B           // A(16) > B(5)? yes
 JMPGT T8_PASS:
 SETR P 0xFFFFFFFF
 TXR P

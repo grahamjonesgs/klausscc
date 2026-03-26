@@ -683,6 +683,7 @@ fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
 /// and prints per-test and aggregate results.
 #[allow(clippy::print_stdout, reason = "Printing to stdout is required for batch test output")]
 #[allow(clippy::arithmetic_side_effects, reason = "Counter arithmetic is safe")]
+#[allow(clippy::too_many_lines, reason = "Only for test batch management, which requires many lines to handle all the logic")]
 #[cfg(not(tarpaulin_include))]
 pub fn run_test_list(
     oplist: &[Opcode],

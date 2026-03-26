@@ -1,0 +1,276 @@
+                              -- // Test 20: Multi-Algorithm CPU Benchmark
+                              -- // Runs four algorithms in sequence to stress-test the CPU:
+                              -- //   Phase 1 - Fibonacci sequence generation (loops, memory writes, addition)
+                              -- //   Phase 2 - Bubble sort on an unsorted array (memory read/write, compare, swap)
+                              -- //   Phase 3 - GCD via Euclidean algorithm (subroutine, modulo, iteration)
+                              -- //   Phase 4 - Prime counting via trial division (nested subroutine, division, modulo)
+                              -- // Tests: CALL, RET, PUSH, POP, MODRR, MEMSETRR, MEMREADRR, ADDRR, ADDV,
+                              -- //        CMPRR, CMPRV, JMPGT, JMPE, JMPNE, JMPNZ, COPY, SETR, INCR, DECR
+                              -- // Expected UART output:
+                              -- //   00000037  (fibonacci: 10th number = 55)
+                              -- //   0000000A  (fibonacci: count generated = 10)
+                              -- //   00000001  (bubble sort: smallest of {9,3,7,1,5} after sort)
+                              -- //   00000009  (bubble sort: largest after sort)
+                              -- //   00000006  (GCD: gcd(48, 18) = 6)
+                              -- //   00000015  (GCD: gcd(252, 105) = 21)
+                              -- //   00000008  (primes: count of primes from 2 to 20 = 8)
+                              -- //   00000013  (primes: largest prime <= 20 = 19)
+                              -- // Expected 7SEG: 0x14
+                              -- // Expected LEDs: 0xFF = all pass
+                              -- 
+                              -- _start
+0x00000000: 0000F013 00000500 -- DELAYV 0x0500
+0x00000002: 00003071 00000014 -- 7SEG1V 0x14
+0x00000004: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 1: FIBONACCI SEQUENCE
+                              -- // Generate first 10 fibonacci numbers and store in memory.
+                              -- // Sequence: 1, 1, 2, 3, 5, 8, 13, 21, 34, 55
+                              -- // ================================================================
+                              -- 
+0x00000005: 00000800 000000BA -- SETR A #FIB_BUF        // A = base address of fibonacci buffer
+0x00000007: 00000801 00000001 -- SETR B 1               // B = fib(n-2) = 1
+0x00000009: 00000802 00000001 -- SETR C 1               // C = fib(n-1) = 1
+0x0000000B: 00007010          -- MEMSETRR B A           // FIB_BUF[0] = 1
+0x0000000C: 00000840          -- INCR A
+0x0000000D: 00007020          -- MEMSETRR C A           // FIB_BUF[1] = 1
+0x0000000E: 00000804 00000008 -- SETR E 8               // 8 more to generate (10 total)
+                              -- 
+0x00000010:                   -- FIB_LOOP:
+0x00000010: 00000834 00000000 -- CMPRV E 0x0
+0x00000012: 00001003 0000001D -- JMPE FIB_DONE:
+                              -- 
+0x00000014: 00000131          -- COPY D B               // D = fib(n-2)
+0x00000015: 00000632          -- ADDRR D C              // D = fib(n-2) + fib(n-1) = fib(n)
+0x00000016: 00000112          -- COPY B C               // shift: B = old fib(n-1)
+0x00000017: 00000123          -- COPY C D               // shift: C = new fib(n)
+                              -- 
+0x00000018: 00000840          -- INCR A
+0x00000019: 00007030          -- MEMSETRR D A           // store fib(n) in buffer
+                              -- 
+0x0000001A: 00000854          -- DECR E
+0x0000001B: 00001000 00000010 -- JMP FIB_LOOP:
+                              -- 
+0x0000001D:                   -- FIB_DONE:
+0x0000001D: 00005012          -- TXR C                  // Output last fib = 55 = 0x37
+0x0000001E: 00005001          -- NEWLINE
+0x0000001F: 00000800 0000000A -- SETR A 10
+0x00000021: 00005010          -- TXR A                  // Output count = 10 = 0x0A
+0x00000022: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 2: BUBBLE SORT
+                              -- // Initialize array {9, 3, 7, 1, 5}, sort ascending.
+                              -- // Result: {1, 3, 5, 7, 9}
+                              -- // ================================================================
+                              -- 
+                              -- // --- Initialize sort buffer ---
+0x00000023: 00000800 000000C4 -- SETR A #SORT_BUF
+0x00000025: 00000801 00000009 -- SETR B 9
+0x00000027: 00007010          -- MEMSETRR B A
+0x00000028: 00000840          -- INCR A
+0x00000029: 00000801 00000003 -- SETR B 3
+0x0000002B: 00007010          -- MEMSETRR B A
+0x0000002C: 00000840          -- INCR A
+0x0000002D: 00000801 00000007 -- SETR B 7
+0x0000002F: 00007010          -- MEMSETRR B A
+0x00000030: 00000840          -- INCR A
+0x00000031: 00000801 00000001 -- SETR B 1
+0x00000033: 00007010          -- MEMSETRR B A
+0x00000034: 00000840          -- INCR A
+0x00000035: 00000801 00000005 -- SETR B 5
+0x00000037: 00007010          -- MEMSETRR B A
+                              -- 
+                              -- // --- Bubble sort (ascending) ---
+0x00000038: 00000807 00000004 -- SETR H 4               // passes remaining (n - 1)
+                              -- 
+0x0000003A:                   -- BS_OUTER:
+0x0000003A: 00000837 00000000 -- CMPRV H 0x0
+0x0000003C: 00001003 0000005B -- JMPE BS_DONE:
+                              -- 
+0x0000003E: 00000805 00000000 -- SETR F 0               // swap flag: 0 = no swaps this pass
+0x00000040: 00000800 000000C4 -- SETR A #SORT_BUF       // reset array pointer to start
+0x00000042: 00000147          -- COPY E H               // E = comparisons to make this pass
+                              -- 
+0x00000043:                   -- BS_INNER:
+                              -- // Load adjacent pair
+0x00000043: 00007110          -- MEMREADRR B A          // B = arr[i]
+0x00000044: 00000840          -- INCR A
+0x00000045: 00007120          -- MEMREADRR C A          // C = arr[i+1]
+                              -- 
+                              -- // If arr[i] > arr[i+1], swap them
+0x00000046: 00000512          -- CMPRR B C
+0x00000047: 00001017 0000004B -- JMPGT BS_DO_SWAP:
+0x00000049: 00001000 00000051 -- JMP BS_SKIP_SWAP:
+                              -- 
+0x0000004B:                   -- BS_DO_SWAP:
+0x0000004B: 00000850          -- DECR A                 // A -> arr[i]
+0x0000004C: 00007020          -- MEMSETRR C A           // arr[i] = smaller value
+0x0000004D: 00000840          -- INCR A                 // A -> arr[i+1]
+0x0000004E: 00007010          -- MEMSETRR B A           // arr[i+1] = larger value
+0x0000004F: 00000805 00000001 -- SETR F 1               // mark swap occurred
+                              -- 
+0x00000051:                   -- BS_SKIP_SWAP:
+0x00000051: 00000854          -- DECR E
+0x00000052: 00001002 00000043 -- JMPNZ BS_INNER:
+                              -- 
+                              -- // End of inner loop - check if any swaps happened
+0x00000054: 00000835 00000000 -- CMPRV F 0x0
+0x00000056: 00001003 0000005B -- JMPE BS_DONE:          // no swaps = array is sorted, exit early
+                              -- 
+0x00000058: 00000857          -- DECR H                 // fewer comparisons needed next pass
+0x00000059: 00001000 0000003A -- JMP BS_OUTER:
+                              -- 
+0x0000005B:                   -- BS_DONE:
+                              -- // Output first (smallest) and last (largest) elements
+0x0000005B: 00000800 000000C4 -- SETR A #SORT_BUF
+0x0000005D: 00007110          -- MEMREADRR B A
+0x0000005E: 00005011          -- TXR B                  // Expect: 00000001 (smallest)
+0x0000005F: 00005001          -- NEWLINE
+0x00000060: 00000810 00000004 -- ADDV A 4               // point to last element (index 4)
+0x00000062: 00007110          -- MEMREADRR B A
+0x00000063: 00005011          -- TXR B                  // Expect: 00000009 (largest)
+0x00000064: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 3: GCD (EUCLIDEAN ALGORITHM)
+                              -- // Compute GCD of two pairs of numbers via subroutine.
+                              -- // ================================================================
+                              -- 
+                              -- // GCD(48, 18) = 6
+0x00000065: 00000800 00000030 -- SETR A 48
+0x00000067: 00000801 00000012 -- SETR B 18
+0x00000069: 00001009 00000093 -- CALL GCD_FUNC:
+0x0000006B: 00005010          -- TXR A                  // Expect: 00000006
+0x0000006C: 00005001          -- NEWLINE
+                              -- 
+                              -- // GCD(252, 105) = 21
+0x0000006D: 00000800 000000FC -- SETR A 252
+0x0000006F: 00000801 00000069 -- SETR B 105
+0x00000071: 00001009 00000093 -- CALL GCD_FUNC:
+0x00000073: 00005010          -- TXR A                  // Expect: 00000015
+0x00000074: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // PHASE 4: PRIME NUMBER DETECTION (TRIAL DIVISION)
+                              -- // Count primes from 2 to 20 using IS_PRIME subroutine.
+                              -- // Primes: 2, 3, 5, 7, 11, 13, 17, 19 = 8 primes
+                              -- // ================================================================
+                              -- 
+0x00000075: 00000804 00000002 -- SETR E 2               // current candidate
+0x00000077: 00000805 00000000 -- SETR F 0               // prime count
+0x00000079: 00000806 00000000 -- SETR G 0               // last prime found
+0x0000007B: 00000807 00000014 -- SETR H 20              // upper limit
+                              -- 
+0x0000007D:                   -- PRIME_LOOP:
+0x0000007D: 00000547          -- CMPRR E H
+0x0000007E: 00001017 0000008C -- JMPGT PRIME_DONE:
+                              -- 
+0x00000080: 00000104          -- COPY A E               // A = candidate for IS_PRIME
+0x00000081: 00001009 000000A0 -- CALL IS_PRIME:         // returns A = 1 (prime) or 0 (not prime)
+                              -- 
+0x00000083: 00000830 00000001 -- CMPRV A 0x1
+0x00000085: 00001004 00000089 -- JMPNE PRIME_NEXT:      // not prime, skip
+                              -- 
+0x00000087: 00000845          -- INCR F                 // prime count++
+0x00000088: 00000164          -- COPY G E               // record this prime as last found
+                              -- 
+0x00000089:                   -- PRIME_NEXT:
+0x00000089: 00000844          -- INCR E                 // next candidate
+0x0000008A: 00001000 0000007D -- JMP PRIME_LOOP:
+                              -- 
+0x0000008C:                   -- PRIME_DONE:
+0x0000008C: 00005015          -- TXR F                  // Expect: 00000008 (8 primes found)
+0x0000008D: 00005001          -- NEWLINE
+0x0000008E: 00005016          -- TXR G                  // Expect: 00000013 (largest prime = 19)
+0x0000008F: 00005001          -- NEWLINE
+                              -- 
+                              -- // ================================================================
+                              -- // ALL PHASES COMPLETE
+                              -- // ================================================================
+                              -- 
+0x00000090: 00003070 000000FF -- LEDV 0xFF
+0x00000092: 0000F011          -- HALT
+                              -- 
+                              -- // ================================================================
+                              -- // SUBROUTINES
+                              -- // ================================================================
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // GCD_FUNC: Euclidean algorithm
+                              -- // Input:  A = first number, B = second number
+                              -- // Output: A = GCD(A, B)
+                              -- // Clobbers: B, C
+                              -- // Algorithm: while B != 0: r = A % B; A = B; B = r
+                              -- // ----------------------------------------------------------------
+0x00000093:                   -- GCD_FUNC:
+0x00000093: 00004002          -- PUSH C
+0x00000094:                   -- GCD_LOOP:
+0x00000094: 00000831 00000000 -- CMPRV B 0x0
+0x00000096: 00001003 0000009E -- JMPE GCD_RET:
+0x00000098: 00008601          -- MODRR A B              // A = A % B (remainder)
+0x00000099: 00000120          -- COPY C A               // C = remainder
+0x0000009A: 00000101          -- COPY A B               // A = old divisor
+0x0000009B: 00000112          -- COPY B C               // B = remainder
+0x0000009C: 00001000 00000094 -- JMP GCD_LOOP:
+0x0000009E:                   -- GCD_RET:
+0x0000009E: 00004012          -- POP C
+0x0000009F: 00001012          -- RET
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // IS_PRIME: Trial division primality test
+                              -- // Input:  A = candidate number (must be >= 2)
+                              -- // Output: A = 1 if prime, 0 if not prime
+                              -- // Clobbers: B
+                              -- // Preserves: C (via push/pop)
+                              -- // Algorithm: try dividing by 2, 3, ..., candidate-1
+                              -- // ----------------------------------------------------------------
+0x000000A0:                   -- IS_PRIME:
+0x000000A0: 00004002          -- PUSH C
+0x000000A1: 00000120          -- COPY C A               // C = candidate (save)
+0x000000A2: 00000801 00000002 -- SETR B 2               // start divisor at 2
+                              -- 
+0x000000A4:                   -- IP_LOOP:
+                              -- // If divisor >= candidate, no factors found -> prime
+0x000000A4: 00000521          -- CMPRR C B
+0x000000A5: 00001017 000000A9 -- JMPGT IP_CONTINUE:     // candidate > divisor -> keep checking
+0x000000A7: 00001000 000000B2 -- JMP IP_IS_PRIME:       // candidate <= divisor -> it's prime
+                              -- 
+0x000000A9:                   -- IP_CONTINUE:
+0x000000A9: 00000102          -- COPY A C               // A = candidate
+0x000000AA: 00008601          -- MODRR A B              // A = candidate % divisor
+0x000000AB: 00000830 00000000 -- CMPRV A 0x0
+0x000000AD: 00001003 000000B6 -- JMPE IP_NOT_PRIME:     // remainder is 0 -> divisible -> not prime
+                              -- 
+0x000000AF: 00000841          -- INCR B                 // try next divisor
+0x000000B0: 00001000 000000A4 -- JMP IP_LOOP:
+                              -- 
+0x000000B2:                   -- IP_IS_PRIME:
+0x000000B2: 00000800 00000001 -- SETR A 1
+0x000000B4: 00004012          -- POP C
+0x000000B5: 00001012          -- RET
+                              -- 
+0x000000B6:                   -- IP_NOT_PRIME:
+0x000000B6: 00000800 00000000 -- SETR A 0
+0x000000B8: 00004012          -- POP C
+0x000000B9: 00001012          -- RET
+                              -- 
+                              -- // ================================================================
+                              -- // DATA BUFFERS
+                              -- // ================================================================
+0x000000BA: 00000000          -- #FIB_BUF 10
+0x000000BB: 00000000          -- #FIB_BUF 10
+0x000000BC: 00000000          -- #FIB_BUF 10
+0x000000BD: 00000000          -- #FIB_BUF 10
+0x000000BE: 00000000          -- #FIB_BUF 10
+0x000000BF: 00000000          -- #FIB_BUF 10
+0x000000C0: 00000000          -- #FIB_BUF 10
+0x000000C1: 00000000          -- #FIB_BUF 10
+0x000000C2: 00000000          -- #FIB_BUF 10
+0x000000C3: 00000000          -- #FIB_BUF 10
+0x000000C4: 00000000          -- #SORT_BUF 5
+0x000000C5: 00000000          -- #SORT_BUF 5
+0x000000C6: 00000000          -- #SORT_BUF 5
+0x000000C7: 00000000          -- #SORT_BUF 5
+0x000000C8: 00000000          -- #SORT_BUF 5
