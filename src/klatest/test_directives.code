@@ -1,0 +1,73 @@
+                              -- // Test C compiler directives
+                              -- // Expected output:
+                              -- //   0000002A  (.word 42 from data section)
+                              -- //   00000000  (.comm buffer, first word)
+                              -- //   00000037  (fibonacci result = 55)
+                              -- 
+                              -- .global _start
+                              -- .extern some_symbol
+                              -- 
+                              -- .text
+                              -- _start
+0x00000000: 0000080F 000FFFFF -- SETR P 0xFFFFF
+0x00000002: 000001EF          -- COPY O P
+                              -- 
+                              -- // Load the value stored by .word in data section
+0x00000003: 00007210 0000003E -- MEMREADR A my_value:
+0x00000005: 00005010          -- TXR A
+0x00000006: 00005001          -- NEWLINE
+                              -- 
+                              -- // Load from .comm buffer (should be zero-initialized)
+0x00000007: 00007210 0000003F -- MEMREADR A buffer:
+0x00000009: 00005010          -- TXR A
+0x0000000A: 00005001          -- NEWLINE
+                              -- 
+                              -- // Quick fibonacci(9) = 55 to prove code still works
+0x0000000B: 00000800 00000009 -- SETR A 9
+0x0000000D: 00001009 00000012 -- CALL fibonacci:
+0x0000000F: 0000501C          -- TXR M
+0x00000010: 00005001          -- NEWLINE
+                              -- 
+0x00000011: 0000F011          -- HALT
+                              -- 
+0x00000012:                   -- fibonacci:
+0x00000012: 000070EF          -- MEMSETRR O P
+0x00000013: 0000085F          -- DECR P
+0x00000014: 000001EF          -- COPY O P
+0x00000015: 0000082F 00000004 -- MINUSV P 4
+0x00000017: 00000D4E FFFFFFFF -- STIDX E O 0xFFFFFFFF
+0x00000019: 00000D5E FFFFFFFE -- STIDX F O 0xFFFFFFFE
+0x0000001B: 00000D6E FFFFFFFD -- STIDX G O 0xFFFFFFFD
+0x0000001D: 00000D7E FFFFFFFC -- STIDX H O 0xFFFFFFFC
+0x0000001F: 0000080C 00000000 -- SETR M 0
+0x00000021: 0000015C          -- COPY F M
+0x00000022: 00000807 00000001 -- SETR H 1
+0x00000024: 0000016C          -- COPY G M
+0x00000025: 00001000 0000002E -- JMP fib_check:
+0x00000027:                   -- fib_loop:
+0x00000027: 00000145          -- COPY E F
+0x00000028: 00000647          -- ADDRR E H
+0x00000029: 00000157          -- COPY F H
+0x0000002A: 00000174          -- COPY H E
+0x0000002B: 0000080C 00000001 -- SETR M 1
+0x0000002D: 0000066C          -- ADDRR G M
+0x0000002E:                   -- fib_check:
+0x0000002E: 00000560          -- CMPRR G A
+0x0000002F: 00001015 00000027 -- JMPLT fib_loop:
+0x00000031: 000001C5          -- COPY M F
+0x00000032: 00000C4E FFFFFFFF -- LDIDX E O 0xFFFFFFFF
+0x00000034: 00000C5E FFFFFFFE -- LDIDX F O 0xFFFFFFFE
+0x00000036: 00000C6E FFFFFFFD -- LDIDX G O 0xFFFFFFFD
+0x00000038: 00000C7E FFFFFFFC -- LDIDX H O 0xFFFFFFFC
+0x0000003A: 000001FE          -- COPY P O
+0x0000003B: 0000084F          -- INCR P
+0x0000003C: 000071EF          -- MEMREADRR O P
+0x0000003D: 00001012          -- RET
+                              -- 
+                              -- .data
+                              -- 
+0x0000003E:                   -- my_value:
+0x0000003E: 0000002A          -- .word 0x2A
+0x0000003F:                   -- buffer:
+0x0000003F: 00000000          -- .space 8
+0x00000040: 00000000          -- .space 8

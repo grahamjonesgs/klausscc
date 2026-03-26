@@ -149,6 +149,54 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         return None;
     }
 
+    // Handle .word VALUE directive — emit a single 32-bit word
+    if first_word == ".word" {
+        let value_str = words.next().unwrap_or("");
+        if value_str.is_empty() {
+            return None;
+        }
+        let value: i64 = if value_str.len() >= 2
+            && (value_str.get(0..2).unwrap_or("  ") == "0x"
+                || value_str.get(0..2).unwrap_or("  ") == "0X")
+        {
+            let without_prefix = value_str.trim_start_matches("0x").trim_start_matches("0X");
+            i64::from_str_radix(without_prefix, 16).unwrap_or(0)
+        } else {
+            value_str.parse::<i64>().unwrap_or(0)
+        };
+        #[allow(clippy::cast_sign_loss, reason = "Sign loss is intentional for u32 hex representation")]
+        return Some(format!("{:08X}", value as u32));
+    }
+
+    // Handle .space N directive — N bytes of zero, rounded up to word boundary
+    if first_word == ".space" {
+        let count_str = words.next().unwrap_or("");
+        if count_str.is_empty() {
+            return None;
+        }
+        let byte_count: i64 = if count_str.len() >= 2
+            && (count_str.get(0..2).unwrap_or("  ") == "0x"
+                || count_str.get(0..2).unwrap_or("  ") == "0X")
+        {
+            let without_prefix = count_str.trim_start_matches("0x").trim_start_matches("0X");
+            i64::from_str_radix(without_prefix, 16).unwrap_or(0)
+        } else {
+            count_str.parse::<i64>().unwrap_or(0)
+        };
+        if byte_count <= 0 {
+            return None;
+        }
+        #[allow(clippy::integer_division, reason = "Integer division is intentional for word count calculation")]
+        #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic is intentional for word count rounding")]
+        #[allow(clippy::integer_division_remainder_used, reason = "Division remainder is intentional for rounding")]
+        let word_count = (byte_count + 3) / 4;
+        let mut data = String::default();
+        for _ in 0..word_count {
+            data.push_str("00000000");
+        }
+        return Some(data);
+    }
+
     let second_word = words.next().unwrap_or("");
     if second_word.is_empty() {
         return None;
@@ -310,6 +358,13 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
         if is_comment(word) && i == 0 {
             return LineType::Comment;
         }
+    }
+    // Check for C compiler directives
+    let first_word = line.split_whitespace().next().unwrap_or("");
+    match first_word {
+        ".word" | ".space" => return LineType::Data,
+        ".text" | ".data" | ".rodata" | ".bss" | ".global" | ".globl" | ".extern" | ".comm" | ".lcomm" => return LineType::Comment,
+        _ => {}
     }
     LineType::Error
 }
@@ -921,5 +976,101 @@ mod tests {
         let lines: Vec<String> = Vec::new();
         let result = parse_expected_uart_values(&lines);
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_data_as_bytes_word_hex() {
+        let output = data_as_bytes(".word 0x2A");
+        assert_eq!(output, Some("0000002A".to_owned()));
+    }
+
+    #[test]
+    fn test_data_as_bytes_word_decimal() {
+        let output = data_as_bytes(".word 42");
+        assert_eq!(output, Some("0000002A".to_owned()));
+    }
+
+    #[test]
+    fn test_data_as_bytes_word_zero() {
+        let output = data_as_bytes(".word 0");
+        assert_eq!(output, Some("00000000".to_owned()));
+    }
+
+    #[test]
+    fn test_data_as_bytes_word_negative() {
+        let output = data_as_bytes(".word -1");
+        assert_eq!(output, Some("FFFFFFFF".to_owned()));
+    }
+
+    #[test]
+    fn test_data_as_bytes_word_missing_value() {
+        let output = data_as_bytes(".word");
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_data_as_bytes_space_4_bytes() {
+        let output = data_as_bytes(".space 4");
+        assert_eq!(output, Some("00000000".to_owned()));
+    }
+
+    #[test]
+    fn test_data_as_bytes_space_8_bytes() {
+        let output = data_as_bytes(".space 8");
+        assert_eq!(output, Some("0000000000000000".to_owned()));
+    }
+
+    #[test]
+    fn test_data_as_bytes_space_5_bytes_rounds_up() {
+        let output = data_as_bytes(".space 5");
+        assert_eq!(output, Some("0000000000000000".to_owned()));
+    }
+
+    #[test]
+    fn test_data_as_bytes_space_zero() {
+        let output = data_as_bytes(".space 0");
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    fn test_line_type_directive_word() {
+        let opcodes = &mut Vec::<Opcode>::new();
+        assert_eq!(line_type(opcodes, ".word 42"), LineType::Data);
+    }
+
+    #[test]
+    fn test_line_type_directive_space() {
+        let opcodes = &mut Vec::<Opcode>::new();
+        assert_eq!(line_type(opcodes, ".space 16"), LineType::Data);
+    }
+
+    #[test]
+    fn test_line_type_directive_text() {
+        let opcodes = &mut Vec::<Opcode>::new();
+        assert_eq!(line_type(opcodes, ".text"), LineType::Comment);
+    }
+
+    #[test]
+    fn test_line_type_directive_data() {
+        let opcodes = &mut Vec::<Opcode>::new();
+        assert_eq!(line_type(opcodes, ".data"), LineType::Comment);
+    }
+
+    #[test]
+    fn test_line_type_directive_global() {
+        let opcodes = &mut Vec::<Opcode>::new();
+        assert_eq!(line_type(opcodes, ".global main"), LineType::Comment);
+    }
+
+    #[test]
+    fn test_line_type_directive_comm() {
+        let opcodes = &mut Vec::<Opcode>::new();
+        assert_eq!(line_type(opcodes, ".comm buffer, 256, 4"), LineType::Comment);
+    }
+
+    #[test]
+    fn test_line_type_directive_lcomm() {
+        let opcodes = &mut Vec::<Opcode>::new();
+        assert_eq!(line_type(opcodes, ".lcomm temp 8"), LineType::Comment);
     }
 }

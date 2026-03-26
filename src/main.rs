@@ -33,7 +33,8 @@ use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
-use serial::{monitor_serial, run_test_monitor, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
+use serial::{monitor_serial, monitor_serial_port, run_test_monitor, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
+use std::fs::{self, read_to_string};
 
 /// Main function for Klausscc.
 ///
@@ -75,7 +76,7 @@ fn main() -> Result<(), i32> {
     let test_flag = matches.get_flag("test");
     let test_timeout: u64 = matches
         .get_one::<String>("test_timeout")
-        .and_then(|s| s.parse().ok())
+        .and_then(|timeout_str| timeout_str.parse().ok())
         .unwrap_or(10);
     let test_list_file: String = matches.get_one::<String>("test_list").unwrap_or(&String::default()).replace(' ', "");
 
@@ -164,7 +165,30 @@ fn main() -> Result<(), i32> {
                     // Test mode: send to board, keep port open, then verify UART output
                     return run_test_mode(&mut msg_list, &bin_string, &output_serial_port, &input_file_name, test_timeout, start_time);
                 }
-                write_to_device(&mut msg_list, &bin_string, &output_serial_port);
+                if monitor_flag {
+                    // Monitor mode: send to board, keep port open, then monitor UART output
+                    match write_to_board_keep_port(&bin_string, &output_serial_port, &mut msg_list) {
+                        Ok(port) => {
+                            msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+                            print_results(&msg_list, start_time);
+                            if let Err(err) = monitor_serial_port(port, &mut msg_list) {
+                                msg_list.push(
+                                    format!("Serial monitor stopped: \"{err}\""),
+                                    None,
+                                    None,
+                                    MessageType::Warning,
+                                );
+                                print_messages(&msg_list);
+                            }
+                            return Ok(());
+                        }
+                        Err(err) => {
+                            msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
+                        }
+                    }
+                } else {
+                    write_to_device(&mut msg_list, &bin_string, &output_serial_port);
+                }
             }
         } else {
             if remove_file(&binary_file_name).is_ok() {
@@ -237,14 +261,58 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
     let mut data_pass0: Vec<Pass0> = Vec::new();
+    let mut in_data_section = false;
 
     for pass in pass0 {
+        let stripped = strip_comments(&pass.input_text_line);
+        let first_word = stripped.split_whitespace().next().unwrap_or("").to_owned();
+
+        // Track section context for C compiler directives
+        match first_word.as_str() {
+            ".text" => { in_data_section = false; }
+            ".data" | ".rodata" | ".bss" => { in_data_section = true; }
+            _ => {}
+        }
+
+        // Expand .comm/.lcomm NAME SIZE into label + .space, defer to data section
+        if first_word == ".comm" || first_word == ".lcomm" {
+            let parts: Vec<&str> = stripped.split(|c: char| c.is_whitespace() || c == ',')
+                .filter(|s| !s.is_empty())
+                .collect();
+            if parts.len() >= 3 {
+                let name = parts[1];
+                let size_str = parts[2];
+                let size: u32 = size_str.parse().unwrap_or(0);
+                data_pass0.push(Pass0 {
+                    input_text_line: format!("{name}:"),
+                    file_name: pass.file_name.clone(),
+                    line_counter: pass.line_counter,
+                });
+                if size > 0 {
+                    data_pass0.push(Pass0 {
+                        input_text_line: format!(".space {size}"),
+                        file_name: pass.file_name.clone(),
+                        line_counter: pass.line_counter,
+                    });
+                }
+            }
+            continue;
+        }
+
+        let lt = line_type(&mut oplist, &pass.input_text_line);
+
+        // Defer labels in data section to end of program with data
+        if in_data_section && lt == LineType::Label {
+            data_pass0.push(pass);
+            continue;
+        }
+
         pass1.push(Pass1 {
             input_text_line: pass.input_text_line.clone(),
             file_name: pass.file_name.clone(),
             line_counter: pass.line_counter,
             program_counter,
-            line_type: line_type(&mut oplist, &pass.input_text_line),
+            line_type: lt.clone(),
         });
         if !is_valid_line(&mut oplist, strip_comments(&pass.input_text_line)) {
             msg_list.push(
@@ -254,7 +322,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
                 MessageType::Error,
             );
         }
-        if line_type(&mut oplist, &pass.input_text_line) == LineType::Opcode {
+        if lt == LineType::Opcode {
             let num_args = num_arguments(&mut oplist, &strip_comments(&pass.input_text_line));
             #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct program counter calculation")]
             if let Some(arguments) = num_args {
@@ -262,24 +330,27 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             }
         }
 
-        if line_type(&mut oplist, &pass.input_text_line) == LineType::Data {
+        if lt == LineType::Data {
             data_pass0.push(pass);
             pass1.pop();
         }
     }
-    #[allow(clippy::integer_division, reason = "Needed for correct duration calculation")]
-    #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct duration calculation")]
-    #[allow(clippy::integer_division_remainder_used, reason = "Needed for correct duration calculation")]
+    #[allow(clippy::integer_division, reason = "Needed for correct data size calculation")]
+    #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct data size calculation")]
+    #[allow(clippy::integer_division_remainder_used, reason = "Needed for correct data size calculation")]
     for data_pass in data_pass0 {
+        let lt = line_type(&mut oplist, &data_pass.input_text_line);
         pass1.push(Pass1 {
             input_text_line: data_pass.input_text_line.clone(),
             file_name: data_pass.file_name.clone(),
             line_counter: data_pass.line_counter,
             program_counter,
-            line_type: line_type(&mut oplist, &data_pass.input_text_line),
+            line_type: lt.clone(),
         });
 
-        program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, data_pass.file_name) / 8;
+        if lt == LineType::Data {
+            program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, data_pass.file_name) / 8;
+        }
     }
     pass1
 }
@@ -500,6 +571,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
 /// parsed from the source file comments.
 #[inline]
 #[allow(clippy::print_stdout, reason = "Printing to stdout is required for test result output")]
+#[allow(clippy::missing_errors_doc, reason = "Only test function to stdout is required for test result output")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
 pub fn run_test_mode(
     msg_list: &mut MsgList,
@@ -510,7 +582,7 @@ pub fn run_test_mode(
     start_time: NaiveTime,
 ) -> Result<(), i32> {
     // Parse expected values from the raw source file
-    let raw_lines: Vec<String> = std::fs::read_to_string(input_file_name)
+    let raw_lines: Vec<String> = fs::read_to_string(input_file_name)
         .unwrap_or_default()
         .lines()
         .map(String::from)
@@ -683,6 +755,7 @@ fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
 /// and prints per-test and aggregate results.
 #[allow(clippy::print_stdout, reason = "Printing to stdout is required for batch test output")]
 #[allow(clippy::arithmetic_side_effects, reason = "Counter arithmetic is safe")]
+#[allow(clippy::missing_inline_in_public_items, reason = "Only used in main batch test function, which is not performance critical")]
 #[allow(clippy::too_many_lines, reason = "Only for test batch management, which requires many lines to handle all the logic")]
 #[cfg(not(tarpaulin_include))]
 pub fn run_test_list(

@@ -108,6 +108,11 @@ pub fn convert_argument(
             );
         }
         Err(_e) => {
+            // Try resolving as a label name without colon suffix
+            let label_with_colon = format!("{argument_trim}:");
+            if let Some(n) = return_label_value(&label_with_colon, labels) {
+                return Some(format!("{n:08X}"));
+            }
             msg_list.push(
                 format!("Decimal value {argument} incorrect"),
                 Some(line_number),
@@ -227,8 +232,9 @@ pub fn label_name_from_string(line: &str) -> Option<String> {
 ///
 /// Return option of program counter for label if it exists, or None.
 pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
+    let line_upper = line.to_uppercase();
     for label in labels {
-        if label.name == line {
+        if label.name.to_uppercase() == line_upper {
             return Some(label.program_counter);
         }
     }
@@ -406,14 +412,20 @@ mod tests {
         ];
         let mut msg_list = MsgList::new();
 
-        // Check for non label text
+        // Check for label reference without colon suffix
         assert_eq!(
             convert_argument("label1", &mut msg_list, 0, "test".to_owned(), &mut labels),
+            Some("00000001".to_owned())
+        );
+
+        // Check for unknown label text
+        assert_eq!(
+            convert_argument("unknown", &mut msg_list, 0, "test".to_owned(), &mut labels),
             None
         );
         assert_eq!(
             msg_list.list.last().unwrap_or_default().text,
-            "Decimal value label1 incorrect".to_owned()
+            "Decimal value unknown incorrect".to_owned()
         );
 
         // Check for hex value out of bounds
