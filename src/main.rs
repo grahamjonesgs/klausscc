@@ -347,8 +347,15 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
 
         if lt == LineType::Data {
-            data_pass0.push(pass);
-            pass1.pop();
+            if in_data_section {
+                data_pass0.push(pass);
+                pass1.pop();
+            } else {
+                // Keep inline data when no explicit .data section is active.
+                // This preserves label semantics for C compiler output data blocks.
+                //#[allow(clippy::arithmetic_side_effects, reason = "Correct program counter adjustment for inline data")]
+                program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, pass.file_name.clone()) / 8;
+            }
         }
     }
     #[allow(clippy::integer_division, reason = "Needed for correct data size calculation")]

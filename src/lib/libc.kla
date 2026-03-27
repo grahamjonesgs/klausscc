@@ -6,7 +6,7 @@ MINUSV P 1
 // save arg 0
 STIDX A O -1
 COPY M O
-ADDV M 2
+MINUSV M 1
 MEMREADRR A M
 CALL _uart_tx_char:
 putchar_L_1:
@@ -21,7 +21,7 @@ COPY O P
 MINUSV P 2
 STIDX H O -1
 COPY M O
-ADDV M 3
+MINUSV M 1
 MEMREADRR H M
 JMP puts_L_4:
 puts_L_3:
@@ -42,6 +42,28 @@ COPY P O
 INCR P
 MEMREADRR O P
 RET
+print_string:
+MEMSETRR O P
+DECR P
+COPY O P
+MINUSV P 1
+STIDX H O -1
+COPY H A
+print_string_loop:
+MEMREADRR A H
+SETR L 0
+CMPRR A L
+JMPE print_string_done
+CALL _uart_tx_char:
+INCR H
+JMP print_string_loop
+print_string_done:
+LDIDX H O -1
+COPY P O
+INCR P
+MEMREADRR O P
+RET
+
 print_str:
 MEMSETRR O P
 DECR P
@@ -49,7 +71,7 @@ COPY O P
 MINUSV P 2
 STIDX H O -1
 COPY M O
-ADDV M 3
+MINUSV M 1
 MEMREADRR H M
 JMP print_str_L_8:
 print_str_L_7:
@@ -76,13 +98,13 @@ MINUSV P 1
 // save arg 0
 STIDX A O -1
 COPY M O
-ADDV M 2
+MINUSV M 1
 MEMREADRR M M
 SETR L 10
 CMPULTRR M L
 JMPE print_unsigned_L_11:
 COPY M O
-ADDV M 2
+MINUSV M 1
 MEMREADRR M M
 SETR L 10
 COPY A M
@@ -90,7 +112,7 @@ DIVURR A L
 CALL print_unsigned:
 print_unsigned_L_11:
 COPY M O
-ADDV M 2
+MINUSV M 1
 MEMREADRR M M
 SETR L 10
 MODURR M L
@@ -138,7 +160,7 @@ STIDX A O -1
 // save arg 1
 STIDX B O -2
 COPY M O
-ADDV M 2
+MINUSV M 1
 MEMREADRR M M
 SETR L 0
 CMPRR M L
@@ -166,7 +188,7 @@ CALL putchar:
 JMP _print_neg_L_18:
 _print_neg_L_17:
 COPY M O
-ADDV M 2
+MINUSV M 1
 MEMREADRR M M
 COPY A M
 CALL print_unsigned:
@@ -184,7 +206,7 @@ MINUSV P 1
 // save arg 0
 STIDX A O -1
 COPY M O
-ADDV M 2
+MINUSV M 1
 MEMREADRR A M
 CALL _uart_tx_hex:
 print_hex_L_19:
@@ -204,7 +226,7 @@ CALL putchar:
 SETR A 120
 CALL putchar:
 COPY M O
-ADDV M 2
+MINUSV M 1
 MEMREADRR A M
 CALL _uart_tx_hex:
 print_hex_prefix_L_20:
