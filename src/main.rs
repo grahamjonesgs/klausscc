@@ -32,9 +32,9 @@ use helper::{create_bin_string, data_as_bytes, is_valid_line, line_type, num_dat
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
-use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
+use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, InputData, Opcode, Pass0, Pass1, Pass2};
 use serial::{monitor_serial, monitor_serial_port, run_test_monitor, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
-use std::fs::{self, read_to_string};
+use std::fs;
 
 /// Main function for Klausscc.
 ///
@@ -59,14 +59,17 @@ fn main() -> Result<(), i32> {
         .unwrap_or(&"opcode_select.vh".to_owned())
         .replace(' ', "");
     let input_file_name: String = matches.get_one::<String>("input").unwrap_or(&String::default()).replace(' ', "");
+    let c_source_file_name: String = matches.get_one::<String>("c_source").unwrap_or(&String::default()).replace(' ', "");
+    let is_c_source = !c_source_file_name.is_empty();
+    let actual_input_file_name = if is_c_source { c_source_file_name.clone() } else { input_file_name.clone() };
     let mut binary_file_name: String = matches
         .get_one::<String>("bitcode")
-        .unwrap_or(&filename_stem(&input_file_name))
+        .unwrap_or(&filename_stem(&actual_input_file_name))
         .replace(' ', "");
     binary_file_name.push_str(".kbt");
     let mut output_file_name: String = matches
         .get_one::<String>("output")
-        .unwrap_or(&filename_stem(&input_file_name))
+        .unwrap_or(&filename_stem(&actual_input_file_name))
         .replace(' ', "");
     output_file_name.push_str(".code");
     let output_serial_port: String = matches.get_one::<String>("serial").unwrap_or(&String::default()).replace(' ', "");
@@ -124,16 +127,29 @@ fn main() -> Result<(), i32> {
         return run_test_list(&oplist, &macro_list, &test_list_file, &output_serial_port, test_timeout, &mut msg_list);
     }
 
-    // Parse the input file
-    msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
-    let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
-    let input_list_option = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
-    if input_list_option.is_none() {
-        print_messages(&msg_list);
-        return Err(1_i32);
-    }
+    // Handle C source compilation
+    let input_list = if is_c_source {
+        msg_list.push(format!("Compiling C source file {c_source_file_name}"), None, None, MessageType::Information);
+        match compile_c_to_kla(&c_source_file_name, &mut msg_list) {
+            Some(lines) => lines,
+            None => {
+                print_messages(&msg_list);
+                return Err(1_i32);
+            }
+        }
+    } else {
+        // Parse the input file
+        msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
+        let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
+        let input_list_option = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
+        if input_list_option.is_none() {
+            print_messages(&msg_list);
+            return Err(1_i32);
+        }
+        input_list_option.unwrap_or_else(|| [].to_vec())
+    };
 
-    let input_list = remove_block_comments(input_list_option.unwrap_or_else(|| [].to_vec()), &mut msg_list);
+    let input_list = remove_block_comments(input_list, &mut msg_list);
 
     // Pass 0 to add macros
     let pass0 = expand_macros(&mut msg_list, input_list, &mut macro_list);
@@ -447,11 +463,23 @@ pub fn set_matches() -> Command {
             Arg::new("input")
                 .short('i')
                 .long("input")
-                .required_unless_present_any(["textmate", "opcodes", "test_list"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "c_source"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
+                .conflicts_with("c_source")
                 .num_args(1)
                 .help("Input file to be assembled"),
+        )
+        .arg(
+            Arg::new("c_source")
+                .short('C')
+                .long("c-source")
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "input"])
+                .conflicts_with("textmate")
+                .conflicts_with("opcodes")
+                .conflicts_with("input")
+                .num_args(1)
+                .help("C source file to compile with rcc and assemble"),
         )
         .arg(
             Arg::new("output")
@@ -922,6 +950,157 @@ pub fn run_test_list(
         Err(2_i32)
     } else {
         Ok(())
+    }
+}
+
+/// Compile C source file to KLA assembly using rcc, and add necessary includes and startup code.
+///
+/// Runs rcc on the C file, captures the output, prepends includes for UART and libc,
+/// and adds startup initialization code.
+#[inline]
+#[cfg(not(tarpaulin_include))]
+pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<InputData>> {
+    use std::path::Path;
+    use std::process::Command;
+
+    // Run rcc to compile C to KLA
+    let rcc_output = Command::new("rcc")
+        .arg("-target=klacpu")
+        .arg(c_file)
+        .output();
+
+    match rcc_output {
+        Ok(output) if output.status.success() => {
+            let kla_content = String::from_utf8_lossy(&output.stdout);
+            msg_list.push(
+                format!("Successfully compiled {} with rcc", c_file),
+                None,
+                None,
+                MessageType::Information,
+            );
+
+            // Split into lines
+            let lines: Vec<String> = kla_content.lines().map(String::from).collect();
+
+            // Create InputData vector
+            let mut input_data_list = Vec::new();
+            let mut line_counter = 1;
+
+            // Add includes (should be expanded here so file inlines are visible for assembler)
+            let source_parent = Path::new(c_file)
+                .parent()
+                .unwrap_or_else(|| Path::new(""));
+
+            for include_rel in ["../lib/libc.kla", "../lib/uart_stubs.kla"] {
+                let include_path = source_parent.join(include_rel);
+                let include_path_str = include_path.to_string_lossy().into_owned();
+
+                let mut include_stack: Vec<String> = Vec::new();
+                let include_lines = read_file_to_vector(&include_path_str, msg_list, &mut include_stack);
+                if include_lines.is_none() {
+                    msg_list.push(
+                        format!("Unable to load include file {include_path_str}"),
+                        None,
+                        None,
+                        MessageType::Error,
+                    );
+                    return None;
+                }
+
+                for included_line in include_lines.unwrap_or_default() {
+                    input_data_list.push(InputData {
+                        file_name: include_path_str.clone(),
+                        input: included_line.input,
+                        line_counter,
+                    });
+                    line_counter += 1;
+                }
+
+                // Blank line between include sections (optionally)
+                input_data_list.push(InputData {
+                    file_name: c_file.to_string(),
+                    input: "".to_string(),
+                    line_counter,
+                });
+                line_counter += 1;
+            }
+
+            // Add start label + startup code
+            input_data_list.push(InputData {
+                file_name: c_file.to_string(),
+                input: "_start".to_string(),
+                line_counter,
+            });
+            line_counter += 1;
+
+            input_data_list.push(InputData {
+                file_name: c_file.to_string(),
+                input: "SETR P 0xFFFFF".to_string(),
+                line_counter,
+            });
+            line_counter += 1;
+            input_data_list.push(InputData {
+                file_name: c_file.to_string(),
+                input: "COPY O P".to_string(),
+                line_counter,
+            });
+            line_counter += 1;
+            input_data_list.push(InputData {
+                file_name: c_file.to_string(),
+                input: "DELAYV 0x0500".to_string(),
+                line_counter,
+            });
+            line_counter += 1;
+            input_data_list.push(InputData {
+                file_name: c_file.to_string(),
+                input: "CALL main:".to_string(),
+                line_counter,
+            });
+            line_counter += 1;
+            input_data_list.push(InputData {
+                file_name: c_file.to_string(),
+                input: "HALT".to_string(),
+                line_counter,
+            });
+            line_counter += 1;
+            input_data_list.push(InputData {
+                file_name: c_file.to_string(),
+                input: "".to_string(),
+                line_counter,
+            });
+            line_counter += 1;
+
+            // Add the compiled code
+            for line in lines {
+                input_data_list.push(InputData {
+                    file_name: c_file.to_string(),
+                    input: line,
+                    line_counter,
+                });
+                line_counter += 1;
+            }
+
+            Some(input_data_list)
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            msg_list.push(
+                format!("rcc compilation failed for {}: {}", c_file, stderr),
+                None,
+                None,
+                MessageType::Error,
+            );
+            None
+        }
+        Err(err) => {
+            msg_list.push(
+                format!("Failed to run rcc on {}: {}", c_file, err),
+                None,
+                None,
+                MessageType::Error,
+            );
+            None
+        }
     }
 }
 
