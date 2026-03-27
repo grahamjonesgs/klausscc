@@ -96,9 +96,11 @@ pub fn convert_argument(
     }
 
     match argument_trim.parse::<i64>() {
+        #[allow(clippy::cast_sign_loss, reason = "Sign loss is intentional — negative values map to two's complement u32")]
+        #[allow(clippy::cast_possible_truncation, reason = "Truncation is intentional — bounds check ensures value fits in 32 bits")]
         Ok(n) => {
-            if n <= 0xFFFF_FFFF {
-                return Some(format!("{n:08X}"));
+            if n >= i64::from(i32::MIN) && n <= 0xFFFF_FFFF {
+                return Some(format!("{:08X}", n as u32));
             }
             msg_list.push(
                 format!("Decimal value out {n} of bounds"),
