@@ -993,11 +993,42 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
             let mut input_data_list = Vec::new();
             let mut line_counter = 1;
 
-            // Add includes (should be expanded here so file inlines are visible for assembler)
             let source_parent = Path::new(c_file)
                 .parent()
                 .unwrap_or_else(|| Path::new(""));
 
+            // 1. _start preamble — must be first so it lands at address 0x000
+            for &preamble_line in &[
+                "_start",
+                "SETR A 0x2000000",
+                "SETSP A",
+                "SETR P 0",
+                "DELAYV 0x0500",
+                "CALL main:",
+                "TXR M",
+                "NEWLINE",
+                "HALT",
+                "",
+            ] {
+                input_data_list.push(InputData {
+                    file_name: c_file.to_string(),
+                    input: preamble_line.to_string(),
+                    line_counter,
+                });
+                line_counter += 1;
+            }
+
+            // 2. Compiled C code (contains main: and user functions)
+            for line in lines {
+                input_data_list.push(InputData {
+                    file_name: c_file.to_string(),
+                    input: line,
+                    line_counter,
+                });
+                line_counter += 1;
+            }
+
+            // 3. Library includes (libc, uart stubs) — after user code
             for include_rel in ["../lib/libc.kla", "../lib/uart_stubs.kla"] {
                 let include_path = source_parent.join(include_rel);
                 let include_path_str = include_path.to_string_lossy().into_owned();
@@ -1014,6 +1045,13 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
                     return None;
                 }
 
+                input_data_list.push(InputData {
+                    file_name: c_file.to_string(),
+                    input: "".to_string(),
+                    line_counter,
+                });
+                line_counter += 1;
+
                 for included_line in include_lines.unwrap_or_default() {
                     input_data_list.push(InputData {
                         file_name: include_path_str.clone(),
@@ -1022,69 +1060,6 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
                     });
                     line_counter += 1;
                 }
-
-                // Blank line between include sections (optionally)
-                input_data_list.push(InputData {
-                    file_name: c_file.to_string(),
-                    input: "".to_string(),
-                    line_counter,
-                });
-                line_counter += 1;
-            }
-
-            // Add start label + startup code
-            input_data_list.push(InputData {
-                file_name: c_file.to_string(),
-                input: "_start".to_string(),
-                line_counter,
-            });
-            line_counter += 1;
-
-            input_data_list.push(InputData {
-                file_name: c_file.to_string(),
-                input: "SETR P 0xFFFFF".to_string(),
-                line_counter,
-            });
-            line_counter += 1;
-            input_data_list.push(InputData {
-                file_name: c_file.to_string(),
-                input: "COPY O P".to_string(),
-                line_counter,
-            });
-            line_counter += 1;
-            input_data_list.push(InputData {
-                file_name: c_file.to_string(),
-                input: "DELAYV 0x0500".to_string(),
-                line_counter,
-            });
-            line_counter += 1;
-            input_data_list.push(InputData {
-                file_name: c_file.to_string(),
-                input: "CALL main:".to_string(),
-                line_counter,
-            });
-            line_counter += 1;
-            input_data_list.push(InputData {
-                file_name: c_file.to_string(),
-                input: "HALT".to_string(),
-                line_counter,
-            });
-            line_counter += 1;
-            input_data_list.push(InputData {
-                file_name: c_file.to_string(),
-                input: "".to_string(),
-                line_counter,
-            });
-            line_counter += 1;
-
-            // Add the compiled code
-            for line in lines {
-                input_data_list.push(InputData {
-                    file_name: c_file.to_string(),
-                    input: line,
-                    line_counter,
-                });
-                line_counter += 1;
             }
 
             Some(input_data_list)

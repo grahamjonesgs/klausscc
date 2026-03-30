@@ -156,10 +156,16 @@ task t_opcode_select;
 
          //=====================================================================
          // Stack control 4xxx
+         // Stack is full-descending in DDR2 RAM (top of 128 MiB).
+         // R15 is the frame pointer by software convention.
          //=====================================================================
-         16'h400?: t_stack_push_reg;                        // PUSH Push register onto stack
-         16'h401?: t_stack_pop_reg;                         // POP Pop stack into register
-         16'h4020: t_stack_push_value(w_var1);              // PUSHV Push value onto stack
+         16'h400?: t_stack_push_reg;                        // PUSH   Push register onto stack
+         16'h401?: t_stack_pop_reg;                         // POP    Pop stack into register
+         16'h4020: t_stack_push_value(w_var1);              // PUSHV  Push 32-bit value onto stack
+         16'h403?: t_get_sp;                                // GETSP  Copy SP into register
+         16'h404?: t_set_sp;                                // SETSP  Set SP from register
+         16'h4050: t_add_sp(w_var1);                        // ADDSP  Add signed 32-bit immediate to SP (alloc/free locals)
+         16'h406?: t_call_reg;                              // CALLR  Call to address in register (function pointers)
 
          //=====================================================================
          // Communication 5xxx
