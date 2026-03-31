@@ -165,6 +165,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             value_str.parse::<i64>().unwrap_or(0)
         };
         #[allow(clippy::cast_sign_loss, reason = "Sign loss is intentional for u32 hex representation")]
+        #[allow(clippy::cast_possible_truncation, reason = "Truncation to u32 is intentional for 32-bit hex output")]
         return Some(format!("{:08X}", value as u32));
     }
 
@@ -415,6 +416,7 @@ pub fn strip_comments(input: &str) -> String {
 ///
 /// Extracts 8-digit uppercase hex values from lines matching the pattern `//   XXXXXXXX  (`.
 #[allow(clippy::arithmetic_side_effects, reason = "Slice indexing is safe after length check")]
+#[allow(clippy::min_ident_chars, reason = "Single-char closure arg is idiomatic for simple predicates")]
 pub fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
     let mut expected: Vec<String> = Vec::new();
     for line in lines {

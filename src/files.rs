@@ -8,7 +8,7 @@ use std::ffi::OsStr;
 use std::{
     fs::File,
     io::{prelude::*, BufReader},
-    path::{Path, MAIN_SEPARATOR_STR},
+    path::Path,
 };
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -601,6 +601,7 @@ pub fn write_code_output_file(
 #[allow(clippy::unwrap_used, reason = "unwrap is acceptable in test code for simplicity")]
 mod test {
     use std::fs;
+    use std::path::MAIN_SEPARATOR_STR;
 
     use super::*;
     use tempfile::TempDir;

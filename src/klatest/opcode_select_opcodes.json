@@ -1,6 +1,6 @@
 [
   {
-    "comment": "Copy second register into first",
+    "comment": "RR Copy second register into first",
     "hex_code": "000001??",
     "registers": 2,
     "section": "",
@@ -8,31 +8,7 @@
     "variables": 0
   },
   {
-    "comment": "And registers, result in first register",
-    "hex_code": "000002??",
-    "registers": 2,
-    "section": "",
-    "text_name": "AND",
-    "variables": 0
-  },
-  {
-    "comment": "Or registers, result in first register",
-    "hex_code": "000003??",
-    "registers": 2,
-    "section": "",
-    "text_name": "OR",
-    "variables": 0
-  },
-  {
-    "comment": "XOR registers, result in first register",
-    "hex_code": "000004??",
-    "registers": 2,
-    "section": "",
-    "text_name": "XOR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare registers, sets equal/less/sign flags",
+    "comment": "RR Set flags from first-second (no writeback)",
     "hex_code": "000005??",
     "registers": 2,
     "section": "",
@@ -40,23 +16,7 @@
     "variables": 0
   },
   {
-    "comment": "Add registers, result in first register",
-    "hex_code": "000006??",
-    "registers": 2,
-    "section": "",
-    "text_name": "ADDRR",
-    "variables": 0
-  },
-  {
-    "comment": "Minus registers, result in first register",
-    "hex_code": "000007??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MINUSRR",
-    "variables": 0
-  },
-  {
-    "comment": "Set register to a value",
+    "comment": "RV Set register to a value",
     "hex_code": "0000080?",
     "registers": 1,
     "section": "",
@@ -64,7 +24,7 @@
     "variables": 1
   },
   {
-    "comment": "Add value to register",
+    "comment": "RV Add value to register",
     "hex_code": "0000081?",
     "registers": 1,
     "section": "",
@@ -72,7 +32,7 @@
     "variables": 1
   },
   {
-    "comment": "Subtract value from register",
+    "comment": "RV Subtract value from register",
     "hex_code": "0000082?",
     "registers": 1,
     "section": "",
@@ -80,7 +40,7 @@
     "variables": 1
   },
   {
-    "comment": "Compare register to value, sets equal/less/sign flags",
+    "comment": "RV Compare register to value",
     "hex_code": "0000083?",
     "registers": 1,
     "section": "",
@@ -88,7 +48,7 @@
     "variables": 1
   },
   {
-    "comment": "Increment register",
+    "comment": "R Increment register",
     "hex_code": "0000084?",
     "registers": 1,
     "section": "",
@@ -96,7 +56,7 @@
     "variables": 0
   },
   {
-    "comment": "Decrement register",
+    "comment": "R Decrement register",
     "hex_code": "0000085?",
     "registers": 1,
     "section": "",
@@ -104,7 +64,7 @@
     "variables": 0
   },
   {
-    "comment": "AND register with value, result in register",
+    "comment": "RV AND register with value",
     "hex_code": "0000086?",
     "registers": 1,
     "section": "",
@@ -112,7 +72,7 @@
     "variables": 1
   },
   {
-    "comment": "OR register with value, result in register",
+    "comment": "RV OR register with value",
     "hex_code": "0000087?",
     "registers": 1,
     "section": "",
@@ -120,7 +80,7 @@
     "variables": 1
   },
   {
-    "comment": "XOR register with value, result in register",
+    "comment": "RV XOR register with value",
     "hex_code": "0000088?",
     "registers": 1,
     "section": "",
@@ -128,7 +88,7 @@
     "variables": 1
   },
   {
-    "comment": "Set register to flags value",
+    "comment": "R Set register to flags value",
     "hex_code": "0000089?",
     "registers": 1,
     "section": "",
@@ -136,7 +96,7 @@
     "variables": 0
   },
   {
-    "comment": "Set register 2's complement",
+    "comment": "R 2's complement negate",
     "hex_code": "000008A?",
     "registers": 1,
     "section": "",
@@ -144,7 +104,7 @@
     "variables": 0
   },
   {
-    "comment": "Absolute value of register",
+    "comment": "R Absolute value",
     "hex_code": "000008B?",
     "registers": 1,
     "section": "",
@@ -152,7 +112,7 @@
     "variables": 0
   },
   {
-    "comment": "Sign extend byte to 32 bits",
+    "comment": "R Sign extend byte to 32 bits",
     "hex_code": "000008C?",
     "registers": 1,
     "section": "",
@@ -160,23 +120,23 @@
     "variables": 0
   },
   {
-    "comment": "Left shift register by 1",
+    "comment": "R Left shift register by 1",
     "hex_code": "000008D?",
     "registers": 1,
     "section": "",
-    "text_name": "SHLR",
+    "text_name": "SHLR1",
     "variables": 0
   },
   {
-    "comment": "Right shift register by 1 (logical)",
+    "comment": "R Right shift register by 1 (logical)",
     "hex_code": "000008E?",
     "registers": 1,
     "section": "",
-    "text_name": "SHRR",
+    "text_name": "SHRR1",
     "variables": 0
   },
   {
-    "comment": "Left shift arithmetical register",
+    "comment": "R Left shift arithmetical by 1",
     "hex_code": "000008F?",
     "registers": 1,
     "section": "",
@@ -184,7 +144,7 @@
     "variables": 0
   },
   {
-    "comment": "Right shift arithmetical register by 1",
+    "comment": "R Right shift arithmetical by 1",
     "hex_code": "0000090?",
     "registers": 1,
     "section": "",
@@ -192,7 +152,7 @@
     "variables": 0
   },
   {
-    "comment": "Left shift register by N bits",
+    "comment": "RV Left shift register by N bits",
     "hex_code": "0000091?",
     "registers": 1,
     "section": "",
@@ -200,7 +160,7 @@
     "variables": 1
   },
   {
-    "comment": "Right shift register by N bits (logical)",
+    "comment": "RV Right shift register by N bits",
     "hex_code": "0000092?",
     "registers": 1,
     "section": "",
@@ -208,7 +168,7 @@
     "variables": 1
   },
   {
-    "comment": "Right shift arithmetical by N bits",
+    "comment": "RV Right shift arithmetical by N",
     "hex_code": "0000093?",
     "registers": 1,
     "section": "",
@@ -216,7 +176,7 @@
     "variables": 1
   },
   {
-    "comment": "Sign extend halfword to 32 bits",
+    "comment": "R Sign extend halfword to 32 bits",
     "hex_code": "0000094?",
     "registers": 1,
     "section": "",
@@ -224,7 +184,7 @@
     "variables": 0
   },
   {
-    "comment": "Zero extend byte to 32 bits",
+    "comment": "R Zero extend byte to 32 bits",
     "hex_code": "0000095?",
     "registers": 1,
     "section": "",
@@ -232,7 +192,7 @@
     "variables": 0
   },
   {
-    "comment": "Zero extend halfword to 32 bits",
+    "comment": "R Zero extend halfword to 32 bits",
     "hex_code": "0000096?",
     "registers": 1,
     "section": "",
@@ -240,7 +200,7 @@
     "variables": 0
   },
   {
-    "comment": "Byte swap (endian conversion)",
+    "comment": "R Byte swap (endian conversion)",
     "hex_code": "0000097?",
     "registers": 1,
     "section": "",
@@ -248,7 +208,7 @@
     "variables": 0
   },
   {
-    "comment": "Set bit N in register",
+    "comment": "RV Set bit N in register",
     "hex_code": "00000A0?",
     "registers": 1,
     "section": "",
@@ -256,7 +216,7 @@
     "variables": 1
   },
   {
-    "comment": "Clear bit N in register",
+    "comment": "RV Clear bit N in register",
     "hex_code": "00000A1?",
     "registers": 1,
     "section": "",
@@ -264,7 +224,7 @@
     "variables": 1
   },
   {
-    "comment": "Toggle bit N in register",
+    "comment": "RV Toggle bit N in register",
     "hex_code": "00000A2?",
     "registers": 1,
     "section": "",
@@ -272,7 +232,7 @@
     "variables": 1
   },
   {
-    "comment": "Test bit N, result in zero flag",
+    "comment": "RV Test bit N, result in zero flag",
     "hex_code": "00000A3?",
     "registers": 1,
     "section": "",
@@ -280,7 +240,7 @@
     "variables": 1
   },
   {
-    "comment": "Population count (count 1 bits)",
+    "comment": "R Population count",
     "hex_code": "00000A8?",
     "registers": 1,
     "section": "",
@@ -288,7 +248,7 @@
     "variables": 0
   },
   {
-    "comment": "Count leading zeros",
+    "comment": "R Count leading zeros",
     "hex_code": "00000A9?",
     "registers": 1,
     "section": "",
@@ -296,7 +256,7 @@
     "variables": 0
   },
   {
-    "comment": "Count trailing zeros",
+    "comment": "R Count trailing zeros",
     "hex_code": "00000AA?",
     "registers": 1,
     "section": "",
@@ -304,7 +264,7 @@
     "variables": 0
   },
   {
-    "comment": "Reverse all bits in register",
+    "comment": "R Reverse all bits",
     "hex_code": "00000AB?",
     "registers": 1,
     "section": "",
@@ -312,7 +272,7 @@
     "variables": 0
   },
   {
-    "comment": "Extract bit field (pos:8, len:8)",
+    "comment": "RV Extract bit field",
     "hex_code": "00000AC?",
     "registers": 1,
     "section": "",
@@ -320,7 +280,7 @@
     "variables": 1
   },
   {
-    "comment": "Deposit bit field",
+    "comment": "RV Deposit bit field",
     "hex_code": "00000AD?",
     "registers": 1,
     "section": "",
@@ -328,7 +288,7 @@
     "variables": 1
   },
   {
-    "comment": "Multiply register by value (signed)",
+    "comment": "RV Multiply register by value (signed)",
     "hex_code": "00000B8?",
     "registers": 1,
     "section": "",
@@ -336,7 +296,7 @@
     "variables": 1
   },
   {
-    "comment": "Divide register by value (signed)",
+    "comment": "RV Divide register by value (signed)",
     "hex_code": "00000B9?",
     "registers": 1,
     "section": "",
@@ -344,7 +304,7 @@
     "variables": 1
   },
   {
-    "comment": "Modulo register by value (signed)",
+    "comment": "RV Modulo register by value (signed)",
     "hex_code": "00000BA?",
     "registers": 1,
     "section": "",
@@ -352,7 +312,7 @@
     "variables": 1
   },
   {
-    "comment": "Load indexed: first = mem[second + var1]",
+    "comment": "RRV first=mem[second+var1]",
     "hex_code": "00000C??",
     "registers": 2,
     "section": "",
@@ -360,7 +320,7 @@
     "variables": 1
   },
   {
-    "comment": "Store indexed: mem[second + var1] = first",
+    "comment": "RRV mem[second+var1]=first",
     "hex_code": "00000D??",
     "registers": 2,
     "section": "",
@@ -368,7 +328,7 @@
     "variables": 1
   },
   {
-    "comment": "Load indexed: first = mem[second + reg[var1]]",
+    "comment": "RRV first=mem[second+reg[var1]]",
     "hex_code": "00000E??",
     "registers": 2,
     "section": "",
@@ -376,23 +336,23 @@
     "variables": 1
   },
   {
-    "comment": "Rotate left by 1",
+    "comment": "R Rotate left by 1",
     "hex_code": "00000F8?",
     "registers": 1,
     "section": "",
-    "text_name": "ROLR",
+    "text_name": "ROLR1",
     "variables": 0
   },
   {
-    "comment": "Rotate right by 1",
+    "comment": "R Rotate right by 1",
     "hex_code": "00000F9?",
     "registers": 1,
     "section": "",
-    "text_name": "RORR",
+    "text_name": "RORR1",
     "variables": 0
   },
   {
-    "comment": "Rotate left through carry",
+    "comment": "R Rotate left through carry",
     "hex_code": "00000FA?",
     "registers": 1,
     "section": "",
@@ -400,7 +360,7 @@
     "variables": 0
   },
   {
-    "comment": "Rotate right through carry",
+    "comment": "R Rotate right through carry",
     "hex_code": "00000FB?",
     "registers": 1,
     "section": "",
@@ -408,7 +368,7 @@
     "variables": 0
   },
   {
-    "comment": "Rotate left by N bits",
+    "comment": "RV Rotate left by N bits",
     "hex_code": "00000FC?",
     "registers": 1,
     "section": "",
@@ -416,7 +376,7 @@
     "variables": 1
   },
   {
-    "comment": "Rotate right by N bits",
+    "comment": "RV Rotate right by N bits",
     "hex_code": "00000FD?",
     "registers": 1,
     "section": "",
@@ -424,7 +384,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump",
+    "comment": "V Jump",
     "hex_code": "00001000",
     "registers": 0,
     "section": "",
@@ -432,7 +392,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if zero",
+    "comment": "V Jump if zero",
     "hex_code": "00001001",
     "registers": 0,
     "section": "",
@@ -440,7 +400,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if not zero",
+    "comment": "V Jump if not zero",
     "hex_code": "00001002",
     "registers": 0,
     "section": "",
@@ -448,7 +408,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if equal",
+    "comment": "V Jump if equal",
     "hex_code": "00001003",
     "registers": 0,
     "section": "",
@@ -456,7 +416,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if not equal",
+    "comment": "V Jump if not equal",
     "hex_code": "00001004",
     "registers": 0,
     "section": "",
@@ -464,7 +424,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if carry",
+    "comment": "V Jump if carry",
     "hex_code": "00001005",
     "registers": 0,
     "section": "",
@@ -472,7 +432,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if not carry",
+    "comment": "V Jump if not carry",
     "hex_code": "00001006",
     "registers": 0,
     "section": "",
@@ -480,7 +440,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if overflow",
+    "comment": "V Jump if overflow",
     "hex_code": "00001007",
     "registers": 0,
     "section": "",
@@ -488,7 +448,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if not overflow",
+    "comment": "V Jump if not overflow",
     "hex_code": "00001008",
     "registers": 0,
     "section": "",
@@ -496,7 +456,7 @@
     "variables": 1
   },
   {
-    "comment": "Call function",
+    "comment": "V Call function",
     "hex_code": "00001009",
     "registers": 0,
     "section": "",
@@ -504,7 +464,7 @@
     "variables": 1
   },
   {
-    "comment": "Call if zero",
+    "comment": "V Call if zero",
     "hex_code": "0000100A",
     "registers": 0,
     "section": "",
@@ -512,7 +472,7 @@
     "variables": 1
   },
   {
-    "comment": "Call if not zero",
+    "comment": "V Call if not zero",
     "hex_code": "0000100B",
     "registers": 0,
     "section": "",
@@ -520,7 +480,7 @@
     "variables": 1
   },
   {
-    "comment": "Call if equal",
+    "comment": "V Call if equal",
     "hex_code": "0000100C",
     "registers": 0,
     "section": "",
@@ -528,7 +488,7 @@
     "variables": 1
   },
   {
-    "comment": "Call if not equal",
+    "comment": "V Call if not equal",
     "hex_code": "0000100D",
     "registers": 0,
     "section": "",
@@ -536,7 +496,7 @@
     "variables": 1
   },
   {
-    "comment": "Call if carry",
+    "comment": "V Call if carry",
     "hex_code": "0000100E",
     "registers": 0,
     "section": "",
@@ -544,7 +504,7 @@
     "variables": 1
   },
   {
-    "comment": "Call if not carry",
+    "comment": "V Call if not carry",
     "hex_code": "0000100F",
     "registers": 0,
     "section": "",
@@ -552,7 +512,7 @@
     "variables": 1
   },
   {
-    "comment": "Call if overflow",
+    "comment": "V Call if overflow",
     "hex_code": "00001010",
     "registers": 0,
     "section": "",
@@ -560,7 +520,7 @@
     "variables": 1
   },
   {
-    "comment": "Call if not overflow",
+    "comment": "V Call if not overflow",
     "hex_code": "00001011",
     "registers": 0,
     "section": "",
@@ -576,7 +536,7 @@
     "variables": 0
   },
   {
-    "comment": "Jump if sign (negative)",
+    "comment": "V Jump if sign (negative)",
     "hex_code": "00001013",
     "registers": 0,
     "section": "",
@@ -584,7 +544,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if not sign (positive)",
+    "comment": "V Jump if not sign",
     "hex_code": "00001014",
     "registers": 0,
     "section": "",
@@ -592,7 +552,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if less-than (signed)",
+    "comment": "V Jump if less-than (signed)",
     "hex_code": "00001015",
     "registers": 0,
     "section": "",
@@ -600,7 +560,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if less-or-equal",
+    "comment": "V Jump if less-or-equal",
     "hex_code": "00001016",
     "registers": 0,
     "section": "",
@@ -608,7 +568,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if greater-than",
+    "comment": "V Jump if greater-than",
     "hex_code": "00001017",
     "registers": 0,
     "section": "",
@@ -616,7 +576,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump if greater-or-equal",
+    "comment": "V Jump if greater-or-equal",
     "hex_code": "00001018",
     "registers": 0,
     "section": "",
@@ -624,7 +584,7 @@
     "variables": 1
   },
   {
-    "comment": "Jump to address in register",
+    "comment": "R Jump to address in register",
     "hex_code": "0000102?",
     "registers": 1,
     "section": "",
@@ -632,7 +592,7 @@
     "variables": 0
   },
   {
-    "comment": "LCD command with register",
+    "comment": "R LCD command with register",
     "hex_code": "0000200?",
     "registers": 1,
     "section": "",
@@ -640,7 +600,7 @@
     "variables": 0
   },
   {
-    "comment": "LCD data with register",
+    "comment": "R LCD data with register",
     "hex_code": "0000201?",
     "registers": 1,
     "section": "",
@@ -648,7 +608,7 @@
     "variables": 0
   },
   {
-    "comment": "LCD write command value",
+    "comment": "V LCD write command value",
     "hex_code": "00002021",
     "registers": 0,
     "section": "",
@@ -656,7 +616,7 @@
     "variables": 1
   },
   {
-    "comment": "LCD data with value",
+    "comment": "V LCD data with value",
     "hex_code": "00002022",
     "registers": 0,
     "section": "",
@@ -664,7 +624,7 @@
     "variables": 1
   },
   {
-    "comment": "Reset line",
+    "comment": "V Reset line",
     "hex_code": "00002023",
     "registers": 0,
     "section": "",
@@ -672,7 +632,7 @@
     "variables": 1
   },
   {
-    "comment": "set LEDs with register",
+    "comment": "R Set LEDs with register",
     "hex_code": "0000300?",
     "registers": 1,
     "section": "",
@@ -680,7 +640,7 @@
     "variables": 0
   },
   {
-    "comment": "Get switch status into register",
+    "comment": "R Get switch status into register",
     "hex_code": "0000301?",
     "registers": 1,
     "section": "",
@@ -688,7 +648,7 @@
     "variables": 0
   },
   {
-    "comment": "Set 7 Seg 1 to register",
+    "comment": "R Set 7 Seg 1 to register",
     "hex_code": "0000302?",
     "registers": 1,
     "section": "",
@@ -696,7 +656,7 @@
     "variables": 0
   },
   {
-    "comment": "Set 7 Seg 2 to register",
+    "comment": "R Set 7 Seg 2 to register",
     "hex_code": "0000303?",
     "registers": 1,
     "section": "",
@@ -704,7 +664,7 @@
     "variables": 0
   },
   {
-    "comment": "Set 7 Seg to register",
+    "comment": "R Set 7 Seg to register",
     "hex_code": "0000304?",
     "registers": 1,
     "section": "",
@@ -712,7 +672,7 @@
     "variables": 0
   },
   {
-    "comment": "RGB 1 from register",
+    "comment": "R RGB 1 from register",
     "hex_code": "0000305?",
     "registers": 1,
     "section": "",
@@ -720,7 +680,7 @@
     "variables": 0
   },
   {
-    "comment": "RGB 2 from register",
+    "comment": "R RGB 2 from register",
     "hex_code": "0000306?",
     "registers": 1,
     "section": "",
@@ -728,7 +688,7 @@
     "variables": 0
   },
   {
-    "comment": "Set LED to value",
+    "comment": "V Set LED to value",
     "hex_code": "00003070",
     "registers": 0,
     "section": "",
@@ -736,7 +696,7 @@
     "variables": 1
   },
   {
-    "comment": "Set 7 Seg 1 to value",
+    "comment": "V Set 7 Seg 1 to value",
     "hex_code": "00003071",
     "registers": 0,
     "section": "",
@@ -744,7 +704,7 @@
     "variables": 1
   },
   {
-    "comment": "Set 7 Seg 2 to value",
+    "comment": "V Set 7 Seg 2 to value",
     "hex_code": "00003072",
     "registers": 0,
     "section": "",
@@ -760,7 +720,7 @@
     "variables": 0
   },
   {
-    "comment": "RGB 1 from value",
+    "comment": "V RGB 1 from value",
     "hex_code": "00003074",
     "registers": 0,
     "section": "",
@@ -768,7 +728,7 @@
     "variables": 1
   },
   {
-    "comment": "RGB 2 from value",
+    "comment": "V RGB 2 from value",
     "hex_code": "00003075",
     "registers": 0,
     "section": "",
@@ -776,7 +736,7 @@
     "variables": 1
   },
   {
-    "comment": "Push register onto stack",
+    "comment": "R Push register onto stack",
     "hex_code": "0000400?",
     "registers": 1,
     "section": "",
@@ -784,7 +744,7 @@
     "variables": 0
   },
   {
-    "comment": "Pop stack into register",
+    "comment": "R Pop stack into register",
     "hex_code": "0000401?",
     "registers": 1,
     "section": "",
@@ -792,7 +752,7 @@
     "variables": 0
   },
   {
-    "comment": "Push value onto stack",
+    "comment": "V Push 32-bit value onto stack",
     "hex_code": "00004020",
     "registers": 0,
     "section": "",
@@ -800,7 +760,39 @@
     "variables": 1
   },
   {
-    "comment": "send test UART message",
+    "comment": "R Copy SP into register",
+    "hex_code": "0000403?",
+    "registers": 1,
+    "section": "",
+    "text_name": "GETSP",
+    "variables": 0
+  },
+  {
+    "comment": "R Set SP from register",
+    "hex_code": "0000404?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SETSP",
+    "variables": 0
+  },
+  {
+    "comment": "V Add signed immediate to SP",
+    "hex_code": "00004050",
+    "registers": 0,
+    "section": "",
+    "text_name": "ADDSP",
+    "variables": 1
+  },
+  {
+    "comment": "R Call to address in register",
+    "hex_code": "0000406?",
+    "registers": 1,
+    "section": "",
+    "text_name": "CALLR",
+    "variables": 0
+  },
+  {
+    "comment": "Send test UART message",
     "hex_code": "00005000",
     "registers": 0,
     "section": "",
@@ -808,7 +800,7 @@
     "variables": 0
   },
   {
-    "comment": "send UART newline",
+    "comment": "Send UART newline",
     "hex_code": "00005001",
     "registers": 0,
     "section": "",
@@ -816,7 +808,7 @@
     "variables": 0
   },
   {
-    "comment": "send 8 bytes value of memory location",
+    "comment": "V Send 8 bytes value of memory location",
     "hex_code": "00005002",
     "registers": 0,
     "section": "",
@@ -824,7 +816,7 @@
     "variables": 1
   },
   {
-    "comment": "send string at memory",
+    "comment": "V Send string at memory",
     "hex_code": "00005003",
     "registers": 0,
     "section": "",
@@ -832,7 +824,7 @@
     "variables": 1
   },
   {
-    "comment": "send 8 bytes reg value in message",
+    "comment": "R Send 8 bytes reg value in message",
     "hex_code": "0000501?",
     "registers": 1,
     "section": "",
@@ -840,7 +832,7 @@
     "variables": 0
   },
   {
-    "comment": "send 8 bytes value at memory of register value",
+    "comment": "R Send value at memory of register",
     "hex_code": "0000502?",
     "registers": 1,
     "section": "",
@@ -848,7 +840,7 @@
     "variables": 0
   },
   {
-    "comment": "send char at memory from register value",
+    "comment": "R Send char at memory from register",
     "hex_code": "0000503?",
     "registers": 1,
     "section": "",
@@ -856,7 +848,7 @@
     "variables": 0
   },
   {
-    "comment": "send string at memory location from register",
+    "comment": "R Send string at memory from register",
     "hex_code": "0000504?",
     "registers": 1,
     "section": "",
@@ -864,7 +856,7 @@
     "variables": 0
   },
   {
-    "comment": "Set interrupt from registers",
+    "comment": "RR Set interrupt from registers",
     "hex_code": "000060??",
     "registers": 2,
     "section": "",
@@ -872,7 +864,7 @@
     "variables": 0
   },
   {
-    "comment": "mem[second] = first",
+    "comment": "RR mem[second]=first",
     "hex_code": "000070??",
     "registers": 2,
     "section": "",
@@ -880,7 +872,7 @@
     "variables": 0
   },
   {
-    "comment": "first = mem[second]",
+    "comment": "RR first=mem[second]",
     "hex_code": "000071??",
     "registers": 2,
     "section": "",
@@ -888,7 +880,7 @@
     "variables": 0
   },
   {
-    "comment": "Set memory from value",
+    "comment": "RV Set memory from value",
     "hex_code": "0000720?",
     "registers": 1,
     "section": "",
@@ -896,7 +888,7 @@
     "variables": 1
   },
   {
-    "comment": "Set register from memory at value",
+    "comment": "RV Set register from memory at value",
     "hex_code": "0000721?",
     "registers": 1,
     "section": "",
@@ -904,7 +896,7 @@
     "variables": 1
   },
   {
-    "comment": "Store indexed: mem[second + reg[var1]] = first",
+    "comment": "RRV mem[second+reg[var1]]=first",
     "hex_code": "000073??",
     "registers": 2,
     "section": "",
@@ -912,215 +904,7 @@
     "variables": 1
   },
   {
-    "comment": "Multiply first * second (signed), result in first",
-    "hex_code": "000080??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MULRR",
-    "variables": 0
-  },
-  {
-    "comment": "Multiply first * second (unsigned), result in first",
-    "hex_code": "000081??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MULURR",
-    "variables": 0
-  },
-  {
-    "comment": "Multiply high word first * second (signed), result in first",
-    "hex_code": "000082??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MULHRR",
-    "variables": 0
-  },
-  {
-    "comment": "Multiply high word first * second (unsigned), result in first",
-    "hex_code": "000083??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MULHURR",
-    "variables": 0
-  },
-  {
-    "comment": "Divide first / second (signed), result in first",
-    "hex_code": "000084??",
-    "registers": 2,
-    "section": "",
-    "text_name": "DIVRR",
-    "variables": 0
-  },
-  {
-    "comment": "Divide first / second (unsigned), result in first",
-    "hex_code": "000085??",
-    "registers": 2,
-    "section": "",
-    "text_name": "DIVURR",
-    "variables": 0
-  },
-  {
-    "comment": "Modulo first % second (signed), result in first",
-    "hex_code": "000086??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MODRR",
-    "variables": 0
-  },
-  {
-    "comment": "Modulo first % second (unsigned), result in first",
-    "hex_code": "000087??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MODURR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare first < second (signed), sets less/equal flags",
-    "hex_code": "000090??",
-    "registers": 2,
-    "section": "",
-    "text_name": "CMPLTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare first <= second (signed), sets less/equal flags",
-    "hex_code": "000091??",
-    "registers": 2,
-    "section": "",
-    "text_name": "CMPLERR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare first > second (signed), sets less/equal flags",
-    "hex_code": "000092??",
-    "registers": 2,
-    "section": "",
-    "text_name": "CMPGTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare first >= second (signed), sets less/equal flags",
-    "hex_code": "000093??",
-    "registers": 2,
-    "section": "",
-    "text_name": "CMPGERR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare first < second (unsigned), sets carry/equal flags",
-    "hex_code": "000094??",
-    "registers": 2,
-    "section": "",
-    "text_name": "CMPULTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare first <= second (unsigned), sets carry/equal flags",
-    "hex_code": "000095??",
-    "registers": 2,
-    "section": "",
-    "text_name": "CMPULERR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare first > second (unsigned), sets carry/equal flags",
-    "hex_code": "000096??",
-    "registers": 2,
-    "section": "",
-    "text_name": "CMPUGTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Compare first >= second (unsigned), sets carry/equal flags",
-    "hex_code": "000097??",
-    "registers": 2,
-    "section": "",
-    "text_name": "CMPUGERR",
-    "variables": 0
-  },
-  {
-    "comment": "Minimum of first and second (signed), result in first",
-    "hex_code": "0000A0??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MINRR",
-    "variables": 0
-  },
-  {
-    "comment": "Maximum of first and second (signed), result in first",
-    "hex_code": "0000A1??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MAXRR",
-    "variables": 0
-  },
-  {
-    "comment": "Minimum of first and second (unsigned), result in first",
-    "hex_code": "0000A2??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MINURR",
-    "variables": 0
-  },
-  {
-    "comment": "Maximum of first and second (unsigned), result in first",
-    "hex_code": "0000A3??",
-    "registers": 2,
-    "section": "",
-    "text_name": "MAXURR",
-    "variables": 0
-  },
-  {
-    "comment": "Rotate first left by second bits",
-    "hex_code": "0000B0??",
-    "registers": 2,
-    "section": "",
-    "text_name": "ROLRR",
-    "variables": 0
-  },
-  {
-    "comment": "Rotate first right by second bits",
-    "hex_code": "0000B1??",
-    "registers": 2,
-    "section": "",
-    "text_name": "RORRR",
-    "variables": 0
-  },
-  {
-    "comment": "Set bit in first (bit number in second)",
-    "hex_code": "0000B2??",
-    "registers": 2,
-    "section": "",
-    "text_name": "BSETRR",
-    "variables": 0
-  },
-  {
-    "comment": "Clear bit in first (bit number in second)",
-    "hex_code": "0000B3??",
-    "registers": 2,
-    "section": "",
-    "text_name": "BCLRRR",
-    "variables": 0
-  },
-  {
-    "comment": "Toggle bit in first (bit number in second)",
-    "hex_code": "0000B4??",
-    "registers": 2,
-    "section": "",
-    "text_name": "BTGLRR",
-    "variables": 0
-  },
-  {
-    "comment": "Test bit in first (bit number in second), result in zero flag",
-    "hex_code": "0000B5??",
-    "registers": 2,
-    "section": "",
-    "text_name": "BTSTRR",
-    "variables": 0
-  },
-  {
-    "comment": "Delay by register",
+    "comment": "R Delay by register",
     "hex_code": "0000F00?",
     "registers": 1,
     "section": "",
@@ -1152,11 +936,299 @@
     "variables": 0
   },
   {
-    "comment": "Delay by value",
+    "comment": "V Delay by value",
     "hex_code": "0000F013",
     "registers": 0,
     "section": "",
     "text_name": "DELAYV",
     "variables": 1
+  },
+  {
+    "comment": "RRR rd=rs1+rs2",
+    "hex_code": "00010???",
+    "registers": 3,
+    "section": "",
+    "text_name": "ADDR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1-rs2",
+    "hex_code": "00020???",
+    "registers": 3,
+    "section": "",
+    "text_name": "SUBR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1&rs2",
+    "hex_code": "00030???",
+    "registers": 3,
+    "section": "",
+    "text_name": "ANDR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1|rs2",
+    "hex_code": "00040???",
+    "registers": 3,
+    "section": "",
+    "text_name": "ORR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1^rs2",
+    "hex_code": "00050???",
+    "registers": 3,
+    "section": "",
+    "text_name": "XORR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1*rs2 signed lo",
+    "hex_code": "00100???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MULR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1*rs2 unsigned lo",
+    "hex_code": "00110???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MULUR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=high(rs1*rs2) signed",
+    "hex_code": "00120???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MULHR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=high(rs1*rs2) unsigned",
+    "hex_code": "00130???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MULHUR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1/rs2 signed",
+    "hex_code": "00140???",
+    "registers": 3,
+    "section": "",
+    "text_name": "DIVR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1/rs2 unsigned",
+    "hex_code": "00150???",
+    "registers": 3,
+    "section": "",
+    "text_name": "DIVUR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1%rs2 signed",
+    "hex_code": "00160???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MODR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1%rs2 unsigned",
+    "hex_code": "00170???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MODUR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1<<rs2[4:0]",
+    "hex_code": "00200???",
+    "registers": 3,
+    "section": "",
+    "text_name": "SHLR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1>>rs2[4:0] logical",
+    "hex_code": "00210???",
+    "registers": 3,
+    "section": "",
+    "text_name": "SHRR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1>>>rs2[4:0] arithmetic",
+    "hex_code": "00220???",
+    "registers": 3,
+    "section": "",
+    "text_name": "SARR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1 rol rs2[4:0]",
+    "hex_code": "00230???",
+    "registers": 3,
+    "section": "",
+    "text_name": "ROLR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1 ror rs2[4:0]",
+    "hex_code": "00240???",
+    "registers": 3,
+    "section": "",
+    "text_name": "RORR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1==rs2)?1:0",
+    "hex_code": "00300???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPEQR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1!=rs2)?1:0",
+    "hex_code": "00310???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPNER",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1<rs2)?1:0 signed",
+    "hex_code": "00320???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPLTR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1<=rs2)?1:0 signed",
+    "hex_code": "00330???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPLER",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1>rs2)?1:0 signed",
+    "hex_code": "00340???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPGTR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1>=rs2)?1:0 signed",
+    "hex_code": "00350???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPGER",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1<rs2)?1:0 unsigned",
+    "hex_code": "00360???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPULTR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1<=rs2)?1:0 unsigned",
+    "hex_code": "00370???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPULER",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1>rs2)?1:0 unsigned",
+    "hex_code": "00380???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPUGTR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1>=rs2)?1:0 unsigned",
+    "hex_code": "00390???",
+    "registers": 3,
+    "section": "",
+    "text_name": "CMPUGER",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=min(rs1,rs2) signed",
+    "hex_code": "00400???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MINR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=max(rs1,rs2) signed",
+    "hex_code": "00410???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MAXR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=min(rs1,rs2) unsigned",
+    "hex_code": "00420???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MINUR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=max(rs1,rs2) unsigned",
+    "hex_code": "00430???",
+    "registers": 3,
+    "section": "",
+    "text_name": "MAXUR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1 with bit rs2 set",
+    "hex_code": "00500???",
+    "registers": 3,
+    "section": "",
+    "text_name": "BSETRR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1 with bit rs2 cleared",
+    "hex_code": "00510???",
+    "registers": 3,
+    "section": "",
+    "text_name": "BCLRRR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=rs1 with bit rs2 toggled",
+    "hex_code": "00520???",
+    "registers": 3,
+    "section": "",
+    "text_name": "BTGLRR",
+    "variables": 0
+  },
+  {
+    "comment": "RRR rd=(rs1>>rs2[4:0])&1",
+    "hex_code": "00530???",
+    "registers": 3,
+    "section": "",
+    "text_name": "BTSTRR",
+    "variables": 0
   }
 ]

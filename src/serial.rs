@@ -1,9 +1,10 @@
 use crate::helper::trim_newline;
 use crate::messages::{MessageType, MsgList};
+use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
+use std::time::Instant;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
-use std::io::{self, Error, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::io::{self, Error, Write as _};
 use std::sync::Arc;
 use std::thread;
 
@@ -288,6 +289,7 @@ pub fn monitor_serial(port_name: &str, msg_list: &mut MsgList) -> Result<(), Err
 /// Used after `write_to_board_keep_port` to continue reading from the same port
 /// that was used to upload the program, ensuring no UART output is missed.
 #[allow(clippy::print_stdout, reason = "Printing to stdout is required for serial monitor output")]
+#[allow(clippy::question_mark_used, reason = "? operator is idiomatic for propagating errors")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
 pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList) -> Result<(), Error> {
     port.set_timeout(Duration::from_millis(500))?;
@@ -318,7 +320,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList
                     io::stdout().flush().unwrap_or(());
                 }
             }
-            Err(ref err) if err.kind() == io::ErrorKind::TimedOut => {
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => {
                 // Timeout is normal when no data is available, just continue
             }
             Err(err) => {
@@ -339,6 +341,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList
 }
 
 /// Result of a test verification run.
+#[allow(clippy::arbitrary_source_item_ordering, reason = "Fields ordered by logical flow, not alphabetically")]
 pub struct TestResult {
     /// Number of expected values that matched.
     pub passed: usize,
@@ -381,7 +384,7 @@ pub fn run_test_monitor(
     timeout_secs: u64,
     msg_list: &mut MsgList,
 ) -> TestResult {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
 
     port.set_timeout(Duration::from_millis(500)).unwrap_or(());
@@ -402,7 +405,7 @@ pub fn run_test_monitor(
                     line_buffer.push_str(&text);
                 }
             }
-            Err(ref err) if err.kind() == io::ErrorKind::TimedOut => {
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => {
                 continue;
             }
             Err(err) => {

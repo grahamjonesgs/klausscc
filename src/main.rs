@@ -45,6 +45,7 @@ use std::fs;
     reason = "Main function requires many lines to handle CLI and file processing logic"
 )]
 #[allow(clippy::or_fun_call, reason = "Needed for simplicity of setting up strings and file names")]
+#[allow(clippy::shadow_reuse, reason = "Rebinding input_list after block_comment removal is clearer than a new name")]
 fn main() -> Result<(), i32> {
     use std::fs::remove_file;
 
@@ -130,12 +131,9 @@ fn main() -> Result<(), i32> {
     // Handle C source compilation
     let input_list = if is_c_source {
         msg_list.push(format!("Compiling C source file {c_source_file_name}"), None, None, MessageType::Information);
-        match compile_c_to_kla(&c_source_file_name, &mut msg_list) {
-            Some(lines) => lines,
-            None => {
-                print_messages(&msg_list);
-                return Err(1_i32);
-            }
+        if let Some(lines) = compile_c_to_kla(&c_source_file_name, &mut msg_list) { lines } else {
+            print_messages(&msg_list);
+            return Err(1_i32);
         }
     } else {
         // Parse the input file
@@ -164,7 +162,7 @@ fn main() -> Result<(), i32> {
 
     if let Err(result_err) = write_code_output_file(&output_file_name, &mut pass2, &mut msg_list) {
         msg_list.push(
-            format!("Unable to write to code file {}, error {}", &output_file_name, result_err),
+            format!("Unable to write to code file {output_file_name}, error {result_err}"),
             None,
             None,
             MessageType::Error,
@@ -200,11 +198,12 @@ fn main() -> Result<(), i32> {
                         }
                         Err(err) => {
                             msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
+                            print_results(&msg_list, start_time);
+                            return Err(1_i32);
                         }
                     }
-                } else {
-                    write_to_device(&mut msg_list, &bin_string, &output_serial_port);
                 }
+                write_to_device(&mut msg_list, &bin_string, &output_serial_port);
             }
         } else {
             if remove_file(&binary_file_name).is_ok() {
@@ -273,6 +272,8 @@ fn main() -> Result<(), i32> {
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
 #[inline]
+#[allow(clippy::min_ident_chars, reason = "Single-char closure args are idiomatic for simple predicates")]
+#[allow(clippy::indexing_slicing, reason = "Indices are guarded by parts.len() >= 3 check above")]
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = 0;
@@ -354,7 +355,10 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
                 // Keep inline data when no explicit .data section is active.
                 // This preserves label semantics for C compiler output data blocks.
                 //#[allow(clippy::arithmetic_side_effects, reason = "Correct program counter adjustment for inline data")]
-                program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, pass.file_name.clone()) / 8;
+                #[allow(clippy::arithmetic_side_effects, reason = "Integer counter increment is intentional")]
+                #[allow(clippy::integer_division, reason = "Byte-to-word division by 8 is intentional")]
+                #[allow(clippy::integer_division_remainder_used, reason = "Byte-to-word division by 8 is intentional")]
+                { program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, pass.file_name.clone()) / 8; }
             }
         }
     }
@@ -451,6 +455,7 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
 #[inline]
 #[cfg(not(tarpaulin_include))] // Can not test CLI in tarpaulin
 #[must_use]
+#[allow(clippy::too_many_lines, reason = "CLI definition requires many argument declarations")]
 pub fn set_matches() -> Command {
     use clap::ArgAction;
 
@@ -566,7 +571,7 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
     msg_list.push(format!("Writing binary file to {binary_file_name}"), None, None, MessageType::Information);
     if let Err(result_err) = write_binary_output_file(&binary_file_name, bin_string) {
         msg_list.push(
-            format!("Unable to write to binary code file {:?}, error {}", &binary_file_name, result_err),
+            format!("Unable to write to binary code file {binary_file_name:?}, error {result_err}"),
             None,
             None,
             MessageType::Error,
@@ -635,8 +640,9 @@ pub fn run_test_mode(
         return Err(1_i32);
     }
 
+    let expected_count = expected_values.len();
     msg_list.push(
-        format!("Found {} expected UART values in source comments", expected_values.len()),
+        format!("Found {expected_count} expected UART values in source comments"),
         None,
         None,
         MessageType::Information,
@@ -729,6 +735,7 @@ pub fn assemble_file(
 }
 
 /// Result of a single test in a batch run.
+#[allow(clippy::arbitrary_source_item_ordering, reason = "Fields ordered by logical flow, not alphabetically")]
 struct BatchTestResult {
     /// File name of the test.
     file_name: String,
@@ -751,12 +758,14 @@ struct BatchTestResult {
 /// Each line is a test file path. Blank lines and lines starting with `//` or `#` are ignored.
 /// Paths are resolved relative to the directory containing the list file.
 #[cfg(not(tarpaulin_include))]
+#[allow(clippy::min_ident_chars, reason = "Single-char match binding is idiomatic for simple Ok/Err unwrapping")]
 fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
-    let list_dir = std::path::Path::new(list_file)
+    use std::path::Path;
+    let list_dir = Path::new(list_file)
         .parent()
-        .unwrap_or_else(|| std::path::Path::new("."));
+        .unwrap_or_else(|| Path::new("."));
 
-    let contents = match std::fs::read_to_string(list_file) {
+    let contents = match fs::read_to_string(list_file) {
         Ok(c) => c,
         Err(err) => {
             msg_list.push(
@@ -774,7 +783,7 @@ fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with('#'))
         .map(|line| {
-            let path = std::path::Path::new(line);
+            let path = Path::new(line);
             if path.is_absolute() {
                 line.to_owned()
             } else {
@@ -792,6 +801,8 @@ fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
 #[allow(clippy::arithmetic_side_effects, reason = "Counter arithmetic is safe")]
 #[allow(clippy::missing_inline_in_public_items, reason = "Only used in main batch test function, which is not performance critical")]
 #[allow(clippy::too_many_lines, reason = "Only for test batch management, which requires many lines to handle all the logic")]
+#[allow(clippy::missing_errors_doc, reason = "Error is a raw exit code, not a type worth documenting")]
+#[allow(clippy::min_ident_chars, reason = "Single-char loop variable is conventional for result iteration")]
 #[cfg(not(tarpaulin_include))]
 pub fn run_test_list(
     oplist: &[Opcode],
@@ -835,23 +846,20 @@ pub fn run_test_list(
         let mut test_msg_list = MsgList::new();
 
         // Assemble the test file
-        let bin_string = match assemble_file(test_file, oplist, macro_list, &mut test_msg_list) {
-            Some(bin) => bin,
-            None => {
-                println!("  SKIP: assembly failed");
-                print_messages(&test_msg_list);
-                results.push(BatchTestResult {
-                    file_name: test_file.clone(),
-                    passed: 0,
-                    failed: 0,
-                    timed_out: false,
-                    total: 0,
-                    skipped: true,
-                    skip_reason: "assembly error".to_owned(),
-                });
-                println!();
-                continue;
-            }
+        let bin_string = if let Some(bin) = assemble_file(test_file, oplist, macro_list, &mut test_msg_list) { bin } else {
+            println!("  SKIP: assembly failed");
+            print_messages(&test_msg_list);
+            results.push(BatchTestResult {
+                file_name: test_file.clone(),
+                passed: 0,
+                failed: 0,
+                timed_out: false,
+                total: 0,
+                skipped: true,
+                skip_reason: "assembly error".to_owned(),
+            });
+            println!();
+            continue;
         };
 
         // Write binary file
@@ -859,7 +867,7 @@ pub fn run_test_list(
         write_binary_file(&mut test_msg_list, &binary_file_name, &bin_string);
 
         // Parse expected values
-        let raw_lines: Vec<String> = std::fs::read_to_string(test_file)
+        let raw_lines: Vec<String> = fs::read_to_string(test_file)
             .unwrap_or_default()
             .lines()
             .map(String::from)
@@ -966,6 +974,7 @@ pub fn run_test_list(
 /// and adds startup initialization code.
 #[inline]
 #[cfg(not(tarpaulin_include))]
+#[allow(clippy::arithmetic_side_effects, reason = "line_counter increments cannot overflow in practice")]
 pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<InputData>> {
     use std::path::Path;
     use std::process::Command;
@@ -980,7 +989,7 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
         Ok(output) if output.status.success() => {
             let kla_content = String::from_utf8_lossy(&output.stdout);
             msg_list.push(
-                format!("Successfully compiled {} with rcc", c_file),
+                format!("Successfully compiled {c_file} with rcc"),
                 None,
                 None,
                 MessageType::Information,
@@ -1011,8 +1020,8 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
                 "",
             ] {
                 input_data_list.push(InputData {
-                    file_name: c_file.to_string(),
-                    input: preamble_line.to_string(),
+                    file_name: c_file.to_owned(),
+                    input: preamble_line.to_owned(),
                     line_counter,
                 });
                 line_counter += 1;
@@ -1021,7 +1030,7 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
             // 2. Compiled C code (contains main: and user functions)
             for line in lines {
                 input_data_list.push(InputData {
-                    file_name: c_file.to_string(),
+                    file_name: c_file.to_owned(),
                     input: line,
                     line_counter,
                 });
@@ -1046,8 +1055,8 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
                 }
 
                 input_data_list.push(InputData {
-                    file_name: c_file.to_string(),
-                    input: "".to_string(),
+                    file_name: c_file.to_owned(),
+                    input: String::new(),
                     line_counter,
                 });
                 line_counter += 1;
@@ -1067,7 +1076,7 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
         Ok(output) => {
             let stderr = String::from_utf8_lossy(&output.stderr);
             msg_list.push(
-                format!("rcc compilation failed for {}: {}", c_file, stderr),
+                format!("rcc compilation failed for {c_file}: {stderr}"),
                 None,
                 None,
                 MessageType::Error,
@@ -1076,7 +1085,7 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
         }
         Err(err) => {
             msg_list.push(
-                format!("Failed to run rcc on {}: {}", c_file, err),
+                format!("Failed to run rcc on {c_file}: {err}"),
                 None,
                 None,
                 MessageType::Error,

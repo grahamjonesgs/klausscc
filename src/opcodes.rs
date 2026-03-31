@@ -243,8 +243,9 @@ pub fn add_registers(
 
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
-        if (i == 2 && num_registers == 2) || (i == 1 && (num_registers == 2 || num_registers == 1))
-        {
+        // Append register hex digit for each register operand word (indices 1..=num_registers).
+        // Handles 1-, 2-, and 3-register instructions uniformly.
+        if i >= 1 && i <= num_registers as usize {
             opcode_found.push_str(&map_reg_to_hex(word));
         }
     }
@@ -320,46 +321,59 @@ fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
 /// Parse opcode definition line to opcode.
 ///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None.
-#[allow(clippy::useless_let_if_seq, reason = "Needed for compatibility with generated code or macro expansion")]
+/// Supports both 32-bit format (`32'hXXXX_XXXX`) and legacy 16-bit format (`16'hXXXX`).
 #[allow(clippy::arithmetic_side_effects, reason = "Needed for compatibility with generated code or macro expansion")]
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_comment: usize;
     let pos_end_comment: usize;
-    let line_pos_opcode: usize;
 
-    // Find the opcode if it exists
-    let pos_opcode: usize = match input_line.find("16'h") {
-        None => return None,
-        Some(location) => {
-            line_pos_opcode = location;
-            location + 4
-        }
-    };
-
-    // check if the line was commented out
-    match input_line.find("//") {
-        None => {}
-        Some(location) => {
-            if location < line_pos_opcode {
+    // Find the opcode — try 32'h (new 32-bit format) first, then 16'h (legacy format).
+    // For 32'h: read XXXX_XXXX (9 chars including underscore separator), strip '_' → 8 hex digits.
+    // For 16'h: read XXXX (4 chars), prepend '0000' → 8 hex digits.
+    let hex_code: String = if let Some(location) = input_line.find("32'h") {
+        // Check if the 32'h marker is preceded by a line comment (i.e. it is commented out)
+        if let Some(comment_loc) = input_line.find("//") {
+            if comment_loc < location {
                 return None;
             }
         }
-    }
-
-    // Check for length of opcode
-    if input_line.len() < (pos_opcode + 4) {
+        let pos = location + 4;
+        // Need XXXX_XXXX (9 chars) after "32'h"
+        if input_line.len() < pos + 9 {
+            return None;
+        }
+        // Build 8-char hex code by removing the underscore separator at offset 4
+        let raw = input_line.get(pos..pos + 9)?;
+        format!("{}{}", raw.get(..4)?, raw.get(5..9)?)
+    } else if let Some(location) = input_line.find("16'h") {
+        // Legacy format: check if commented out
+        if let Some(comment_loc) = input_line.find("//") {
+            if comment_loc < location {
+                return None;
+            }
+        }
+        let pos = location + 4;
+        // Need XXXX (4 chars) after "16'h"
+        if input_line.len() < pos + 4 {
+            return None;
+        }
+        format!("0000{}", input_line.get(pos..pos + 4)?)
+    } else {
         return None;
-    }
+    };
 
-    // Define number of registers from opcode definition
-
+    // Define number of registers from trailing '?' nibbles in the 8-char hex code.
+    // Each '?' represents one register field (nibble). Checked longest-first so that
+    // three '?'s correctly sets 3 registers (not just 2 or 1).
     let mut num_registers: u32 = 0;
-    if input_line.get(pos_opcode + 3..pos_opcode + 4) == Some("?") {
+    if hex_code.get(7..8) == Some("?") {
         num_registers = 1;
     }
-
-    if input_line.get(pos_opcode + 2..pos_opcode + 4) == Some("??") {
+    if hex_code.get(6..8) == Some("??") {
         num_registers = 2;
+    }
+    if hex_code.get(5..8) == Some("???") {
+        num_registers = 3;
     }
 
     // Look for variable, and set flag
@@ -398,10 +412,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     }
 
     Some(Opcode {
-        hex_code: format!(
-            "0000{}",
-            &input_line.get(pos_opcode..pos_opcode + 4).unwrap_or("    ")
-        ),
+        hex_code,
         registers: num_registers,
         variables: num_variables,
         comment: input_line
@@ -1132,5 +1143,116 @@ mod tests {
                 }
             ]
         );
+    }
+
+    // -------------------------------------------------------------------------
+    // 32-bit format (32'hXXXX_XXXX) tests
+    // -------------------------------------------------------------------------
+
+    #[test]
+    // Parse 32'h RRR format (three registers, no variable)
+    fn test_opcode_from_string_32bit_rrr() {
+        let input = "32'h0001_0???: t_addr3;                               // ADDR RRR rd=rs1+rs2";
+        let output = opcode_from_string(input);
+        assert_eq!(
+            output,
+            Some(Opcode {
+                text_name: "ADDR".to_owned(),
+                hex_code: "00010???".to_owned(),
+                registers: 3,
+                variables: 0,
+                comment: "RRR rd=rs1+rs2".to_owned(),
+                section: String::default(),
+            })
+        );
+    }
+
+    #[test]
+    // Parse 32'h RV format (one register, one variable)
+    fn test_opcode_from_string_32bit_rv() {
+        let input = "32'h0000_080?: t_set_reg(w_var1);                     // SETR RV Set register to a value";
+        let output = opcode_from_string(input);
+        assert_eq!(
+            output,
+            Some(Opcode {
+                text_name: "SETR".to_owned(),
+                hex_code: "0000080?".to_owned(),
+                registers: 1,
+                variables: 1,
+                comment: "RV Set register to a value".to_owned(),
+                section: String::default(),
+            })
+        );
+    }
+
+    #[test]
+    // Parse 32'h V format (no registers, one variable)
+    fn test_opcode_from_string_32bit_v() {
+        let input = "32'h0000_1000: t_cond_jump(w_var1, 1'b1);             // JMP V Jump";
+        let output = opcode_from_string(input);
+        assert_eq!(
+            output,
+            Some(Opcode {
+                text_name: "JMP".to_owned(),
+                hex_code: "00001000".to_owned(),
+                registers: 0,
+                variables: 1,
+                comment: "V Jump".to_owned(),
+                section: String::default(),
+            })
+        );
+    }
+
+    #[test]
+    // Parse 32'h RR format (two registers, no variable)
+    fn test_opcode_from_string_32bit_rr() {
+        let input = "32'h0000_0C??: t_load_indexed(w_var1);                // LDIDX RRV first=mem[second+var1]";
+        let output = opcode_from_string(input);
+        assert_eq!(
+            output,
+            Some(Opcode {
+                text_name: "LDIDX".to_owned(),
+                hex_code: "00000C??".to_owned(),
+                registers: 2,
+                variables: 1,
+                comment: "RRV first=mem[second+var1]".to_owned(),
+                section: String::default(),
+            })
+        );
+    }
+
+    #[test]
+    // 32'h line that is commented out returns None
+    fn test_opcode_from_string_32bit_commented() {
+        let input = "// 32'h0001_0???: t_addr3;                            // ADDR RRR rd=rs1+rs2";
+        let output = opcode_from_string(input);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    // 32'h line that is too short returns None
+    fn test_opcode_from_string_32bit_too_short() {
+        let input = "32'h0001_0";
+        let output = opcode_from_string(input);
+        assert_eq!(output, None);
+    }
+
+    #[test]
+    // add_registers handles three-register (RRR) instructions correctly
+    fn test_add_registers_three_regs() {
+        let mut msg_list = MsgList::new();
+        let input = String::from("ADDR A B C");
+        let opcodes = &mut Vec::<Opcode>::new();
+        opcodes.push(Opcode {
+            text_name: String::from("ADDR"),
+            hex_code: String::from("00010???"),
+            comment: String::default(),
+            variables: 0,
+            registers: 3,
+            section: String::default(),
+        });
+        let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
+        // A=0, B=1, C=2 → "00010" + "0" + "1" + "2"
+        assert_eq!(output, String::from("00010012"));
     }
 }
