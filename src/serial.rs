@@ -193,6 +193,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
 pub fn write_to_board_keep_port(
     binary_output: &str,
     port_name: &str,
+    send_break: bool,
     msg_list: &mut MsgList,
 ) -> Result<Box<dyn SerialPort>, Error> {
     use serialport::{DataBits, FlowControl, Parity, StopBits};
@@ -204,7 +205,14 @@ pub fn write_to_board_keep_port(
     port.set_data_bits(DataBits::Eight)?;
     port.set_parity(Parity::None)?;
     port.set_flow_control(FlowControl::None)?;
-    port.write_all(b"S")?;
+
+    if send_break {
+        port.set_break()?;
+        thread::sleep(Duration::from_millis(100));
+        port.clear_break()?;
+    } else {
+        port.write_all(b"S")?;
+    }
 
     thread::sleep(Duration::from_millis(500)); //Wait for board to reset
 
@@ -266,9 +274,10 @@ pub fn write_to_board_keep_port(
 pub fn write_to_board(
     binary_output: &str,
     port_name: &str,
+    send_break: bool,
     msg_list: &mut MsgList,
 ) -> Result<(), Error> {
-    let _port = write_to_board_keep_port(binary_output, port_name, msg_list)?;
+    let _port = write_to_board_keep_port(binary_output, port_name, send_break, msg_list)?;
     Ok(())
 }
 

@@ -78,6 +78,7 @@ fn main() -> Result<(), i32> {
     let textmate_flag = matches.get_flag("textmate");
     let monitor_flag = matches.get_flag("monitor");
     let test_flag = matches.get_flag("test");
+    let no_break_flag = matches.get_flag("no_break");
     let test_timeout: u64 = matches
         .get_one::<String>("test_timeout")
         .and_then(|timeout_str| timeout_str.parse().ok())
@@ -125,7 +126,7 @@ fn main() -> Result<(), i32> {
 
     // Batch test list mode
     if !test_list_file.is_empty() {
-        return run_test_list(&oplist, &macro_list, &test_list_file, &output_serial_port, test_timeout, &mut msg_list);
+        return run_test_list(&oplist, &macro_list, &test_list_file, &output_serial_port, test_timeout, !no_break_flag, &mut msg_list);
     }
 
     // Handle C source compilation
@@ -177,11 +178,11 @@ fn main() -> Result<(), i32> {
             if !output_serial_port.is_empty() {
                 if test_flag {
                     // Test mode: send to board, keep port open, then verify UART output
-                    return run_test_mode(&mut msg_list, &bin_string, &output_serial_port, &input_file_name, test_timeout, start_time);
+                    return run_test_mode(&mut msg_list, &bin_string, &output_serial_port, &input_file_name, test_timeout, !no_break_flag, start_time);
                 }
                 if monitor_flag {
                     // Monitor mode: send to board, keep port open, then monitor UART output
-                    match write_to_board_keep_port(&bin_string, &output_serial_port, &mut msg_list) {
+                    match write_to_board_keep_port(&bin_string, &output_serial_port, !no_break_flag, &mut msg_list) {
                         Ok(port) => {
                             msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
                             print_results(&msg_list, start_time);
@@ -203,7 +204,7 @@ fn main() -> Result<(), i32> {
                         }
                     }
                 }
-                write_to_device(&mut msg_list, &bin_string, &output_serial_port);
+                write_to_device(&mut msg_list, &bin_string, &output_serial_port, !no_break_flag);
             }
         } else {
             if remove_file(&binary_file_name).is_ok() {
@@ -560,6 +561,13 @@ pub fn set_matches() -> Command {
                 .conflicts_with("monitor")
                 .help("File containing list of test .kla files to assemble and verify sequentially"),
         )
+        .arg(
+            Arg::new("no_break")
+                .short('n')
+                .long("no-break")
+                .action(ArgAction::SetTrue)
+                .help("Skip UART break signal and send 'S' instead (for testing CPU without break)"),
+        )
 }
 
 /// Writes the binary file.
@@ -584,9 +592,9 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
 /// Sends the resultant code on the serial device defined if no errors were found.
 #[inline]
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str) {
+pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str, send_break: bool) {
     if msg_list.number_by_type(&MessageType::Error) == 0 {
-        let write_result = write_to_board(bin_string, output_serial_port, msg_list);
+        let write_result = write_to_board(bin_string, output_serial_port, send_break, msg_list);
         match write_result {
             Ok(()) => {
                 msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
@@ -619,6 +627,7 @@ pub fn run_test_mode(
     output_serial_port: &str,
     input_file_name: &str,
     test_timeout: u64,
+    send_break: bool,
     start_time: NaiveTime,
 ) -> Result<(), i32> {
     // Parse expected values from the raw source file
@@ -649,7 +658,7 @@ pub fn run_test_mode(
     );
 
     // Send to board and keep port open
-    let port = match write_to_board_keep_port(bin_string, output_serial_port, msg_list) {
+    let port = match write_to_board_keep_port(bin_string, output_serial_port, send_break, msg_list) {
         Ok(port) => {
             msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
             port
@@ -810,6 +819,7 @@ pub fn run_test_list(
     list_file: &str,
     output_serial_port: &str,
     test_timeout: u64,
+    send_break: bool,
     msg_list: &mut MsgList,
 ) -> Result<(), i32> {
     if output_serial_port.is_empty() {
@@ -890,7 +900,7 @@ pub fn run_test_list(
         }
 
         // Send to board and keep port open
-        let port = match write_to_board_keep_port(&bin_string, output_serial_port, &mut test_msg_list) {
+        let port = match write_to_board_keep_port(&bin_string, output_serial_port, send_break, &mut test_msg_list) {
             Ok(port) => port,
             Err(err) => {
                 println!("  SKIP: serial port error \"{err}\"");
