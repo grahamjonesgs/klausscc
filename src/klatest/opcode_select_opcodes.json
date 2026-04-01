@@ -208,6 +208,14 @@
     "variables": 0
   },
   {
+    "comment": "R Bitwise NOT register",
+    "hex_code": "0000098?",
+    "registers": 1,
+    "section": "",
+    "text_name": "NOTR",
+    "variables": 0
+  },
+  {
     "comment": "RV Set bit N in register",
     "hex_code": "00000A0?",
     "registers": 1,
@@ -576,11 +584,43 @@
     "variables": 1
   },
   {
-    "comment": "V Jump if greater-or-equal",
+    "comment": "V Jump if greater-or-equal (signed)",
     "hex_code": "00001018",
     "registers": 0,
     "section": "",
     "text_name": "JMPGE",
+    "variables": 1
+  },
+  {
+    "comment": "V Jump if unsigned less-than",
+    "hex_code": "00001019",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPULT",
+    "variables": 1
+  },
+  {
+    "comment": "V Jump if unsigned less-or-equal",
+    "hex_code": "0000101A",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPULE",
+    "variables": 1
+  },
+  {
+    "comment": "V Jump if unsigned greater-than",
+    "hex_code": "0000101B",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPUGT",
+    "variables": 1
+  },
+  {
+    "comment": "V Jump if unsigned greater-or-equal",
+    "hex_code": "0000101C",
+    "registers": 0,
+    "section": "",
+    "text_name": "JMPUGE",
     "variables": 1
   },
   {

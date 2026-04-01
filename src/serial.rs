@@ -62,23 +62,25 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
 /// Lists all ports, checks if ISB and possible and returns some last one or none.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn find_possible_port() -> Option<String> {
-    let mut suggested_port: Option<String> = None;
     let available_ports = serialport::available_ports();
     match available_ports {
-        Err(_) => {
-            return None;
-        }
+        Err(_) => None,
         Ok(ports) => {
-            for port in ports {
-                if let SerialPortType::UsbPort(info) = port.port_type {
-                    if check_usb_serial_possible(&info) {
-                        suggested_port = Some(port.port_name.clone());
+            let mut matching: Vec<String> = ports
+                .into_iter()
+                .filter_map(|port| {
+                    if let SerialPortType::UsbPort(info) = port.port_type {
+                        if check_usb_serial_possible(&info) {
+                            return Some(port.port_name);
+                        }
                     }
-                }
-            }
+                    None
+                })
+                .collect();
+            matching.sort();
+            matching.into_iter().last()
         }
     }
-    suggested_port
 }
 
 /// Return port from port name.

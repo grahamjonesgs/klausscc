@@ -128,6 +128,7 @@ task t_opcode_select;
          32'h0000_095?: t_zero_extend_byte;                    // ZEXTB R Zero extend byte to 32 bits
          32'h0000_096?: t_zero_extend_half;                    // ZEXTH R Zero extend halfword to 32 bits
          32'h0000_097?: t_byte_swap;                           // BSWAP R Byte swap (endian conversion)
+         32'h0000_098?: t_not_reg;                             // NOTR R Bitwise NOT register
 
          //=====================================================================
          // Bit manipulation by immediate 0A0x-0AFx
@@ -194,7 +195,11 @@ task t_opcode_select;
          32'h0000_1015: t_cond_jump(w_var1, r_less_flag);      // JMPLT V Jump if less-than (signed)
          32'h0000_1016: t_cond_jump(w_var1, r_less_flag | r_equal_flag);   // JMPLE V Jump if less-or-equal
          32'h0000_1017: t_cond_jump(w_var1, !r_less_flag & !r_equal_flag); // JMPGT V Jump if greater-than
-         32'h0000_1018: t_cond_jump(w_var1, !r_less_flag);     // JMPGE V Jump if greater-or-equal
+         32'h0000_1018: t_cond_jump(w_var1, !r_less_flag);                      // JMPGE V Jump if greater-or-equal (signed)
+         32'h0000_1019: t_cond_jump(w_var1, r_ult_flag);                         // JMPULT V Jump if unsigned less-than
+         32'h0000_101A: t_cond_jump(w_var1, r_ult_flag | r_equal_flag);          // JMPULE V Jump if unsigned less-or-equal
+         32'h0000_101B: t_cond_jump(w_var1, !r_ult_flag & !r_equal_flag);        // JMPUGT V Jump if unsigned greater-than
+         32'h0000_101C: t_cond_jump(w_var1, !r_ult_flag);                        // JMPUGE V Jump if unsigned greater-or-equal
          32'h0000_102?: t_jump_reg;                             // JMPR R Jump to address in register
 
          //=====================================================================

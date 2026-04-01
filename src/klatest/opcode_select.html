@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 31/03/2026 11:02<h2>Opcode Table</h2>
+Created 01/04/2026 09:42<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -205,6 +205,13 @@ Created 31/03/2026 11:02<h2>Opcode Table</h2>
     <td>0</td>
     <td>1</td>
     <td>R Byte swap (endian conversion)</td>
+</tr>
+<tr>
+    <td>NOTR</td>
+    <td>0000098?</td>
+    <td>0</td>
+    <td>1</td>
+    <td>R Bitwise NOT register</td>
 </tr>
 <tr>
     <td>BSET</td>
@@ -533,7 +540,35 @@ Created 31/03/2026 11:02<h2>Opcode Table</h2>
     <td>00001018</td>
     <td>1</td>
     <td>0</td>
-    <td>V Jump if greater-or-equal</td>
+    <td>V Jump if greater-or-equal (signed)</td>
+</tr>
+<tr>
+    <td>JMPULT</td>
+    <td>00001019</td>
+    <td>1</td>
+    <td>0</td>
+    <td>V Jump if unsigned less-than</td>
+</tr>
+<tr>
+    <td>JMPULE</td>
+    <td>0000101A</td>
+    <td>1</td>
+    <td>0</td>
+    <td>V Jump if unsigned less-or-equal</td>
+</tr>
+<tr>
+    <td>JMPUGT</td>
+    <td>0000101B</td>
+    <td>1</td>
+    <td>0</td>
+    <td>V Jump if unsigned greater-than</td>
+</tr>
+<tr>
+    <td>JMPUGE</td>
+    <td>0000101C</td>
+    <td>1</td>
+    <td>0</td>
+    <td>V Jump if unsigned greater-or-equal</td>
 </tr>
 <tr>
     <td>JMPR</td>
