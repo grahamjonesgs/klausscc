@@ -83,6 +83,7 @@ pub fn find_possible_port() -> Option<String> {
     }
 }
 
+
 /// Return port from port name.
 ///
 /// If port name is `AUTO_SERIAL` then return the first USB serial port found.
@@ -283,6 +284,22 @@ pub fn write_to_board(
     Ok(())
 }
 
+/// Print bytes to stdout, optionally showing each byte as hex alongside the character.
+#[allow(clippy::print_stdout, reason = "Printing to stdout is required for serial monitor output")]
+fn print_bytes(data: &[u8], debug: bool) {
+    if debug {
+        for &b in data {
+            if b.is_ascii_graphic() || b == b' ' {
+                print!("{:02X}('{}') ", b, char::from(b));
+            } else {
+                print!("{:02X} ", b);
+            }
+        }
+    } else {
+        print!("{}", String::from_utf8_lossy(data));
+    }
+}
+
 /// Monitor serial port for incoming UART data from the FPGA board.
 ///
 /// Continuously reads from the serial port and prints received data to stdout.
@@ -290,9 +307,9 @@ pub fn write_to_board(
 #[allow(clippy::print_stdout, reason = "Printing to stdout is required for serial monitor output")]
 #[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub fn monitor_serial(port_name: &str, msg_list: &mut MsgList) -> Result<(), Error> {
+pub fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
     let port = return_port(port_name, msg_list)?;
-    monitor_serial_port(port, msg_list)
+    monitor_serial_port(port, debug, msg_list)
 }
 
 /// Monitor an already-open serial port for incoming UART data.
@@ -302,7 +319,7 @@ pub fn monitor_serial(port_name: &str, msg_list: &mut MsgList) -> Result<(), Err
 #[allow(clippy::print_stdout, reason = "Printing to stdout is required for serial monitor output")]
 #[allow(clippy::question_mark_used, reason = "? operator is idiomatic for propagating errors")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList) -> Result<(), Error> {
+pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
     port.set_timeout(Duration::from_millis(500))?;
 
     let running = Arc::new(AtomicBool::new(true));
@@ -319,22 +336,47 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList
         );
     }
 
+    // Flush the OS-level stdin buffer, then drain the crossterm event queue.
+    // Both are needed: tcflush clears bytes already in the kernel buffer
+    // (e.g. a Ctrl+Z from a previous run), the poll loop clears anything
+    // crossterm has already read from that buffer into its own queue.
+    {
+        use nix::sys::termios::{FlushArg, tcflush};
+        let stdin_fd = unsafe { std::os::unix::io::BorrowedFd::borrow_raw(0) };
+        let _ = tcflush(stdin_fd, FlushArg::TCIFLUSH);
+    }
+    while crossterm::event::poll(Duration::ZERO).unwrap_or(false) {
+        let _ = crossterm::event::read();
+    }
+
     // Clone the port so the stdin thread can write while the main loop reads.
     match port.try_clone().map_err(|e| Error::other(e.to_string())) {
         Ok(mut write_port) => {
             thread::spawn(move || {
-                let stdin = io::stdin();
-                let mut stdin_lock = stdin.lock();
-                let mut buf = [0u8; 1];
+                use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
                 while running_stdin.load(Ordering::Relaxed) {
-                    match stdin_lock.read(&mut buf) {
-                        Ok(1) => {
-                            if buf[0] == 0x03 {
-                                // Ctrl+C in raw mode
-                                running_stdin.store(false, Ordering::Relaxed);
-                                break;
+                    // Poll with a short timeout so we can check `running` regularly.
+                    match event::poll(Duration::from_millis(100)) {
+                        Ok(true) => {
+                            if let Ok(Event::Key(KeyEvent { code, modifiers, .. })) = event::read() {
+                                let byte: Option<u8> = match code {
+                                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                                        running_stdin.store(false, Ordering::Relaxed);
+                                        break;
+                                    }
+                                    KeyCode::Char(c) if modifiers.contains(KeyModifiers::CONTROL) => {
+                                        // Convert Ctrl+<letter> to its control code (e.g. Ctrl+Z -> 0x1A)
+                                        c.to_ascii_lowercase().try_into().ok().map(|b: u8| b & 0x1F)
+                                    }
+                                    KeyCode::Char(c) => c.encode_utf8(&mut [0u8; 4]).bytes().next(),
+                                    KeyCode::Enter => Some(b'\r'),
+                                    KeyCode::Backspace => Some(0x08),
+                                    _ => None,
+                                };
+                                if let Some(b) = byte {
+                                    let _ = write_port.write_all(&[b]);
+                                }
                             }
-                            let _ = write_port.write_all(&buf);
                         }
                         _ => {}
                     }
@@ -353,15 +395,23 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList
 
     println!("Monitoring serial port (Ctrl+C to stop)...\r");
 
-    let mut buffer = [0_u8; 1024];
-    while running.load(Ordering::Relaxed) {
-        match port.read(&mut buffer[..]) {
+    let mut read_buf = [0_u8; 1024];
+    let mut halt_received = false;
+
+    'monitor: while running.load(Ordering::Relaxed) {
+        match port.read(&mut read_buf[..]) {
             Ok(bytes_read) => {
-                if bytes_read > 0 {
-                    let text = String::from_utf8_lossy(buffer.get(..bytes_read).unwrap_or(&[]));
-                    print!("{text}");
+                let data = read_buf.get(..bytes_read).unwrap_or(&[]);
+                // A UART break arrives as 0x00 (NUL).  Since the CPU only ever
+                // sends ASCII text, 0x00 cannot appear in normal output.
+                if let Some(pos) = data.iter().position(|&b| b == 0x00) {
+                    print_bytes(&data[..pos], debug);
                     io::stdout().flush().unwrap_or(());
+                    halt_received = true;
+                    break 'monitor;
                 }
+                print_bytes(data, debug);
+                io::stdout().flush().unwrap_or(());
             }
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
@@ -378,7 +428,11 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList
     }
 
     let _ = crossterm::terminal::disable_raw_mode();
-    println!("\r\nSerial monitor stopped.");
+    if halt_received {
+        println!("\r\nCPU halted.");
+    } else {
+        println!("\r\nSerial monitor stopped.");
+    }
     drop(port);
     Ok(())
 }

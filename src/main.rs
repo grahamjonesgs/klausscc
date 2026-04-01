@@ -79,6 +79,7 @@ fn main() -> Result<(), i32> {
     let monitor_flag = matches.get_flag("monitor");
     let test_flag = matches.get_flag("test");
     let no_break_flag = matches.get_flag("no_break");
+    let debug_flag = matches.get_flag("debug");
     let test_timeout: u64 = matches
         .get_one::<String>("test_timeout")
         .and_then(|timeout_str| timeout_str.parse().ok())
@@ -186,7 +187,7 @@ fn main() -> Result<(), i32> {
                         Ok(port) => {
                             msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
                             print_results(&msg_list, start_time);
-                            if let Err(err) = monitor_serial_port(port, &mut msg_list) {
+                            if let Err(err) = monitor_serial_port(port, debug_flag, &mut msg_list) {
                                 msg_list.push(
                                     format!("Serial monitor stopped: \"{err}\""),
                                     None,
@@ -243,7 +244,7 @@ fn main() -> Result<(), i32> {
             print_messages(&msg_list);
             return Err(1_i32);
         }
-        if let Err(err) = monitor_serial(&output_serial_port, &mut msg_list) {
+        if let Err(err) = monitor_serial(&output_serial_port, debug_flag, &mut msg_list) {
             msg_list.push(
                 format!("Serial monitor stopped: \"{err}\""),
                 None,
@@ -567,6 +568,13 @@ pub fn set_matches() -> Command {
                 .long("no-break")
                 .action(ArgAction::SetTrue)
                 .help("Skip UART break signal and send 'S' instead (for testing CPU without break)"),
+        )
+        .arg(
+            Arg::new("debug")
+                .short('d')
+                .long("debug")
+                .action(ArgAction::SetTrue)
+                .help("Print each received UART byte as hex alongside normal output"),
         )
 }
 
