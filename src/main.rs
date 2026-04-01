@@ -1030,7 +1030,7 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
                 "SETR A 0x2000000",
                 "SETSP A",
                 "SETR P 0",
-                "DELAYV 0x0500",
+                "DELAYV 0x100",
                 "CALL main:",
                 "HALT",
                 "",
