@@ -7,11 +7,15 @@
 //   _uart_tx_hex(val)    - print 32-bit value as 8 hex digits
 //   _uart_newline()      - print CR/LF
 //   _uart_tx_char(ch)    - print single ASCII character
+//   _uart_rx_char()      - blocking receive: wait for a byte, return it in M
+//   _uart_rx_char_nb()   - non-blocking receive: return byte if available, -1 if not
 //
 // Usage from C:
 //   extern void _uart_tx_hex(int val);
 //   extern void _uart_newline(void);
 //   extern void _uart_tx_char(int ch);
+//   extern int  _uart_rx_char(void);
+//   extern int  _uart_rx_char_nb(void);
 
 // ----------------------------------------------------------------
 // _uart_tx_hex: print register A as 8 hex digits
@@ -37,6 +41,30 @@ _uart_tx_char:
 SETR N #_CHAR_BUF
 MEMSETRR A N
 TXCHARMEMR N
+RET
+
+// ----------------------------------------------------------------
+// _uart_rx_char: blocking receive - wait until a byte arrives
+// Return: M = received byte
+// ----------------------------------------------------------------
+_uart_rx_char:
+RXRB M
+RET
+
+// ----------------------------------------------------------------
+// _uart_rx_char_nb: non-blocking receive
+// RXRNB sets zero_flag=1 and leaves M unchanged when FIFO is empty.
+// We test the flag here and return -1 as the no-data sentinel so
+// callers get a plain integer — no flag inspection needed from C.
+// Return: M = received byte, or -1 if no byte available
+// ----------------------------------------------------------------
+_uart_rx_char_nb:
+RXRNB M
+JMPZ _rxrnb_empty:
+RET
+_rxrnb_empty:
+SETR M 0
+NOTR M
 RET
 
 // Scratch buffer for putchar (1 word)

@@ -1024,8 +1024,6 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
                 "SETR P 0",
                 "DELAYV 0x0500",
                 "CALL main:",
-                "TXR M",
-                "NEWLINE",
                 "HALT",
                 "",
             ] {

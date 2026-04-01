@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use std::time::Instant;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
-use std::io::{self, Error, Write as _};
+use std::io::{self, Error, Read as _, Write as _};
 use std::sync::Arc;
 use std::thread;
 
@@ -306,20 +306,52 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList
     port.set_timeout(Duration::from_millis(500))?;
 
     let running = Arc::new(AtomicBool::new(true));
-    let running_clone = Arc::clone(&running);
+    let running_stdin = Arc::clone(&running);
 
-    if let Err(err) = ctrlc::set_handler(move || {
-        running_clone.store(false, Ordering::Relaxed);
-    }) {
+    // Raw mode sends each keystroke immediately without buffering and without
+    // the OS intercepting Ctrl+C as a signal, so we handle 0x03 manually below.
+    if let Err(err) = crossterm::terminal::enable_raw_mode() {
         msg_list.push(
-            format!("Failed to set Ctrl+C handler: \"{err}\""),
+            format!("Failed to enable raw terminal mode: \"{err}\""),
             None,
             None,
             MessageType::Warning,
         );
     }
 
-    println!("Monitoring serial port (Ctrl+C to stop)...");
+    // Clone the port so the stdin thread can write while the main loop reads.
+    match port.try_clone().map_err(|e| Error::other(e.to_string())) {
+        Ok(mut write_port) => {
+            thread::spawn(move || {
+                let stdin = io::stdin();
+                let mut stdin_lock = stdin.lock();
+                let mut buf = [0u8; 1];
+                while running_stdin.load(Ordering::Relaxed) {
+                    match stdin_lock.read(&mut buf) {
+                        Ok(1) => {
+                            if buf[0] == 0x03 {
+                                // Ctrl+C in raw mode
+                                running_stdin.store(false, Ordering::Relaxed);
+                                break;
+                            }
+                            let _ = write_port.write_all(&buf);
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        }
+        Err(err) => {
+            msg_list.push(
+                format!("Failed to clone serial port for input forwarding: \"{err}\""),
+                None,
+                None,
+                MessageType::Warning,
+            );
+        }
+    }
+
+    println!("Monitoring serial port (Ctrl+C to stop)...\r");
 
     let mut buffer = [0_u8; 1024];
     while running.load(Ordering::Relaxed) {
@@ -331,9 +363,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList
                     io::stdout().flush().unwrap_or(());
                 }
             }
-            Err(err) if err.kind() == io::ErrorKind::TimedOut => {
-                // Timeout is normal when no data is available, just continue
-            }
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
                 msg_list.push(
                     format!("Serial monitor error: \"{err}\""),
@@ -341,12 +371,14 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, msg_list: &mut MsgList
                     None,
                     MessageType::Error,
                 );
+                let _ = crossterm::terminal::disable_raw_mode();
                 return Err(err);
             }
         }
     }
 
-    println!("\nSerial monitor stopped.");
+    let _ = crossterm::terminal::disable_raw_mode();
+    println!("\r\nSerial monitor stopped.");
     drop(port);
     Ok(())
 }

@@ -250,6 +250,8 @@ task t_opcode_select;
          32'h0000_502?: t_tx_value_of_mem_at_reg;              // TXMEMR R Send value at memory of register
          32'h0000_503?: t_tx_char_from_reg_value;              // TXCHARMEMR R Send char at memory from register
          32'h0000_504?: t_tx_string_at_reg;                    // TXSTRMEMR R Send string at memory from register
+         32'h0000_505?: t_rx_blocking;                        // RXRB R Blocking receive byte into register
+         32'h0000_506?: t_rx_nonblocking;                     // RXRNB R Non-blocking receive byte into register (zero_flag=1 if empty)
 
          //=====================================================================
          // CPU Setting 6xxx
