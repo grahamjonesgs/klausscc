@@ -224,11 +224,7 @@ pub fn write_to_board_keep_port(
     if port.read(&mut read_buffer[..]).is_err() { //clear any old messages in buffer
     }
 
-    for byte in binary_output.as_bytes() {
-        let char_delay = Duration::from_micros(100);
-        thread::sleep(char_delay);
-        port.write_all(&[*byte])?;
-    }
+    port.write_all(binary_output.as_bytes())?;
 
     port.flush()?;
     let ret_msg_size = port.read(&mut read_buffer[..]).unwrap_or(0);

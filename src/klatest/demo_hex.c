@@ -66,7 +66,7 @@ int is_prime(int n) {
 
 int main() {
     int i, count, last;
-    print_str("Hello World");
+/*    print_str("Hello World\n"); */
 
     /* Basic arithmetic */
     print_result(6 * 7);           /* 0x2A = 42 */
