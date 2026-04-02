@@ -997,11 +997,41 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
     use std::path::Path;
     use std::process::Command;
 
-    // Run rcc to compile C to KLA
+    // Run cpprcc (preprocessor) piped into rcc, equivalent to:
+    //   cpprcc myprogram.c | rcc -target=klacpu
+    let cpprcc_output = Command::new("cpprcc").arg(c_file).output();
+    let preprocessed = match cpprcc_output {
+        Ok(out) if out.status.success() => out.stdout,
+        Ok(out) => {
+            msg_list.push(
+                format!("cpprcc failed for {c_file}: {}", String::from_utf8_lossy(&out.stderr)),
+                None, None, MessageType::Error,
+            );
+            return None;
+        }
+        Err(err) => {
+            msg_list.push(
+                format!("Failed to run cpprcc on {c_file}: \"{err}\""),
+                None, None, MessageType::Error,
+            );
+            return None;
+        }
+    };
+
     let rcc_output = Command::new("rcc")
         .arg("-target=klacpu")
-        .arg(c_file)
-        .output();
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write as _;
+            if let Some(stdin) = child.stdin.take() {
+                let mut stdin = stdin;
+                stdin.write_all(&preprocessed)?;
+            }
+            child.wait_with_output()
+        });
 
     match rcc_output {
         Ok(output) if output.status.success() => {
