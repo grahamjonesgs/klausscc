@@ -2,6 +2,11 @@ use crate::files::LineType;
 use crate::labels::label_name_from_string;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{return_opcode, Opcode, Pass2};
+
+/// Number of reserved words at the start of memory for the heap header.
+/// Word 0: heap_start (written by loader), Word 1: heap_end (written by loader),
+/// Word 2: reserved, Word 3: reserved. Code begins at word 4.
+pub const HEAP_HEADER_WORDS: u32 = 4;
 /// Find checksum.
 ///
 /// Calculates the checksum from the string of hex values, removing control characters.
@@ -76,9 +81,26 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
 
     output_string.push('S'); // Start character
 
+    // Word 0: heap_start placeholder — patched below once total program size is known
+    let heap_start_offset = output_string.len();
+    output_string.push_str("00000000");
+
+    // Words 1-3: reserved header words (heap_end, reserved, reserved)
+    for _ in 1..HEAP_HEADER_WORDS {
+        output_string.push_str("00000000");
+    }
+
     for pass in pass2 {
         output_string.push_str(&pass.opcode);
     }
+
+    // heap_start = first free word after the program = total words in binary
+    // output_string is 'S' + hex_chars, so hex_chars = len-1, words = (len-1)/8
+    #[allow(clippy::arithmetic_side_effects, reason = "Subtraction and division safe: string starts with 'S' so len >= 1")]
+    #[allow(clippy::integer_division, reason = "Integer division intentional: convert hex chars to 32-bit word count")]
+    let heap_start: u32 = ((output_string.len() - 1) / 8) as u32;
+    #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
+    output_string.replace_range(heap_start_offset..heap_start_offset + 8, &format!("{heap_start:08X}"));
 
     if pass2
         .iter()
@@ -561,7 +583,9 @@ mod tests {
         });
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
-        assert_eq!(bin_string, Some("S1234432100000001Z0010556AX".to_owned()));
+        // Word 0 is heap_start (set by assembler = total words in binary = 5),
+        // words 1-3 are reserved zeros; checksum reflects the updated word 0.
+        assert_eq!(bin_string, Some("S000000050000000000000000000000001234432100000001Z00105577X".to_owned()));
     }
 
     #[test]

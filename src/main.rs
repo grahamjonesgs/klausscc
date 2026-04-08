@@ -28,7 +28,7 @@ mod serial;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
-use helper::{create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments};
+use helper::{create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
@@ -278,7 +278,7 @@ fn main() -> Result<(), i32> {
 #[allow(clippy::indexing_slicing, reason = "Indices are guarded by parts.len() >= 3 check above")]
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
-    let mut program_counter: u32 = 0;
+    let mut program_counter: u32 = HEAP_HEADER_WORDS; // Words 0-3 reserved for heap header
     let mut data_pass0: Vec<Pass0> = Vec::new();
     let mut in_data_section = false;
 
@@ -1213,13 +1213,15 @@ mod tests {
             },
         ];
         let pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(pass1.first().unwrap_or_default().program_counter, 0);
-        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 3);
-        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 4);
-        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 5);
-        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 6);
-        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 7);
-        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 9);
+        // PC starts at HEAP_HEADER_WORDS (4); #DATA1 items are kept inline (not deferred)
+        // when no .data section is active, so they consume PC between code instructions.
+        assert_eq!(pass1.first().unwrap_or_default().program_counter, 4);  // MOV
+        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 7);   // PUSH (+3 for MOV)
+        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 8);   // RET
+        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 9);   // #DATA1 0x2 (inline)
+        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 11);  // RET (+2 for data)
+        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 12);  // #DATA1 "HELLO" (inline)
+        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 15);  // RET (+3 for HELLO)
     }
 
     #[test]

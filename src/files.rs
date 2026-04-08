@@ -548,6 +548,33 @@ pub fn write_code_output_file(
         None,
         MessageType::Information,
     );
+    // Compute heap_start = first free word after the program
+    // = max(program_counter + word_count) across all code/data entries
+    #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars to word count")]
+    let heap_start: u32 = pass2
+        .iter()
+        .filter(|p| p.line_type == LineType::Opcode || p.line_type == LineType::Data)
+        .map(|p| p.program_counter.saturating_add(p.opcode.len() as u32 / 8))
+        .max()
+        .unwrap_or(crate::helper::HEAP_HEADER_WORDS);
+
+    // Emit the 4 reserved heap header words before the assembled code
+    let heap_header = [
+        (format!("{heap_start:08X}"), "heap_start  (set by assembler)"),
+        ("00000000".to_owned(),       "heap_end    (reserved)"),
+        ("00000000".to_owned(),       "(reserved)"),
+        ("00000000".to_owned(),       "(reserved)"),
+    ];
+    for (i, (value, comment)) in heap_header.iter().enumerate() {
+        match file.write_all(
+            format!("0x{:08X}: {value:<17} -- {comment}\n", i).as_bytes(),
+        ) {
+            Ok(()) => {}
+            #[cfg(not(tarpaulin_include))]
+            Err(err) => return Err(err),
+        }
+    }
+
     #[allow(clippy::integer_division, reason = "Integer division is intentional and safe in this context")]
     #[allow(clippy::cast_possible_truncation, reason = "Casting is intentional and safe in this context")]
     #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional and safe in this context")]
@@ -1239,7 +1266,8 @@ mod test {
         result_write.unwrap();
 
         let buffer = fs::read_to_string(file_name1).unwrap();
-        assert_eq!(buffer.lines().count(), 11);
-        assert_eq!(buffer, "0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678          -- #DATA1 \"HELLO\"\n0x00000006: FFFFFFFF          -- #DATA1 \"HELLO\"\n0x00000007: DDDDDDDD          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
+        // 4 header lines prepended; word 0 = heap_start computed by assembler (= 8 here)
+        assert_eq!(buffer.lines().count(), 15);
+        assert_eq!(buffer, "0x00000000: 00000008          -- heap_start  (set by assembler)\n0x00000001: 00000000          -- heap_end    (reserved)\n0x00000002: 00000000          -- (reserved)\n0x00000003: 00000000          -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678          -- #DATA1 \"HELLO\"\n0x00000006: FFFFFFFF          -- #DATA1 \"HELLO\"\n0x00000007: DDDDDDDD          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
     }
 }
