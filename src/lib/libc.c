@@ -1,7 +1,7 @@
 /* libc.c - Minimal C library for FPGA_CPU_32_DDR_cache
  *
- * All types are 32-bit words (CHAR_BIT=32, sizeof(int)=1).
- * No floating point. No file I/O. Output via UART only.
+ * Byte-addressed CPU. sizeof(char)=1, sizeof(int)=sizeof(void*)=4.
+ * CHAR_BIT=8. No floating point. No file I/O. Output via UART only.
  *
  * Compile with: build/rcc -target=klacpu lib/libc.c > lib/libc.asm
  */
@@ -16,7 +16,7 @@ extern int  _uart_rx_char_nb(void);
 /* Forward declarations */
 void print_unsigned(unsigned n);
 void _print_neg(int neg, int orig);
-void print_str(int *s);
+void print_str(char *s);
 
 /* =============================================================
  * Character output
@@ -38,7 +38,7 @@ int getchar_nb(void) {
     return _uart_rx_char_nb();
 }
 
-void puts(int *s) {
+void puts(char *s) {
     while (*s != 0) {
         putchar(*s);
         s = s + 1;
@@ -47,7 +47,7 @@ void puts(int *s) {
 }
 
 /* Print a string without trailing newline */
-void print_str(int *s) {
+void print_str(char *s) {
     while (*s != 0) {
         putchar(*s);
         s = s + 1;
@@ -117,8 +117,8 @@ void newline(void) {
  * String operations
  * ============================================================= */
 
-/* String length (word-sized characters) */
-int strlen(int *s) {
+/* String length (byte characters) */
+int strlen(char *s) {
     int len;
     len = 0;
     while (*s != 0) {
@@ -129,7 +129,7 @@ int strlen(int *s) {
 }
 
 /* String compare: returns 0 if equal, <0 or >0 otherwise */
-int strcmp(int *a, int *b) {
+int strcmp(char *a, char *b) {
     while (*a != 0 && *a == *b) {
         a = a + 1;
         b = b + 1;
@@ -138,8 +138,8 @@ int strcmp(int *a, int *b) {
 }
 
 /* String copy: copies src to dst, returns dst */
-int *strcpy(int *dst, int *src) {
-    int *ret;
+char *strcpy(char *dst, char *src) {
+    char *ret;
     ret = dst;
     while (*src != 0) {
         *dst = *src;
@@ -154,9 +154,9 @@ int *strcpy(int *dst, int *src) {
  * Memory operations
  * ============================================================= */
 
-/* Set n words to value c */
-void *memset(int *dst, int c, int n) {
-    int *p;
+/* Set n bytes to value c */
+void *memset(char *dst, int c, int n) {
+    char *p;
     p = dst;
     while (n > 0) {
         *p = c;
@@ -166,10 +166,10 @@ void *memset(int *dst, int c, int n) {
     return dst;
 }
 
-/* Copy n words from src to dst */
-void *memcpy(int *dst, int *src, int n) {
-    int *d;
-    int *s;
+/* Copy n bytes from src to dst */
+void *memcpy(char *dst, char *src, int n) {
+    char *d;
+    char *s;
     d = dst;
     s = src;
     while (n > 0) {
@@ -214,39 +214,34 @@ void swap(int *a, int *b) {
  * Heap management - Free-list allocator
  *
  * The assembler writes four 32-bit words at the very start of
- * memory (addresses 0-3).  Because this CPU is word-addressed
- * (CHAR_BIT=32, no byte addressing), each "slot" is one full
- * 32-bit word at its own address — they are NOT four 8-bit bytes
- * packed into a single 32-bit word:
+ * memory (byte addresses 0, 4, 8, 12):
  *
- *   Address 0: heap_start — first heap word (written by assembler,
- *                           = first word after the assembled program)
- *   Address 1: heap_top   — current high-water mark (init'd and
- *                           updated here by malloc as heap grows)
- *   Address 2: reserved
- *   Address 3: reserved
- *   Address 4+: program code / data
- *   heap_start .. heap_top: live heap (grows upward)
- *   0x1FFFFFF downward:     hardware stack
+ *   [0]  heap_start — byte address of first heap word (set by assembler)
+ *   [4]  heap_top   — current high-water mark (byte address)
+ *   [8]  reserved
+ *   [12] reserved
  *
- * Each heap block has a 3-word header followed by the user data:
+ * malloc() accepts a byte count and rounds up to the nearest 4-byte word.
+ * All block pointers and size fields are in 4-byte WORDS internally.
+ *
+ * Each heap block has a 3-word (12-byte) header followed by user data:
  *
  *   blk[0]  size — user-data words in this block (header NOT counted)
  *   blk[1]  free — 1 = free, 0 = allocated
- *   blk[2]  next — next free-block address (as int), 0 = end of list
+ *   blk[2]  next — next free-block pointer (as int byte addr), 0 = end
  *
  * The free list is kept sorted by address so that adjacent free
  * blocks can be coalesced in O(1) on every free().
  * ============================================================= */
 
-#define MALLOC_HDRSIZE  3       /* header words per block            */
-#define MALLOC_MIN_SPLIT 1      /* min user words to create a split  */
+#define MALLOC_HDRSIZE   3    /* header words per block (12 bytes)    */
+#define MALLOC_MIN_SPLIT 1    /* min user words to create a split     */
 
 static int  _heap_inited = 0;
-static int *_free_head   = 0;   /* head of free list; 0 = empty      */
+static int *_free_head   = 0; /* head of free list; 0 = empty         */
 
 /* _heap_init: called once on the first malloc/calloc/free.
- * Reads heap_start from mem[0] and primes heap_top in mem[1]. */
+ * Reads heap_start from [0] and primes heap_top in [4]. */
 static void _heap_init(void) {
     int *mem;
     mem          = (int *)0;
@@ -255,7 +250,8 @@ static void _heap_init(void) {
     _heap_inited = 1;
 }
 
-/* malloc: allocate 'size' words from the heap.
+/* malloc: allocate 'size' bytes from the heap.
+ * Internally rounds up to the nearest 4-byte word.
  * Returns a pointer to the usable data area, or 0 on failure.
  * Uses first-fit; splits the block when the surplus is large enough. */
 void *malloc(int size) {
@@ -264,28 +260,32 @@ void *malloc(int size) {
     int *split;
     int *blk;
     int *mem;
+    int  words;
     int  total;
 
     if (!_heap_inited) _heap_init();
     if (size <= 0) return 0;
 
+    /* Round byte size up to whole words */
+    words = (size + 3) / 4;
+
     /* --- First-fit search through the address-sorted free list --- */
     prev = 0;
     curr = _free_head;
     while (curr != 0) {
-        if (curr[0] >= size) {
+        if (curr[0] >= words) {
             /* Found a usable block */
-            if (curr[0] >= size + MALLOC_HDRSIZE + MALLOC_MIN_SPLIT) {
+            if (curr[0] >= words + MALLOC_HDRSIZE + MALLOC_MIN_SPLIT) {
                 /* Split: carve a new free block from the tail */
-                split    = curr + MALLOC_HDRSIZE + size;
-                split[0] = curr[0] - size - MALLOC_HDRSIZE;
+                split    = curr + MALLOC_HDRSIZE + words;
+                split[0] = curr[0] - words - MALLOC_HDRSIZE;
                 split[1] = 1;           /* free              */
                 split[2] = curr[2];     /* inherit next ptr  */
                 if (prev != 0)
                     prev[2] = (int)split;
                 else
                     _free_head = split;
-                curr[0] = size;
+                curr[0] = words;
             } else {
                 /* Use the whole block: remove from free list */
                 if (prev != 0)
@@ -303,11 +303,11 @@ void *malloc(int size) {
 
     /* --- No suitable free block: extend the heap --- */
     mem   = (int *)0;
-    total = MALLOC_HDRSIZE + size;
-    blk   = (int *)mem[1];          /* current heap_top = new block   */
-    mem[1] = (int)(blk + total);    /* advance heap_top               */
+    total = MALLOC_HDRSIZE + words;
+    blk   = (int *)mem[1];              /* current heap_top = new block   */
+    mem[1] = (int)(blk + total);        /* advance heap_top by total words */
 
-    blk[0] = size;
+    blk[0] = words;
     blk[1] = 0;     /* allocated */
     blk[2] = 0;
     return (void *)(blk + MALLOC_HDRSIZE);
@@ -346,7 +346,6 @@ void free(void *ptr) {
         if (adj == curr) {
             blk[0] = blk[0] + MALLOC_HDRSIZE + curr[0];
             blk[2] = curr[2];
-            /* curr is now absorbed; blk is the merged block */
         }
     }
 
@@ -360,7 +359,7 @@ void free(void *ptr) {
     }
 }
 
-/* calloc: allocate nmemb*size words, zero-initialised.
+/* calloc: allocate nmemb*size bytes, zero-initialised.
  * Returns 0 on overflow or allocation failure. */
 void *calloc(int nmemb, int size) {
     int   total;
@@ -370,7 +369,7 @@ void *calloc(int nmemb, int size) {
     total = nmemb * size;
     ptr   = malloc(total);
     if (ptr != 0)
-        memset((int *)ptr, 0, total);
+        memset((char *)ptr, 0, total);
     return ptr;
 }
 
@@ -378,27 +377,30 @@ void *calloc(int nmemb, int size) {
  *   ptr == 0          => behaves like malloc(new_size)
  *   new_size == 0     => behaves like free(ptr), returns 0
  *   new_size <= old   => returns ptr unchanged (no shrink)
- * Returns the (possibly new) data pointer, or 0 on failure. */
+ * Returns the (possibly new) data pointer, or 0 on failure.
+ * old_size and new_size are in bytes. */
 void *realloc(void *ptr, int new_size) {
     int  *blk;
-    int   old_size;
+    int   old_words;
+    int   new_words;
     void *new_ptr;
 
     if (ptr == 0)       return malloc(new_size);
     if (new_size <= 0)  { free(ptr); return 0; }
 
-    blk      = (int *)ptr - MALLOC_HDRSIZE;
-    old_size = blk[0];
-    if (new_size <= old_size) return ptr;   /* already fits */
+    blk       = (int *)ptr - MALLOC_HDRSIZE;
+    old_words = blk[0];
+    new_words = (new_size + 3) / 4;
+    if (new_words <= old_words) return ptr;   /* already fits */
 
     new_ptr = malloc(new_size);
     if (new_ptr == 0) return 0;
-    memcpy((int *)new_ptr, (int *)ptr, old_size);
+    memcpy((char *)new_ptr, (char *)ptr, old_words * 4);
     free(ptr);
     return new_ptr;
 }
 
-/* heap_words_used: count words currently allocated (not in free blocks).
+/* heap_words_used: count 4-byte words currently allocated.
  * Walks all blocks linearly from heap_start to heap_top. */
 int heap_words_used(void) {
     int *mem;
@@ -407,7 +409,7 @@ int heap_words_used(void) {
 
     if (!_heap_inited) return 0;
     mem  = (int *)0;
-    blk  = (int *)mem[0];   /* heap_start */
+    blk  = (int *)mem[0];   /* heap_start byte address */
     used = 0;
     while (blk < (int *)mem[1]) {
         if (blk[1] == 0)    /* allocated */
@@ -417,7 +419,7 @@ int heap_words_used(void) {
     return used;
 }
 
-/* heap_words_free: count words sitting in free blocks. */
+/* heap_words_free: count 4-byte words sitting in free blocks. */
 int heap_words_free(void) {
     int *curr;
     int  free_words;

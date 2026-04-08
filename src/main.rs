@@ -278,7 +278,7 @@ fn main() -> Result<(), i32> {
 #[allow(clippy::indexing_slicing, reason = "Indices are guarded by parts.len() >= 3 check above")]
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
-    let mut program_counter: u32 = HEAP_HEADER_WORDS; // Words 0-3 reserved for heap header
+    let mut program_counter: u32 = HEAP_HEADER_WORDS * 4; // Byte address: 4 header words × 4 bytes each
     let mut data_pass0: Vec<Pass0> = Vec::new();
     let mut in_data_section = false;
 
@@ -345,7 +345,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             let num_args = num_arguments(&mut oplist, &strip_comments(&pass.input_text_line));
             #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct program counter calculation")]
             if let Some(arguments) = num_args {
-                program_counter = program_counter + arguments + 1;
+                program_counter = program_counter + (arguments + 1) * 4; // Each word = 4 bytes
             }
         }
 
@@ -358,9 +358,8 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
                 // This preserves label semantics for C compiler output data blocks.
                 //#[allow(clippy::arithmetic_side_effects, reason = "Correct program counter adjustment for inline data")]
                 #[allow(clippy::arithmetic_side_effects, reason = "Integer counter increment is intentional")]
-                #[allow(clippy::integer_division, reason = "Byte-to-word division by 8 is intentional")]
-                #[allow(clippy::integer_division_remainder_used, reason = "Byte-to-word division by 8 is intentional")]
-                { program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, pass.file_name.clone()) / 8; }
+                #[allow(clippy::integer_division, reason = "hex_chars/2 = bytes: each word is 8 hex chars and 4 bytes")]
+                { program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, pass.file_name.clone()) / 2; }
             }
         }
     }
@@ -378,7 +377,8 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         });
 
         if lt == LineType::Data {
-            program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, data_pass.file_name) / 8;
+            #[allow(clippy::integer_division, reason = "hex_chars/2 = bytes: each word is 8 hex chars and 4 bytes")]
+            { program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, data_pass.file_name) / 2; }
         }
     }
     pass1
@@ -1213,15 +1213,15 @@ mod tests {
             },
         ];
         let pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        // PC starts at HEAP_HEADER_WORDS (4); #DATA1 items are kept inline (not deferred)
-        // when no .data section is active, so they consume PC between code instructions.
-        assert_eq!(pass1.first().unwrap_or_default().program_counter, 4);  // MOV
-        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 7);   // PUSH (+3 for MOV)
-        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 8);   // RET
-        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 9);   // #DATA1 0x2 (inline)
-        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 11);  // RET (+2 for data)
-        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 12);  // #DATA1 "HELLO" (inline)
-        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 15);  // RET (+3 for HELLO)
+        // Byte addressing: PC starts at 16 (4 header words × 4 bytes).
+        // Each instruction word = 4 bytes; data bytes = word_count × 4.
+        assert_eq!(pass1.first().unwrap_or_default().program_counter, 16); // MOV
+        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 28);  // PUSH (MOV=3 words×4=12)
+        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 32);  // RET  (+4)
+        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 36);  // #DATA1 0x2 inline (+4)
+        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 44);  // RET  (2 words×4=8)
+        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 48);  // #DATA1 "HELLO" inline (+4)
+        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 60);  // RET  (3 words×4=12)
     }
 
     #[test]

@@ -128,6 +128,7 @@ task t_opcode_select;
          32'h0000_095?: t_zero_extend_byte;                    // ZEXTB R Zero extend byte to 32 bits
          32'h0000_096?: t_zero_extend_half;                    // ZEXTH R Zero extend halfword to 32 bits
          32'h0000_097?: t_byte_swap;                           // BSWAP R Byte swap (endian conversion)
+         32'h0000_098?: t_not_reg;                             // NOTR R Bitwise NOT register
 
          //=====================================================================
          // Bit manipulation by immediate 0A0x-0AFx
@@ -194,7 +195,11 @@ task t_opcode_select;
          32'h0000_1015: t_cond_jump(w_var1, r_less_flag);      // JMPLT V Jump if less-than (signed)
          32'h0000_1016: t_cond_jump(w_var1, r_less_flag | r_equal_flag);   // JMPLE V Jump if less-or-equal
          32'h0000_1017: t_cond_jump(w_var1, !r_less_flag & !r_equal_flag); // JMPGT V Jump if greater-than
-         32'h0000_1018: t_cond_jump(w_var1, !r_less_flag);     // JMPGE V Jump if greater-or-equal
+         32'h0000_1018: t_cond_jump(w_var1, !r_less_flag);                      // JMPGE V Jump if greater-or-equal (signed)
+         32'h0000_1019: t_cond_jump(w_var1, r_ult_flag);                         // JMPULT V Jump if unsigned less-than
+         32'h0000_101A: t_cond_jump(w_var1, r_ult_flag | r_equal_flag);          // JMPULE V Jump if unsigned less-or-equal
+         32'h0000_101B: t_cond_jump(w_var1, !r_ult_flag & !r_equal_flag);        // JMPUGT V Jump if unsigned greater-than
+         32'h0000_101C: t_cond_jump(w_var1, !r_ult_flag);                        // JMPUGE V Jump if unsigned greater-or-equal
          32'h0000_102?: t_jump_reg;                             // JMPR R Jump to address in register
 
          //=====================================================================
@@ -245,6 +250,8 @@ task t_opcode_select;
          32'h0000_502?: t_tx_value_of_mem_at_reg;              // TXMEMR R Send value at memory of register
          32'h0000_503?: t_tx_char_from_reg_value;              // TXCHARMEMR R Send char at memory from register
          32'h0000_504?: t_tx_string_at_reg;                    // TXSTRMEMR R Send string at memory from register
+         32'h0000_505?: t_rx_blocking;                        // RXRB R Blocking receive byte into register
+         32'h0000_506?: t_rx_nonblocking;                     // RXRNB R Non-blocking receive byte into register (zero_flag=1 if empty)
 
          //=====================================================================
          // CPU Setting 6xxx
@@ -259,6 +266,12 @@ task t_opcode_select;
          32'h0000_720?: t_set_mem_from_value_reg(w_var1);      // MEMSETR RV Set memory from value
          32'h0000_721?: t_set_reg_from_mem_value(w_var1);      // MEMREADR RV Set register from memory at value
          32'h0000_73??: t_store_indexed_reg(w_var1);           // STIDXR RRV mem[second+reg[var1]]=first
+
+         //=====================================================================
+         // Byte memory access 74xx-75xx
+         //=====================================================================
+         32'h0000_74??: t_memset8;                              // MEMSET8 RR mem8[reg2]=reg1[7:0] (byte addr)
+         32'h0000_75??: t_memget8;                              // MEMGET8 RR reg1=zero_ext(mem8[reg2]) (byte addr)
 
          //=====================================================================
          // Other Fxxx

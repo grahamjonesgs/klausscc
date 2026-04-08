@@ -548,15 +548,15 @@ pub fn write_code_output_file(
         None,
         MessageType::Information,
     );
-    // Compute heap_start = first free word after the program
-    // = max(program_counter + word_count) across all code/data entries
-    #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars to word count")]
+    // Compute heap_start = first free byte after the program
+    // program_counter is already a byte address; opcode.len()/8 = words, *4 = bytes → /2 total
+    #[allow(clippy::integer_division, reason = "hex_chars/2 = bytes: each word is 8 hex chars and 4 bytes")]
     let heap_start: u32 = pass2
         .iter()
         .filter(|p| p.line_type == LineType::Opcode || p.line_type == LineType::Data)
-        .map(|p| p.program_counter.saturating_add(p.opcode.len() as u32 / 8))
+        .map(|p| p.program_counter.saturating_add(p.opcode.len() as u32 / 2))
         .max()
-        .unwrap_or(crate::helper::HEAP_HEADER_WORDS);
+        .unwrap_or(crate::helper::HEAP_HEADER_WORDS * 4);
 
     // Emit the 4 reserved heap header words before the assembled code
     let heap_header = [
@@ -1266,8 +1266,8 @@ mod test {
         result_write.unwrap();
 
         let buffer = fs::read_to_string(file_name1).unwrap();
-        // 4 header lines prepended; word 0 = heap_start computed by assembler (= 8 here)
+        // 4 header lines prepended; word 0 = heap_start in bytes (= 0x11 here)
         assert_eq!(buffer.lines().count(), 15);
-        assert_eq!(buffer, "0x00000000: 00000008          -- heap_start  (set by assembler)\n0x00000001: 00000000          -- heap_end    (reserved)\n0x00000002: 00000000          -- (reserved)\n0x00000003: 00000000          -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678          -- #DATA1 \"HELLO\"\n0x00000006: FFFFFFFF          -- #DATA1 \"HELLO\"\n0x00000007: DDDDDDDD          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
+        assert_eq!(buffer, "0x00000000: 00000011          -- heap_start  (set by assembler)\n0x00000001: 00000000          -- heap_end    (reserved)\n0x00000002: 00000000          -- (reserved)\n0x00000003: 00000000          -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678          -- #DATA1 \"HELLO\"\n0x00000006: FFFFFFFF          -- #DATA1 \"HELLO\"\n0x00000007: DDDDDDDD          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
     }
 }

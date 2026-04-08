@@ -896,6 +896,22 @@
     "variables": 0
   },
   {
+    "comment": "R Blocking receive byte into register",
+    "hex_code": "0000505?",
+    "registers": 1,
+    "section": "",
+    "text_name": "RXRB",
+    "variables": 0
+  },
+  {
+    "comment": "R Non-blocking receive byte into register (zero_flag=1 if empty)",
+    "hex_code": "0000506?",
+    "registers": 1,
+    "section": "",
+    "text_name": "RXRNB",
+    "variables": 0
+  },
+  {
     "comment": "RR Set interrupt from registers",
     "hex_code": "000060??",
     "registers": 2,
@@ -942,6 +958,22 @@
     "section": "",
     "text_name": "STIDXR",
     "variables": 1
+  },
+  {
+    "comment": "RR mem8[reg2]=reg1[7:0] (byte addr)",
+    "hex_code": "000074??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMSET8",
+    "variables": 0
+  },
+  {
+    "comment": "RR reg1=zero_ext(mem8[reg2]) (byte addr)",
+    "hex_code": "000075??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMGET8",
+    "variables": 0
   },
   {
     "comment": "R Delay by register",

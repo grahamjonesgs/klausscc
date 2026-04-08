@@ -22,17 +22,7 @@
  *   Done.
  */
 
-extern void  putchar(int ch);
-extern void  print_str(int *s);
-extern void  print_int(int n);
-extern void  print_hex_prefix(int val);
-extern void  newline(void);
-extern void *malloc(int size);
-extern void  free(void *ptr);
-extern void *calloc(int nmemb, int size);
-extern void *realloc(void *ptr, int new_size);
-extern int   heap_words_used(void);
-extern int   heap_words_free(void);
+/*#include "libc.h"*/
 
 int main() {
     int *mem;   /* pointer to word 0: heap header lives at addresses 0-3 */

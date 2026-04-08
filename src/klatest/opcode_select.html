@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 01/04/2026 09:42<h2>Opcode Table</h2>
+Created 08/04/2026 16:14<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -809,6 +809,20 @@ Created 01/04/2026 09:42<h2>Opcode Table</h2>
     <td>R Send string at memory from register</td>
 </tr>
 <tr>
+    <td>RXRB</td>
+    <td>0000505?</td>
+    <td>0</td>
+    <td>1</td>
+    <td>R Blocking receive byte into register</td>
+</tr>
+<tr>
+    <td>RXRNB</td>
+    <td>0000506?</td>
+    <td>0</td>
+    <td>1</td>
+    <td>R Non-blocking receive byte into register (zero_flag=1 if empty)</td>
+</tr>
+<tr>
     <td>INTSETRR</td>
     <td>000060??</td>
     <td>0</td>
@@ -849,6 +863,20 @@ Created 01/04/2026 09:42<h2>Opcode Table</h2>
     <td>1</td>
     <td>2</td>
     <td>RRV mem[second+reg[var1]]=first</td>
+</tr>
+<tr>
+    <td>MEMSET8</td>
+    <td>000074??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>RR mem8[reg2]=reg1[7:0] (byte addr)</td>
+</tr>
+<tr>
+    <td>MEMGET8</td>
+    <td>000075??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>RR reg1=zero_ext(mem8[reg2]) (byte addr)</td>
 </tr>
 <tr>
     <td>DELAYR</td>

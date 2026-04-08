@@ -268,6 +268,12 @@ task t_opcode_select;
          32'h0000_73??: t_store_indexed_reg(w_var1);           // STIDXR RRV mem[second+reg[var1]]=first
 
          //=====================================================================
+         // Byte memory access 74xx-75xx
+         //=====================================================================
+         32'h0000_74??: t_memset8;                              // MEMSET8 RR mem8[reg2]=reg1[7:0] (byte addr)
+         32'h0000_75??: t_memget8;                              // MEMGET8 RR reg1=zero_ext(mem8[reg2]) (byte addr)
+
+         //=====================================================================
          // Other Fxxx
          //=====================================================================
          32'h0000_F00?: t_delay_reg;                           // DELAYR R Delay by register

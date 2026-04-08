@@ -94,11 +94,11 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
         output_string.push_str(&pass.opcode);
     }
 
-    // heap_start = first free word after the program = total words in binary
-    // output_string is 'S' + hex_chars, so hex_chars = len-1, words = (len-1)/8
-    #[allow(clippy::arithmetic_side_effects, reason = "Subtraction and division safe: string starts with 'S' so len >= 1")]
-    #[allow(clippy::integer_division, reason = "Integer division intentional: convert hex chars to 32-bit word count")]
-    let heap_start: u32 = ((output_string.len() - 1) / 8) as u32;
+    // heap_start = first free byte after the program
+    // output_string is 'S' + hex_chars; hex_chars/8 = words; words*4 = bytes
+    #[allow(clippy::arithmetic_side_effects, reason = "Subtraction safe: string starts with 'S' so len >= 1")]
+    #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars → words → bytes")]
+    let heap_start: u32 = (((output_string.len() - 1) / 8) * 4) as u32;
     #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
     output_string.replace_range(heap_start_offset..heap_start_offset + 8, &format!("{heap_start:08X}"));
 
@@ -583,9 +583,9 @@ mod tests {
         });
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
-        // Word 0 is heap_start (set by assembler = total words in binary = 5),
+        // Word 0 is heap_start in bytes (5 words × 4 = 20 = 0x14),
         // words 1-3 are reserved zeros; checksum reflects the updated word 0.
-        assert_eq!(bin_string, Some("S000000050000000000000000000000001234432100000001Z00105577X".to_owned()));
+        assert_eq!(bin_string, Some("S000000140000000000000000000000001234432100000001Z00105586X".to_owned()));
     }
 
     #[test]
