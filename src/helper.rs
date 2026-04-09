@@ -4,8 +4,8 @@ use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{return_opcode, Opcode, Pass2};
 
 /// Number of reserved words at the start of memory for the heap header.
-/// Word 0: heap_start (written by loader), Word 1: heap_end (written by loader),
-/// Word 2: reserved, Word 3: reserved. Code begins at word 4.
+/// Byte 0x00: heap_start (written by assembler), Byte 0x04: heap_end (written by assembler),
+/// Byte 0x08: reserved, Byte 0x0C: reserved. Code begins at byte 0x10.
 pub const HEAP_HEADER_WORDS: u32 = 4;
 /// Find checksum.
 ///
