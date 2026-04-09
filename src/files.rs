@@ -556,18 +556,18 @@ pub fn write_code_output_file(
         .filter(|p| p.line_type == LineType::Opcode || p.line_type == LineType::Data)
         .map(|p| p.program_counter.saturating_add(p.opcode.len() as u32 / 2))
         .max()
-        .unwrap_or(crate::helper::HEAP_HEADER_WORDS * 4);
+        .unwrap_or(crate::helper::HEAP_HEADER_WORDS * 8);
 
     // Emit the 4 reserved heap header words before the assembled code
     let heap_header = [
-        (format!("{heap_start:08X}"), "heap_start  (set by assembler)"),
-        ("00000000".to_owned(),       "heap_end    (reserved)"),
-        ("00000000".to_owned(),       "(reserved)"),
-        ("00000000".to_owned(),       "(reserved)"),
+        (format!("{heap_start:016X}"), "heap_start  (set by assembler)"),
+        ("0000000000000000".to_owned(), "heap_end    (reserved)"),
+        ("0000000000000000".to_owned(), "(reserved)"),
+        ("0000000000000000".to_owned(), "(reserved)"),
     ];
     for (i, (value, comment)) in heap_header.iter().enumerate() {
         match file.write_all(
-            format!("0x{:08X}: {value:<17} -- {comment}\n", i * 4).as_bytes(),
+            format!("0x{:08X}: {value:<33} -- {comment}\n", i * 8).as_bytes(),
         ) {
             Ok(()) => {}
             #[cfg(not(tarpaulin_include))]
@@ -588,12 +588,12 @@ pub fn write_code_output_file(
                 pass.input_text_line
             );
         } else if pass.line_type == LineType::Data {
-            for n in 0..pass.opcode.len() / 8 {
+            for n in 0..pass.opcode.len() / 16 {
                 out_line.push_str(
                     format!(
-                        "0x{:08X}: {:<16}  -- {}\n",
-                        pass.program_counter + n as u32,
-                        &mut pass.opcode.get(n * 8..n * 8 + 8).unwrap_or("        "),
+                        "0x{:08X}: {:<32}  -- {}\n",
+                        pass.program_counter + n as u32 * 8,
+                        &mut pass.opcode.get(n * 16..n * 16 + 16).unwrap_or("                "),
                         pass.input_text_line
                     )
                     .as_str(),
@@ -1267,7 +1267,9 @@ mod test {
 
         let buffer = fs::read_to_string(file_name1).unwrap();
         // 4 header lines prepended; word 0 = heap_start in bytes (= 0x11 here)
-        assert_eq!(buffer.lines().count(), 15);
-        assert_eq!(buffer, "0x00000000: 00000011          -- heap_start  (set by assembler)\n0x00000004: 00000000          -- heap_end    (reserved)\n0x00000008: 00000000          -- (reserved)\n0x0000000C: 00000000          -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678          -- #DATA1 \"HELLO\"\n0x00000006: FFFFFFFF          -- #DATA1 \"HELLO\"\n0x00000007: DDDDDDDD          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
+        // 64-bit mode: header offsets are i*8, values are 16-char hex; data words are 16 hex chars each
+        // opcode "12345678FFFFFFFFDDDDDDDD" (24 chars) yields 1 data line (24/16=1)
+        assert_eq!(buffer.lines().count(), 13);
+        assert_eq!(buffer, "0x00000000: 0000000000000011                  -- heap_start  (set by assembler)\n0x00000008: 0000000000000000                  -- heap_end    (reserved)\n0x00000010: 0000000000000000                  -- (reserved)\n0x00000018: 0000000000000000                  -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678FFFFFFFF                  -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
     }
 }

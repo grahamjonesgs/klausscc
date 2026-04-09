@@ -274,6 +274,14 @@ task t_opcode_select;
          32'h0000_75??: t_memget8;                              // MEMGET8 RR reg1=zero_ext(mem8[reg2]) (byte addr)
 
          //=====================================================================
+         // 64-bit memory access 76xx-79xx
+         //=====================================================================
+         32'h0000_76??: t_memset64;                             // MEMSET64 RR mem64[reg2]=reg1 (64-bit word store)
+         32'h0000_77??: t_memget64;                             // MEMGET64 RR reg1=mem64[reg2] (64-bit word load)
+         32'h0000_78??: t_store_indexed_64(w_var1);             // STIDX64 RRV mem64[reg2+var1]=reg1 (64-bit indexed store)
+         32'h0000_79??: t_load_indexed_64(w_var1);              // LDIDX64 RRV reg1=mem64[reg2+var1] (64-bit indexed load)
+
+         //=====================================================================
          // Other Fxxx
          //=====================================================================
          32'h0000_F00?: t_delay_reg;                           // DELAYR R Delay by register

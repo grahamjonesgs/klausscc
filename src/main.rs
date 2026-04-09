@@ -278,7 +278,7 @@ fn main() -> Result<(), i32> {
 #[allow(clippy::indexing_slicing, reason = "Indices are guarded by parts.len() >= 3 check above")]
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
-    let mut program_counter: u32 = HEAP_HEADER_WORDS * 4; // Byte address: 4 header words × 4 bytes each
+    let mut program_counter: u32 = HEAP_HEADER_WORDS * 8; // Byte address: 4 header words × 8 bytes each (64-bit words)
     let mut data_pass0: Vec<Pass0> = Vec::new();
     let mut in_data_section = false;
 
@@ -1057,7 +1057,7 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
             // 1. _start preamble — must be first so it lands at address 0x000
             for &preamble_line in &[
                 "_start",
-                "SETR A 0x2000000",
+                "SETR A 0x8000000",
                 "SETSP A",
                 "SETR P 0",
                 "DELAYV 0x100",
@@ -1213,15 +1213,16 @@ mod tests {
             },
         ];
         let pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        // Byte addressing: PC starts at 16 (4 header words × 4 bytes).
-        // Each instruction word = 4 bytes; data bytes = word_count × 4.
-        assert_eq!(pass1.first().unwrap_or_default().program_counter, 16); // MOV
-        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 28);  // PUSH (MOV=3 words×4=12)
-        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 32);  // RET  (+4)
-        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 36);  // #DATA1 0x2 inline (+4)
-        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 44);  // RET  (2 words×4=8)
-        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 48);  // #DATA1 "HELLO" inline (+4)
-        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 60);  // RET  (3 words×4=12)
+        // Byte addressing: PC starts at 32 (4 header words × 8 bytes each in 64-bit).
+        // Each instruction word = 4 bytes (opcode encoding unchanged).
+        // Each 64-bit data word = 8 bytes (16 hex chars).
+        assert_eq!(pass1.first().unwrap_or_default().program_counter, 32); // MOV
+        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 44);  // PUSH (MOV=3 words×4=12)
+        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 48);  // RET  (+4)
+        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 52);  // #DATA1 0x2 inline (+4)
+        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 68);  // RET  (2 data words×8=16)
+        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 72);  // #DATA1 "HELLO" inline (+4)
+        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 84);  // RET  (string=12 bytes)
     }
 
     #[test]
