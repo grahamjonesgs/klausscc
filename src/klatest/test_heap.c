@@ -72,7 +72,7 @@ int main() {
      *   heap_words_used() must return 5.
      * ========================================================== */
     hs  = mem[0];
-    ht  = mem[1];
+    ht  = heap_get_top();
     ok  = ((ht - hs) == 32) && (heap_words_used() == 5);
     print_str("T2 heap acctg:  ");
     if (ok) print_str("PASS"); else print_str("FAIL");

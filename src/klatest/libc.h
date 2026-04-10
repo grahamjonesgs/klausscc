@@ -45,8 +45,8 @@ extern void  swap(int *a, int *b);
  * All sizes are in BYTES (standard C convention, CHAR_BIT=8).
  *
  * Memory header layout — four 32-bit words at byte addresses 0-15:
- *   [0]  heap_start  set by assembler (byte address of first heap word)
- *   [4]  heap_top    maintained by malloc (high-water mark, byte address)
+ *   [0]  heap_start  set by assembler (byte address of first heap word, read-only)
+ *   [4]  (unused — heap_top is tracked in an internal static variable)
  *   [8]  reserved
  *   [12] reserved
  *
@@ -59,6 +59,7 @@ extern void *calloc(int nmemb, int size);   /* allocate + zero-fill           */
 extern void *realloc(void *ptr, int size);  /* resize (never shrinks)         */
 extern int   heap_words_used(void);         /* 4-byte words in live blocks    */
 extern int   heap_words_free(void);         /* 4-byte words in free blocks    */
+extern int   heap_get_top(void);            /* current heap_top as byte addr  */
 
 /* === Low-level UART (also available directly) === */
 extern void _uart_tx_hex(int val);     /* TXR wrapper */
