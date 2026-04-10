@@ -270,6 +270,41 @@ fn main() -> Result<(), i32> {
     Ok(())
 }
 
+/// Auto-upgrade `SETR R value` to `SETR64 R value` when the immediate doesn't fit in 32 bits.
+///
+/// Returns the (possibly rewritten) line string unchanged for all other mnemonics or
+/// when the value fits in the 32-bit range accepted by `convert_argument`
+/// (i.e. `i32::MIN ..= 0xFFFF_FFFF`).
+fn upgrade_setr_to_setr64(line: &str) -> String {
+    let stripped = strip_comments(line);
+    let mut words = stripped.split_whitespace();
+    if !words.next().unwrap_or("").eq_ignore_ascii_case("setr") {
+        return line.to_owned();
+    }
+    let _reg = words.next(); // skip register name
+    let val_str = match words.next() {
+        Some(s) => s,
+        None => return line.to_owned(),
+    };
+    // Parse as signed 64-bit so we handle negative decimal and full-width hex.
+    #[allow(clippy::cast_possible_wrap, reason = "u64→i64 reinterpret is intentional for range check")]
+    let val: i64 = if val_str.len() >= 2 && val_str.get(..2).map_or(false, |s| s.eq_ignore_ascii_case("0x")) {
+        let hex = &val_str[2..].replace('_', "");
+        u64::from_str_radix(hex, 16).map_or(0, |v| v as i64)
+    } else {
+        val_str.parse::<i64>().unwrap_or(0)
+    };
+    // Same bounds as convert_argument: [i32::MIN, 0xFFFF_FFFF] fits in 32 bits.
+    if val >= i64::from(i32::MIN) && val <= 0xFFFF_FFFF_i64 {
+        return line.to_owned();
+    }
+    // Upgrade: replace the leading "SETR" (any case) with "SETR64".
+    let trimmed = line.trim_start();
+    let leading_ws = &line[..line.len() - trimmed.len()];
+    // SAFETY: trimmed starts with "setr" (4 ASCII chars), confirmed by eq_ignore_ascii_case above.
+    format!("{leading_ws}SETR64{}", &trimmed[4..])
+}
+
 /// Returns pass1 from pass0.
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
@@ -318,7 +353,9 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             continue;
         }
 
-        let lt = line_type(&mut oplist, &pass.input_text_line);
+        // Rewrite "SETR R val" → "SETR64 R val" before line_type/num_arguments when val > 32 bits.
+        let upgraded_line = upgrade_setr_to_setr64(&pass.input_text_line);
+        let lt = line_type(&mut oplist, &upgraded_line);
 
         // Defer labels in data section to end of program with data
         if in_data_section && lt == LineType::Label {
@@ -327,22 +364,22 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
 
         pass1.push(Pass1 {
-            input_text_line: pass.input_text_line.clone(),
+            input_text_line: upgraded_line.clone(),
             file_name: pass.file_name.clone(),
             line_counter: pass.line_counter,
             program_counter,
             line_type: lt.clone(),
         });
-        if !is_valid_line(&mut oplist, strip_comments(&pass.input_text_line)) {
+        if !is_valid_line(&mut oplist, strip_comments(&upgraded_line)) {
             msg_list.push(
-                format!("Error {}", pass.input_text_line),
+                format!("Error {}", upgraded_line),
                 Some(pass.line_counter),
                 Some(pass.file_name.clone()),
                 MessageType::Error,
             );
         }
         if lt == LineType::Opcode {
-            let num_args = num_arguments(&mut oplist, &strip_comments(&pass.input_text_line));
+            let num_args = num_arguments(&mut oplist, &strip_comments(&upgraded_line));
             #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct program counter calculation")]
             if let Some(arguments) = num_args {
                 program_counter = program_counter + (arguments + 1) * 4; // Each word = 4 bytes

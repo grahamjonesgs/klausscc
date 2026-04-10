@@ -59,6 +59,18 @@ pub fn format_opcodes(input: &String) -> String {
         result.push_str(input.get(12..16).unwrap_or("    "));
         return result;
     }
+    // 12-byte instruction: 32-bit opcode + 64-bit immediate (lo32 + hi32), e.g. SETR64
+    if input.len() == 24 {
+        let mut result = input.get(0..4).unwrap_or("    ").to_owned();
+        result.push_str(input.get(4..8).unwrap_or("    "));
+        result.push(' ');
+        result.push_str(input.get(8..12).unwrap_or("    "));
+        result.push_str(input.get(12..16).unwrap_or("    "));
+        result.push(' ');
+        result.push_str(input.get(16..20).unwrap_or("    "));
+        result.push_str(input.get(20..24).unwrap_or("    "));
+        return result;
+    }
     (*input).clone()
 }
 

@@ -129,6 +129,7 @@ task t_opcode_select;
          32'h0000_096?: t_zero_extend_half;                    // ZEXTH R Zero extend halfword to 32 bits
          32'h0000_097?: t_byte_swap;                           // BSWAP R Byte swap (endian conversion)
          32'h0000_098?: t_not_reg;                             // NOTR R Bitwise NOT register
+         32'h0000_099?: t_setr64(w_reg1, w_var1, w_var2);    // SETR64 RVV reg1=(var2<<32)|var1 (64-bit literal, lo32 then hi32)
 
          //=====================================================================
          // Bit manipulation by immediate 0A0x-0AFx
