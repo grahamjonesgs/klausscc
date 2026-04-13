@@ -71,7 +71,11 @@ pub fn convert_argument(
     {
         let without_prefix1 = argument_trim.trim_start_matches("0x");
         let without_prefix2 = without_prefix1.trim_start_matches("0X");
-        let int_value_result = i64::from_str_radix(&without_prefix2.replace('_', ""), 16);
+        // Parse as u64 so full 64-bit hex literals (e.g. 0xFFFFFFFFFFFFFFFF) don't overflow.
+        // Then reinterpret as i64 for the same bounds check as the decimal path.
+        // Values like 0xFFFFFFFFFFFFFFFF (-1) are in [i32::MIN, 0xFFFF_FFFF] and emit FFFFFFFF;
+        // the CPU sign-extends the 32-bit immediate to 64 bits, giving the correct 64-bit value.
+        let int_value_result = u64::from_str_radix(&without_prefix2.replace('_', ""), 16);
         if int_value_result.is_err() {
             msg_list.push(
                 format!("Hex value {argument} incorrect"),
@@ -82,12 +86,14 @@ pub fn convert_argument(
             return None;
         }
         let int_value = int_value_result.unwrap_or(0);
-
-        if int_value <= 0xFFFF_FFFF {
-            return Some(format!("{int_value:08X}"));
+        #[allow(clippy::cast_possible_wrap, reason = "Intentional u64→i64 reinterpret for sign-extended range check")]
+        let int_value_signed = int_value as i64;
+        if int_value_signed >= i64::from(i32::MIN) && int_value_signed <= 0xFFFF_FFFF_i64 {
+            #[allow(clippy::cast_possible_truncation, reason = "Intentional truncation: value verified to fit in 32 bits")]
+            return Some(format!("{:08X}", int_value_signed as u32));
         }
         msg_list.push(
-            format!("Hex value out 0x{int_value:08X} of bounds"),
+            format!("Hex value out 0x{int_value:016X} of bounds"),
             Some(line_number),
             Some(filename),
             MessageType::Warning,
@@ -443,7 +449,7 @@ mod tests {
         );
         assert_eq!(
             msg_list.list.last().unwrap_or_default().text,
-            "Hex value out 0x123456789 of bounds".to_owned()
+            "Hex value out 0x0000000123456789 of bounds".to_owned()
         );
 
         // Check for label not defined
