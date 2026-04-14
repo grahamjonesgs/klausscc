@@ -1,7 +1,7 @@
-/* libc.h - Minimal C library for FPGA_CPU_32_DDR_cache
+/* libc.h - Minimal C library for FPGA_CPU_64_DDR_cache
  *
- * Byte-addressed CPU. sizeof(char)=1, sizeof(int)=sizeof(void*)=4.
- * CHAR_BIT=8. Strings are standard null-terminated byte arrays.
+ * Byte-addressed CPU. sizeof(char)=1, sizeof(int)=sizeof(void*)=8.
+ * Registers are 64-bit. CHAR_BIT=8. Strings are standard null-terminated byte arrays.
  *
  * Usage:
  *   #include "libc.h"      (if using a preprocessor)
@@ -44,21 +44,21 @@ extern void  swap(int *a, int *b);
  *
  * All sizes are in BYTES (standard C convention, CHAR_BIT=8).
  *
- * Memory header layout — four 32-bit words at byte addresses 0-15:
+ * Memory header layout — four 64-bit words at byte addresses 0-31:
  *   [0]  heap_start  set by assembler (byte address of first heap word, read-only)
- *   [4]  (unused — heap_top is tracked in an internal static variable)
- *   [8]  reserved
- *   [12] reserved
+ *   [8]  (unused — heap_top is tracked in an internal static variable)
+ *   [16] reserved
+ *   [24] reserved
  *
- * Each block carries a 3-word (12-byte) header before the user data.
- * malloc() internally rounds size up to the nearest word (4 bytes).
+ * Each block carries a 3-word (24-byte) header before the user data.
+ * malloc() internally rounds size up to the nearest word (8 bytes).
  */
 extern void *malloc(int size);              /* allocate 'size' bytes          */
 extern void  free(void *ptr);               /* release allocation             */
 extern void *calloc(int nmemb, int size);   /* allocate + zero-fill           */
 extern void *realloc(void *ptr, int size);  /* resize (never shrinks)         */
-extern int   heap_words_used(void);         /* 4-byte words in live blocks    */
-extern int   heap_words_free(void);         /* 4-byte words in free blocks    */
+extern int   heap_words_used(void);         /* 8-byte words in live blocks    */
+extern int   heap_words_free(void);         /* 8-byte words in free blocks    */
 extern int   heap_get_top(void);            /* current heap_top as byte addr  */
 
 /* === Low-level UART (also available directly) === */

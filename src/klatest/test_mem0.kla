@@ -31,4 +31,4 @@ NEWLINE
 
 HALT
 
-!include libc.kla
+!include uart_stubs.kla

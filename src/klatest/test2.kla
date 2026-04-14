@@ -1,0 +1,14 @@
+main:
+PUSH P
+GETSP P
+ADDSP -8
+SETR A main_L_2
+CALL print_str:
+SETR M 0
+main_L_1:
+SETSP P
+POP P
+RET
+main_L_2:
+.word 0x48656c6c6f772057
+.word 0x6f726c6400000000

@@ -1,0 +1,63 @@
+0x00000000: 00000000000000FC                  -- heap_start  (set by assembler)
+0x00000008: 0000000000000000                  -- heap_end    (reserved)
+0x00000010: 0000000000000000                  -- (reserved)
+0x00000018: 0000000000000000                  -- (reserved)
+                              -- // memcoherency.kla
+                              -- //
+                              -- // Minimal test for MEMSET8 -> MEMGET64 coherency.
+                              -- //
+                              -- // Writes 8 individual bytes to a word-aligned buffer one-at-a-time
+                              -- // using MEMSET8 (byte store), then reads the full 8-byte word back
+                              -- // with MEMGET64 and transmits it to the UART as hex.
+                              -- //
+                              -- // Expected UART output: 0102030405060708
+                              -- //
+                              -- // If the CPU has a byte-write / word-read coherency bug, the high
+                              -- // bytes (written first in big-endian order) will show stale values.
+                              -- // e.g. if bytes 0-3 are invisible:  ????????05060708
+                              -- 
+                              -- _start
+0x00000020: 00000800 08000000 -- SETR A 0x8000000
+0x00000028: 00004040          -- SETSP A
+0x0000002C: 0000080F 00000000 -- SETR P 0
+0x00000034: 0000F013 00000100 -- DELAYV 0x100
+                              -- 
+                              -- // Use N as the byte-write pointer (N = address of buf)
+0x0000003C: 0000080D 000000F4 -- SETR N #buf
+                              -- 
+                              -- // Write 8 bytes: big-endian encoding of 0x0102030405060708
+0x00000044: 0000080C 00000001 -- SETR M 0x01
+0x0000004C: 000074CD          -- MEMSET8 M N          // buf[0] = 0x01  (MSB)
+0x00000050: 0000081D 00000001 -- ADDV N 1
+0x00000058: 0000080C 00000002 -- SETR M 0x02
+0x00000060: 000074CD          -- MEMSET8 M N          // buf[1] = 0x02
+0x00000064: 0000081D 00000001 -- ADDV N 1
+0x0000006C: 0000080C 00000003 -- SETR M 0x03
+0x00000074: 000074CD          -- MEMSET8 M N          // buf[2] = 0x03
+0x00000078: 0000081D 00000001 -- ADDV N 1
+0x00000080: 0000080C 00000004 -- SETR M 0x04
+0x00000088: 000074CD          -- MEMSET8 M N          // buf[3] = 0x04
+0x0000008C: 0000081D 00000001 -- ADDV N 1
+0x00000094: 0000080C 00000005 -- SETR M 0x05
+0x0000009C: 000074CD          -- MEMSET8 M N          // buf[4] = 0x05
+0x000000A0: 0000081D 00000001 -- ADDV N 1
+0x000000A8: 0000080C 00000006 -- SETR M 0x06
+0x000000B0: 000074CD          -- MEMSET8 M N          // buf[5] = 0x06
+0x000000B4: 0000081D 00000001 -- ADDV N 1
+0x000000BC: 0000080C 00000007 -- SETR M 0x07
+0x000000C4: 000074CD          -- MEMSET8 M N          // buf[6] = 0x07
+0x000000C8: 0000081D 00000001 -- ADDV N 1
+0x000000D0: 0000080C 00000008 -- SETR M 0x08
+0x000000D8: 000074CD          -- MEMSET8 M N          // buf[7] = 0x08  (LSB)
+                              -- 
+                              -- // Read back the full 8-byte word from the original aligned address
+0x000000DC: 00000800 000000F4 -- SETR A #buf
+0x000000E4: 00007B00          -- MEMGET64 A A         // A = 64-bit word at buf
+                              -- 
+                              -- // Transmit to UART as 16 hex digits
+                              -- // Expected: 0102030405060708
+0x000000E8: 00005010          -- TXR A
+0x000000EC: 00005001          -- NEWLINE
+0x000000F0: 0000F011          -- HALT
+                              -- 
+0x000000F4: 0000000000000000                  -- #buf 1               // 1 word = 8 bytes of scratch space

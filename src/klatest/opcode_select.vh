@@ -129,7 +129,6 @@ task t_opcode_select;
          32'h0000_096?: t_zero_extend_half;                    // ZEXTH R Zero extend halfword to 32 bits
          32'h0000_097?: t_byte_swap;                           // BSWAP R Byte swap (endian conversion)
          32'h0000_098?: t_not_reg;                             // NOTR R Bitwise NOT register
-         32'h0000_099?: t_setr64(w_reg1, w_var1, w_var2);    // SETR64 RVV reg1=(var2<<32)|var1 (64-bit literal, lo32 then hi32)
 
          //=====================================================================
          // Bit manipulation by immediate 0A0x-0AFx
@@ -168,6 +167,17 @@ task t_opcode_select;
          32'h0000_0FB?: t_rotate_right_carry;                  // RORCR R Rotate right through carry
          32'h0000_0FC?: t_rotate_left_n(w_var1);               // ROLV RV Rotate left by N bits
          32'h0000_0FD?: t_rotate_right_n(w_var1);              // RORV RV Rotate right by N bits
+
+         //=====================================================================
+         // 64-bit immediate load (3-word instruction) 0FEx
+         //=====================================================================
+         32'h0000_0FE?: t_set_reg64(w_var1, 32'b0);              // SETR64 RV64 Load 64-bit immediate (hi32 self-fetched)
+
+         //=====================================================================
+         // Word (32-bit) ops that sign-extend to 64 — W-suffix  0FFx
+         //=====================================================================
+         32'h0000_0FF0: t_sextw;                                 // SEXTW R Sign-extend lower 32-bit to 64
+         32'h0000_0FF1: t_zextw;                                 // ZEXTW R Zero-extend lower 32-bit to 64
 
          //=====================================================================
          // Flow control 1xxx
@@ -238,7 +248,8 @@ task t_opcode_select;
          32'h0000_403?: t_get_sp;                              // GETSP R Copy SP into register
          32'h0000_404?: t_set_sp;                              // SETSP R Set SP from register
          32'h0000_4050: t_add_sp(w_var1);                      // ADDSP V Add signed immediate to SP
-         32'h0000_406?: t_call_reg;                            // CALLR R Call to address in register
+         32'h0000_4060: t_stack_push_value64(w_var1, w_var2);  // PUSHV64 V64 Push 64-bit value onto stack
+         32'h0000_407?: t_call_reg;                            // CALLR R Call to address in register
 
          //=====================================================================
          // Communication 5xxx
@@ -275,12 +286,22 @@ task t_opcode_select;
          32'h0000_75??: t_memget8;                              // MEMGET8 RR reg1=zero_ext(mem8[reg2]) (byte addr)
 
          //=====================================================================
-         // 64-bit memory access 76xx-79xx
+         // 16-bit halfword memory access 76xx-77xx
          //=====================================================================
-         32'h0000_76??: t_memset64;                             // MEMSET64 RR mem64[reg2]=reg1 (64-bit word store)
-         32'h0000_77??: t_memget64;                             // MEMGET64 RR reg1=mem64[reg2] (64-bit word load)
-         32'h0000_78??: t_store_indexed_64(w_var1);             // STIDX64 RRV mem64[reg2+var1]=reg1 (64-bit indexed store)
-         32'h0000_79??: t_load_indexed_64(w_var1);              // LDIDX64 RRV reg1=mem64[reg2+var1] (64-bit indexed load)
+         32'h0000_76??: t_memset16;                              // MEMSET16 RR mem16[reg2]=reg1[15:0]
+         32'h0000_77??: t_memget16;                              // MEMGET16 RR reg1=zero_ext(mem16[reg2])
+
+         //=====================================================================
+         // 32-bit word memory access 78xx-79xx
+         //=====================================================================
+         32'h0000_78??: t_memset32;                              // MEMSET32 RR mem32[reg2]=reg1[31:0]
+         32'h0000_79??: t_memget32;                              // MEMGET32 RR reg1=zero_ext(mem32[reg2])
+
+         //=====================================================================
+         // 64-bit doubleword memory access 7Axx-7Bxx
+         //=====================================================================
+         32'h0000_7A??: t_memset64;                              // MEMSET64 RR mem64[reg2]=reg1
+         32'h0000_7B??: t_memget64;                              // MEMGET64 RR reg1=mem64[reg2]
 
          //=====================================================================
          // Other Fxxx
@@ -290,6 +311,12 @@ task t_opcode_select;
          32'h0000_F011: t_halt;                                // HALT Freeze and hang
          32'h0000_F012: t_reset;                               // RESET Reset
          32'h0000_F013: t_delay(w_var1);                       // DELAYV V Delay by value
+
+         //=====================================================================
+         // 64-bit indexed memory access FCxx-FDxx
+         //=====================================================================
+         32'h0000_FC??: t_load_indexed64(w_var1);              // LDIDX64 RRV reg1=mem64[reg2+var1]
+         32'h0000_FD??: t_store_indexed64(w_var1);             // STIDX64 RRV mem64[reg2+var1]=reg1
 
          default: begin
             r_SM <= HCF_1;  // Halt and catch fire error 1

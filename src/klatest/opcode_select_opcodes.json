@@ -392,6 +392,30 @@
     "variables": 1
   },
   {
+    "comment": "RV64 Load 64-bit immediate (hi32 self-fetched)",
+    "hex_code": "00000FE?",
+    "registers": 1,
+    "section": "",
+    "text_name": "SETR64",
+    "variables": 1
+  },
+  {
+    "comment": "R Sign-extend lower 32-bit to 64",
+    "hex_code": "00000FF0",
+    "registers": 0,
+    "section": "",
+    "text_name": "SEXTW",
+    "variables": 0
+  },
+  {
+    "comment": "R Zero-extend lower 32-bit to 64",
+    "hex_code": "00000FF1",
+    "registers": 0,
+    "section": "",
+    "text_name": "ZEXTW",
+    "variables": 0
+  },
+  {
     "comment": "V Jump",
     "hex_code": "00001000",
     "registers": 0,
@@ -824,8 +848,16 @@
     "variables": 1
   },
   {
+    "comment": "V64 Push 64-bit value onto stack",
+    "hex_code": "00004060",
+    "registers": 0,
+    "section": "",
+    "text_name": "PUSHV64",
+    "variables": 2
+  },
+  {
     "comment": "R Call to address in register",
-    "hex_code": "0000406?",
+    "hex_code": "0000407?",
     "registers": 1,
     "section": "",
     "text_name": "CALLR",
@@ -976,6 +1008,54 @@
     "variables": 0
   },
   {
+    "comment": "RR mem16[reg2]=reg1[15:0]",
+    "hex_code": "000076??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMSET16",
+    "variables": 0
+  },
+  {
+    "comment": "RR reg1=zero_ext(mem16[reg2])",
+    "hex_code": "000077??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMGET16",
+    "variables": 0
+  },
+  {
+    "comment": "RR mem32[reg2]=reg1[31:0]",
+    "hex_code": "000078??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMSET32",
+    "variables": 0
+  },
+  {
+    "comment": "RR reg1=zero_ext(mem32[reg2])",
+    "hex_code": "000079??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMGET32",
+    "variables": 0
+  },
+  {
+    "comment": "RR mem64[reg2]=reg1",
+    "hex_code": "00007A??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMSET64",
+    "variables": 0
+  },
+  {
+    "comment": "RR reg1=mem64[reg2]",
+    "hex_code": "00007B??",
+    "registers": 2,
+    "section": "",
+    "text_name": "MEMGET64",
+    "variables": 0
+  },
+  {
     "comment": "R Delay by register",
     "hex_code": "0000F00?",
     "registers": 1,
@@ -1013,6 +1093,22 @@
     "registers": 0,
     "section": "",
     "text_name": "DELAYV",
+    "variables": 1
+  },
+  {
+    "comment": "RRV reg1=mem64[reg2+var1]",
+    "hex_code": "0000FC??",
+    "registers": 2,
+    "section": "",
+    "text_name": "LDIDX64",
+    "variables": 1
+  },
+  {
+    "comment": "RRV mem64[reg2+var1]=reg1",
+    "hex_code": "0000FD??",
+    "registers": 2,
+    "section": "",
+    "text_name": "STIDX64",
     "variables": 1
   },
   {
