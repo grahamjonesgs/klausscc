@@ -1,4 +1,4 @@
-use crate::helper::data_name_from_string;
+use crate::helper::{data_name_from_string, strip_comments};
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::Pass1;
 
@@ -176,7 +176,8 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
         .collect();
     for line in pass1 {
         if label_name_from_string(&line.input_text_line).is_some() {
-            let mut words = line.input_text_line.split_whitespace();
+            let stripped = strip_comments(&line.input_text_line);
+            let mut words = stripped.split_whitespace();
             let first_word = words.next().unwrap_or("");
             let second_word = words.next();
             if second_word.is_some() {
@@ -194,9 +195,10 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     }
     for line in pass1 {
         if data_name_from_string(&line.input_text_line).is_some() {
-            let mut words = line.input_text_line.split_whitespace();
+            let stripped = strip_comments(&line.input_text_line);
+            let mut words = stripped.split_whitespace();
             let first_word = words.next().unwrap_or("");
-            let remaining_line = line.input_text_line.trim_start_matches(first_word).trim();
+            let remaining_line = stripped.trim_start_matches(first_word).trim().to_owned();
             let second_word = words.next();
             let third_word = words.next();
             if third_word.is_some() && !second_word.unwrap_or_default().starts_with('\"') {

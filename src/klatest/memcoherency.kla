@@ -1,0 +1,59 @@
+// memcoherency.kla
+//
+// Minimal test for MEMSET8 -> MEMGET64 coherency.
+//
+// Writes 8 individual bytes to a word-aligned buffer one-at-a-time
+// using MEMSET8 (byte store), then reads the full 8-byte word back
+// with MEMGET64 and transmits it to the UART as hex.
+//
+// Expected UART output: 0102030405060708
+//
+// If the CPU has a byte-write / word-read coherency bug, the high
+// bytes (written first in big-endian order) will show stale values.
+// e.g. if bytes 0-3 are invisible:  ????????05060708
+
+_start
+SETR A 0x8000000
+SETSP A
+SETR P 0
+DELAYV 0x100
+
+// Use N as the byte-write pointer (N = address of buf)
+SETR N #buf
+
+// Write 8 bytes: big-endian encoding of 0x0102030405060708
+SETR M 0x01
+MEMSET8 M N          // buf[0] = 0x01  (MSB)
+ADDV N 1
+SETR M 0x02
+MEMSET8 M N          // buf[1] = 0x02
+ADDV N 1
+SETR M 0x03
+MEMSET8 M N          // buf[2] = 0x03
+ADDV N 1
+SETR M 0x04
+MEMSET8 M N          // buf[3] = 0x04
+ADDV N 1
+SETR M 0x05
+MEMSET8 M N          // buf[4] = 0x05
+ADDV N 1
+SETR M 0x06
+MEMSET8 M N          // buf[5] = 0x06
+ADDV N 1
+SETR M 0x07
+MEMSET8 M N          // buf[6] = 0x07
+ADDV N 1
+SETR M 0x08
+MEMSET8 M N          // buf[7] = 0x08  (LSB)
+
+// Read back the full 8-byte word from the original aligned address
+SETR A #buf
+MEMGET64 A A         // A = 64-bit word at buf
+
+// Transmit to UART as 16 hex digits
+// Expected: 0102030405060708
+TXR A
+NEWLINE
+HALT
+
+#buf 1               // 1 word = 8 bytes of scratch space
