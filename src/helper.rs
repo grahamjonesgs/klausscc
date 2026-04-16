@@ -100,8 +100,11 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     #[allow(clippy::arithmetic_side_effects, reason = "Subtraction safe: string starts with 'S' so len >= 1")]
     #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars → bytes")]
     let heap_start: u32 = ((output_string.len() - 1) / 2) as u32;
+    // Emit heap_start as lo32 then hi32 (matching data_as_bytes little-endian word order).
+    // Using big-endian format!("{:016X}") would place the value in the high-address word,
+    // which MEMGET64 reads as hi32, giving heap_start<<32 instead of heap_start.
     #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
-    output_string.replace_range(heap_start_offset..heap_start_offset + 16, &format!("{heap_start:016X}"));
+    output_string.replace_range(heap_start_offset..heap_start_offset + 16, &format!("{heap_start:08X}00000000"));
 
     if pass2
         .iter()
@@ -586,9 +589,9 @@ mod tests {
         });
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
-        // Word 0 is heap_start in bytes (72 hex chars / 2 = 36 = 0x24),
+        // Word 0 is heap_start in bytes (72 hex chars / 2 = 36 = 0x24), emitted as lo32 first.
         // words 1-3 are reserved zeros (16 hex chars each); checksum reflects updated word 0.
-        assert_eq!(bin_string, Some("S00000000000000240000000000000000000000000000000000000000000000001234432100000001Z0010559EX".to_owned()));
+        assert_eq!(bin_string, Some("S00000024000000000000000000000000000000000000000000000000000000001234432100000001Z0010559EX".to_owned()));
     }
 
     #[test]
