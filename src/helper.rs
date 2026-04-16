@@ -94,12 +94,16 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
         output_string.push_str(&pass.opcode);
     }
 
-    // heap_start = first free byte after the program
+    // heap_start = first free byte after the program, rounded up to 8-byte alignment.
+    // All heap block headers are 3×8=24 bytes, so every data area is 8-byte aligned
+    // when heap_start itself is 8-byte aligned — required for MEMSET8→MEMGET64 coherency.
     // output_string is 'S' + hex_chars; hex_chars/2 = bytes (valid for both 32-bit opcodes
     // and 64-bit data words since both maintain a 2:1 hex-char to byte ratio)
     #[allow(clippy::arithmetic_side_effects, reason = "Subtraction safe: string starts with 'S' so len >= 1")]
     #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars → bytes")]
-    let heap_start: u32 = ((output_string.len() - 1) / 2) as u32;
+    let heap_start_raw: u32 = ((output_string.len() - 1) / 2) as u32;
+    #[allow(clippy::arithmetic_side_effects, reason = "Addition safe: heap_start_raw + 7 cannot overflow for realistic program sizes")]
+    let heap_start: u32 = (heap_start_raw + 7) & !7u32; // align to 8-byte boundary
     // Emit heap_start as lo32 then hi32 (matching data_as_bytes little-endian word order).
     // Using big-endian format!("{:016X}") would place the value in the high-address word,
     // which MEMGET64 reads as hi32, giving heap_start<<32 instead of heap_start.
@@ -589,9 +593,9 @@ mod tests {
         });
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
-        // Word 0 is heap_start in bytes (72 hex chars / 2 = 36 = 0x24), emitted as lo32 first.
+        // Word 0 is heap_start in bytes (72 hex chars / 2 = 36 = 0x24, aligned to 8 → 0x28), emitted as lo32 first.
         // words 1-3 are reserved zeros (16 hex chars each); checksum reflects updated word 0.
-        assert_eq!(bin_string, Some("S00000024000000000000000000000000000000000000000000000000000000001234432100000001Z0010559EX".to_owned()));
+        assert_eq!(bin_string, Some("S00000028000000000000000000000000000000000000000000000000000000001234432100000001Z001055A2X".to_owned()));
     }
 
     #[test]
