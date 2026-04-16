@@ -1,26 +1,44 @@
 // Can be read by assembler, so format is fixed.
 // Opcode must be first word in comment.
-// Format codes: R=register, V=value, RRR=three registers, RRV=two registers+value
+// Format codes: R=1 reg, RR=2 regs, RRR=3 regs, RV=reg+imm32, RRV=2 regs+imm32,
+//               V=imm32 only, V64=two consecutive imm32 words (lo32 then hi32)
 //
-// 32-bit opcode format:
-//   [31:16] operation code  (identifies the instruction)
-//   [15:12] always 0x0      (fixed zero nibble)
-//   [11:8]  rd              (destination register)
-//   [7:4]   rs1             (source register 1)
-//   [3:0]   rs2             (source register 2)
+// Instruction word sizes (all instructions fetch from consecutive 4-byte words):
+//   R, RR, RRR     : 1 word  (4 B),  PC += 4
+//   RV, RRV, V     : 2 words (8 B),  PC += 8;  imm32 word at PC+4
+//   V64            : 3 words (12 B), PC += 12; lo32 at PC+4, hi32 at PC+8
 //
-// Legacy/non-ALU instructions use: 32'h0000_XXXX (upper 16 bits = 0)
-//   [15:12] primary opcode class
-//   [11:8]  secondary opcode
-//   [7:4]   register 1
-//   [3:0]   register 2
+// V64 encoding — inline 3-word instruction (not a literal pool):
+//   word 0 @ PC+0 : opcode (destination register in [3:0])
+//   word 1 @ PC+4 : bits [31:0]  of the 64-bit immediate (lo32)
+//   word 2 @ PC+8 : bits [63:32] of the 64-bit immediate (hi32)
+//   The assembler emits all three words consecutively; PC is updated atomically to PC+12.
 //
-// 3-register ALU instructions use: 32'hNNNN_0???
-//   [31:16] = operation code (non-zero)
-//   [15:12] = 0x0 (fixed)
-//   [11:8]  = rd  (destination)
-//   [7:4]   = rs1 (source 1)
-//   [3:0]   = rs2 (source 2)
+// Immediate sign/zero extension:
+//   Sign-extended (imm32 → 64 bit) : SETR, CMPRV, ADDSP
+//   Zero-extended (imm32 → 64 bit) : ADDV, MINUSV, ANDV, ORV, XORV, PUSHV,
+//                                     LDIDX, STIDX, LDIDX64, STIDX64
+//   Full 64-bit, no extension       : SETR64, PUSHV64
+//
+// Two opcode encodings:
+//
+//   3-register ALU  (upper 16 bits non-zero, pattern NNNN_0???):
+//     [31:16] = operation code
+//     [15:12] = 0x0 (fixed)
+//     [11:8]  = rd  (destination)
+//     [7:4]   = rs1 (source 1)
+//     [3:0]   = rs2 (source 2)
+//
+//   Legacy / non-ALU  (upper 16 bits = 0x0000, pattern 0000_XXXX):
+//     [15:12] = primary opcode class
+//     [11:8]  = secondary opcode
+//     [7:4]   = rs1  (source / first operand; destination for COPY)
+//     [3:0]   = rs2  (source / second operand; destination for single-R ops)
+//
+// Memory bus: big-endian 64-bit. Byte address 0 (lowest addr) = MSB of doubleword.
+// Stack: full-descending, 8-byte slots. SP points to last-pushed item. R15 = frame ptr.
+//   PUSH: SP -= 8; mem[SP] = value (64-bit)
+//   POP:  value = mem[SP]; SP += 8
 
 /* Macro definition
 $POPALL POP A / POP B / POP C
@@ -39,38 +57,45 @@ task t_opcode_select;
 
          //=====================================================================
          // 3-register ALU: basic arithmetic/logic  (32'h0001_0??? to 32'h0007_0???)
-         // [31:16]=op, [15:12]=0, [11:8]=rd, [7:4]=rs1, [3:0]=rs2
+         // Encoding: [31:16]=op, [15:12]=0, [11:8]=rd, [7:4]=rs1, [3:0]=rs2
+         // All set zero_flag and sign_flag; ADDR/SUBR also set carry/overflow.
          //=====================================================================
-         32'h0001_0???: t_addr3;                               // ADDR RRR rd=rs1+rs2
-         32'h0002_0???: t_subr3;                               // SUBR RRR rd=rs1-rs2
-         32'h0003_0???: t_andr3;                               // ANDR RRR rd=rs1&rs2
-         32'h0004_0???: t_orr3;                                // ORR RRR rd=rs1|rs2
-         32'h0005_0???: t_xorr3;                               // XORR RRR rd=rs1^rs2
+         32'h0001_0???: t_addr3;                               // ADDR RRR rd=rs1+rs2; sets zero/sign/carry/overflow
+         32'h0002_0???: t_subr3;                               // SUBR RRR rd=rs1-rs2; sets zero/sign/carry/overflow
+         32'h0003_0???: t_andr3;                               // ANDR RRR rd=rs1&rs2; sets zero
+         32'h0004_0???: t_orr3;                                // ORR RRR rd=rs1|rs2; sets zero
+         32'h0005_0???: t_xorr3;                               // XORR RRR rd=rs1^rs2; sets zero
+         32'h0006_0???: t_addc3;                               // ADDC RRR rd=rs1+rs2+carry_flag; sets zero/sign/carry/overflow
+         32'h0007_0???: t_subc3;                               // SUBC RRR rd=rs1-rs2-carry_flag; sets zero/sign/carry/overflow
 
          //=====================================================================
          // 3-register multiply/divide  (32'h0010_0??? to 32'h0017_0???)
+         // All are 64×64→64-bit; MULHR/MULHUR give the upper 64 bits of the
+         // full 128-bit product.  Division truncates toward zero.
          //=====================================================================
-         32'h0010_0???: t_mul_regs_hw;                         // MULR RRR rd=rs1*rs2 signed lo
-         32'h0011_0???: t_mulu_regs_hw;                        // MULUR RRR rd=rs1*rs2 unsigned lo
-         32'h0012_0???: t_mulh_regs_hw;                        // MULHR RRR rd=high(rs1*rs2) signed
-         32'h0013_0???: t_mulhu_regs_hw;                       // MULHUR RRR rd=high(rs1*rs2) unsigned
-         32'h0014_0???: t_div_regs_hw;                         // DIVR RRR rd=rs1/rs2 signed
+         32'h0010_0???: t_mul_regs_hw;                         // MULR RRR rd=rs1*rs2 signed, lower 64 bits
+         32'h0011_0???: t_mulu_regs_hw;                        // MULUR RRR rd=rs1*rs2 unsigned, lower 64 bits
+         32'h0012_0???: t_mulh_regs_hw;                        // MULHR RRR rd=upper64(rs1*rs2) signed
+         32'h0013_0???: t_mulhu_regs_hw;                       // MULHUR RRR rd=upper64(rs1*rs2) unsigned
+         32'h0014_0???: t_div_regs_hw;                         // DIVR RRR rd=rs1/rs2 signed, truncates toward zero
          32'h0015_0???: t_divu_regs_hw;                        // DIVUR RRR rd=rs1/rs2 unsigned
          32'h0016_0???: t_mod_regs_hw;                         // MODR RRR rd=rs1%rs2 signed
          32'h0017_0???: t_modu_regs_hw;                        // MODUR RRR rd=rs1%rs2 unsigned
 
          //=====================================================================
          // 3-register shift/rotate  (32'h0020_0??? to 32'h0024_0???)
+         // Shift count taken from rs2[5:0] (0–63).  All set zero_flag.
          //=====================================================================
-         32'h0020_0???: t_shlr3;                               // SHLR RRR rd=rs1<<rs2[4:0]
-         32'h0021_0???: t_shrr3;                               // SHRR RRR rd=rs1>>rs2[4:0] logical
-         32'h0022_0???: t_sarr3;                               // SARR RRR rd=rs1>>>rs2[4:0] arithmetic
-         32'h0023_0???: t_rotate_left_reg;                     // ROLR RRR rd=rs1 rol rs2[4:0]
-         32'h0024_0???: t_rotate_right_reg;                    // RORR RRR rd=rs1 ror rs2[4:0]
+         32'h0020_0???: t_shlr3;                               // SHLR RRR rd=rs1<<rs2[5:0] logical left
+         32'h0021_0???: t_shrr3;                               // SHRR RRR rd=rs1>>rs2[5:0] logical right
+         32'h0022_0???: t_sarr3;                               // SARR RRR rd=rs1>>>rs2[5:0] arithmetic right
+         32'h0023_0???: t_rotate_left_reg;                     // ROLR RRR rd=rs1 rol rs2[5:0]
+         32'h0024_0???: t_rotate_right_reg;                    // RORR RRR rd=rs1 ror rs2[5:0]
 
          //=====================================================================
-         // 3-register compare to register  (32'h0030_0??? to 32'h0039_0???)
-         // Result written to rd as 0 or 1
+         // 3-register boolean compare  (32'h0030_0??? to 32'h0039_0???)
+         // Writes 0 or 1 to rd; does NOT modify condition flags.
+         // For flag-setting comparisons use CMPRR (RR) or CMPRV (RV).
          //=====================================================================
          32'h0030_0???: t_cmpeqr;                              // CMPEQR RRR rd=(rs1==rs2)?1:0
          32'h0031_0???: t_cmpner;                              // CMPNER RRR rd=(rs1!=rs2)?1:0
@@ -93,194 +118,290 @@ task t_opcode_select;
 
          //=====================================================================
          // 3-register bit manipulation  (32'h0050_0??? to 32'h0053_0???)
+         // Bit position from rs2[5:0] (0–63).
          //=====================================================================
-         32'h0050_0???: t_bit_set_reg;                         // BSETRR RRR rd=rs1 with bit rs2 set
-         32'h0051_0???: t_bit_clear_reg;                       // BCLRRR RRR rd=rs1 with bit rs2 cleared
-         32'h0052_0???: t_bit_toggle_reg;                      // BTGLRR RRR rd=rs1 with bit rs2 toggled
-         32'h0053_0???: t_bit_test_reg;                        // BTSTRR RRR rd=(rs1>>rs2[4:0])&1
+         32'h0050_0???: t_bit_set_reg;                         // BSETRR RRR rd=rs1 with bit rs2[5:0] set
+         32'h0051_0???: t_bit_clear_reg;                       // BCLRRR RRR rd=rs1 with bit rs2[5:0] cleared
+         32'h0052_0???: t_bit_toggle_reg;                      // BTGLRR RRR rd=rs1 with bit rs2[5:0] toggled
+         32'h0053_0???: t_bit_test_reg;                        // BTSTRR RRR rd=(rs1>>rs2[5:0])&1; writes 0 or 1
 
          //=====================================================================
-         // Value-based register ops 0xxx (upper 16 = 0x0000, legacy format)
+         // Legacy register ops (upper 16 = 0x0000)
+         // COPY: rs1=[7:4] is the destination, rs2=[3:0] is the source (reversed vs ALU).
+         // CMPRR: computes rs1-rs2, sets equal/less/ult/sign flags; no writeback, no zero_flag.
          //=====================================================================
-         32'h0000_01??: t_copy_regs;                           // COPY RR Copy second register into first
-         32'h0000_05??: t_cmprr3;                              // CMPRR RR Set flags from first-second (no writeback)
-         32'h0000_080?: t_set_reg(w_var1);                     // SETR RV Set register to a value
-         32'h0000_081?: t_add_value(w_var1);                   // ADDV RV Add value to register
-         32'h0000_082?: t_minus_value(w_var1);                 // MINUSV RV Subtract value from register
-         32'h0000_083?: t_compare_reg_value(w_var1);           // CMPRV RV Compare register to value
-         32'h0000_084?: t_inc_reg;                             // INCR R Increment register
-         32'h0000_085?: t_dec_reg;                             // DECR R Decrement register
-         32'h0000_086?: t_and_reg_value(w_var1);               // ANDV RV AND register with value
-         32'h0000_087?: t_or_reg_value(w_var1);                // ORV RV OR register with value
-         32'h0000_088?: t_xor_reg_value(w_var1);               // XORV RV XOR register with value
-         32'h0000_089?: t_set_reg_flags;                       // SETFR R Set register to flags value
-         32'h0000_08A?: t_negate_reg;                          // NEGR R 2's complement negate
-         32'h0000_08B?: t_abs_reg;                             // ABSR R Absolute value
-         32'h0000_08C?: t_sign_extend_byte;                    // SEXTB R Sign extend byte to 32 bits
-         32'h0000_08D?: t_left_shift_reg;                      // SHLR1 R Left shift register by 1
-         32'h0000_08E?: t_right_shift_reg;                     // SHRR1 R Right shift register by 1 (logical)
-         32'h0000_08F?: t_left_shift_a_reg;                    // SHLAR R Left shift arithmetical by 1
-         32'h0000_090?: t_right_shift_a_reg;                   // SHRAR R Right shift arithmetical by 1
-         32'h0000_091?: t_left_shift_n(w_var1);                // SHLV RV Left shift register by N bits
-         32'h0000_092?: t_right_shift_n(w_var1);               // SHRV RV Right shift register by N bits
-         32'h0000_093?: t_right_shift_a_n(w_var1);             // SHRAV RV Right shift arithmetical by N
-         32'h0000_094?: t_sign_extend_half;                    // SEXTH R Sign extend halfword to 32 bits
-         32'h0000_095?: t_zero_extend_byte;                    // ZEXTB R Zero extend byte to 32 bits
-         32'h0000_096?: t_zero_extend_half;                    // ZEXTH R Zero extend halfword to 32 bits
-         32'h0000_097?: t_byte_swap;                           // BSWAP R Byte swap (endian conversion)
-         32'h0000_098?: t_not_reg;                             // NOTR R Bitwise NOT register
+         32'h0000_01??: t_copy_regs;                           // COPY RR rs1=rs2 (reg[7:4] ← reg[3:0])
+         32'h0000_05??: t_cmprr3;                              // CMPRR RR sets equal/less/ult/sign flags from rs1-rs2; no writeback
 
          //=====================================================================
-         // Bit manipulation by immediate 0A0x-0AFx
+         // Register-immediate arithmetic/logic (RV, 2-word instructions)
+         // imm32 is the word at PC+4.
+         // SETR sign-extends imm32 to 64 bits.
+         // ADDV/MINUSV/ANDV/ORV/XORV zero-extend imm32 (imm treated as unsigned 32-bit).
+         // CMPRV sign-extends imm32 then sets flags; no writeback.
          //=====================================================================
-         32'h0000_0A0?: t_bit_set_value(w_var1);               // BSET RV Set bit N in register
-         32'h0000_0A1?: t_bit_clear_value(w_var1);             // BCLR RV Clear bit N in register
-         32'h0000_0A2?: t_bit_toggle_value(w_var1);            // BTGL RV Toggle bit N in register
-         32'h0000_0A3?: t_bit_test_value(w_var1);              // BTST RV Test bit N, result in zero flag
-         32'h0000_0A8?: t_popcnt;                              // POPCNT R Population count
-         32'h0000_0A9?: t_clz;                                 // CLZ R Count leading zeros
-         32'h0000_0AA?: t_ctz;                                 // CTZ R Count trailing zeros
-         32'h0000_0AB?: t_bit_reverse;                         // BITREV R Reverse all bits
-         32'h0000_0AC?: t_extract_bits(w_var1);                // BEXTR RV Extract bit field
-         32'h0000_0AD?: t_deposit_bits(w_var1);                // BDEP RV Deposit bit field
+         32'h0000_080?: t_set_reg(w_var1);                     // SETR RV rd=sign_ext(imm32) to 64 bits
+         32'h0000_081?: t_add_value(w_var1);                   // ADDV RV rd=rs+zero_ext(imm32); sets zero/sign/carry/overflow
+         32'h0000_082?: t_minus_value(w_var1);                 // MINUSV RV rd=rs-zero_ext(imm32); sets zero/sign/carry/overflow
+         32'h0000_083?: t_compare_reg_value(w_var1);           // CMPRV RV sets equal/less/ult/sign flags from rs-sign_ext(imm32); no writeback
+         32'h0000_084?: t_inc_reg;                             // INCR R rd=rs+1; sets zero/sign/carry/overflow
+         32'h0000_085?: t_dec_reg;                             // DECR R rd=rs-1; sets zero/sign/carry/overflow
+         32'h0000_086?: t_and_reg_value(w_var1);               // ANDV RV rd=rs&zero_ext(imm32); sets zero
+         32'h0000_087?: t_or_reg_value(w_var1);                // ORV RV rd=rs|zero_ext(imm32); sets zero
+         32'h0000_088?: t_xor_reg_value(w_var1);               // XORV RV rd=rs^zero_ext(imm32); sets zero
+         32'h0000_089?: t_set_reg_flags;                       // SETFR R rd={zero,equal,carry,overflow,60'b0}
+         32'h0000_08A?: t_negate_reg;                          // NEGR R rd=-(rs) two's complement; sets zero
+         32'h0000_08B?: t_abs_reg;                             // ABSR R rd=|rs| signed; sets zero
+         32'h0000_08C?: t_sign_extend_byte;                    // SEXTB R rd=sign_ext(rs[7:0]) to 64 bits; sets zero/sign
+         32'h0000_08D?: t_left_shift_reg;                      // SHLR1 R rd=rs<<1 logical
+         32'h0000_08E?: t_right_shift_reg;                     // SHRR1 R rd=rs>>1 logical
+         32'h0000_08F?: t_left_shift_a_reg;                    // SHLAR R rd=rs<<<1 arithmetic (same as logical left)
+         32'h0000_090?: t_right_shift_a_reg;                   // SHRAR R rd=rs>>>1 arithmetic (sign-replicating)
+         32'h0000_091?: t_left_shift_n(w_var1);                // SHLV RV rd=rs<<imm[5:0] logical; sets zero
+         32'h0000_092?: t_right_shift_n(w_var1);               // SHRV RV rd=rs>>imm[5:0] logical; sets zero
+         32'h0000_093?: t_right_shift_a_n(w_var1);             // SHRAV RV rd=rs>>>imm[5:0] arithmetic; sets zero
+         32'h0000_094?: t_sign_extend_half;                    // SEXTH R rd=sign_ext(rs[15:0]) to 64 bits; sets zero/sign
+         32'h0000_095?: t_zero_extend_byte;                    // ZEXTB R rd=zero_ext(rs[7:0]) to 64 bits; sets zero
+         32'h0000_096?: t_zero_extend_half;                    // ZEXTH R rd=zero_ext(rs[15:0]) to 64 bits; sets zero
+         32'h0000_097?: t_byte_swap;                           // BSWAP R rd=byte_reverse(rs) all 8 bytes (64-bit endian swap)
+         32'h0000_098?: t_not_reg;                             // NOTR R rd=~rs bitwise NOT; sets zero
 
          //=====================================================================
-         // Hardware multiply/divide by value 0Bxx
+         // Bit manipulation by immediate (RV, 2-word). Bit position in imm[5:0] (0–63).
+         // BTST sets zero_flag = NOT(bit); does not write a register.
          //=====================================================================
-         32'h0000_0B8?: t_mul_value_hw(w_var1);                // MULV RV Multiply register by value (signed)
-         32'h0000_0B9?: t_div_value_hw(w_var1);                // DIVV RV Divide register by value (signed)
-         32'h0000_0BA?: t_mod_value_hw(w_var1);                // MODV RV Modulo register by value (signed)
+         32'h0000_0A0?: t_bit_set_value(w_var1);               // BSET RV rd=rs with bit imm[5:0] set
+         32'h0000_0A1?: t_bit_clear_value(w_var1);             // BCLR RV rd=rs with bit imm[5:0] cleared
+         32'h0000_0A2?: t_bit_toggle_value(w_var1);            // BTGL RV rd=rs with bit imm[5:0] toggled
+         32'h0000_0A3?: t_bit_test_value(w_var1);              // BTST RV test bit imm[5:0] of rs; zero_flag=NOT(bit), no rd write
+         32'h0000_0A8?: t_popcnt;                              // POPCNT R rd=popcount(rs) (number of 1 bits, 0–64)
+         32'h0000_0A9?: t_clz;                                 // CLZ R rd=count of leading zeros (0–64)
+         32'h0000_0AA?: t_ctz;                                 // CTZ R rd=count of trailing zeros (0–64)
+         32'h0000_0AB?: t_bit_reverse;                         // BITREV R rd=bit_reverse(rs) (bit 63↔0, etc.)
+         32'h0000_0AC?: t_extract_bits(w_var1);                // BEXTR RV rd=extract bit field from rs using imm descriptor
+         32'h0000_0AD?: t_deposit_bits(w_var1);                // BDEP RV rd=deposit bit field into rs using imm descriptor
 
          //=====================================================================
-         // Indexed memory access 0C0x-0EFx
+         // Hardware multiply/divide by immediate (RV, 2-word).  Signed only.
          //=====================================================================
-         32'h0000_0C??: t_load_indexed(w_var1);                // LDIDX RRV first=mem[second+var1]
-         32'h0000_0D??: t_store_indexed(w_var1);               // STIDX RRV mem[second+var1]=first
-         32'h0000_0E??: t_load_indexed_reg(w_var1);            // LDIDXR RRV first=mem[second+reg[var1]]
+         32'h0000_0B8?: t_mul_value_hw(w_var1);                // MULV RV rd=rs*sign_ext(imm32) signed, lower 64 bits
+         32'h0000_0B9?: t_div_value_hw(w_var1);                // DIVV RV rd=rs/sign_ext(imm32) signed, truncates toward zero
+         32'h0000_0BA?: t_mod_value_hw(w_var1);                // MODV RV rd=rs%sign_ext(imm32) signed
 
          //=====================================================================
-         // Rotate by immediate 0F8x-0FDx
+         // Indexed memory — 64-bit load/store (RRV, 2-word)
+         // Effective address = rs2[31:0] + zero_ext(imm32).  No alignment enforcement.
+         // LDIDXR/STIDXR: imm[3:0] is a register number; offset = reg[imm[3:0]].
+         //   These use a 3-cycle pipeline to read the offset register.
          //=====================================================================
-         32'h0000_0F8?: t_rotate_left;                         // ROLR1 R Rotate left by 1
-         32'h0000_0F9?: t_rotate_right;                        // RORR1 R Rotate right by 1
-         32'h0000_0FA?: t_rotate_left_carry;                   // ROLCR R Rotate left through carry
-         32'h0000_0FB?: t_rotate_right_carry;                  // RORCR R Rotate right through carry
-         32'h0000_0FC?: t_rotate_left_n(w_var1);               // ROLV RV Rotate left by N bits
-         32'h0000_0FD?: t_rotate_right_n(w_var1);              // RORV RV Rotate right by N bits
+         32'h0000_0C??: t_load_indexed(w_var1);                // LDIDX64 RRV rd=mem64[rs2+zero_ext(imm32)]
+         32'h0000_0D??: t_store_indexed(w_var1);               // STIDX64 RRV mem64[rs2+zero_ext(imm32)]=rs1
+         32'h0000_0E??: t_load_indexed_reg(w_var1);            // LDIDX64R RRV rd=mem64[rs2+reg[imm[3:0]]]; imm[3:0]=offset reg number
 
          //=====================================================================
-         // Flow control 1xxx
+         // Indexed memory — sub-word load/store (RRV, 2-word)
+         // LDIDX32/STIDX32: 4-byte aligned; LDIDX16: 2-byte aligned; LDIDX8: byte address.
          //=====================================================================
-         32'h0000_1000: t_cond_jump(w_var1, 1'b1);             // JMP V Jump
-         32'h0000_1001: t_cond_jump(w_var1, r_zero_flag);      // JMPZ V Jump if zero
-         32'h0000_1002: t_cond_jump(w_var1, !r_zero_flag);     // JMPNZ V Jump if not zero
-         32'h0000_1003: t_cond_jump(w_var1, r_equal_flag);     // JMPE V Jump if equal
-         32'h0000_1004: t_cond_jump(w_var1, !r_equal_flag);    // JMPNE V Jump if not equal
-         32'h0000_1005: t_cond_jump(w_var1, r_carry_flag);     // JMPC V Jump if carry
-         32'h0000_1006: t_cond_jump(w_var1, !r_carry_flag);    // JMPNC V Jump if not carry
-         32'h0000_1007: t_cond_jump(w_var1, r_overflow_flag);  // JMPO V Jump if overflow
-         32'h0000_1008: t_cond_jump(w_var1, !r_overflow_flag); // JMPNO V Jump if not overflow
-         32'h0000_1009: t_cond_call(w_var1, 1'b1);             // CALL V Call function
-         32'h0000_100A: t_cond_call(w_var1, r_zero_flag);      // CALLZ V Call if zero
-         32'h0000_100B: t_cond_call(w_var1, !r_zero_flag);     // CALLNZ V Call if not zero
-         32'h0000_100C: t_cond_call(w_var1, r_equal_flag);     // CALLE V Call if equal
-         32'h0000_100D: t_cond_call(w_var1, !r_equal_flag);    // CALLNE V Call if not equal
-         32'h0000_100E: t_cond_call(w_var1, r_carry_flag);     // CALLC V Call if carry
-         32'h0000_100F: t_cond_call(w_var1, !r_carry_flag);    // CALLNC V Call if not carry
-         32'h0000_1010: t_cond_call(w_var1, r_overflow_flag);  // CALLO V Call if overflow
-         32'h0000_1011: t_cond_call(w_var1, !r_overflow_flag); // CALLNO V Call if not overflow
-         32'h0000_1012: t_ret;                                  // RET Return from call
-         32'h0000_1013: t_cond_jump(w_var1, r_sign_flag);      // JMPS V Jump if sign (negative)
-         32'h0000_1014: t_cond_jump(w_var1, !r_sign_flag);     // JMPNS V Jump if not sign
-         32'h0000_1015: t_cond_jump(w_var1, r_less_flag);      // JMPLT V Jump if less-than (signed)
-         32'h0000_1016: t_cond_jump(w_var1, r_less_flag | r_equal_flag);   // JMPLE V Jump if less-or-equal
-         32'h0000_1017: t_cond_jump(w_var1, !r_less_flag & !r_equal_flag); // JMPGT V Jump if greater-than
-         32'h0000_1018: t_cond_jump(w_var1, !r_less_flag);                      // JMPGE V Jump if greater-or-equal (signed)
-         32'h0000_1019: t_cond_jump(w_var1, r_ult_flag);                         // JMPULT V Jump if unsigned less-than
-         32'h0000_101A: t_cond_jump(w_var1, r_ult_flag | r_equal_flag);          // JMPULE V Jump if unsigned less-or-equal
-         32'h0000_101B: t_cond_jump(w_var1, !r_ult_flag & !r_equal_flag);        // JMPUGT V Jump if unsigned greater-than
-         32'h0000_101C: t_cond_jump(w_var1, !r_ult_flag);                        // JMPUGE V Jump if unsigned greater-or-equal
-         32'h0000_102?: t_jump_reg;                             // JMPR R Jump to address in register
+         32'h0000_C0??: t_load_indexed32(w_var1);              // LDIDX32 RRV rd=zero_ext(mem32[(rs2+zero_ext(imm32))&~3])
+         32'h0000_C1??: t_store_indexed32(w_var1);             // STIDX32 RRV mem32[(rs2+zero_ext(imm32))&~3]=rs1[31:0]
+         32'h0000_C2??: t_load_indexed16(w_var1);              // LDIDX16 RRV rd=zero_ext(mem16[(rs2+zero_ext(imm32))&~1])
+         32'h0000_C3??: t_store_indexed16(w_var1);             // STIDX16 RRV mem16[(rs2+zero_ext(imm32))&~1]=rs1[15:0]
+         32'h0000_C4??: t_load_indexed8(w_var1);               // LDIDX8 RRV rd=zero_ext(mem8[rs2+zero_ext(imm32)])
+         32'h0000_C5??: t_store_indexed8(w_var1);              // STIDX8 RRV mem8[rs2+zero_ext(imm32)]=rs1[7:0]
 
          //=====================================================================
-         // SPI LCD Control 2xxx
+         // Rotate by immediate (R for ×1, RV for ×N).  Count in imm[5:0] (0–63).
          //=====================================================================
-         32'h0000_200?: spi_dc_write_command_reg;              // CDCDMR R LCD command with register
-         32'h0000_201?: spi_dc_data_command_reg;               // LCDDATAR R LCD data with register
-         32'h0000_2021: spi_dc_write_command_value(w_var1);    // LCDCMDV V LCD write command value
-         32'h0000_2022: spi_dc_write_data_value(w_var1);       // LCDDATAV V LCD data with value
-         32'h0000_2023: t_lcd_reset_value(w_var1);             // LCD V Reset line
+         32'h0000_0F8?: t_rotate_left;                         // ROLR1 R rd=rs rol 1
+         32'h0000_0F9?: t_rotate_right;                        // RORR1 R rd=rs ror 1
+         32'h0000_0FA?: t_rotate_left_carry;                   // ROLCR R rd=rs rol 1 through carry
+         32'h0000_0FB?: t_rotate_right_carry;                  // RORCR R rd=rs ror 1 through carry
+         32'h0000_0FC?: t_rotate_left_n(w_var1);               // ROLV RV rd=rs rol imm[5:0]
+         32'h0000_0FD?: t_rotate_right_n(w_var1);              // RORV RV rd=rs ror imm[5:0]
 
          //=====================================================================
-         // Board LED and Switch 3xxx
+         // 64-bit immediate load — V64, 3-word instruction (12 bytes, PC+=12)
+         // Encoding: opcode word (rd in [3:0]) | lo32 word at PC+4 | hi32 word at PC+8
+         // Result: rd = {hi32, lo32} — full 64 bits, no sign extension.
+         // The three words are inline (consecutive); this is NOT a literal pool.
          //=====================================================================
-         32'h0000_300?: t_led_reg;                             // LEDR R Set LEDs with register
-         32'h0000_301?: t_get_switch_reg;                      // SWR R Get switch status into register
-         32'h0000_302?: t_7_seg1_reg;                          // 7SEG1R R Set 7 Seg 1 to register
-         32'h0000_303?: t_7_seg2_reg;                          // 7SEG2R R Set 7 Seg 2 to register
-         32'h0000_304?: t_7_seg_reg;                           // 7SEGR R Set 7 Seg to register
-         32'h0000_305?: t_led_rgb1_reg;                        // RGB1R R RGB 1 from register
-         32'h0000_306?: t_led_rgb2_reg;                        // RGB2R R RGB 2 from register
-         32'h0000_3070: t_led_value(w_var1);                   // LEDV V Set LED to value
-         32'h0000_3071: t_7_seg1_value(w_var1);                // 7SEG1V V Set 7 Seg 1 to value
-         32'h0000_3072: t_7_seg2_value(w_var1);                // 7SEG2V V Set 7 Seg 2 to value
-         32'h0000_3073: t_7_seg_blank;                         // 7SEGBLANK Blank 7 Seg
-         32'h0000_3074: t_led_rgb1_value(w_var1);              // RGB1V V RGB 1 from value
-         32'h0000_3075: t_led_rgb2_value(w_var1);              // RGB2V V RGB 2 from value
+         32'h0000_0FE?: t_set_reg64(w_var1, 32'b0);            // SETR64 RV64 rd={hi32,lo32}; 3-word: opcode@PC rd=[3:0], lo32@PC+4, hi32@PC+8
 
          //=====================================================================
-         // Stack control 4xxx
+         // 32-bit ↔ 64-bit extension (R, 1-word).  rs2=[3:0], rd=rs2.
          //=====================================================================
-         32'h0000_400?: t_stack_push_reg;                      // PUSH R Push register onto stack
-         32'h0000_401?: t_stack_pop_reg;                       // POP R Pop stack into register
-         32'h0000_4020: t_stack_push_value(w_var1);            // PUSHV V Push 32-bit value onto stack
-         32'h0000_403?: t_get_sp;                              // GETSP R Copy SP into register
-         32'h0000_404?: t_set_sp;                              // SETSP R Set SP from register
-         32'h0000_4050: t_add_sp(w_var1);                      // ADDSP V Add signed immediate to SP
-         32'h0000_406?: t_call_reg;                            // CALLR R Call to address in register
+         32'h0000_0F0?: t_sextw;                               // SEXTW R rd=sign_ext(rs[31:0]) to 64 bits
+         32'h0000_0F1?: t_zextw;                               // ZEXTW R rd=zero_ext(rs[31:0]) to 64 bits
 
          //=====================================================================
-         // Communication 5xxx
+         // Flow control (V = absolute 32-bit byte address at PC+4, 2-word insns)
+         //
+         // Flag sources:
+         //   zero_flag    — set by arithmetic ops when result == 0
+         //   equal_flag   — set by CMPRR/CMPRV when operands are equal
+         //   carry_flag   — carry/borrow out of bit 63
+         //   overflow_flag— signed overflow
+         //   sign_flag    — result MSB (negative)
+         //   less_flag    — signed less-than, set by CMPRR/CMPRV
+         //   ult_flag     — unsigned less-than, set by CMPRR/CMPRV
+         //
+         // JMPZ tests the arithmetic zero_flag; JMPE tests the compare equal_flag.
+         // JMPLT/JMPLE/JMPGT/JMPGE use less_flag (from CMPRR/CMPRV, signed).
+         // JMPULT/JMPULE/JMPUGT/JMPUGE use ult_flag (from CMPRR/CMPRV, unsigned).
          //=====================================================================
-         32'h0000_5000: t_test_message;                        // TESTMSG Send test UART message
-         32'h0000_5001: t_tx_newline;                          // NEWLINE Send UART newline
-         32'h0000_5002: t_tx_value_of_mem(w_var1);             // TXMEM V Send 8 bytes value of memory location
-         32'h0000_5003: t_tx_string_at_mem(w_var1);            // TXSTRMEM V Send string at memory
-         32'h0000_501?: t_tx_reg;                              // TXR R Send 8 bytes reg value in message
-         32'h0000_502?: t_tx_value_of_mem_at_reg;              // TXMEMR R Send value at memory of register
-         32'h0000_503?: t_tx_char_from_reg_value;              // TXCHARMEMR R Send char at memory from register
-         32'h0000_504?: t_tx_string_at_reg;                    // TXSTRMEMR R Send string at memory from register
-         32'h0000_505?: t_rx_blocking;                        // RXRB R Blocking receive byte into register
-         32'h0000_506?: t_rx_nonblocking;                     // RXRNB R Non-blocking receive byte into register (zero_flag=1 if empty)
+         32'h0000_1000: t_cond_jump(w_var1, 1'b1);             // JMP V jump to absolute byte addr imm32 (unconditional)
+         32'h0000_1001: t_cond_jump(w_var1, r_zero_flag);      // JMPZ V jump if zero_flag (arithmetic result was zero)
+         32'h0000_1002: t_cond_jump(w_var1, !r_zero_flag);     // JMPNZ V jump if not zero_flag
+         32'h0000_1003: t_cond_jump(w_var1, r_equal_flag);     // JMPE V jump if equal_flag (from CMPRR/CMPRV)
+         32'h0000_1004: t_cond_jump(w_var1, !r_equal_flag);    // JMPNE V jump if not equal_flag
+         32'h0000_1005: t_cond_jump(w_var1, r_carry_flag);     // JMPC V jump if carry_flag
+         32'h0000_1006: t_cond_jump(w_var1, !r_carry_flag);    // JMPNC V jump if not carry_flag
+         32'h0000_1007: t_cond_jump(w_var1, r_overflow_flag);  // JMPO V jump if overflow_flag
+         32'h0000_1008: t_cond_jump(w_var1, !r_overflow_flag); // JMPNO V jump if not overflow_flag
+         32'h0000_1009: t_cond_call(w_var1, 1'b1);             // CALL V push PC+8 (ret addr), jump to imm32; SP-=8
+         32'h0000_100A: t_cond_call(w_var1, r_zero_flag);      // CALLZ V call if zero_flag; SP-=8
+         32'h0000_100B: t_cond_call(w_var1, !r_zero_flag);     // CALLNZ V call if not zero_flag; SP-=8
+         32'h0000_100C: t_cond_call(w_var1, r_equal_flag);     // CALLE V call if equal_flag; SP-=8
+         32'h0000_100D: t_cond_call(w_var1, !r_equal_flag);    // CALLNE V call if not equal_flag; SP-=8
+         32'h0000_100E: t_cond_call(w_var1, r_carry_flag);     // CALLC V call if carry_flag; SP-=8
+         32'h0000_100F: t_cond_call(w_var1, !r_carry_flag);    // CALLNC V call if not carry_flag; SP-=8
+         32'h0000_1010: t_cond_call(w_var1, r_overflow_flag);  // CALLO V call if overflow_flag; SP-=8
+         32'h0000_1011: t_cond_call(w_var1, !r_overflow_flag); // CALLNO V call if not overflow_flag; SP-=8
+         32'h0000_1012: t_ret;                                  // RET pop return addr (uses [31:0]); SP+=8
+         32'h0000_1013: t_cond_jump(w_var1, r_sign_flag);      // JMPS V jump if sign_flag (result was negative)
+         32'h0000_1014: t_cond_jump(w_var1, !r_sign_flag);     // JMPNS V jump if not sign_flag
+         32'h0000_1015: t_cond_jump(w_var1, r_less_flag);                        // JMPLT V jump if less_flag (signed <, from CMPRR/CMPRV)
+         32'h0000_1016: t_cond_jump(w_var1, r_less_flag | r_equal_flag);         // JMPLE V jump if less_flag|equal_flag (signed <=)
+         32'h0000_1017: t_cond_jump(w_var1, !r_less_flag & !r_equal_flag);       // JMPGT V jump if !less_flag&!equal_flag (signed >)
+         32'h0000_1018: t_cond_jump(w_var1, !r_less_flag);                       // JMPGE V jump if !less_flag (signed >=)
+         32'h0000_1019: t_cond_jump(w_var1, r_ult_flag);                         // JMPULT V jump if ult_flag (unsigned <, from CMPRR/CMPRV)
+         32'h0000_101A: t_cond_jump(w_var1, r_ult_flag | r_equal_flag);          // JMPULE V jump if ult_flag|equal_flag (unsigned <=)
+         32'h0000_101B: t_cond_jump(w_var1, !r_ult_flag & !r_equal_flag);        // JMPUGT V jump if !ult_flag&!equal_flag (unsigned >)
+         32'h0000_101C: t_cond_jump(w_var1, !r_ult_flag);                        // JMPUGE V jump if !ult_flag (unsigned >=)
+         32'h0000_102?: t_jump_reg;                             // JMPR R jump to absolute byte addr in rs2
 
          //=====================================================================
-         // CPU Setting 6xxx
+         // SPI LCD Control (2xxx)
          //=====================================================================
-         32'h0000_60??: t_set_interrupt_regs;                  // INTSETRR RR Set interrupt from registers
+         32'h0000_200?: spi_dc_write_command_reg;              // CDCDMR R send LCD command byte from rs2[7:0]
+         32'h0000_201?: spi_dc_data_command_reg;               // LCDDATAR R send LCD data byte from rs2[7:0]
+         32'h0000_2021: spi_dc_write_command_value(w_var1);    // LCDCMDV V send LCD command byte from imm[7:0]
+         32'h0000_2022: spi_dc_write_data_value(w_var1);       // LCDDATAV V send LCD data byte from imm[7:0]
+         32'h0000_2023: t_lcd_reset_value(w_var1);             // LCD V drive LCD reset line with imm[0]
 
          //=====================================================================
-         // Memory actions 7xxx
+         // Board I/O — LEDs, switches, 7-segment displays (3xxx)
          //=====================================================================
-         32'h0000_70??: t_set_mem_from_reg_reg;                // MEMSETRR RR mem[second]=first
-         32'h0000_71??: t_set_reg_from_mem_reg;                // MEMREADRR RR first=mem[second]
-         32'h0000_720?: t_set_mem_from_value_reg(w_var1);      // MEMSETR RV Set memory from value
-         32'h0000_721?: t_set_reg_from_mem_value(w_var1);      // MEMREADR RV Set register from memory at value
-         32'h0000_73??: t_store_indexed_reg(w_var1);           // STIDXR RRV mem[second+reg[var1]]=first
+         32'h0000_300?: t_led_reg;                             // LEDR R set LEDs from rs2
+         32'h0000_301?: t_get_switch_reg;                      // SWR R rd=switch status word
+         32'h0000_302?: t_7_seg1_reg;                          // 7SEG1R R set 7-seg display 1 from rs2
+         32'h0000_303?: t_7_seg2_reg;                          // 7SEG2R R set 7-seg display 2 from rs2
+         32'h0000_304?: t_7_seg_reg;                           // 7SEGR R set both 7-seg displays from rs2
+         32'h0000_305?: t_led_rgb1_reg;                        // RGB1R R set RGB LED 1 from rs2
+         32'h0000_306?: t_led_rgb2_reg;                        // RGB2R R set RGB LED 2 from rs2
+         32'h0000_3070: t_led_value(w_var1);                   // LEDV V set LEDs from imm32
+         32'h0000_3071: t_7_seg1_value(w_var1);                // 7SEG1V V set 7-seg display 1 from imm32
+         32'h0000_3072: t_7_seg2_value(w_var1);                // 7SEG2V V set 7-seg display 2 from imm32
+         32'h0000_3073: t_7_seg_blank;                         // 7SEGBLANK blank both 7-seg displays
+         32'h0000_3074: t_led_rgb1_value(w_var1);              // RGB1V V set RGB LED 1 from imm32
+         32'h0000_3075: t_led_rgb2_value(w_var1);              // RGB2V V set RGB LED 2 from imm32
 
          //=====================================================================
-         // Byte memory access 74xx-75xx
+         // Stack control (4xxx)
+         // CALL/CALLR push the return address zero-extended to 64 bits.
+         // RET pops 64 bits; restores PC from the lower 32 bits [31:0].
+         // PUSHV zero-extends imm32 to 64 bits before pushing.
+         // PUSHV64: 3-word V64 instruction (opcode@PC, lo32@PC+4, hi32@PC+8; PC+=12).
          //=====================================================================
-         32'h0000_74??: t_memset8;                              // MEMSET8 RR mem8[reg2]=reg1[7:0] (byte addr)
-         32'h0000_75??: t_memget8;                              // MEMGET8 RR reg1=zero_ext(mem8[reg2]) (byte addr)
+         32'h0000_400?: t_stack_push_reg;                      // PUSH R push rs2 (64-bit) onto stack; SP-=8
+         32'h0000_401?: t_stack_pop_reg;                       // POP R pop 64-bit from stack into rd; SP+=8
+         32'h0000_4020: t_stack_push_value(w_var1);            // PUSHV V push zero_ext(imm32) (64-bit) onto stack; SP-=8
+         32'h0000_403?: t_get_sp;                              // GETSP R rd=zero_ext(SP) (SP is 32-bit)
+         32'h0000_404?: t_set_sp;                              // SETSP R SP=rs2[31:0]
+         32'h0000_4050: t_add_sp(w_var1);                      // ADDSP V SP+=sign_ext(imm32); negative=allocate locals, positive=free
+         32'h0000_4060: t_stack_push_value64(w_var1, w_var2);  // PUSHV64 V64 push {hi32,lo32} (64-bit) onto stack; SP-=8; PC+=12
+         32'h0000_407?: t_call_reg;                            // CALLR R push PC+4 (ret addr, zero-ext), jump to rs2; SP-=8
 
          //=====================================================================
-         // Other Fxxx
+         // UART communication (5xxx) — debug output
          //=====================================================================
-         32'h0000_F00?: t_delay_reg;                           // DELAYR R Delay by register
-         32'h0000_F010: t_nop;                                 // NOP No operation
-         32'h0000_F011: t_halt;                                // HALT Freeze and hang
-         32'h0000_F012: t_reset;                               // RESET Reset
-         32'h0000_F013: t_delay(w_var1);                       // DELAYV V Delay by value
+         32'h0000_5000: t_test_message;                        // TESTMSG send fixed test string over UART
+         32'h0000_5001: t_tx_newline;                          // NEWLINE send UART newline (CR+LF)
+         32'h0000_5002: t_tx_value_of_mem(w_var1);             // TXMEM V send 64-bit value at mem[imm32] as hex over UART
+         32'h0000_5003: t_tx_string_at_mem(w_var1);            // TXSTRMEM V send null-terminated string at mem[imm32] over UART
+         32'h0000_501?: t_tx_reg;                              // TXR R send rs2 (64-bit) as hex over UART
+         32'h0000_502?: t_tx_value_of_mem_at_reg;              // TXMEMR R send 64-bit value at mem[rs2] as hex over UART
+         32'h0000_503?: t_tx_char_from_reg_value;              // TXCHARMEMR R send byte at mem[rs2] as ASCII char over UART
+         32'h0000_504?: t_tx_string_at_reg;                    // TXSTRMEMR R send null-terminated string at mem[rs2] over UART
+         32'h0000_505?: t_rx_blocking;                         // RXRB R blocking receive: rd=UART byte (waits until byte available)
+         32'h0000_506?: t_rx_nonblocking;                      // RXRNB R non-blocking receive: rd=UART byte; zero_flag=1 if FIFO empty
+
+         //=====================================================================
+         // Interrupt control (6xxx)
+         // INTSETRR: rs1[1:0] = interrupt number (0–3); rs2[31:0] = handler byte address.
+         //=====================================================================
+         32'h0000_60??: t_set_interrupt_regs;                  // INTSETRR RR set interrupt[rs1[1:0]] handler = rs2[31:0]
+
+         //=====================================================================
+         // Memory — 64-bit doubleword load/store (7xxx)
+         // All 64-bit ops require 8-byte alignment; hardware uses the full address as-is.
+         // MEMSET64RR/MEMREADRR: rs1=[7:4]=data, rs2=[3:0]=address.
+         // MEMSETR/MEMREADR: imm32 is the absolute byte address (2-word instruction).
+         // STIDXR: imm[3:0] is a register number; offset = reg[imm[3:0]] (3-cycle pipeline).
+         //=====================================================================
+         32'h0000_70??: t_set_mem_from_reg_reg;                // MEMSET64RR RR mem64[rs2]=rs1; 8-byte aligned
+         32'h0000_71??: t_set_reg_from_mem_reg;                // MEMREADRR RR rd=mem64[rs2]; 8-byte aligned
+         32'h0000_720?: t_set_mem_from_value_reg(w_var1);      // MEMSETR RV mem64[imm32]=rs; 8-byte aligned
+         32'h0000_721?: t_set_reg_from_mem_value(w_var1);      // MEMREADR RV rd=mem64[imm32]; 8-byte aligned
+         32'h0000_73??: t_store_indexed_reg(w_var1);           // STIDX64R RRV mem64[rs2+reg[imm[3:0]]]=rs1; imm[3:0]=offset reg number
+
+         //=====================================================================
+         // Byte memory access (74xx–75xx) — big-endian byte addressing
+         // addr[2:0] selects the byte within the 64-bit doubleword.
+         // addr[2:0]=0 → MSB (bits[63:56]); addr[2:0]=7 → LSB (bits[7:0]).
+         // No alignment requirement.
+         //=====================================================================
+         32'h0000_74??: t_memset8;                             // MEMSET8 RR mem8[rs2]=rs1[7:0]; byte addr, big-endian
+         32'h0000_75??: t_memget8;                             // MEMGET8 RR rd=zero_ext(mem8[rs2]); byte addr, big-endian
+
+         //=====================================================================
+         // 16-bit halfword memory access (76xx–77xx)
+         // Hardware clears addr[0] (2-byte aligned). big-endian.
+         //=====================================================================
+         32'h0000_76??: t_memset16;                            // MEMSET16 RR mem16[rs2&~1]=rs1[15:0]; 2-byte aligned, big-endian
+         32'h0000_77??: t_memget16;                            // MEMGET16 RR rd=zero_ext(mem16[rs2&~1]); 2-byte aligned, big-endian
+
+         //=====================================================================
+         // 32-bit word memory access (78xx–79xx)
+         // Hardware clears addr[1:0] (4-byte aligned). big-endian.
+         //=====================================================================
+         32'h0000_78??: t_memset32;                            // MEMSET32 RR mem32[rs2&~3]=rs1[31:0]; 4-byte aligned, big-endian
+         32'h0000_79??: t_memget32;                            // MEMGET32 RR rd=zero_ext(mem32[rs2&~3]); 4-byte aligned, big-endian
+
+         //=====================================================================
+         // 64-bit doubleword memory access (7Axx–7Bxx)
+         // Hardware clears addr[2:0] (8-byte aligned).
+         //=====================================================================
+         32'h0000_7A??: t_memset64;                            // MEMSET64 RR mem64[rs2&~7]=rs1; 8-byte aligned
+         32'h0000_7B??: t_memget64;                            // MEMGET64 RR rd=mem64[rs2&~7]; 8-byte aligned
+
+         //=====================================================================
+         // Miscellaneous (Fxxx)
+         // HALT enters a low-power halted state; only a hard reset resumes execution.
+         // RESET restores PC to 0x4 (word 1, the first instruction after the header).
+         //=====================================================================
+         32'h0000_F00?: t_delay_reg;                           // DELAYR R spin-wait rs2 clock cycles
+         32'h0000_F010: t_nop;                                 // NOP no operation; PC+=4
+         32'h0000_F011: t_halt;                                // HALT freeze execution until hard reset
+         32'h0000_F012: t_reset;                               // RESET restart: PC=0x4 (word 1)
+         32'h0000_F013: t_delay(w_var1);                       // DELAYV V spin-wait imm32 clock cycles
+
+         //=====================================================================
+         // 64-bit indexed memory — 8-byte aligned (FCxx–FDxx, RRV, 2-word)
+         // Effective address = (rs2[31:0] + zero_ext(imm32)) & ~7 (8-byte aligned).
+         //=====================================================================
+         32'h0000_FC??: t_load_indexed64(w_var1);              // LDIDX64 RRV rd=mem64[(rs2+zero_ext(imm32))&~7]; 8-byte aligned
+         32'h0000_FD??: t_store_indexed64(w_var1);             // STIDX64 RRV mem64[(rs2+zero_ext(imm32))&~7]=rs1; 8-byte aligned
 
          default: begin
             r_SM <= HCF_1;  // Halt and catch fire error 1

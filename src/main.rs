@@ -270,6 +270,41 @@ fn main() -> Result<(), i32> {
     Ok(())
 }
 
+/// Auto-upgrade `SETR R value` to `SETR64 R value` when the immediate doesn't fit in 32 bits.
+///
+/// Returns the (possibly rewritten) line string unchanged for all other mnemonics or
+/// when the value fits in the 32-bit range accepted by `convert_argument`
+/// (i.e. `i32::MIN ..= 0xFFFF_FFFF`).
+fn upgrade_setr_to_setr64(line: &str) -> String {
+    let stripped = strip_comments(line);
+    let mut words = stripped.split_whitespace();
+    if !words.next().unwrap_or("").eq_ignore_ascii_case("setr") {
+        return line.to_owned();
+    }
+    let _reg = words.next(); // skip register name
+    let val_str = match words.next() {
+        Some(s) => s,
+        None => return line.to_owned(),
+    };
+    // Parse as signed 64-bit so we handle negative decimal and full-width hex.
+    #[allow(clippy::cast_possible_wrap, reason = "u64→i64 reinterpret is intentional for range check")]
+    let val: i64 = if val_str.len() >= 2 && val_str.get(..2).map_or(false, |s| s.eq_ignore_ascii_case("0x")) {
+        let hex = &val_str[2..].replace('_', "");
+        u64::from_str_radix(hex, 16).map_or(0, |v| v as i64)
+    } else {
+        val_str.parse::<i64>().unwrap_or(0)
+    };
+    // Same bounds as convert_argument: [i32::MIN, 0xFFFF_FFFF] fits in 32 bits.
+    if val >= i64::from(i32::MIN) && val <= 0xFFFF_FFFF_i64 {
+        return line.to_owned();
+    }
+    // Upgrade: replace the leading "SETR" (any case) with "SETR64".
+    let trimmed = line.trim_start();
+    let leading_ws = &line[..line.len() - trimmed.len()];
+    // SAFETY: trimmed starts with "setr" (4 ASCII chars), confirmed by eq_ignore_ascii_case above.
+    format!("{leading_ws}SETR64{}", &trimmed[4..])
+}
+
 /// Returns pass1 from pass0.
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
@@ -278,7 +313,7 @@ fn main() -> Result<(), i32> {
 #[allow(clippy::indexing_slicing, reason = "Indices are guarded by parts.len() >= 3 check above")]
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
-    let mut program_counter: u32 = HEAP_HEADER_WORDS * 4; // Byte address: 4 header words × 4 bytes each
+    let mut program_counter: u32 = HEAP_HEADER_WORDS * 8; // Byte address: 4 header words × 8 bytes each (64-bit words)
     let mut data_pass0: Vec<Pass0> = Vec::new();
     let mut in_data_section = false;
 
@@ -318,7 +353,9 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             continue;
         }
 
-        let lt = line_type(&mut oplist, &pass.input_text_line);
+        // Rewrite "SETR R val" → "SETR64 R val" before line_type/num_arguments when val > 32 bits.
+        let upgraded_line = upgrade_setr_to_setr64(&pass.input_text_line);
+        let lt = line_type(&mut oplist, &upgraded_line);
 
         // Defer labels in data section to end of program with data
         if in_data_section && lt == LineType::Label {
@@ -327,22 +364,22 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
 
         pass1.push(Pass1 {
-            input_text_line: pass.input_text_line.clone(),
+            input_text_line: upgraded_line.clone(),
             file_name: pass.file_name.clone(),
             line_counter: pass.line_counter,
             program_counter,
             line_type: lt.clone(),
         });
-        if !is_valid_line(&mut oplist, strip_comments(&pass.input_text_line)) {
+        if !is_valid_line(&mut oplist, strip_comments(&upgraded_line)) {
             msg_list.push(
-                format!("Error {}", pass.input_text_line),
+                format!("Error {}", upgraded_line),
                 Some(pass.line_counter),
                 Some(pass.file_name.clone()),
                 MessageType::Error,
             );
         }
         if lt == LineType::Opcode {
-            let num_args = num_arguments(&mut oplist, &strip_comments(&pass.input_text_line));
+            let num_args = num_arguments(&mut oplist, &strip_comments(&upgraded_line));
             #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct program counter calculation")]
             if let Some(arguments) = num_args {
                 program_counter = program_counter + (arguments + 1) * 4; // Each word = 4 bytes
@@ -1057,7 +1094,7 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
             // 1. _start preamble — must be first so it lands at address 0x000
             for &preamble_line in &[
                 "_start",
-                "SETR A 0x2000000",
+                "SETR A 0x8000000",
                 "SETSP A",
                 "SETR P 0",
                 "DELAYV 0x100",
@@ -1213,15 +1250,16 @@ mod tests {
             },
         ];
         let pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        // Byte addressing: PC starts at 16 (4 header words × 4 bytes).
-        // Each instruction word = 4 bytes; data bytes = word_count × 4.
-        assert_eq!(pass1.first().unwrap_or_default().program_counter, 16); // MOV
-        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 28);  // PUSH (MOV=3 words×4=12)
-        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 32);  // RET  (+4)
-        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 36);  // #DATA1 0x2 inline (+4)
-        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 44);  // RET  (2 words×4=8)
-        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 48);  // #DATA1 "HELLO" inline (+4)
-        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 60);  // RET  (3 words×4=12)
+        // Byte addressing: PC starts at 32 (4 header words × 8 bytes each in 64-bit).
+        // Each instruction word = 4 bytes (opcode encoding unchanged).
+        // Each 64-bit data word = 8 bytes (16 hex chars).
+        assert_eq!(pass1.first().unwrap_or_default().program_counter, 32); // MOV
+        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 44);  // PUSH (MOV=3 words×4=12)
+        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 48);  // RET  (+4)
+        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 52);  // #DATA1 0x2 inline (+4)
+        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 68);  // RET  (2 data words×8=16)
+        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 72);  // #DATA1 "HELLO" inline (+4)
+        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 84);  // RET  (string=12 bytes)
     }
 
     #[test]

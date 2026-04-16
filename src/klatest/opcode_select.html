@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 08/04/2026 16:14<h2>Opcode Table</h2>
+Created 14/04/2026 10:36<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -366,6 +366,27 @@ Created 08/04/2026 16:14<h2>Opcode Table</h2>
     <td>1</td>
     <td>1</td>
     <td>RV Rotate right by N bits</td>
+</tr>
+<tr>
+    <td>SETR64</td>
+    <td>00000FE?</td>
+    <td>1</td>
+    <td>1</td>
+    <td>RV64 Load 64-bit immediate (hi32 self-fetched)</td>
+</tr>
+<tr>
+    <td>SEXTW</td>
+    <td>00000FF0</td>
+    <td>0</td>
+    <td>0</td>
+    <td>R Sign-extend lower 32-bit to 64</td>
+</tr>
+<tr>
+    <td>ZEXTW</td>
+    <td>00000FF1</td>
+    <td>0</td>
+    <td>0</td>
+    <td>R Zero-extend lower 32-bit to 64</td>
 </tr>
 <tr>
     <td>JMP</td>
@@ -746,8 +767,15 @@ Created 08/04/2026 16:14<h2>Opcode Table</h2>
     <td>V Add signed immediate to SP</td>
 </tr>
 <tr>
+    <td>PUSHV64</td>
+    <td>00004060</td>
+    <td>2</td>
+    <td>0</td>
+    <td>V64 Push 64-bit value onto stack</td>
+</tr>
+<tr>
     <td>CALLR</td>
-    <td>0000406?</td>
+    <td>0000407?</td>
     <td>0</td>
     <td>1</td>
     <td>R Call to address in register</td>
@@ -879,6 +907,48 @@ Created 08/04/2026 16:14<h2>Opcode Table</h2>
     <td>RR reg1=zero_ext(mem8[reg2]) (byte addr)</td>
 </tr>
 <tr>
+    <td>MEMSET16</td>
+    <td>000076??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>RR mem16[reg2]=reg1[15:0]</td>
+</tr>
+<tr>
+    <td>MEMGET16</td>
+    <td>000077??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>RR reg1=zero_ext(mem16[reg2])</td>
+</tr>
+<tr>
+    <td>MEMSET32</td>
+    <td>000078??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>RR mem32[reg2]=reg1[31:0]</td>
+</tr>
+<tr>
+    <td>MEMGET32</td>
+    <td>000079??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>RR reg1=zero_ext(mem32[reg2])</td>
+</tr>
+<tr>
+    <td>MEMSET64</td>
+    <td>00007A??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>RR mem64[reg2]=reg1</td>
+</tr>
+<tr>
+    <td>MEMGET64</td>
+    <td>00007B??</td>
+    <td>0</td>
+    <td>2</td>
+    <td>RR reg1=mem64[reg2]</td>
+</tr>
+<tr>
     <td>DELAYR</td>
     <td>0000F00?</td>
     <td>0</td>
@@ -912,6 +982,20 @@ Created 08/04/2026 16:14<h2>Opcode Table</h2>
     <td>1</td>
     <td>0</td>
     <td>V Delay by value</td>
+</tr>
+<tr>
+    <td>LDIDX64</td>
+    <td>0000FC??</td>
+    <td>1</td>
+    <td>2</td>
+    <td>RRV reg1=mem64[reg2+var1]</td>
+</tr>
+<tr>
+    <td>STIDX64</td>
+    <td>0000FD??</td>
+    <td>1</td>
+    <td>2</td>
+    <td>RRV mem64[reg2+var1]=reg1</td>
 </tr>
 <tr>
     <td>ADDR</td>

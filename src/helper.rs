@@ -83,11 +83,11 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
 
     // Word 0: heap_start placeholder — patched below once total program size is known
     let heap_start_offset = output_string.len();
-    output_string.push_str("00000000");
+    output_string.push_str("0000000000000000");
 
     // Words 1-3: reserved header words (heap_end, reserved, reserved)
     for _ in 1..HEAP_HEADER_WORDS {
-        output_string.push_str("00000000");
+        output_string.push_str("0000000000000000");
     }
 
     for pass in pass2 {
@@ -95,12 +95,13 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     }
 
     // heap_start = first free byte after the program
-    // output_string is 'S' + hex_chars; hex_chars/8 = words; words*4 = bytes
+    // output_string is 'S' + hex_chars; hex_chars/2 = bytes (valid for both 32-bit opcodes
+    // and 64-bit data words since both maintain a 2:1 hex-char to byte ratio)
     #[allow(clippy::arithmetic_side_effects, reason = "Subtraction safe: string starts with 'S' so len >= 1")]
-    #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars → words → bytes")]
-    let heap_start: u32 = (((output_string.len() - 1) / 8) * 4) as u32;
+    #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars → bytes")]
+    let heap_start: u32 = ((output_string.len() - 1) / 2) as u32;
     #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
-    output_string.replace_range(heap_start_offset..heap_start_offset + 8, &format!("{heap_start:08X}"));
+    output_string.replace_range(heap_start_offset..heap_start_offset + 16, &format!("{heap_start:016X}"));
 
     if pass2
         .iter()
@@ -171,7 +172,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         return None;
     }
 
-    // Handle .word VALUE directive — emit a single 32-bit word
+    // Handle .word VALUE directive — emit a single 64-bit word
     if first_word == ".word" {
         let value_str = words.next().unwrap_or("");
         if value_str.is_empty() {
@@ -186,12 +187,14 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         } else {
             value_str.parse::<i64>().unwrap_or(0)
         };
-        #[allow(clippy::cast_sign_loss, reason = "Sign loss is intentional for u32 hex representation")]
-        #[allow(clippy::cast_possible_truncation, reason = "Truncation to u32 is intentional for 32-bit hex output")]
-        return Some(format!("{:08X}", value as u32));
+        #[allow(clippy::cast_sign_loss, reason = "Sign loss is intentional for u64 hex representation")]
+        let v64 = value as u64;
+        let lo32 = (v64 & 0xFFFF_FFFF) as u32;
+        let hi32 = ((v64 >> 32) & 0xFFFF_FFFF) as u32;
+        return Some(format!("{lo32:08X}{hi32:08X}"));
     }
 
-    // Handle .space N directive — N bytes of zero, rounded up to word boundary
+    // Handle .space N directive — N bytes of zero, rounded up to 64-bit word boundary
     if first_word == ".space" {
         let count_str = words.next().unwrap_or("");
         if count_str.is_empty() {
@@ -212,10 +215,10 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         #[allow(clippy::integer_division, reason = "Integer division is intentional for word count calculation")]
         #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic is intentional for word count rounding")]
         #[allow(clippy::integer_division_remainder_used, reason = "Division remainder is intentional for rounding")]
-        let word_count = (byte_count + 3) / 4;
+        let word_count = (byte_count + 7) / 8;
         let mut data = String::default();
         for _ in 0..word_count {
-            data.push_str("00000000");
+            data.push_str("0000000000000000");
         }
         return Some(data);
     }
@@ -277,7 +280,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         } else {
             let mut data = String::default();
             for _ in 0..int_value {
-                data.push_str("00000000");
+                data.push_str("0000000000000000");
             }
             Some(data)
         }
@@ -583,9 +586,9 @@ mod tests {
         });
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
-        // Word 0 is heap_start in bytes (5 words × 4 = 20 = 0x14),
-        // words 1-3 are reserved zeros; checksum reflects the updated word 0.
-        assert_eq!(bin_string, Some("S000000140000000000000000000000001234432100000001Z00105586X".to_owned()));
+        // Word 0 is heap_start in bytes (72 hex chars / 2 = 36 = 0x24),
+        // words 1-3 are reserved zeros (16 hex chars each); checksum reflects updated word 0.
+        assert_eq!(bin_string, Some("S00000000000000240000000000000000000000000000000000000000000000001234432100000001Z0010559EX".to_owned()));
     }
 
     #[test]
@@ -821,7 +824,7 @@ mod tests {
         let mut msg_list = MsgList::new();
         let input = String::from("#TEST 3");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
-        assert_eq!(output, 24);
+        assert_eq!(output, 48); // 3 words × 16 hex chars per 64-bit word = 48
     }
 
     #[test]
@@ -841,7 +844,7 @@ mod tests {
     fn test_data_as_bytes1() {
         let input = String::from("#TEST 3");
         let output = data_as_bytes(&input);
-        assert_eq!(output, Some("000000000000000000000000".to_owned()));
+        assert_eq!(output, Some("000000000000000000000000000000000000000000000000".to_owned())); // 3 × 16 hex chars per 64-bit word
     }
 
     #[test]
@@ -871,7 +874,7 @@ mod tests {
     fn test_data_as_bytes5() {
         let input = String::from("#TEST 0x1");
         let output = data_as_bytes(&input);
-        assert_eq!(output, Some("00000000".to_owned()),);
+        assert_eq!(output, Some("0000000000000000".to_owned()),); // 1 × 16 hex chars per 64-bit word
     }
 
     #[test]
@@ -1007,25 +1010,25 @@ mod tests {
     #[test]
     fn test_data_as_bytes_word_hex() {
         let output = data_as_bytes(".word 0x2A");
-        assert_eq!(output, Some("0000002A".to_owned()));
+        assert_eq!(output, Some("0000002A00000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_word_decimal() {
         let output = data_as_bytes(".word 42");
-        assert_eq!(output, Some("0000002A".to_owned()));
+        assert_eq!(output, Some("0000002A00000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_word_zero() {
         let output = data_as_bytes(".word 0");
-        assert_eq!(output, Some("00000000".to_owned()));
+        assert_eq!(output, Some("0000000000000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_word_negative() {
         let output = data_as_bytes(".word -1");
-        assert_eq!(output, Some("FFFFFFFF".to_owned()));
+        assert_eq!(output, Some("FFFFFFFFFFFFFFFF".to_owned()));
     }
 
     #[test]
@@ -1037,7 +1040,7 @@ mod tests {
     #[test]
     fn test_data_as_bytes_space_4_bytes() {
         let output = data_as_bytes(".space 4");
-        assert_eq!(output, Some("00000000".to_owned()));
+        assert_eq!(output, Some("0000000000000000".to_owned()));
     }
 
     #[test]

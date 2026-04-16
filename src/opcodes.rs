@@ -138,6 +138,18 @@ impl Default for &Pass2 {
     }
 }
 
+/// Parse a single token as a u64 immediate value.
+///
+/// Handles `0x`/`0X` hex prefix (full 64-bit range) and signed decimal.
+/// Returns `None` if the token cannot be parsed (e.g. a label name).
+fn parse_imm64(token: &str) -> Option<u64> {
+    if token.len() >= 2 && token.get(..2).map_or(false, |s| s.eq_ignore_ascii_case("0x")) {
+        u64::from_str_radix(&token[2..].replace('_', ""), 16).ok()
+    } else {
+        token.parse::<i64>().ok().map(|v| v as u64)
+    }
+}
+
 /// Return opcode with formatted arguments.
 ///
 /// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values.
@@ -153,6 +165,22 @@ pub fn add_arguments(
     let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
     let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
     let mut arguments = String::default();
+
+    // Special case: 2-variable instruction with a single 64-bit literal (e.g. SETR64).
+    // When exactly one value token follows the register(s), interpret it as a 64-bit immediate
+    // and split into lo32 (var1 at PC+4) and hi32 (var2 at PC+8).
+    #[allow(clippy::cast_possible_truncation, reason = "Intentional 64-to-32 bit split for lo/hi word encoding")]
+    if num_arguments == 2 {
+        let words_vec: Vec<&str> = line.split_whitespace().collect();
+        let val_idx = num_registers as usize + 1;
+        if words_vec.len() == val_idx + 1 {
+            if let Some(val64) = parse_imm64(words_vec[val_idx]) {
+                let lo32 = (val64 & 0xFFFF_FFFF) as u32;
+                let hi32 = ((val64 >> 32) & 0xFFFF_FFFF) as u32;
+                return format!("{lo32:08X}{hi32:08X}");
+            }
+        }
+    }
 
     let words = line.split_whitespace();
     #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]

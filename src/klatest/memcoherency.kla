@@ -1,0 +1,148 @@
+// memcoherency.kla
+//
+// Test 1: bytes 0-3 first, then bytes 4-7
+//   Expected: 0102030405060708
+//   Previous result: 0000F01101020304  (second half stale)
+//
+// Test 2: bytes 4-7 first, then bytes 0-3  (swapped order)
+//   If second sub-word is always stale regardless of order:
+//     result would be: 0000F01105060708  (still second half stale)
+//   If write order matters (last-written wins):
+//     result would differ
+
+_start
+SETR A 0x8000000
+SETSP A
+SETR P 0
+DELAYV 0x100
+
+// ---- Test 1: write buf+0..+3 first, then buf+4..+7 ----
+// Expected: 0807060504030201 (little-endian: byte 0 at bits[7:0])
+SETR N #buf1
+
+SETR M 0x01
+MEMSET8 M N          // buf1[0] = 0x01
+ADDV N 1
+SETR M 0x02
+MEMSET8 M N          // buf1[1] = 0x02
+ADDV N 1
+SETR M 0x03
+MEMSET8 M N          // buf1[2] = 0x03
+ADDV N 1
+SETR M 0x04
+MEMSET8 M N          // buf1[3] = 0x04
+ADDV N 1
+SETR M 0x05
+MEMSET8 M N          // buf1[4] = 0x05
+ADDV N 1
+SETR M 0x06
+MEMSET8 M N          // buf1[5] = 0x06
+ADDV N 1
+SETR M 0x07
+MEMSET8 M N          // buf1[6] = 0x07
+ADDV N 1
+SETR M 0x08
+MEMSET8 M N          // buf1[7] = 0x08
+
+SETR A #buf1
+MEMGET64 A A
+// Expected: 0807060504030201
+TXR A
+NEWLINE
+
+// ---- Test 2: write buf+4..+7 first, then buf+0..+3 ----
+// Expected: 0807060504030201 (same bytes as test 1, different write order)
+SETR N #buf2
+ADDV N 4             // start at offset +4
+
+SETR M 0x05
+MEMSET8 M N          // buf2[4] = 0x05
+ADDV N 1
+SETR M 0x06
+MEMSET8 M N          // buf2[5] = 0x06
+ADDV N 1
+SETR M 0x07
+MEMSET8 M N          // buf2[6] = 0x07
+ADDV N 1
+SETR M 0x08
+MEMSET8 M N          // buf2[7] = 0x08
+
+SETR N #buf2         // back to offset 0
+
+SETR M 0x01
+MEMSET8 M N          // buf2[0] = 0x01
+ADDV N 1
+SETR M 0x02
+MEMSET8 M N          // buf2[1] = 0x02
+ADDV N 1
+SETR M 0x03
+MEMSET8 M N          // buf2[2] = 0x03
+ADDV N 1
+SETR M 0x04
+MEMSET8 M N          // buf2[3] = 0x04
+
+SETR A #buf2
+MEMGET64 A A
+// Expected: 0807060504030201
+TXR A
+NEWLINE
+
+// ---- Test 3: write non-zero, then overwrite with zeros ----
+// Write 0xAA to all 8 bytes, then zero out bytes 0-3.
+// Expected: 0000000000000000AAAAAAAAAAAAAAAA -> no, just 8 bytes per word
+// Write 0xAA to all 8 bytes of buf3, then write 0x00 to bytes 0-3.
+// Expected: 0xAAAAAAAA00000000 (bytes 4-7 at high bits, bytes 0-3 zeroed at low bits)
+// If MEMSET8 ignores zero: 0xAAAAAAAAAAAAAAAA (zeros not written)
+SETR N #buf3
+
+SETR M 0xAA
+MEMSET8 M N          // buf3[0] = 0xAA
+ADDV N 1
+SETR M 0xAA
+MEMSET8 M N          // buf3[1] = 0xAA
+ADDV N 1
+SETR M 0xAA
+MEMSET8 M N          // buf3[2] = 0xAA
+ADDV N 1
+SETR M 0xAA
+MEMSET8 M N          // buf3[3] = 0xAA
+ADDV N 1
+SETR M 0xAA
+MEMSET8 M N          // buf3[4] = 0xAA
+ADDV N 1
+SETR M 0xAA
+MEMSET8 M N          // buf3[5] = 0xAA
+ADDV N 1
+SETR M 0xAA
+MEMSET8 M N          // buf3[6] = 0xAA
+ADDV N 1
+SETR M 0xAA
+MEMSET8 M N          // buf3[7] = 0xAA
+
+// Now overwrite bytes 0-3 with 0x00
+SETR N #buf3
+SETR M 0
+MEMSET8 M N          // buf3[0] = 0x00
+ADDV N 1
+SETR M 0
+MEMSET8 M N          // buf3[1] = 0x00
+ADDV N 1
+SETR M 0
+MEMSET8 M N          // buf3[2] = 0x00
+ADDV N 1
+SETR M 0
+MEMSET8 M N          // buf3[3] = 0x00
+
+SETR A #buf3
+MEMGET64 A A
+// Expected: AAAAAAAA00000000 (bytes 4-7=0xAA at bits[63:32], bytes 0-3=0x00 at bits[31:0])
+// If zeros discarded: AAAAAAAAAAAAAAAA
+TXR A
+NEWLINE
+
+HALT
+NOP                  // 4-byte pad: aligns buf1 to 0x2B8 (8-byte boundary)
+
+#buf1 1              // 8 bytes for test 1, at 0x2B8 (8-byte aligned)
+#buf2 1              // 8 bytes for test 2, at 0x2C0 (8-byte aligned)
+#buf3 1              // 8 bytes for test 3, at 0x2C8 (8-byte aligned)

@@ -1,0 +1,108 @@
+0x00000000: 00000000000000AC                  -- heap_start  (set by assembler)
+0x00000008: 0000000000000000                  -- heap_end    (reserved)
+0x00000010: 0000000000000000                  -- (reserved)
+0x00000018: 0000000000000000                  -- (reserved)
+                              -- // test_mem0.kla — Diagnostic: read address 0 and output
+                              -- //
+                              -- // Reads the 32-bit word at byte address 0 (heap_start, set by assembler)
+                              -- // and transmits it as 8 hex digits via UART AND displays it on both
+                              -- // 7-segment displays (7SEGR: upper 16 bits on display 1, lower 16 on display 2).
+                              -- //
+                              -- // Usage: assemble standalone (no C runtime / libc needed)
+                              -- //   assembler test_mem0.kla
+                              -- //
+                              -- // Expected output: the byte address of the first heap word.
+                              -- // If byte-addressed and ~5000 bytes of code:  0x000013B0
+                              -- // If word-addressed (old era):               smaller value e.g. 0x000004EC
+                              -- 
+                              -- _start
+0x00000020: 00000800 08000000 -- SETR A 0x8000000    // SP = top of DDR RAM
+0x00000028: 00004040          -- SETSP A
+0x0000002C: 0000080F 00000000 -- SETR P 0
+0x00000034: 0000F013 00000500 -- DELAYV 0x0500       // let UART and board settle
+                              -- 
+                              -- // Read the 32-bit word at byte address 0 into A
+0x0000003C: 0000080E 00000000 -- SETR O 0
+0x00000044: 0000710E          -- MEMREADRR A O       // A = mem[0]  (heap_start placed here by assembler)
+                              -- 
+                              -- // Send via UART as 8 hex digits
+0x00000048: 00005010          -- TXR A
+0x0000004C: 00005001          -- NEWLINE
+                              -- 
+                              -- // Display all 32 bits on both 7-segment displays
+                              -- // Upper 16 bits → display 1, lower 16 bits → display 2
+0x00000050: 00003040          -- 7SEGR A
+                              -- 
+0x00000054: 0000F011          -- HALT
+                              -- 
+                              -- // uart_stubs.kla - Low-level UART routines callable from C
+                              -- //
+                              -- // Calling convention: args in A-D, return in M
+                              -- // These are leaf functions (no calls), so no frame setup needed.
+                              -- //
+                              -- // Functions:
+                              -- //   _uart_tx_hex(val)    - print 32-bit value as 8 hex digits
+                              -- //   _uart_newline()      - print CR/LF
+                              -- //   _uart_tx_char(ch)    - print single ASCII character
+                              -- //   _uart_rx_char()      - blocking receive: wait for a byte, return it in M
+                              -- //   _uart_rx_char_nb()   - non-blocking receive: return byte if available, -1 if not
+                              -- //
+                              -- // Usage from C:
+                              -- //   extern void _uart_tx_hex(int val);
+                              -- //   extern void _uart_newline(void);
+                              -- //   extern void _uart_tx_char(int ch);
+                              -- //   extern int  _uart_rx_char(void);
+                              -- //   extern int  _uart_rx_char_nb(void);
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // _uart_tx_hex: print register A as 8 hex digits
+                              -- // Input: A = value
+                              -- // ----------------------------------------------------------------
+0x00000058:                   -- _uart_tx_hex:
+0x00000058: 00005010          -- TXR A
+0x0000005C: 00001012          -- RET
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // _uart_newline: print CR/LF
+                              -- // ----------------------------------------------------------------
+0x00000060:                   -- _uart_newline:
+0x00000060: 00005001          -- NEWLINE
+0x00000064: 00001012          -- RET
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // _uart_tx_char: print single ASCII char from A (low 8 bits)
+                              -- // We store the value to a scratch word then use TXCHARMEMR
+                              -- // Input: A = character value (low 8 bits used)
+                              -- // ----------------------------------------------------------------
+0x00000068:                   -- _uart_tx_char:
+0x00000068: 0000080D 000000A4 -- SETR N #_CHAR_BUF
+0x00000070: 0000760D          -- MEMSET64 A N
+0x00000074: 0000503D          -- TXCHARMEMR N
+0x00000078: 00001012          -- RET
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // _uart_rx_char: blocking receive - wait until a byte arrives
+                              -- // Return: M = received byte
+                              -- // ----------------------------------------------------------------
+0x0000007C:                   -- _uart_rx_char:
+0x0000007C: 0000505C          -- RXRB M
+0x00000080: 00001012          -- RET
+                              -- 
+                              -- // ----------------------------------------------------------------
+                              -- // _uart_rx_char_nb: non-blocking receive
+                              -- // RXRNB sets zero_flag=1 and leaves M unchanged when FIFO is empty.
+                              -- // We test the flag here and return -1 as the no-data sentinel so
+                              -- // callers get a plain integer — no flag inspection needed from C.
+                              -- // Return: M = received byte, or -1 if no byte available
+                              -- // ----------------------------------------------------------------
+0x00000084:                   -- _uart_rx_char_nb:
+0x00000084: 0000506C          -- RXRNB M
+0x00000088: 00001001 00000094 -- JMPZ _rxrnb_empty:
+0x00000090: 00001012          -- RET
+0x00000094:                   -- _rxrnb_empty:
+0x00000094: 0000080C 00000000 -- SETR M 0
+0x0000009C: 0000098C          -- NOTR M
+0x000000A0: 00001012          -- RET
+                              -- 
+                              -- // Scratch buffer for putchar (1 word)
+0x000000A4: 0000000000000000                  -- #_CHAR_BUF 1

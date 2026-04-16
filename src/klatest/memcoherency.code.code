@@ -1,0 +1,152 @@
+0x00000000: 00000000000002D0                  -- heap_start  (set by assembler)
+0x00000008: 0000000000000000                  -- heap_end    (reserved)
+0x00000010: 0000000000000000                  -- (reserved)
+0x00000018: 0000000000000000                  -- (reserved)
+                              -- // memcoherency.kla
+                              -- //
+                              -- // Test 1: bytes 0-3 first, then bytes 4-7
+                              -- //   Expected: 0102030405060708
+                              -- //   Previous result: 0000F01101020304  (second half stale)
+                              -- //
+                              -- // Test 2: bytes 4-7 first, then bytes 0-3  (swapped order)
+                              -- //   If second sub-word is always stale regardless of order:
+                              -- //     result would be: 0000F01105060708  (still second half stale)
+                              -- //   If write order matters (last-written wins):
+                              -- //     result would differ
+                              -- 
+                              -- _start
+0x00000020: 00000800 08000000 -- SETR A 0x8000000
+0x00000028: 00004040          -- SETSP A
+0x0000002C: 0000080F 00000000 -- SETR P 0
+0x00000034: 0000F013 00000100 -- DELAYV 0x100
+                              -- 
+                              -- // ---- Test 1: write buf+0..+3 first, then buf+4..+7 ----
+                              -- // Expected: 0102030405060708
+0x0000003C: 0000080D 000002B8 -- SETR N #buf1
+                              -- 
+0x00000044: 0000080C 00000001 -- SETR M 0x01
+0x0000004C: 000074CD          -- MEMSET8 M N          // buf1[0] = 0x01
+0x00000050: 0000081D 00000001 -- ADDV N 1
+0x00000058: 0000080C 00000002 -- SETR M 0x02
+0x00000060: 000074CD          -- MEMSET8 M N          // buf1[1] = 0x02
+0x00000064: 0000081D 00000001 -- ADDV N 1
+0x0000006C: 0000080C 00000003 -- SETR M 0x03
+0x00000074: 000074CD          -- MEMSET8 M N          // buf1[2] = 0x03
+0x00000078: 0000081D 00000001 -- ADDV N 1
+0x00000080: 0000080C 00000004 -- SETR M 0x04
+0x00000088: 000074CD          -- MEMSET8 M N          // buf1[3] = 0x04
+0x0000008C: 0000081D 00000001 -- ADDV N 1
+0x00000094: 0000080C 00000005 -- SETR M 0x05
+0x0000009C: 000074CD          -- MEMSET8 M N          // buf1[4] = 0x05
+0x000000A0: 0000081D 00000001 -- ADDV N 1
+0x000000A8: 0000080C 00000006 -- SETR M 0x06
+0x000000B0: 000074CD          -- MEMSET8 M N          // buf1[5] = 0x06
+0x000000B4: 0000081D 00000001 -- ADDV N 1
+0x000000BC: 0000080C 00000007 -- SETR M 0x07
+0x000000C4: 000074CD          -- MEMSET8 M N          // buf1[6] = 0x07
+0x000000C8: 0000081D 00000001 -- ADDV N 1
+0x000000D0: 0000080C 00000008 -- SETR M 0x08
+0x000000D8: 000074CD          -- MEMSET8 M N          // buf1[7] = 0x08
+                              -- 
+0x000000DC: 00000800 000002B8 -- SETR A #buf1
+0x000000E4: 00007B00          -- MEMGET64 A A
+                              -- // Expected (aligned, fixed CPU): 0102030405060708
+0x000000E8: 00005010          -- TXR A
+0x000000EC: 00005001          -- NEWLINE
+                              -- 
+                              -- // ---- Test 2: write buf+4..+7 first, then buf+0..+3 ----
+                              -- // Expected: 0102030405060708 (same bytes as test 1, different write order)
+0x000000F0: 0000080D 000002C0 -- SETR N #buf2
+0x000000F8: 0000081D 00000004 -- ADDV N 4             // start at offset +4
+                              -- 
+0x00000100: 0000080C 00000005 -- SETR M 0x05
+0x00000108: 000074CD          -- MEMSET8 M N          // buf2[4] = 0x05
+0x0000010C: 0000081D 00000001 -- ADDV N 1
+0x00000114: 0000080C 00000006 -- SETR M 0x06
+0x0000011C: 000074CD          -- MEMSET8 M N          // buf2[5] = 0x06
+0x00000120: 0000081D 00000001 -- ADDV N 1
+0x00000128: 0000080C 00000007 -- SETR M 0x07
+0x00000130: 000074CD          -- MEMSET8 M N          // buf2[6] = 0x07
+0x00000134: 0000081D 00000001 -- ADDV N 1
+0x0000013C: 0000080C 00000008 -- SETR M 0x08
+0x00000144: 000074CD          -- MEMSET8 M N          // buf2[7] = 0x08
+                              -- 
+0x00000148: 0000080D 000002C0 -- SETR N #buf2         // back to offset 0
+                              -- 
+0x00000150: 0000080C 00000001 -- SETR M 0x01
+0x00000158: 000074CD          -- MEMSET8 M N          // buf2[0] = 0x01
+0x0000015C: 0000081D 00000001 -- ADDV N 1
+0x00000164: 0000080C 00000002 -- SETR M 0x02
+0x0000016C: 000074CD          -- MEMSET8 M N          // buf2[1] = 0x02
+0x00000170: 0000081D 00000001 -- ADDV N 1
+0x00000178: 0000080C 00000003 -- SETR M 0x03
+0x00000180: 000074CD          -- MEMSET8 M N          // buf2[2] = 0x03
+0x00000184: 0000081D 00000001 -- ADDV N 1
+0x0000018C: 0000080C 00000004 -- SETR M 0x04
+0x00000194: 000074CD          -- MEMSET8 M N          // buf2[3] = 0x04
+                              -- 
+0x00000198: 00000800 000002C0 -- SETR A #buf2
+0x000001A0: 00007B00          -- MEMGET64 A A
+                              -- // Expected (aligned, fixed CPU): 0102030405060708
+0x000001A4: 00005010          -- TXR A
+0x000001A8: 00005001          -- NEWLINE
+                              -- 
+                              -- // ---- Test 3: write non-zero, then overwrite with zeros ----
+                              -- // Write 0xAA to all 8 bytes, then zero out bytes 0-3.
+                              -- // Expected: 0000000000000000AAAAAAAAAAAAAAAA -> no, just 8 bytes per word
+                              -- // Write 0xAA to all 8 bytes of buf3, then write 0x00 to bytes 0-3.
+                              -- // Expected: 0x00000000AAAAAAAA
+                              -- // If MEMSET8 ignores zero: 0xAAAAAAAAAAAAAAAA (zeros not written)
+0x000001AC: 0000080D 000002C8 -- SETR N #buf3
+                              -- 
+0x000001B4: 0000080C 000000AA -- SETR M 0xAA
+0x000001BC: 000074CD          -- MEMSET8 M N          // buf3[0] = 0xAA
+0x000001C0: 0000081D 00000001 -- ADDV N 1
+0x000001C8: 0000080C 000000AA -- SETR M 0xAA
+0x000001D0: 000074CD          -- MEMSET8 M N          // buf3[1] = 0xAA
+0x000001D4: 0000081D 00000001 -- ADDV N 1
+0x000001DC: 0000080C 000000AA -- SETR M 0xAA
+0x000001E4: 000074CD          -- MEMSET8 M N          // buf3[2] = 0xAA
+0x000001E8: 0000081D 00000001 -- ADDV N 1
+0x000001F0: 0000080C 000000AA -- SETR M 0xAA
+0x000001F8: 000074CD          -- MEMSET8 M N          // buf3[3] = 0xAA
+0x000001FC: 0000081D 00000001 -- ADDV N 1
+0x00000204: 0000080C 000000AA -- SETR M 0xAA
+0x0000020C: 000074CD          -- MEMSET8 M N          // buf3[4] = 0xAA
+0x00000210: 0000081D 00000001 -- ADDV N 1
+0x00000218: 0000080C 000000AA -- SETR M 0xAA
+0x00000220: 000074CD          -- MEMSET8 M N          // buf3[5] = 0xAA
+0x00000224: 0000081D 00000001 -- ADDV N 1
+0x0000022C: 0000080C 000000AA -- SETR M 0xAA
+0x00000234: 000074CD          -- MEMSET8 M N          // buf3[6] = 0xAA
+0x00000238: 0000081D 00000001 -- ADDV N 1
+0x00000240: 0000080C 000000AA -- SETR M 0xAA
+0x00000248: 000074CD          -- MEMSET8 M N          // buf3[7] = 0xAA
+                              -- 
+                              -- // Now overwrite bytes 0-3 with 0x00
+0x0000024C: 0000080D 000002C8 -- SETR N #buf3
+0x00000254: 0000080C 00000000 -- SETR M 0
+0x0000025C: 000074CD          -- MEMSET8 M N          // buf3[0] = 0x00
+0x00000260: 0000081D 00000001 -- ADDV N 1
+0x00000268: 0000080C 00000000 -- SETR M 0
+0x00000270: 000074CD          -- MEMSET8 M N          // buf3[1] = 0x00
+0x00000274: 0000081D 00000001 -- ADDV N 1
+0x0000027C: 0000080C 00000000 -- SETR M 0
+0x00000284: 000074CD          -- MEMSET8 M N          // buf3[2] = 0x00
+0x00000288: 0000081D 00000001 -- ADDV N 1
+0x00000290: 0000080C 00000000 -- SETR M 0
+0x00000298: 000074CD          -- MEMSET8 M N          // buf3[3] = 0x00
+                              -- 
+0x0000029C: 00000800 000002C8 -- SETR A #buf3
+0x000002A4: 00007B00          -- MEMGET64 A A
+                              -- // Expected (aligned, fixed CPU): 00000000AAAAAAAA
+                              -- // If zeros discarded: AAAAAAAAAAAAAAAA
+0x000002A8: 00005010          -- TXR A
+0x000002AC: 00005001          -- NEWLINE
+                              -- 
+0x000002B0: 0000F011          -- HALT
+0x000002B4: 0000F010          -- NOP                  // 4-byte pad: aligns buf1 to 0x2B8 (8-byte boundary)
+                              -- 
+0x000002B8: 0000000000000000                  -- #buf1 1              // 8 bytes for test 1, at 0x2B8 (8-byte aligned)
+0x000002C0: 0000000000000000                  -- #buf2 1              // 8 bytes for test 2, at 0x2C0 (8-byte aligned)
+0x000002C8: 0000000000000000                  -- #buf3 1              // 8 bytes for test 3, at 0x2C8 (8-byte aligned)
