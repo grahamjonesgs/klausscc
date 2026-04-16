@@ -188,7 +188,10 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             value_str.parse::<i64>().unwrap_or(0)
         };
         #[allow(clippy::cast_sign_loss, reason = "Sign loss is intentional for u64 hex representation")]
-        return Some(format!("{:016X}", value as u64));
+        let v64 = value as u64;
+        let lo32 = (v64 & 0xFFFF_FFFF) as u32;
+        let hi32 = ((v64 >> 32) & 0xFFFF_FFFF) as u32;
+        return Some(format!("{lo32:08X}{hi32:08X}"));
     }
 
     // Handle .space N directive — N bytes of zero, rounded up to 64-bit word boundary
@@ -1007,13 +1010,13 @@ mod tests {
     #[test]
     fn test_data_as_bytes_word_hex() {
         let output = data_as_bytes(".word 0x2A");
-        assert_eq!(output, Some("000000000000002A".to_owned()));
+        assert_eq!(output, Some("0000002A00000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_word_decimal() {
         let output = data_as_bytes(".word 42");
-        assert_eq!(output, Some("000000000000002A".to_owned()));
+        assert_eq!(output, Some("0000002A00000000".to_owned()));
     }
 
     #[test]

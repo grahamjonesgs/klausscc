@@ -21,7 +21,7 @@
 0x00000034: 0000F013 00000100 -- DELAYV 0x100
                               -- 
                               -- // ---- Test 1: write buf+0..+3 first, then buf+4..+7 ----
-                              -- // Expected: 0807060504030201 (little-endian: byte 0 at bits[7:0])
+                              -- // Expected: 0102030405060708
 0x0000003C: 0000080D 000002B8 -- SETR N #buf1
                               -- 
 0x00000044: 0000080C 00000001 -- SETR M 0x01
@@ -50,12 +50,12 @@
                               -- 
 0x000000DC: 00000800 000002B8 -- SETR A #buf1
 0x000000E4: 00007B00          -- MEMGET64 A A
-                              -- // Expected: 0807060504030201
+                              -- // Expected (aligned, fixed CPU): 0102030405060708
 0x000000E8: 00005010          -- TXR A
 0x000000EC: 00005001          -- NEWLINE
                               -- 
                               -- // ---- Test 2: write buf+4..+7 first, then buf+0..+3 ----
-                              -- // Expected: 0807060504030201 (same bytes as test 1, different write order)
+                              -- // Expected: 0102030405060708 (same bytes as test 1, different write order)
 0x000000F0: 0000080D 000002C0 -- SETR N #buf2
 0x000000F8: 0000081D 00000004 -- ADDV N 4             // start at offset +4
                               -- 
@@ -87,7 +87,7 @@
                               -- 
 0x00000198: 00000800 000002C0 -- SETR A #buf2
 0x000001A0: 00007B00          -- MEMGET64 A A
-                              -- // Expected: 0807060504030201
+                              -- // Expected (aligned, fixed CPU): 0102030405060708
 0x000001A4: 00005010          -- TXR A
 0x000001A8: 00005001          -- NEWLINE
                               -- 
@@ -95,7 +95,7 @@
                               -- // Write 0xAA to all 8 bytes, then zero out bytes 0-3.
                               -- // Expected: 0000000000000000AAAAAAAAAAAAAAAA -> no, just 8 bytes per word
                               -- // Write 0xAA to all 8 bytes of buf3, then write 0x00 to bytes 0-3.
-                              -- // Expected: 0xAAAAAAAA00000000 (bytes 4-7 at high bits, bytes 0-3 zeroed at low bits)
+                              -- // Expected: 0x00000000AAAAAAAA
                               -- // If MEMSET8 ignores zero: 0xAAAAAAAAAAAAAAAA (zeros not written)
 0x000001AC: 0000080D 000002C8 -- SETR N #buf3
                               -- 
@@ -139,7 +139,7 @@
                               -- 
 0x0000029C: 00000800 000002C8 -- SETR A #buf3
 0x000002A4: 00007B00          -- MEMGET64 A A
-                              -- // Expected: AAAAAAAA00000000 (bytes 4-7=0xAA at bits[63:32], bytes 0-3=0x00 at bits[31:0])
+                              -- // Expected (aligned, fixed CPU): 00000000AAAAAAAA
                               -- // If zeros discarded: AAAAAAAAAAAAAAAA
 0x000002A8: 00005010          -- TXR A
 0x000002AC: 00005001          -- NEWLINE

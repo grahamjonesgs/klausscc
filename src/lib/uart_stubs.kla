@@ -39,7 +39,7 @@ RET
 // ----------------------------------------------------------------
 _uart_tx_char:
 SETR N #_CHAR_BUF
-MEMSET64 A N
+MEMSET8 A N
 TXCHARMEMR N
 RET
 
