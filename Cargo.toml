@@ -24,6 +24,7 @@ serde_json = {version = "1.0"}
 ctrlc = { version = "3.4" }
 crossterm = { version = "0.28" }
 nix = { version = "0.31", features = ["term"] }
+object = { version = "0.36", default-features = false, features = ["read"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }

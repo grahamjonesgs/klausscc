@@ -86,6 +86,35 @@ fn main() -> Result<(), i32> {
         .unwrap_or(10);
     let test_list_file: String = matches.get_one::<String>("test_list").unwrap_or(&String::default()).replace(' ', "");
 
+    // elf2serial mode: convert a flat LLVM binary to the board wire format and optionally send it
+    if let Some(elf_binary_path) = matches.get_one::<String>("elf_binary") {
+        let entry_addr: Option<u32> = matches.get_one::<String>("entry_point").map(|s| {
+            if s.len() >= 2 && s.get(..2).map_or(false, |p| p.eq_ignore_ascii_case("0x")) {
+                u32::from_str_radix(&s[2..], 16).unwrap_or(0x20)
+            } else {
+                s.parse::<u32>().unwrap_or(0x20)
+            }
+        });
+        let elf_stem = filename_stem(elf_binary_path);
+        let elf_binary_name = matches
+            .get_one::<String>("bitcode")
+            .map(String::as_str)
+            .unwrap_or(&elf_stem);
+        let mut elf_kbt_name = elf_binary_name.to_owned();
+        elf_kbt_name.push_str(".kbt");
+        return run_elf2serial(
+            elf_binary_path,
+            entry_addr,
+            &output_serial_port,
+            &elf_kbt_name,
+            monitor_flag,
+            debug_flag,
+            no_break_flag,
+            &mut msg_list,
+            start_time,
+        );
+    }
+
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
     let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
@@ -493,6 +522,172 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
 /// Uses the Command from Clap to expand the CLI.
 #[inline]
 #[cfg(not(tarpaulin_include))] // Can not test CLI in tarpaulin
+/// Parse an ELF file and extract its LOAD segments as a contiguous flat buffer.
+///
+/// Returns `(flat_bytes, base_address, entry_address)` where `flat_bytes` covers
+/// the range `[base_address, base_address + flat_bytes.len())`.  Gaps between
+/// non-contiguous LOAD segments are zero-filled.  Returns `None` if the file
+/// cannot be parsed or contains no LOAD segments with data.
+fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
+    use object::{Object, ObjectSegment};
+    let file = object::File::parse(data).ok()?;
+    let entry = file.entry();
+
+    // Collect all LOAD segments that actually have bytes in the file.
+    let mut segments: Vec<(u64, Vec<u8>)> = file
+        .segments()
+        .filter_map(|seg| {
+            let addr = seg.address();
+            let bytes = seg.data().ok()?.to_vec();
+            if bytes.is_empty() { None } else { Some((addr, bytes)) }
+        })
+        .collect();
+    segments.sort_by_key(|(addr, _)| *addr);
+
+    if segments.is_empty() {
+        return None;
+    }
+
+    let base = segments[0].0;
+    #[allow(clippy::arithmetic_side_effects, reason = "addr >= base guaranteed by sort; len is usize")]
+    let end = segments
+        .iter()
+        .map(|(addr, bytes)| addr + bytes.len() as u64)
+        .max()?;
+    #[allow(clippy::arithmetic_side_effects, reason = "end >= base guaranteed by construction")]
+    let mut flat = vec![0u8; (end - base) as usize];
+    for (addr, bytes) in &segments {
+        #[allow(clippy::arithmetic_side_effects, reason = "addr >= base guaranteed by sort")]
+        let offset = (addr - base) as usize;
+        flat[offset..offset + bytes.len()].copy_from_slice(bytes);
+    }
+
+    Some((flat, base, entry))
+}
+
+/// Convert an LLVM ELF or flat binary to the board wire format and optionally send it.
+///
+/// Detects ELF magic automatically:
+/// - **ELF file**: LOAD segments are extracted; entry point is read from the ELF
+///   header (overridden by `--entry` if given).
+/// - **Flat binary**: bytes are used verbatim; entry point comes from `--entry`
+///   (defaults to `0x20` if not given).
+///
+/// The resulting wire string is written to a `.kbt` file and, when a serial port
+/// is given, sent to the board exactly like the normal assembly path.
+#[cfg(not(tarpaulin_include))]
+#[allow(clippy::too_many_arguments, reason = "All arguments are needed to mirror the normal send path")]
+fn run_elf2serial(
+    binary_path: &str,
+    entry_override: Option<u32>,
+    output_serial_port: &str,
+    kbt_file_name: &str,
+    monitor_flag: bool,
+    debug_flag: bool,
+    no_break_flag: bool,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    use helper::calc_checksum;
+
+    let file_data = fs::read(binary_path).map_err(|e| {
+        msg_list.push(
+            format!("Cannot read binary file {binary_path}: {e}"),
+            None, None, MessageType::Error,
+        );
+        1_i32
+    })?;
+
+    const ELF_MAGIC: &[u8] = b"\x7fELF";
+    let (binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
+        let (flat, _base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
+            msg_list.push(
+                format!("Failed to extract LOAD segments from ELF file {binary_path}"),
+                None, None, MessageType::Error,
+            );
+            1_i32
+        })?;
+        msg_list.push(
+            format!("Detected ELF file: extracted {} bytes of LOAD segments", flat.len()),
+            None, None, MessageType::Information,
+        );
+        let entry = entry_override.unwrap_or(elf_entry as u32);
+        (flat, entry)
+    } else {
+        msg_list.push(
+            "Detected flat binary (no ELF header)".to_owned(),
+            None, None, MessageType::Information,
+        );
+        (file_data, entry_override.unwrap_or(0x20_u32))
+    };
+
+    let mut out = String::new();
+    out.push('S');
+
+    // Word 0: heap_start placeholder, patched below
+    let heap_start_offset = out.len();
+    out.push_str("0000000000000000");
+    // Words 1-3: reserved header words
+    for _ in 1..HEAP_HEADER_WORDS {
+        out.push_str("0000000000000000");
+    }
+
+    // Program bytes as uppercase hex
+    for byte in &binary_data {
+        #[allow(clippy::format_push_string, reason = "Byte-by-byte hex encoding is clearest here")]
+        out.push_str(&format!("{byte:02X}"));
+    }
+
+    // Patch heap_start = total byte count of everything after 'S'
+    #[allow(clippy::arithmetic_side_effects, reason = "len >= 1 because 'S' was pushed first")]
+    #[allow(clippy::integer_division, reason = "hex chars / 2 = bytes")]
+    let heap_start: u32 = ((out.len() - 1) / 2) as u32;
+    #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
+    out.replace_range(heap_start_offset..heap_start_offset + 16, &format!("{heap_start:016X}"));
+
+    // Entry point (32-bit byte address)
+    out.push_str(&format!("{entry_addr:08X}"));
+
+    // Stack hint
+    out.push_str("Z0010");
+
+    // Checksum
+    let checksum = calc_checksum(&out, msg_list);
+    out.push_str(&checksum);
+    out.push('X');
+
+    msg_list.push(
+        format!("elf2serial: {binary_path} → {kbt_file_name} (entry 0x{entry_addr:08X}, heap_start 0x{heap_start:08X})"),
+        None, None, MessageType::Information,
+    );
+
+    write_binary_file(msg_list, kbt_file_name, &out);
+
+    if !output_serial_port.is_empty() {
+        if monitor_flag {
+            match write_to_board_keep_port(&out, output_serial_port, !no_break_flag, msg_list) {
+                Ok(port) => {
+                    msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+                    print_results(msg_list, start_time);
+                    if let Err(err) = monitor_serial_port(port, debug_flag, msg_list) {
+                        msg_list.push(format!("Serial monitor stopped: \"{err}\""), None, None, MessageType::Warning);
+                    }
+                    return Ok(());
+                }
+                Err(err) => {
+                    msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
+                    print_results(msg_list, start_time);
+                    return Err(1_i32);
+                }
+            }
+        }
+        write_to_device(msg_list, &out, output_serial_port, !no_break_flag);
+    }
+
+    print_results(msg_list, start_time);
+    Ok(())
+}
+
 #[must_use]
 #[allow(clippy::too_many_lines, reason = "CLI definition requires many argument declarations")]
 pub fn set_matches() -> Command {
@@ -507,8 +702,22 @@ pub fn set_matches() -> Command {
                 .short('c')
                 .long("opcode")
                 .num_args(1)
-                .required(true)
+                .required_unless_present_any(["elf_binary"])
                 .help("Opcode source file from Verilog"),
+        )
+        .arg(
+            Arg::new("elf_binary")
+                .short('e')
+                .long("elf-binary")
+                .num_args(1)
+                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes"])
+                .help("Flat binary from LLVM: skip assembly and convert directly to board wire format"),
+        )
+        .arg(
+            Arg::new("entry_point")
+                .long("entry")
+                .num_args(1)
+                .help("Entry point address for elf-binary mode (hex 0x... or decimal). Optional for ELF files — read from ELF header. Required for flat binaries (default 0x20)."),
         )
         .arg(
             Arg::new("input")
