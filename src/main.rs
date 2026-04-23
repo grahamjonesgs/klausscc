@@ -621,6 +621,14 @@ fn run_elf2serial(
         (file_data, entry_override.unwrap_or(0x20_u32))
     };
 
+    // calc_checksum requires the stripped hex length to be divisible by 4.
+    // Stripped length = 76 + 2N, so N must be even.  Pad to 4-byte alignment
+    // (the natural instruction-word size) to be safe.
+    let mut binary_data = binary_data;
+    while binary_data.len() % 4 != 0 {
+        binary_data.push(0);
+    }
+
     let mut out = String::new();
     out.push('S');
 
@@ -632,10 +640,13 @@ fn run_elf2serial(
         out.push_str("0000000000000000");
     }
 
-    // Program bytes as uppercase hex
-    for byte in &binary_data {
-        #[allow(clippy::format_push_string, reason = "Byte-by-byte hex encoding is clearest here")]
-        out.push_str(&format!("{byte:02X}"));
+    // Encode program as 32-bit little-endian words formatted as {:08X}, matching
+    // the assembler's output format (e.g. instruction 0x10090000 stored in the
+    // little-endian ELF as bytes [0x00,0x00,0x09,0x10] → from_le → 0x10090000 → "10090000").
+    #[allow(clippy::format_push_string, reason = "Word-by-word hex encoding matches assembler kbt format")]
+    for chunk in binary_data.chunks(4) {
+        let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        out.push_str(&format!("{word:08X}"));
     }
 
     // Patch heap_start = total byte count of everything after 'S'
@@ -723,7 +734,7 @@ pub fn set_matches() -> Command {
             Arg::new("input")
                 .short('i')
                 .long("input")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "c_source"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "c_source", "elf_binary"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .conflicts_with("c_source")
@@ -734,7 +745,7 @@ pub fn set_matches() -> Command {
             Arg::new("c_source")
                 .short('C')
                 .long("c-source")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "input"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "input", "elf_binary"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .conflicts_with("input")
