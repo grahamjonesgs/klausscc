@@ -352,29 +352,26 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
                 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
                 while running_stdin.load(Ordering::Relaxed) {
                     // Poll with a short timeout so we can check `running` regularly.
-                    match event::poll(Duration::from_millis(100)) {
-                        Ok(true) => {
-                            if let Ok(Event::Key(KeyEvent { code, modifiers, .. })) = event::read() {
-                                let byte: Option<u8> = match code {
-                                    KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
-                                        running_stdin.store(false, Ordering::Relaxed);
-                                        break;
-                                    }
-                                    KeyCode::Char(c) if modifiers.contains(KeyModifiers::CONTROL) => {
-                                        // Convert Ctrl+<letter> to its control code (e.g. Ctrl+Z -> 0x1A)
-                                        c.to_ascii_lowercase().try_into().ok().map(|b: u8| b & 0x1F)
-                                    }
-                                    KeyCode::Char(c) => c.encode_utf8(&mut [0u8; 4]).bytes().next(),
-                                    KeyCode::Enter => Some(b'\r'),
-                                    KeyCode::Backspace => Some(0x08),
-                                    _ => None,
-                                };
-                                if let Some(b) = byte {
-                                    let _ = write_port.write_all(&[b]);
+                    if let Ok(true) = event::poll(Duration::from_millis(100)) {
+                        if let Ok(Event::Key(KeyEvent { code, modifiers, .. })) = event::read() {
+                            let byte: Option<u8> = match code {
+                                KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                                    running_stdin.store(false, Ordering::Relaxed);
+                                    break;
                                 }
+                                KeyCode::Char(c) if modifiers.contains(KeyModifiers::CONTROL) => {
+                                    // Convert Ctrl+<letter> to its control code (e.g. Ctrl+Z -> 0x1A)
+                                    c.to_ascii_lowercase().try_into().ok().map(|b: u8| b & 0x1F)
+                                }
+                                KeyCode::Char(c) => c.encode_utf8(&mut [0u8; 4]).bytes().next(),
+                                KeyCode::Enter => Some(b'\r'),
+                                KeyCode::Backspace => Some(0x08),
+                                _ => None,
+                            };
+                            if let Some(b) = byte {
+                                let _ = write_port.write_all(&[b]);
                             }
                         }
-                        _ => {}
                     }
                 }
             });

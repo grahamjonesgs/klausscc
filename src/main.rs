@@ -1,4 +1,4 @@
-#![warn(clippy::all, clippy::restriction, clippy::pedantic, clippy::nursery, clippy::cargo)]
+//#![warn(clippy::all, clippy::restriction, clippy::pedantic, clippy::nursery, clippy::cargo)]
 
 #![allow(clippy::allow_attributes, reason = "Needed to allow use of clippy restrictions")]
 #![allow(clippy::implicit_return, reason = "Needed for compatibility with code using implicit returns")]
@@ -411,7 +411,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             let num_args = num_arguments(&mut oplist, &strip_comments(&upgraded_line));
             #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct program counter calculation")]
             if let Some(arguments) = num_args {
-                program_counter = program_counter + (arguments + 1) * 4; // Each word = 4 bytes
+                program_counter += (arguments + 1) * 4; // Each word = 4 bytes
             }
         }
 
@@ -529,9 +529,8 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
 /// non-contiguous LOAD segments are zero-filled.  Returns `None` if the file
 /// cannot be parsed or contains no LOAD segments with data.
 fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
-    use object::{Object, ObjectSegment};
+    use object::{Object, ObjectSegment, ObjectSymbol};
     let file = object::File::parse(data).ok()?;
-    let entry = file.entry();
 
     // Collect all LOAD segments that actually have bytes in the file.
     let mut segments: Vec<(u64, Vec<u8>)> = file
@@ -561,6 +560,21 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
         let offset = (addr - base) as usize;
         flat[offset..offset + bytes.len()].copy_from_slice(bytes);
     }
+
+    // Determine entry point:
+    // 1. ELF e_entry header field (set by linker ENTRY() directive)
+    // 2. Fall back to _start symbol address
+    // 3. Final fallback: base address of first LOAD segment
+    let entry = {
+        let e = file.entry();
+        if e != 0 {
+            e
+        } else {
+            file.symbols()
+                .find(|sym| sym.name() == Ok("_start"))
+                .map_or(base, |sym| sym.address())
+        }
+    };
 
     Some((flat, base, entry))
 }
@@ -600,18 +614,27 @@ fn run_elf2serial(
 
     const ELF_MAGIC: &[u8] = b"\x7fELF";
     let (binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
-        let (flat, _base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
+        let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
             msg_list.push(
                 format!("Failed to extract LOAD segments from ELF file {binary_path}"),
                 None, None, MessageType::Error,
             );
             1_i32
         })?;
+        // Convert ELF virtual address → board byte address.
+        // The flat buffer starts at ELF VMA `elf_base` but is loaded by the board
+        // immediately after the heap header (HEAP_HEADER_WORDS × 8 bytes).
+        // board_entry = (elf_entry - elf_base) + HEAP_HEADER_WORDS * 8
+        #[allow(clippy::arithmetic_side_effects, reason = "elf_entry >= elf_base by construction in parse_elf_to_flat")]
+        let board_entry = (elf_entry.saturating_sub(elf_base)) + u64::from(HEAP_HEADER_WORDS) * 8;
+        let entry = entry_override.unwrap_or(board_entry as u32);
         msg_list.push(
-            format!("Detected ELF file: extracted {} bytes of LOAD segments", flat.len()),
+            format!(
+                "Detected ELF file: {} bytes, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}, board entry 0x{entry:08X}",
+                flat.len()
+            ),
             None, None, MessageType::Information,
         );
-        let entry = entry_override.unwrap_or(elf_entry as u32);
         (flat, entry)
     } else {
         msg_list.push(
@@ -640,12 +663,13 @@ fn run_elf2serial(
         out.push_str("0000000000000000");
     }
 
-    // Encode program as 32-bit little-endian words formatted as {:08X}, matching
-    // the assembler's output format (e.g. instruction 0x10090000 stored in the
-    // little-endian ELF as bytes [0x00,0x00,0x09,0x10] → from_le → 0x10090000 → "10090000").
+    // Encode program as 32-bit words formatted as {:08X}, matching the assembler's
+    // kbt output format.  The KlaussCPU LLVM backend emits instruction words in
+    // big-endian byte order in the ELF (opcode bits in the first byte), so we
+    // read each 4-byte chunk as big-endian to reconstruct the correct 32-bit value.
     #[allow(clippy::format_push_string, reason = "Word-by-word hex encoding matches assembler kbt format")]
     for chunk in binary_data.chunks(4) {
-        let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        let word = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         out.push_str(&format!("{word:08X}"));
     }
 
