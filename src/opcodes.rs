@@ -315,6 +315,53 @@ fn map_reg_to_hex(input: &str) -> String {
     }
 }
 
+/// Register nibble value to register name (inverse of `map_reg_to_hex`).
+fn hex_nibble_to_reg(nibble: u32) -> &'static str {
+    match nibble & 0xF {
+        0x0 => "A", 0x1 => "B", 0x2 => "C", 0x3 => "D",
+        0x4 => "E", 0x5 => "F", 0x6 => "G", 0x7 => "H",
+        0x8 => "I", 0x9 => "J", 0xA => "K", 0xB => "L",
+        0xC => "M", 0xD => "N", 0xE => "O", _ => "P",
+    }
+}
+
+/// Disassemble a 32-bit instruction word.
+///
+/// Searches `opcodes` for the first entry whose `hex_code` pattern matches `word`.
+/// `'?'` characters in `hex_code` act as nibble wildcards.
+/// Returns `(mnemonic_with_registers, variables_count)` or `None` if no match.
+/// Register operands are extracted from the low nibbles of `word` in the same
+/// order they appear in source (reg1 at the highest of the occupied nibbles).
+#[allow(clippy::arithmetic_side_effects, reason = "nibble shifts are safe: n <= 3, shift <= 8")]
+pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> {
+    for opcode in opcodes {
+        // Compute mask/pattern from hex_code on the fly — '?' = wildcard nibble.
+        let mut mask: u32 = 0;
+        let mut pattern: u32 = 0;
+        for ch in opcode.hex_code.chars() {
+            mask <<= 4;
+            pattern <<= 4;
+            if ch != '?' {
+                mask |= 0xF_u32;
+                pattern |= ch.to_digit(16).unwrap_or(0);
+            }
+        }
+        if (word & mask) == pattern {
+            let n = opcode.registers;
+            let mut text = opcode.text_name.clone();
+            // reg1 occupies nibble (n-1), reg2 nibble (n-2), …, regN nibble 0.
+            for i in 1..=n {
+                let shift = (n - i) * 4;
+                let nibble = (word >> shift) & 0xF;
+                text.push(' ');
+                text.push_str(hex_nibble_to_reg(nibble));
+            }
+            return Some((text, opcode.variables));
+        }
+    }
+    None
+}
+
 /// Returns number of args for opcode.
 ///
 /// From opcode name, option of number of arguments for opcode, or None.

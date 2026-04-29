@@ -1,7 +1,7 @@
 use crate::files::LineType;
 use crate::labels::label_name_from_string;
 use crate::messages::{MessageType, MsgList};
-use crate::opcodes::{return_opcode, Opcode, Pass2};
+use crate::opcodes::{disassemble_word, return_opcode, Opcode, Pass2};
 
 /// Number of reserved words at the start of memory for the heap header.
 /// Byte 0x00: heap_start (written by assembler), Byte 0x04: heap_end (written by assembler),
@@ -71,6 +71,111 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     format!("{checksum:04X}")
 }
 
+/// Encode a 32-bit word for the kbt wire format (little-endian byte order).
+///
+/// The board's serial loader stores bytes in the order they arrive, so a 32-bit
+/// value must be transmitted LSByte-first so the CPU reads the correct value.
+/// e.g. instruction 0x400F0000 → "00000F40", entry 0x20 → "20000000".
+#[must_use]
+#[allow(clippy::arithmetic_side_effects, reason = "bit shifts on u32 are always safe")]
+pub fn encode_word_kbt(w: u32) -> String {
+    format!(
+        "{:02X}{:02X}{:02X}{:02X}",
+        w & 0xFF,
+        (w >> 8) & 0xFF,
+        (w >> 16) & 0xFF,
+        (w >> 24) & 0xFF,
+    )
+}
+
+/// Encode a hex opcode/data string for the kbt wire format.
+///
+/// Applies `encode_word_kbt` to each 8-character (32-bit word) chunk.
+/// Chunks shorter than 8 characters are passed through unchanged.
+#[must_use]
+pub fn encode_hex_kbt(hex: &str) -> String {
+    let bytes = hex.as_bytes();
+    let mut result = String::with_capacity(hex.len());
+    let mut i = 0;
+    while i + 8 <= bytes.len() {
+        #[allow(clippy::string_slice, reason = "bounds guaranteed by while condition")]
+        let chunk = &hex[i..i + 8];
+        let w = u32::from_str_radix(chunk, 16).unwrap_or(0);
+        result.push_str(&encode_word_kbt(w));
+        i += 8;
+    }
+    // Pass through any trailing chars that don't form a full 32-bit word
+    #[allow(clippy::string_slice, reason = "i <= hex.len() by construction")]
+    result.push_str(&hex[i..]);
+    result
+}
+
+/// Compute the kbt checksum for a LE-encoded wire string.
+///
+/// For each 8-char (32-bit) chunk in the data stream the LE bytes are decoded back to
+/// the natural 32-bit word V, and `V[31:16] + V[15:0]` is accumulated.  Any trailing
+/// 4-char groups (test artefacts — real programs only have 32-bit words) are summed as
+/// natural 16-bit values.  The checksum formula is:
+///
+///   `chk = (running_sum + count) % 65536`
+///
+/// where `count` is the number of 16-bit half-word groups accumulated (= 2 × number
+/// of 32-bit words).  This matches the FPGA formula `chk = running_sum + last_addr×2`.
+///
+/// The result is a 32-bit word emitted in LE byte order (8 hex chars), exactly like
+/// every other word in the stream.  The caller is responsible for writing the `Z`
+/// delimiter; this function must be called **before** appending `Z` so that `Z` is
+/// not included in the sum.
+#[must_use]
+#[allow(clippy::arithmetic_side_effects, reason = "sum arithmetic is safe for realistic program sizes")]
+#[allow(clippy::integer_division_remainder_used, reason = "modulo is intentional for checksum wrapping")]
+#[allow(clippy::modulo_arithmetic, reason = "modulo is intentional for checksum calculation")]
+pub fn calc_checksum_le(input_string: &str, msg_list: &mut MsgList) -> String {
+    // Strip S framing char only (Z/X are not present — caller hasn't appended them yet).
+    let stripped: String = input_string.chars().filter(|&c| c != 'S').collect();
+
+    if !stripped.len().is_multiple_of(4) {
+        msg_list.push(
+            format!("LE checksum string length not multiple of 4, length is {}", stripped.len()),
+            None, None, MessageType::Error,
+        );
+        return encode_word_kbt(0);
+    }
+
+    let mut sum: i32 = 0;
+    let mut count: u32 = 0;
+    let mut i: usize = 0;
+
+    // Process 8-char groups as LE-encoded 32-bit words.
+    // Decode each word to its natural value V, accumulate V[31:16] + V[15:0].
+    while i + 8 <= stripped.len() {
+        #[allow(clippy::string_slice, reason = "bounds guaranteed by while condition")]
+        let chunk = &stripped[i..i + 8];
+        let b0 = i32::from_str_radix(&chunk[0..2], 16).unwrap_or(0);
+        let b1 = i32::from_str_radix(&chunk[2..4], 16).unwrap_or(0);
+        let b2 = i32::from_str_radix(&chunk[4..6], 16).unwrap_or(0);
+        let b3 = i32::from_str_radix(&chunk[6..8], 16).unwrap_or(0);
+        // natural V = b0 | b1<<8 | b2<<16 | b3<<24
+        // V[31:16] = b3*256 + b2,   V[15:0] = b1*256 + b0
+        sum = (sum + b3 * 256 + b2 + b1 * 256 + b0) % (0xFFFF_i32 + 1);
+        count += 2;
+        i += 8;
+    }
+    // Any trailing 4-char groups (test-only artefacts) summed as natural 16-bit.
+    while i + 4 <= stripped.len() {
+        #[allow(clippy::string_slice, reason = "bounds guaranteed by while condition")]
+        let chunk = &stripped[i..i + 4];
+        let val = i32::from_str_radix(chunk, 16).unwrap_or(0);
+        sum = (sum + val) % (0xFFFF_i32 + 1);
+        count += 1;
+        i += 4;
+    }
+
+    // chk = running_sum + last_addr×2 (FPGA formula, adj=0)
+    let chk = ((sum + count as i32) % (0xFFFF_i32 + 1)) as u32;
+    encode_word_kbt(chk)
+}
+
 /// Return String of bit codes with start/stop bytes and CRC.
 ///
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
@@ -91,7 +196,7 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     }
 
     for pass in pass2 {
-        output_string.push_str(&pass.opcode);
+        output_string.push_str(&encode_hex_kbt(&pass.opcode));
     }
 
     // heap_start = first free byte after the program, rounded up to 8-byte alignment.
@@ -104,11 +209,13 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     let heap_start_raw: u32 = ((output_string.len() - 1) / 2) as u32;
     #[allow(clippy::arithmetic_side_effects, reason = "Addition safe: heap_start_raw + 7 cannot overflow for realistic program sizes")]
     let heap_start: u32 = (heap_start_raw + 7) & !7u32; // align to 8-byte boundary
-    // Emit heap_start as lo32 then hi32 (matching data_as_bytes little-endian word order).
-    // Using big-endian format!("{:016X}") would place the value in the high-address word,
-    // which MEMGET64 reads as hi32, giving heap_start<<32 instead of heap_start.
+    // Emit heap_start as lo32 then hi32, each word encoded for LE board loading.
+    // hi32 is always zero; encode_word_kbt(0) = "00000000" so only lo32 needs encoding.
     #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
-    output_string.replace_range(heap_start_offset..heap_start_offset + 16, &format!("{heap_start:08X}00000000"));
+    output_string.replace_range(
+        heap_start_offset..heap_start_offset + 16,
+        &format!("{}00000000", encode_word_kbt(heap_start)),
+    );
 
     if pass2
         .iter()
@@ -116,24 +223,19 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
         .count()
         == 1
     {
-        output_string.push_str(
-            format!(
-                "{:08X}",
-                pass2
-                    .iter()
-                    .find(|x| x.line_type == LineType::Start)
-                    .unwrap_or(&Pass2 {
-                        line_type: LineType::Start,
-                        opcode: String::default(),
-                        program_counter: 0,
-                        line_counter: 0,
-                        input_text_line: String::default(),
-                        file_name: "None".to_owned(),
-                    })
-                    .program_counter
-            )
-            .as_str(),
-        );
+        let entry_pc = pass2
+            .iter()
+            .find(|x| x.line_type == LineType::Start)
+            .unwrap_or(&Pass2 {
+                line_type: LineType::Start,
+                opcode: String::default(),
+                program_counter: 0,
+                line_counter: 0,
+                input_text_line: String::default(),
+                file_name: "None".to_owned(),
+            })
+            .program_counter;
+        output_string.push_str(&encode_word_kbt(entry_pc));
     } else if pass2
         .iter()
         .filter(|x| x.line_type == LineType::Start)
@@ -157,16 +259,91 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
         return None;
     }
 
-    // Add writing Z0010 and then checksum.
-    output_string.push_str("Z0010"); // Holding for stack if needed
+    // Checksum must be computed before the Z delimiter is appended.
+    // Returns an 8-char LE-encoded 32-bit word.
+    let checksum = calc_checksum_le(&output_string, msg_list);
 
-    let checksum = calc_checksum(&output_string, msg_list);
-
+    output_string.push('Z');
     output_string.push_str(&checksum);
-
     output_string.push('X'); // Stop character
 
     Some(output_string)
+}
+
+/// Disassemble a flat byte slice into a `Vec<Pass2>` for use with `write_code_output_file`.
+///
+/// Each 4-byte chunk is read as a big-endian 32-bit word (matching the KlaussCPU LLVM ELF
+/// byte order) and matched against `opcodes`.  When a match is found, register operands are
+/// extracted and any argument words that follow (determined by `opcode.variables`) are consumed
+/// and appended to the same entry's `opcode` hex string so `write_code_output_file` formats them
+/// correctly.  Unrecognised words produce a `???` fallback line.
+///
+/// `base_addr` is the board byte address of the first byte in `binary` (normally
+/// `HEAP_HEADER_WORDS * 8 = 0x20`).
+#[allow(clippy::arithmetic_side_effects, reason = "index arithmetic is bounds-checked by the while condition")]
+#[allow(clippy::cast_possible_truncation, reason = "binary length fits in u32 for any realistic program")]
+pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcode]) -> Vec<Pass2> {
+    let mut result: Vec<Pass2> = Vec::new();
+    let mut i: usize = 0;
+
+    while i + 4 <= binary.len() {
+        let word = u32::from_le_bytes([binary[i], binary[i + 1], binary[i + 2], binary[i + 3]]);
+        let pc = base_addr.saturating_add(i as u32);
+
+        let (base_text, vars) = disassemble_word(word, opcodes)
+            .map_or_else(|| (format!("??? (0x{word:08X})"), 0_u32), |(t, v)| (t, v));
+
+        let mut opcode_hex = format!("{word:08X}");
+        let mut display_text = base_text;
+
+        // Consume argument words that immediately follow the instruction word.
+        // vars == 1 → one 32-bit immediate at PC+4.
+        // vars == 2 → two 32-bit words at PC+4 (lo32) and PC+8 (hi32), forming a 64-bit value.
+        let arg_word_count = vars.min(2) as usize;
+        let mut arg_ok = true;
+        for arg_idx in 0..arg_word_count {
+            let off = i + 4 + arg_idx * 4;
+            if off + 4 <= binary.len() {
+                let av = u32::from_le_bytes([binary[off], binary[off + 1], binary[off + 2], binary[off + 3]]);
+                opcode_hex.push_str(&format!("{av:08X}"));
+                if arg_idx == 0 && arg_word_count == 1 {
+                    display_text.push_str(&format!(" 0x{av:X}"));
+                } else if arg_idx == 0 {
+                    // 64-bit: lo32 stored first — stash it, combine after reading hi32
+                    display_text.push_str(&format!(" 0x{av:08X}"));
+                } else {
+                    // arg_idx == 1: hi32 — replace the lo32 placeholder with combined value
+                    // The display_text already ends with " 0x{lo32:08X}"; replace with 64-bit
+                    let lo_str_len = " 0x".len() + 8; // " 0x" + 8 hex chars
+                    let lo = u64::from_str_radix(
+                        display_text.get(display_text.len() - 8..).unwrap_or("0"),
+                        16,
+                    ).unwrap_or(0);
+                    display_text.truncate(display_text.len() - lo_str_len);
+                    let val64 = (u64::from(av) << 32) | lo;
+                    display_text.push_str(&format!(" 0x{val64:X}"));
+                }
+            } else {
+                arg_ok = false;
+                break;
+            }
+        }
+
+        let words_consumed = if arg_ok { 1 + arg_word_count } else { 1 };
+
+        result.push(Pass2 {
+            file_name: String::new(),
+            input_text_line: display_text,
+            line_counter: 0,
+            line_type: LineType::Opcode,
+            opcode: opcode_hex,
+            program_counter: pc,
+        });
+
+        i += words_consumed * 4;
+    }
+
+    result
 }
 
 /// Returns bytes for data element.
@@ -593,9 +770,13 @@ mod tests {
         });
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
-        // Word 0 is heap_start in bytes (72 hex chars / 2 = 36 = 0x24, aligned to 8 → 0x28), emitted as lo32 first.
-        // words 1-3 are reserved zeros (16 hex chars each); checksum reflects updated word 0.
-        assert_eq!(bin_string, Some("S00000028000000000000000000000000000000000000000000000000000000001234432100000001Z001055A2X".to_owned()));
+        // Word 0: heap_start=0x28 LE → "28000000"; hi32=0 → "00000000".
+        // Entry pc=1 LE → "01000000". 4-char opcodes pass through unchanged.
+        // No "Z0010" — checksum is a 32-bit LE word immediately after Z.
+        // 10 × 8-char groups (8 header + "12344321" + entry); count=20.
+        // sum: "28000000"→40 (0x28), "12344321"→21845, "01000000"→1 = 21886.
+        // chk = (21886+20)%65536 = 21906 = 0x5592; LE → "92550000".
+        assert_eq!(bin_string, Some("S28000000000000000000000000000000000000000000000000000000000000001234432101000000Z92550000X".to_owned()));
     }
 
     #[test]

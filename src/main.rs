@@ -28,7 +28,7 @@ mod serial;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
-use helper::{create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
+use helper::{create_bin_string, data_as_bytes, disassemble_flat_to_pass2, encode_hex_kbt, encode_word_kbt, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
@@ -105,6 +105,7 @@ fn main() -> Result<(), i32> {
         return run_elf2serial(
             elf_binary_path,
             entry_addr,
+            &opcode_file_name,
             &output_serial_port,
             &elf_kbt_name,
             monitor_flag,
@@ -594,6 +595,7 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
 fn run_elf2serial(
     binary_path: &str,
     entry_override: Option<u32>,
+    opcode_file_name: &str,
     output_serial_port: &str,
     kbt_file_name: &str,
     monitor_flag: bool,
@@ -602,7 +604,7 @@ fn run_elf2serial(
     msg_list: &mut MsgList,
     start_time: NaiveTime,
 ) -> Result<(), i32> {
-    use helper::calc_checksum;
+    use helper::calc_checksum_le;
 
     let file_data = fs::read(binary_path).map_err(|e| {
         msg_list.push(
@@ -644,9 +646,7 @@ fn run_elf2serial(
         (file_data, entry_override.unwrap_or(0x20_u32))
     };
 
-    // calc_checksum requires the stripped hex length to be divisible by 4.
-    // Stripped length = 76 + 2N, so N must be even.  Pad to 4-byte alignment
-    // (the natural instruction-word size) to be safe.
+    // Pad binary_data to 4-byte alignment so every word is complete.
     let mut binary_data = binary_data;
     while binary_data.len() % 4 != 0 {
         binary_data.push(0);
@@ -663,31 +663,32 @@ fn run_elf2serial(
         out.push_str("0000000000000000");
     }
 
-    // Encode program as 32-bit words formatted as {:08X}, matching the assembler's
-    // kbt output format.  The KlaussCPU LLVM backend emits instruction words in
-    // big-endian byte order in the ELF (opcode bits in the first byte), so we
-    // read each 4-byte chunk as big-endian to reconstruct the correct 32-bit value.
-    #[allow(clippy::format_push_string, reason = "Word-by-word hex encoding matches assembler kbt format")]
+    // Encode program words for the kbt wire format.
+    // The LLVM ELF stores instruction bytes in little-endian order, so read each
+    // 4-byte chunk as LE to reconstruct the 32-bit value, then encode it with the
+    // half-word byte-swap the board's serial loader expects.
+    #[allow(clippy::format_push_string, reason = "Word-by-word encoding matches kbt format")]
     for chunk in binary_data.chunks(4) {
-        let word = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-        out.push_str(&format!("{word:08X}"));
+        let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
+        out.push_str(&encode_word_kbt(word));
     }
 
-    // Patch heap_start = total byte count of everything after 'S'
+    // Patch heap_start: lo32 = heap_start value (encoded for LE board), hi32 = 0.
     #[allow(clippy::arithmetic_side_effects, reason = "len >= 1 because 'S' was pushed first")]
     #[allow(clippy::integer_division, reason = "hex chars / 2 = bytes")]
     let heap_start: u32 = ((out.len() - 1) / 2) as u32;
     #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
-    out.replace_range(heap_start_offset..heap_start_offset + 16, &format!("{heap_start:016X}"));
+    out.replace_range(
+        heap_start_offset..heap_start_offset + 16,
+        &format!("{}00000000", encode_word_kbt(heap_start)),
+    );
 
-    // Entry point (32-bit byte address)
-    out.push_str(&format!("{entry_addr:08X}"));
+    // Entry point — LE-encoded like all other 32-bit words per FPGA team spec.
+    out.push_str(&encode_word_kbt(entry_addr));
 
-    // Stack hint
-    out.push_str("Z0010");
-
-    // Checksum
-    let checksum = calc_checksum(&out, msg_list);
+    // Checksum computed before Z delimiter; returns 8-char LE 32-bit word.
+    let checksum = calc_checksum_le(&out, msg_list);
+    out.push('Z');
     out.push_str(&checksum);
     out.push('X');
 
@@ -697,6 +698,38 @@ fn run_elf2serial(
     );
 
     write_binary_file(msg_list, kbt_file_name, &out);
+
+    // Optionally produce a .code disassembly listing alongside the .kbt.
+    // Try to load the opcode file; if it exists and parses, disassemble binary_data.
+    // If the file is absent or fails to parse, skip silently.
+    if std::path::Path::new(opcode_file_name).exists() {
+        let mut tmp_msgs = MsgList::new();
+        let mut opened: Vec<String> = Vec::new();
+        let opt_opcodes = read_file_to_vector(opcode_file_name, &mut tmp_msgs, &mut opened)
+            .and_then(|vh| parse_vh_file(vh, &mut tmp_msgs).0);
+        if let Some(opcodes) = opt_opcodes {
+            let code_file_name = {
+                let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
+                format!("{stem}.code")
+            };
+            let mut pass2 = disassemble_flat_to_pass2(
+                &binary_data,
+                HEAP_HEADER_WORDS * 8,
+                &opcodes,
+            );
+            if let Err(e) = write_code_output_file(&code_file_name, &mut pass2, msg_list) {
+                msg_list.push(
+                    format!("Failed to write disassembly file {code_file_name}: {e}"),
+                    None, None, MessageType::Warning,
+                );
+            }
+        } else {
+            msg_list.push(
+                format!("Opcode file {opcode_file_name} found but could not be parsed — skipping .code output"),
+                None, None, MessageType::Warning,
+            );
+        }
+    }
 
     if !output_serial_port.is_empty() {
         if monitor_flag {
