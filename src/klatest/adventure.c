@@ -1,23 +1,20 @@
-/* adventure.c - Mini text adventure for FPGA_CPU_32_DDR_cache
+/* adventure.c — Mini text adventure for KlaussCPU (LLVM backend port).
  *
- * Compile: build/rcc -target=klacpu adventure.c > adventure.kla
- *
- * Then in crt0.kla:
- *   INCLUDE adventure.kla
- *   INCLUDE lib/libc.kla
- *   INCLUDE lib/uart_stubs.kla
+ * Compile via Makefile:  make adventure.elf  &&  make adventure.bin
  *
  * Commands: n/s/e/w = move, l = look, g = get, u = use, i = inventory, q = quit
  * Goal: find torch, find key (needs torch), unlock door, escape!
  */
 
+/* Runtime provided by libc.c + uart_stubs.c */
 extern void putchar(int ch);
 extern void print_str(char *s);
-extern void print_int(int n);
+extern void print_int(long long n);
 extern void newline(void);
 extern int  getchar(void);
 
-/* Game state */
+/* ── Game state ──────────────────────────────────────────────────────────── */
+
 int room;
 int items;
 int turns;
@@ -45,16 +42,15 @@ int read_cmd(void)
     /* Drain rest of line until CR or LF */
     if (cmd != 13 && cmd != 10) {
         c = cmd;
-        while (c != 13 && c != 10) {
+        while (c != 13 && c != 10)
             c = getchar();
-        }
     }
     newline();
 
     /* Uppercase to lowercase */
-    if (cmd >= 'A' && cmd <= 'Z') {
+    if (cmd >= 'A' && cmd <= 'Z')
         cmd = cmd + 32;
-    }
+
     return cmd;
 }
 
@@ -114,15 +110,9 @@ void look(void)
 void show_inventory(void)
 {
     print_str("You carry: ");
-    if (items == 0) {
-        print_str("nothing");
-    }
-    if (items & HAS_TORCH) {
-        print_str("[torch] ");
-    }
-    if (items & HAS_KEY) {
-        print_str("[key] ");
-    }
+    if (items == 0)          print_str("nothing");
+    if (items & HAS_TORCH)   print_str("[torch] ");
+    if (items & HAS_KEY)     print_str("[key] ");
     newline();
 }
 
@@ -168,9 +158,9 @@ void do_move(int dir)
         else { print_str("You cannot go that way."); newline(); return; }
     }
     else if (room == ROOM_HALL) {
-        if (dir == 's') { room = ROOM_CELL; }
+        if      (dir == 's') { room = ROOM_CELL;   }
         else if (dir == 'e') { room = ROOM_ARMORY; }
-        else if (dir == 'n') { room = ROOM_DOOR; }
+        else if (dir == 'n') { room = ROOM_DOOR;   }
         else { print_str("You cannot go that way."); newline(); return; }
     }
     else if (room == ROOM_ARMORY) {
@@ -189,14 +179,14 @@ int main(void)
 {
     int cmd;
 
-    room = ROOM_CELL;
+    room  = ROOM_CELL;
     items = 0;
     turns = 0;
     alive = 1;
 
     print_str("========================================"); newline();
     print_str("   DUNGEON ESCAPE"); newline();
-    print_str("   Running on FPGA_CPU_32_DDR_cache!"); newline();
+    print_str("   Running on KlaussCPU!"); newline();
     print_str("========================================"); newline();
     print_str("Commands: n/s/e/w=move l=look"); newline();
     print_str("  g=get u=use i=inventory q=quit"); newline();
@@ -209,35 +199,18 @@ int main(void)
         cmd = read_cmd();
         turns = turns + 1;
 
-        if (cmd == 'q') {
-            print_str("You surrender to the darkness..."); newline();
-            alive = 0;
-        }
-        else if (cmd == 'l') {
-            look();
-        }
-        else if (cmd == 'i') {
-            show_inventory();
-        }
-        else if (cmd == 'g') {
-            do_get();
-        }
-        else if (cmd == 'u') {
-            do_use();
-        }
-        else if (cmd == 'n' || cmd == 's' || cmd == 'e' || cmd == 'w') {
-            do_move(cmd);
-        }
-        else {
-            print_str("Huh? Try n/s/e/w/l/g/u/i/q"); newline();
-        }
+        if      (cmd == 'q') { print_str("You surrender to the darkness..."); newline(); alive = 0; }
+        else if (cmd == 'l') { look(); }
+        else if (cmd == 'i') { show_inventory(); }
+        else if (cmd == 'g') { do_get(); }
+        else if (cmd == 'u') { do_use(); }
+        else if (cmd == 'n' || cmd == 's' || cmd == 'e' || cmd == 'w') { do_move(cmd); }
+        else                 { print_str("Huh? Try n/s/e/w/l/g/u/i/q"); newline(); }
 
         if (room == ROOM_FREE) {
             newline();
             print_str("*** YOU ESCAPED THE DUNGEON! ***"); newline();
-            print_str("Turns: ");
-            print_int(turns);
-            newline();
+            print_str("Turns: "); print_int(turns); newline();
             alive = 0;
         }
     }
