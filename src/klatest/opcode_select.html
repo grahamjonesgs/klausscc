@@ -14,7 +14,7 @@
 </head>
 <body>
 <h1>Klauss ISA Instruction set and macros</h1>
-Created 22/04/2026 11:56<h2>Opcode Table</h2>
+Created 30/04/2026 12:47<h2>Opcode Table</h2>
 
 <table id="opcodes">
 <tr>
@@ -30,6 +30,13 @@ Created 22/04/2026 11:56<h2>Opcode Table</h2>
     <td>0</td>
     <td>2</td>
     <td>RR rs1=rs2 (reg[7:4] ← reg[3:0])</td>
+</tr>
+<tr>
+    <td>ADDI</td>
+    <td>000002??</td>
+    <td>1</td>
+    <td>2</td>
+    <td>RRV rd=rs+sign_ext(imm32); rd=[7:4], rs=[3:0]; sets zero/sign/carry/overflow</td>
 </tr>
 <tr>
     <td>CMPRR</td>
@@ -939,7 +946,7 @@ Created 22/04/2026 11:56<h2>Opcode Table</h2>
     <td>000079??</td>
     <td>0</td>
     <td>2</td>
-    <td>RR rd=zero_ext(mem32[rs2&~3]); 4-byte aligned, little-endian</td>
+    <td>RR rd=zero_ext(mem32[rs2]); any byte alignment, little-endian (cross-line spans take a 2nd read)</td>
 </tr>
 <tr>
     <td>MEMSET64</td>
@@ -996,6 +1003,20 @@ Created 22/04/2026 11:56<h2>Opcode Table</h2>
     <td>1</td>
     <td>2</td>
     <td>RRV mem8[rs2+zero_ext(imm32)]=rs1[7:0]</td>
+</tr>
+<tr>
+    <td>LDIDX8_S</td>
+    <td>0000C6??</td>
+    <td>1</td>
+    <td>2</td>
+    <td>RRV rd=sign_ext(mem8[rs2+zero_ext(imm32)])</td>
+</tr>
+<tr>
+    <td>LDIDX16_S</td>
+    <td>0000C7??</td>
+    <td>1</td>
+    <td>2</td>
+    <td>RRV rd=sign_ext(mem16[(rs2+zero_ext(imm32))&~1])</td>
 </tr>
 <tr>
     <td>DELAYR</td>

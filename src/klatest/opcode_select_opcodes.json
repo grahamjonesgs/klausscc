@@ -8,6 +8,14 @@
     "variables": 0
   },
   {
+    "comment": "RRV rd=rs+sign_ext(imm32); rd=[7:4], rs=[3:0]; sets zero/sign/carry/overflow",
+    "hex_code": "000002??",
+    "registers": 2,
+    "section": "",
+    "text_name": "ADDI",
+    "variables": 1
+  },
+  {
     "comment": "RR sets equal/less/ult/sign flags from rs1-rs2; no writeback",
     "hex_code": "000005??",
     "registers": 2,
@@ -1040,7 +1048,7 @@
     "variables": 0
   },
   {
-    "comment": "RR rd=zero_ext(mem32[rs2&~3]); 4-byte aligned, little-endian",
+    "comment": "RR rd=zero_ext(mem32[rs2]); any byte alignment, little-endian (cross-line spans take a 2nd read)",
     "hex_code": "000079??",
     "registers": 2,
     "section": "",
@@ -1109,6 +1117,22 @@
     "registers": 2,
     "section": "",
     "text_name": "STIDX8",
+    "variables": 1
+  },
+  {
+    "comment": "RRV rd=sign_ext(mem8[rs2+zero_ext(imm32)])",
+    "hex_code": "0000C6??",
+    "registers": 2,
+    "section": "",
+    "text_name": "LDIDX8_S",
+    "variables": 1
+  },
+  {
+    "comment": "RRV rd=sign_ext(mem16[(rs2+zero_ext(imm32))&~1])",
+    "hex_code": "0000C7??",
+    "registers": 2,
+    "section": "",
+    "text_name": "LDIDX16_S",
     "variables": 1
   },
   {

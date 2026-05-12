@@ -28,7 +28,7 @@ mod serial;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
-use helper::{create_bin_string, data_as_bytes, disassemble_flat_to_pass2, encode_hex_kbt, encode_word_kbt, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
+use helper::{create_bin_string, data_as_bytes, disassemble_flat_to_pass2, encode_word_kbt, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
@@ -604,7 +604,7 @@ fn run_elf2serial(
     msg_list: &mut MsgList,
     start_time: NaiveTime,
 ) -> Result<(), i32> {
-    use helper::calc_checksum_le;
+    use helper::calc_checksum;
 
     let file_data = fs::read(binary_path).map_err(|e| {
         msg_list.push(
@@ -676,7 +676,8 @@ fn run_elf2serial(
     // Patch heap_start: lo32 = heap_start value (encoded for LE board), hi32 = 0.
     #[allow(clippy::arithmetic_side_effects, reason = "len >= 1 because 'S' was pushed first")]
     #[allow(clippy::integer_division, reason = "hex chars / 2 = bytes")]
-    let heap_start: u32 = ((out.len() - 1) / 2) as u32;
+    let heap_start_raw: u32 = ((out.len() - 1) / 2) as u32;
+    let heap_start: u32 = (heap_start_raw + 7) & !7u32; // align to 8-byte boundary
     #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
     out.replace_range(
         heap_start_offset..heap_start_offset + 16,
@@ -687,7 +688,7 @@ fn run_elf2serial(
     out.push_str(&encode_word_kbt(entry_addr));
 
     // Checksum computed before Z delimiter; returns 8-char LE 32-bit word.
-    let checksum = calc_checksum_le(&out, msg_list);
+    let checksum = calc_checksum(&out, msg_list);
     out.push('Z');
     out.push_str(&checksum);
     out.push('X');

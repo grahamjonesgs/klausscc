@@ -7,70 +7,6 @@ use crate::opcodes::{disassemble_word, return_opcode, Opcode, Pass2};
 /// Byte 0x00: heap_start (written by assembler), Byte 0x04: heap_end (written by assembler),
 /// Byte 0x08: reserved, Byte 0x0C: reserved. Code begins at byte 0x10.
 pub const HEAP_HEADER_WORDS: u32 = 4;
-/// Find checksum.
-///
-/// Calculates the checksum from the string of hex values, removing control characters.
-#[allow(clippy::modulo_arithmetic, reason = "Modulo arithmetic is intentional for checksum calculation")]
-#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional in this checksum context")]
-#[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for this calculation")]
-pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
-    let mut stripped_string = String::default();
-    let mut checksum: i32 = 0;
-
-    // Remove S, Z and X
-    for char in input_string.chars() {
-        if (char != 'S') && (char != 'Z') && (char != 'X') {
-            stripped_string.push(char);
-        }
-    }
-
-    // check if len is divisible by 4
-    if !stripped_string.len().is_multiple_of(4) {
-        msg_list.push(
-            {
-                format!(
-                    "Opcode list length not multiple of 4, length is {}",
-                    stripped_string.len(),
-                )
-            },
-            None,
-            None,
-            MessageType::Error,
-        );
-        return "0000".to_owned();
-    }
-
-    let mut position_index: u32 = 0;
-    #[allow(clippy::char_indices_as_byte_indices, reason = "Using char indices as byte indices is intentional in this context de to nature of characters")]
-    for (index, _) in stripped_string.chars().enumerate() {
-        #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for this calculation")]
-        if index.is_multiple_of(4) {
-            let int_value =
-                i32::from_str_radix(stripped_string.get(index..index + 4).unwrap_or("    "), 16);
-            if int_value.is_err() {
-                msg_list.push(
-                    {
-                        format!(
-                            "Error creating opcode for invalid value {}",
-                            stripped_string.get(index..index + 4).unwrap_or("    "),
-                        )
-                    },
-                    None,
-                    None,
-                    MessageType::Error,
-                );
-            } else {
-                checksum = (checksum + int_value.unwrap_or(0_i32)) % (0xFFFF_i32 + 1_i32);
-                position_index += 1;
-            }
-        }
-    }
-    
-    checksum =
-        (checksum + position_index.try_into().unwrap_or(0_i32) - 1).abs() % (0xFFFF_i32 + 1_i32);
-    format!("{checksum:04X}")
-}
-
 /// Encode a 32-bit word for the kbt wire format (little-endian byte order).
 ///
 /// The board's serial loader stores bytes in the order they arrive, so a 32-bit
@@ -130,7 +66,7 @@ pub fn encode_hex_kbt(hex: &str) -> String {
 #[allow(clippy::arithmetic_side_effects, reason = "sum arithmetic is safe for realistic program sizes")]
 #[allow(clippy::integer_division_remainder_used, reason = "modulo is intentional for checksum wrapping")]
 #[allow(clippy::modulo_arithmetic, reason = "modulo is intentional for checksum calculation")]
-pub fn calc_checksum_le(input_string: &str, msg_list: &mut MsgList) -> String {
+pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     // Strip S framing char only (Z/X are not present — caller hasn't appended them yet).
     let stripped: String = input_string.chars().filter(|&c| c != 'S').collect();
 
@@ -261,7 +197,7 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
 
     // Checksum must be computed before the Z delimiter is appended.
     // Returns an 8-char LE-encoded 32-bit word.
-    let checksum = calc_checksum_le(&output_string, msg_list);
+    let checksum = calc_checksum(&output_string, msg_list);
 
     output_string.push('Z');
     output_string.push_str(&checksum);
@@ -670,53 +606,6 @@ pub fn trim_newline(input: &mut String) {
 mod tests {
     use super::*;
     use crate::labels::{return_label_value, Label};
-
-    #[test]
-    // Test that correct checksum is calculated
-    fn test_calc_checksum1() {
-        let mut msg_list = MsgList::new();
-        let checksum = calc_checksum("S0000Z0010", &mut msg_list);
-        assert_eq!(checksum, "0011");
-    }
-    #[test]
-    // Test for invalid length
-    fn test_calc_checksum2() {
-        let mut msg_list = MsgList::new();
-        let checksum = calc_checksum("S00001Z0010", &mut msg_list);
-        assert_eq!(checksum, "0000");
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Opcode list length not multiple of 4, length is 9"
-        );
-    }
-
-    #[test]
-    // Test that correct checksum is calculated
-    fn test_calc_checksum3() {
-        let mut msg_list = MsgList::new();
-        let checksum = calc_checksum("S00000000Z0010", &mut msg_list);
-        assert_eq!(checksum, "0012");
-    }
-
-    #[test]
-    // Test that correct checksum is calculated
-    fn test_calc_checksum4() {
-        let mut msg_list = MsgList::new();
-        let checksum = calc_checksum("S00009999Z0010", &mut msg_list);
-        assert_eq!(checksum, "99AB");
-    }
-
-    #[test]
-    // Test that correct checksum is calculated
-    fn test_calc_checksum5() {
-        let mut msg_list = MsgList::new();
-        let checksum = calc_checksum("____", &mut msg_list);
-        assert_eq!(checksum, "0001");
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Error creating opcode for invalid value ____"
-        );
-    }
 
     #[test]
     // Test that line is trimmed of newline

@@ -135,6 +135,7 @@ task t_opcode_select;
          // CMPRR: computes rs1-rs2, sets equal/less/ult/sign flags; no writeback, no zero_flag.
          //=====================================================================
          32'h0000_01??: t_copy_regs;                           // COPY RR rs1=rs2 (reg[7:4] ← reg[3:0])
+         32'h0000_02??: t_addi(w_var1);                        // ADDI RRV rd=rs+sign_ext(imm32); rd=[7:4], rs=[3:0]; sets zero/sign/carry/overflow
          32'h0000_05??: t_cmprr3;                              // CMPRR RR sets equal/less/ult/sign flags from rs1-rs2; no writeback
 
          //=====================================================================
@@ -221,6 +222,8 @@ task t_opcode_select;
          32'h0000_C3??: t_store_indexed16(w_var1);             // STIDX16 RRV mem16[(rs2+zero_ext(imm32))&~1]=rs1[15:0]
          32'h0000_C4??: t_load_indexed8(w_var1);               // LDIDX8 RRV rd=zero_ext(mem8[rs2+zero_ext(imm32)])
          32'h0000_C5??: t_store_indexed8(w_var1);              // STIDX8 RRV mem8[rs2+zero_ext(imm32)]=rs1[7:0]
+         32'h0000_C6??: t_load_indexed8_s(w_var1);             // LDIDX8_S RRV rd=sign_ext(mem8[rs2+zero_ext(imm32)])
+         32'h0000_C7??: t_load_indexed16_s(w_var1);            // LDIDX16_S RRV rd=sign_ext(mem16[(rs2+zero_ext(imm32))&~1])
 
          //=====================================================================
          // Rotate by immediate (R for ×1, RV for ×N).  Count in imm[5:0] (0–63).
@@ -403,7 +406,7 @@ task t_opcode_select;
          // addr[2]=0 → bits[31:0] (low half); addr[2]=1 → bits[63:32] (high half).
          //=====================================================================
          32'h0000_78??: t_memset32;                            // MEMSET32 RR mem32[rs2&~3]=rs1[31:0]; 4-byte aligned, little-endian
-         32'h0000_79??: t_memget32;                            // MEMGET32 RR rd=zero_ext(mem32[rs2&~3]); 4-byte aligned, little-endian
+         32'h0000_79??: t_memget32;                            // MEMGET32 RR rd=zero_ext(mem32[rs2]); any byte alignment, little-endian (cross-line spans take a 2nd read)
 
          //=====================================================================
          // 64-bit doubleword memory access (7Axx–7Bxx)

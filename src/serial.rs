@@ -102,7 +102,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
         }
     }
 
-    let port_result = serialport::new(local_port_name.clone(), 1_000_000)
+    let port_result = serialport::new(local_port_name.clone(), 3_000_000)
         .timeout(Duration::from_millis(100))
         .open();
     if let Err(err) = port_result {
