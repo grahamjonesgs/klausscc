@@ -53,7 +53,7 @@ pub fn encode_hex_kbt(hex: &str) -> String {
 /// 4-char groups (test artefacts — real programs only have 32-bit words) are summed as
 /// natural 16-bit values.  The checksum formula is:
 ///
-///   `chk = (running_sum + count) % 65536`
+///   `chk = (running_sum + count) % 65536`.
 ///
 /// where `count` is the number of 16-bit half-word groups accumulated (= 2 × number
 /// of 32-bit words).  This matches the FPGA formula `chk = running_sum + last_addr×2`.
@@ -144,7 +144,7 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars → bytes")]
     let heap_start_raw: u32 = ((output_string.len() - 1) / 2) as u32;
     #[allow(clippy::arithmetic_side_effects, reason = "Addition safe: heap_start_raw + 7 cannot overflow for realistic program sizes")]
-    let heap_start: u32 = (heap_start_raw + 7) & !7u32; // align to 8-byte boundary
+    let heap_start: u32 = (heap_start_raw + 7) & !7_u32; // align to 8-byte boundary
     // Emit heap_start as lo32 then hi32, each word encoded for LE board loading.
     // hi32 is always zero; encode_word_kbt(0) = "00000000" so only lo32 needs encoding.
     #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]

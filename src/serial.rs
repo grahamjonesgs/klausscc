@@ -338,11 +338,12 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
     // crossterm has already read from that buffer into its own queue.
     {
         use nix::sys::termios::{FlushArg, tcflush};
+        // SAFETY: 0 is the file descriptor for stdin, which is always valid in a process context.
         let stdin_fd = unsafe { std::os::unix::io::BorrowedFd::borrow_raw(0) };
         let _ = tcflush(stdin_fd, FlushArg::TCIFLUSH);
     }
     while crossterm::event::poll(Duration::ZERO).unwrap_or(false) {
-        let _ = crossterm::event::read();
+        drop(crossterm::event::read());
     }
 
     // Clone the port so the stdin thread can write while the main loop reads.
@@ -363,13 +364,13 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
                                     // Convert Ctrl+<letter> to its control code (e.g. Ctrl+Z -> 0x1A)
                                     c.to_ascii_lowercase().try_into().ok().map(|b: u8| b & 0x1F)
                                 }
-                                KeyCode::Char(c) => c.encode_utf8(&mut [0u8; 4]).bytes().next(),
+                                KeyCode::Char(c) => c.encode_utf8(&mut [0_u8; 4]).bytes().next(),
                                 KeyCode::Enter => Some(b'\r'),
                                 KeyCode::Backspace => Some(0x08),
                                 _ => None,
                             };
                             if let Some(b) = byte {
-                                let _ = write_port.write_all(&[b]);
+                                drop(write_port.write_all(&[b]));
                             }
                         }
                     }
@@ -414,7 +415,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
                     None,
                     MessageType::Error,
                 );
-                let _ = crossterm::terminal::disable_raw_mode();
+                drop(crossterm::terminal::disable_raw_mode());
                 return Err(err);
             }
         }

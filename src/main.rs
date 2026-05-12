@@ -1,4 +1,5 @@
 //#![warn(clippy::all, clippy::restriction, clippy::pedantic, clippy::nursery, clippy::cargo)]
+#![warn(clippy::all, clippy::restriction)]
 
 #![allow(clippy::allow_attributes, reason = "Needed to allow use of clippy restrictions")]
 #![allow(clippy::implicit_return, reason = "Needed for compatibility with code using implicit returns")]
@@ -8,6 +9,24 @@
 #![allow(clippy::multiple_crate_versions, reason = "Needed for compatibility with crates using multiple versions")]
 #![allow(clippy::single_call_fn, reason = "Needed for code clarity")]
 #![allow(clippy::redundant_test_prefix, reason = "Needed for compatibility with test naming")]
+#![allow(clippy::min_ident_chars, reason = "Single-char identifiers are idiomatic in closures")]
+#![allow(clippy::question_mark_used, reason = "The ? operator is idiomatic Rust")]
+#![allow(clippy::pattern_type_mismatch, reason = "Destructuring references is idiomatic")]
+#![allow(clippy::wildcard_enum_match_arm, reason = "Wildcard match arms are sometimes appropriate")]
+#![allow(clippy::std_instead_of_alloc, reason = "This is a std binary, not no_std")]
+#![allow(clippy::missing_inline_in_public_items, reason = "Not applicable to a binary crate")]
+#![allow(clippy::little_endian_bytes, reason = "Explicit LE byte reads are intentional")]
+#![allow(clippy::arbitrary_source_item_ordering, reason = "Item ordering is at author's discretion")]
+#![allow(clippy::absolute_paths, reason = "Fully-qualified paths are sometimes clearer")]
+#![allow(clippy::indexing_slicing, reason = "Bounds are validated by surrounding context")]
+#![allow(clippy::string_slice, reason = "String slices on known-ASCII hex strings are safe")]
+#![allow(clippy::missing_asserts_for_indexing, reason = "Bounds validated by loop conditions")]
+#![allow(clippy::default_numeric_fallback, reason = "Type context is clear from surrounding code")]
+#![allow(clippy::arithmetic_side_effects, reason = "Arithmetic operations are safe in this context")]
+#![allow(clippy::integer_division_remainder_used, reason = "Integer division and modulo are intentional")]
+#![allow(clippy::let_underscore_must_use, reason = "Intentional result discard for cleanup operations")]
+#![allow(clippy::let_underscore_untyped, reason = "Type is evident from context for discarded results")]
+#![allow(clippy::semicolon_outside_block, reason = "Semicolon placement inside blocks is intentional")]
 
 //! Top level file for Klausscc.
 
@@ -89,7 +108,7 @@ fn main() -> Result<(), i32> {
     // elf2serial mode: convert a flat LLVM binary to the board wire format and optionally send it
     if let Some(elf_binary_path) = matches.get_one::<String>("elf_binary") {
         let entry_addr: Option<u32> = matches.get_one::<String>("entry_point").map(|s| {
-            if s.len() >= 2 && s.get(..2).map_or(false, |p| p.eq_ignore_ascii_case("0x")) {
+            if s.len() >= 2 && s.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) {
                 u32::from_str_radix(&s[2..], 16).unwrap_or(0x20)
             } else {
                 s.parse::<u32>().unwrap_or(0x20)
@@ -318,7 +337,7 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
     };
     // Parse as signed 64-bit so we handle negative decimal and full-width hex.
     #[allow(clippy::cast_possible_wrap, reason = "u64→i64 reinterpret is intentional for range check")]
-    let val: i64 = if val_str.len() >= 2 && val_str.get(..2).map_or(false, |s| s.eq_ignore_ascii_case("0x")) {
+    let val: i64 = if val_str.len() >= 2 && val_str.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
         let hex = &val_str[2..].replace('_', "");
         u64::from_str_radix(hex, 16).map_or(0, |v| v as i64)
     } else {
@@ -530,7 +549,7 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
 /// non-contiguous LOAD segments are zero-filled.  Returns `None` if the file
 /// cannot be parsed or contains no LOAD segments with data.
 fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
-    use object::{Object, ObjectSegment, ObjectSymbol};
+    use object::{Object as _, ObjectSegment as _, ObjectSymbol as _};
     let file = object::File::parse(data).ok()?;
 
     // Collect all LOAD segments that actually have bytes in the file.
@@ -555,7 +574,7 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
         .map(|(addr, bytes)| addr + bytes.len() as u64)
         .max()?;
     #[allow(clippy::arithmetic_side_effects, reason = "end >= base guaranteed by construction")]
-    let mut flat = vec![0u8; (end - base) as usize];
+    let mut flat = vec![0_u8; (end - base) as usize];
     for (addr, bytes) in &segments {
         #[allow(clippy::arithmetic_side_effects, reason = "addr >= base guaranteed by sort")]
         let offset = (addr - base) as usize;
@@ -615,7 +634,7 @@ fn run_elf2serial(
     })?;
 
     const ELF_MAGIC: &[u8] = b"\x7fELF";
-    let (binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
+    let (mut binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
         let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
             msg_list.push(
                 format!("Failed to extract LOAD segments from ELF file {binary_path}"),
@@ -647,7 +666,6 @@ fn run_elf2serial(
     };
 
     // Pad binary_data to 4-byte alignment so every word is complete.
-    let mut binary_data = binary_data;
     while binary_data.len() % 4 != 0 {
         binary_data.push(0);
     }
@@ -677,7 +695,7 @@ fn run_elf2serial(
     #[allow(clippy::arithmetic_side_effects, reason = "len >= 1 because 'S' was pushed first")]
     #[allow(clippy::integer_division, reason = "hex chars / 2 = bytes")]
     let heap_start_raw: u32 = ((out.len() - 1) / 2) as u32;
-    let heap_start: u32 = (heap_start_raw + 7) & !7u32; // align to 8-byte boundary
+    let heap_start: u32 = (heap_start_raw + 7) & !7_u32; // align to 8-byte boundary
     #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
     out.replace_range(
         heap_start_offset..heap_start_offset + 16,
@@ -786,7 +804,7 @@ pub fn set_matches() -> Command {
             Arg::new("entry_point")
                 .long("entry")
                 .num_args(1)
-                .help("Entry point address for elf-binary mode (hex 0x... or decimal). Optional for ELF files — read from ELF header. Required for flat binaries (default 0x20)."),
+                .help("Entry point address for elf-binary mode (hex 0x... or decimal). Optional for ELF files \u{2014} read from ELF header. Required for flat binaries (default 0x20)."),
         )
         .arg(
             Arg::new("input")
@@ -1035,9 +1053,7 @@ pub fn assemble_file(
     msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
     let mut opened_input_files: Vec<String> = Vec::new();
     let input_list_option = read_file_to_vector(input_file_name, msg_list, &mut opened_input_files);
-    if input_list_option.is_none() {
-        return None;
-    }
+    input_list_option.as_ref()?;
 
     let input_list = remove_block_comments(input_list_option.unwrap_or_else(|| [].to_vec()), msg_list);
 
@@ -1341,8 +1357,7 @@ pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<Inpu
         .spawn()
         .and_then(|mut child| {
             use std::io::Write as _;
-            if let Some(stdin) = child.stdin.take() {
-                let mut stdin = stdin;
+            if let Some(mut stdin) = child.stdin.take() {
                 stdin.write_all(&preprocessed)?;
             }
             child.wait_with_output()

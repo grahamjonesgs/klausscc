@@ -143,7 +143,7 @@ impl Default for &Pass2 {
 /// Handles `0x`/`0X` hex prefix (full 64-bit range) and signed decimal.
 /// Returns `None` if the token cannot be parsed (e.g. a label name).
 fn parse_imm64(token: &str) -> Option<u64> {
-    if token.len() >= 2 && token.get(..2).map_or(false, |s| s.eq_ignore_ascii_case("0x")) {
+    if token.len() >= 2 && token.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
         u64::from_str_radix(&token[2..].replace('_', ""), 16).ok()
     } else {
         token.parse::<i64>().ok().map(|v| v as u64)
