@@ -232,7 +232,7 @@ fn main() -> Result<(), i32> {
                 }
                 if monitor_flag {
                     // Monitor mode: send to board, keep port open, then monitor UART output
-                    match write_to_board_keep_port(&bin_string, &output_serial_port, !no_break_flag, &mut msg_list) {
+                    match write_to_board_keep_port(&bin_string, &output_serial_port, !no_break_flag, true, &mut msg_list) {
                         Ok(port) => {
                             msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
                             print_results(&msg_list, start_time);
@@ -567,15 +567,40 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
         return None;
     }
 
-    let base = segments[0].0;
+    // Only keep the first contiguous cluster of segments.  Embedded ELFs often
+    // place code/data at a low VMA and a completely separate region (e.g. XIP
+    // flash, ITCM, peripheral windows) at a very high VMA.  Zero-filling the
+    // gap between them would produce a multi-hundred-MB flat buffer that stalls
+    // encoding and disassembly.  Segments separated by more than MAX_SEGMENT_GAP
+    // bytes from the previous one are treated as a different physical memory
+    // region and dropped from this cluster.
+    const MAX_SEGMENT_GAP: u64 = 0x10_0000; // 1 MB
+    #[allow(clippy::arithmetic_side_effects, reason = "prev_end = prev_addr + len, both bounded by usize")]
+    let cluster: Vec<(u64, Vec<u8>)> = segments
+        .into_iter()
+        .scan(None::<u64>, |prev_end, (addr, bytes)| {
+            let gap = prev_end.map_or(0, |end| addr.saturating_sub(end));
+            #[allow(clippy::arithmetic_side_effects, reason = "addr + len bounded by ELF file size")]
+            { *prev_end = Some(addr + bytes.len() as u64); }
+            if gap <= MAX_SEGMENT_GAP { Some(Some((addr, bytes))) } else { Some(None) }
+        })
+        .take_while(Option::is_some)
+        .flatten()
+        .collect();
+
+    if cluster.is_empty() {
+        return None;
+    }
+
+    let base = cluster[0].0;
     #[allow(clippy::arithmetic_side_effects, reason = "addr >= base guaranteed by sort; len is usize")]
-    let end = segments
+    let end = cluster
         .iter()
         .map(|(addr, bytes)| addr + bytes.len() as u64)
         .max()?;
     #[allow(clippy::arithmetic_side_effects, reason = "end >= base guaranteed by construction")]
     let mut flat = vec![0_u8; (end - base) as usize];
-    for (addr, bytes) in &segments {
+    for (addr, bytes) in &cluster {
         #[allow(clippy::arithmetic_side_effects, reason = "addr >= base guaranteed by sort")]
         let offset = (addr - base) as usize;
         flat[offset..offset + bytes.len()].copy_from_slice(bytes);
@@ -752,7 +777,7 @@ fn run_elf2serial(
 
     if !output_serial_port.is_empty() {
         if monitor_flag {
-            match write_to_board_keep_port(&out, output_serial_port, !no_break_flag, msg_list) {
+            match write_to_board_keep_port(&out, output_serial_port, !no_break_flag, true, msg_list) {
                 Ok(port) => {
                     msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
                     print_results(msg_list, start_time);
@@ -781,9 +806,10 @@ pub fn set_matches() -> Command {
     use clap::ArgAction;
 
     Command::new("Klauss Assembler")
-        .version("0.0.1")
+        .version(env!("CARGO_PKG_VERSION"))
         .author("Graham Jones")
         .about("Assembler for FPGA_CPU")
+        .arg_required_else_help(true)
         .arg(
             Arg::new("opcode_file")
                 .short('c')
@@ -999,7 +1025,7 @@ pub fn run_test_mode(
     );
 
     // Send to board and keep port open
-    let port = match write_to_board_keep_port(bin_string, output_serial_port, send_break, msg_list) {
+    let port = match write_to_board_keep_port(bin_string, output_serial_port, send_break, false, msg_list) {
         Ok(port) => {
             msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
             port
@@ -1239,7 +1265,7 @@ pub fn run_test_list(
         }
 
         // Send to board and keep port open
-        let port = match write_to_board_keep_port(&bin_string, output_serial_port, send_break, &mut test_msg_list) {
+        let port = match write_to_board_keep_port(&bin_string, output_serial_port, send_break, false, &mut test_msg_list) {
             Ok(port) => port,
             Err(err) => {
                 println!("  SKIP: serial port error \"{err}\"");

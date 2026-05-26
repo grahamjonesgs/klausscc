@@ -197,6 +197,7 @@ pub fn write_to_board_keep_port(
     binary_output: &str,
     port_name: &str,
     send_break: bool,
+    skip_load_response: bool,
     msg_list: &mut MsgList,
 ) -> Result<Box<dyn SerialPort>, Error> {
     use serialport::{DataBits, FlowControl, Parity, StopBits};
@@ -227,6 +228,11 @@ pub fn write_to_board_keep_port(
     port.write_all(binary_output.as_bytes())?;
 
     port.flush()?;
+
+    if skip_load_response {
+        return Ok(port);
+    }
+
     let ret_msg_size = port.read(&mut read_buffer[..]).unwrap_or(0);
 
     if ret_msg_size == 0 {
@@ -276,7 +282,7 @@ pub fn write_to_board(
     send_break: bool,
     msg_list: &mut MsgList,
 ) -> Result<(), Error> {
-    let _port = write_to_board_keep_port(binary_output, port_name, send_break, msg_list)?;
+    let _port = write_to_board_keep_port(binary_output, port_name, send_break, false, msg_list)?;
     Ok(())
 }
 
