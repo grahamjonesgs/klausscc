@@ -44,10 +44,13 @@ mod messages;
 mod opcodes;
 /// Module to write to serial and read response.
 mod serial;
+/// Module to stream a flat DDR image to the board over TCP (network boot).
+mod netload;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
-use helper::{create_bin_string, data_as_bytes, disassemble_flat_to_pass2, encode_word_kbt, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
+use helper::{build_ddr_image, create_bin_string, data_as_bytes, disassemble_flat_to_pass2, encode_word_kbt, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
+use netload::{net_load, NETBOOT_DEFAULT_PORT};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
@@ -130,6 +133,31 @@ fn main() -> Result<(), i32> {
             monitor_flag,
             debug_flag,
             no_break_flag,
+            &mut msg_list,
+            start_time,
+        );
+    }
+
+    // net-load mode: flatten an ELF (or take a flat binary) and stream it to the
+    // board over TCP — no kbt, no UART. See NETBOOT_PLAN.md / netboot.c.
+    if let Some(net_binary_path) = matches.get_one::<String>("net_load") {
+        let entry_addr: Option<u32> = matches.get_one::<String>("entry_point").map(|s| {
+            if s.len() >= 2 && s.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) {
+                u32::from_str_radix(&s[2..], 16).unwrap_or(0x20)
+            } else {
+                s.parse::<u32>().unwrap_or(0x20)
+            }
+        });
+        let board_ip = matches.get_one::<String>("ip").cloned().unwrap_or_default();
+        let board_port: u16 = matches
+            .get_one::<String>("port")
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(NETBOOT_DEFAULT_PORT);
+        return run_netload(
+            net_binary_path,
+            entry_addr,
+            &board_ip,
+            board_port,
             &mut msg_list,
             start_time,
         );
@@ -624,6 +652,87 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
     Some((flat, base, entry))
 }
 
+/// Flatten an ELF (or take a flat binary) and stream it to the board over TCP.
+///
+/// Detects ELF magic automatically: ELF LOAD segments are extracted and the
+/// entry point read from the header (overridable with `--entry`); a flat binary
+/// is used verbatim with entry defaulting to `0x20`.  The flat image is wrapped
+/// in the heap-header DDR layout (`build_ddr_image`) and sent via `net_load`.
+#[cfg(not(tarpaulin_include))]
+fn run_netload(
+    binary_path: &str,
+    entry_override: Option<u32>,
+    board_ip: &str,
+    board_port: u16,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    if board_ip.is_empty() {
+        msg_list.push(
+            "net-load requires --ip <board address>".to_owned(),
+            None, None, MessageType::Error,
+        );
+        print_results(msg_list, start_time);
+        return Err(1_i32);
+    }
+
+    let file_data = fs::read(binary_path).map_err(|e| {
+        msg_list.push(
+            format!("Cannot read binary file {binary_path}: {e}"),
+            None, None, MessageType::Error,
+        );
+        1_i32
+    })?;
+
+    const ELF_MAGIC: &[u8] = b"\x7fELF";
+    let (mut binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
+        let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
+            msg_list.push(
+                format!("Failed to extract LOAD segments from ELF file {binary_path}"),
+                None, None, MessageType::Error,
+            );
+            1_i32
+        })?;
+        #[allow(clippy::arithmetic_side_effects, reason = "elf_entry >= elf_base by construction in parse_elf_to_flat")]
+        let board_entry = elf_entry.saturating_sub(elf_base) + u64::from(HEAP_HEADER_WORDS) * 8;
+        #[allow(clippy::cast_possible_truncation, reason = "board entry fits in u32 for realistic programs")]
+        let entry = entry_override.unwrap_or(board_entry as u32);
+        msg_list.push(
+            format!(
+                "Detected ELF file: {} bytes, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}, board entry 0x{entry:08X}",
+                flat.len()
+            ),
+            None, None, MessageType::Information,
+        );
+        (flat, entry)
+    } else {
+        msg_list.push(
+            "Detected flat binary (no ELF header)".to_owned(),
+            None, None, MessageType::Information,
+        );
+        (file_data, entry_override.unwrap_or(0x20_u32))
+    };
+
+    // Pad to a 4-byte boundary so every word is complete.
+    while binary_data.len() % 4 != 0 {
+        binary_data.push(0);
+    }
+
+    let image = build_ddr_image(&binary_data);
+
+    if let Err(err) = net_load(board_ip, board_port, &image, entry_addr, msg_list) {
+        msg_list.push(
+            format!("netboot failed: \"{err}\""),
+            None, None, MessageType::Error,
+        );
+        print_results(msg_list, start_time);
+        return Err(1_i32);
+    }
+
+    print_results(msg_list, start_time);
+    Ok(())
+}
+
 /// Convert an LLVM ELF or flat binary to the board wire format and optionally send it.
 ///
 /// Detects ELF magic automatically:
@@ -810,12 +919,17 @@ pub fn set_matches() -> Command {
         .author("Graham Jones")
         .about("Assembler for FPGA_CPU")
         .arg_required_else_help(true)
+        .override_usage(
+            "klausscc --opcode <opcode_file> [OPTIONS] \
+             <--input <input> | --c-source <c_source> | --elf-binary <elf_binary> \
+             | --textmate | --opcodes | --test-list <test_list>>",
+        )
         .arg(
             Arg::new("opcode_file")
                 .short('c')
                 .long("opcode")
                 .num_args(1)
-                .required_unless_present_any(["elf_binary"])
+                .required_unless_present_any(["elf_binary", "net_load"])
                 .help("Opcode source file from Verilog"),
         )
         .arg(
@@ -823,20 +937,40 @@ pub fn set_matches() -> Command {
                 .short('e')
                 .long("elf-binary")
                 .num_args(1)
-                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes"])
+                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes", "net_load"])
                 .help("Flat binary from LLVM: skip assembly and convert directly to board wire format"),
+        )
+        .arg(
+            Arg::new("net_load")
+                .short('N')
+                .long("net-load")
+                .num_args(1)
+                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes", "elf_binary"])
+                .help("ELF or flat binary: flatten and stream to the board over TCP (network boot). Needs --ip."),
+        )
+        .arg(
+            Arg::new("ip")
+                .long("ip")
+                .num_args(1)
+                .help("Board IP address for --net-load (e.g. 192.168.68.50)"),
+        )
+        .arg(
+            Arg::new("port")
+                .long("port")
+                .num_args(1)
+                .help("Board TCP port for --net-load (default 5000)"),
         )
         .arg(
             Arg::new("entry_point")
                 .long("entry")
                 .num_args(1)
-                .help("Entry point address for elf-binary mode (hex 0x... or decimal). Optional for ELF files \u{2014} read from ELF header. Required for flat binaries (default 0x20)."),
+                .help("Entry point address for elf-binary / net-load mode (hex 0x... or decimal). Optional for ELF files \u{2014} read from ELF header. Required for flat binaries (default 0x20)."),
         )
         .arg(
             Arg::new("input")
                 .short('i')
                 .long("input")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "c_source", "elf_binary"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "c_source", "elf_binary", "net_load"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .conflicts_with("c_source")
@@ -847,7 +981,7 @@ pub fn set_matches() -> Command {
             Arg::new("c_source")
                 .short('C')
                 .long("c-source")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "input", "elf_binary"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "input", "elf_binary", "net_load"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .conflicts_with("input")

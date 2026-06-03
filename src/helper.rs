@@ -206,6 +206,34 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     Some(output_string)
 }
 
+/// Build the raw DDR image bytes for network loading (TCP netboot).
+///
+/// Mirrors `create_bin_string`'s memory layout but emits **raw little-endian
+/// bytes** — no ASCII-hex, no `S`/`Z`/`X` framing: a 4×64-bit heap header
+/// followed by the program, padded so the total length is the 8-byte-aligned
+/// `heap_start`.  Word 0 lo32 holds `heap_start` (first free byte after the
+/// program); the rest of the header is zero.  The entry point is transmitted
+/// separately in the netboot protocol header, not embedded here.
+#[must_use]
+#[allow(clippy::arithmetic_side_effects, reason = "lengths fit in u32 for realistic program sizes")]
+#[allow(clippy::cast_possible_truncation, reason = "image length fits in u32")]
+pub fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
+    const HEADER_BYTES: usize = HEAP_HEADER_WORDS as usize * 8;
+    let mut image = vec![0_u8; HEADER_BYTES];
+    image.extend_from_slice(binary_data);
+    // Pad to a 4-byte word boundary (matches the kbt path's word emission).
+    while !image.len().is_multiple_of(4) {
+        image.push(0);
+    }
+    // heap_start = first free byte after the program, rounded up to 8 bytes.
+    let heap_start = (image.len() as u32 + 7) & !7_u32;
+    // Pad the image out to heap_start so it is itself 8-byte aligned.
+    image.resize(heap_start as usize, 0);
+    // Word 0 lo32 = heap_start (LE); hi32 stays zero.
+    image[0..4].copy_from_slice(&heap_start.to_le_bytes());
+    image
+}
+
 /// Disassemble a flat byte slice into a `Vec<Pass2>` for use with `write_code_output_file`.
 ///
 /// Each 4-byte chunk is read as a big-endian 32-bit word (matching the KlaussCPU LLVM ELF
