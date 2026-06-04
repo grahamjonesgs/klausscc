@@ -163,6 +163,17 @@ fn main() -> Result<(), i32> {
         );
     }
 
+    // mem-out mode: flatten an ELF (or take a flat binary) and write a $readmemh
+    // image for the resident boot ROM (boot_rom.v). See NETBOOT_PLAN.md Phase 2.
+    if let Some(mem_binary_path) = matches.get_one::<String>("mem_out") {
+        let mem_stem = filename_stem(mem_binary_path);
+        let mem_file_name = matches
+            .get_one::<String>("mem_file")
+            .cloned()
+            .unwrap_or_else(|| format!("{mem_stem}.mem"));
+        return run_mem_out(mem_binary_path, &mem_file_name, &mut msg_list, start_time);
+    }
+
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
     let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
@@ -733,6 +744,87 @@ fn run_netload(
     Ok(())
 }
 
+/// Flatten an ELF (or take a flat binary) and write a `$readmemh` boot-ROM image.
+///
+/// The image is the same `build_ddr_image` DDR layout used for net-load, emitted
+/// as one 64-bit little-endian doubleword per line (16 hex chars) — matching
+/// `boot_rom.v` (DEPTH_DW × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
+/// word 0 (`heap_start` = image byte length) to know how much to copy to DDR.
+#[cfg(not(tarpaulin_include))]
+#[allow(clippy::integer_division, reason = "dword count = byte length / 8, exact since image is 8-aligned")]
+fn run_mem_out(
+    binary_path: &str,
+    mem_file_name: &str,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    let file_data = fs::read(binary_path).map_err(|e| {
+        msg_list.push(
+            format!("Cannot read binary file {binary_path}: {e}"),
+            None, None, MessageType::Error,
+        );
+        1_i32
+    })?;
+
+    const ELF_MAGIC: &[u8] = b"\x7fELF";
+    let mut binary_data = if file_data.starts_with(ELF_MAGIC) {
+        let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
+            msg_list.push(
+                format!("Failed to extract LOAD segments from ELF file {binary_path}"),
+                None, None, MessageType::Error,
+            );
+            1_i32
+        })?;
+        msg_list.push(
+            format!(
+                "Detected ELF file: {} bytes, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}",
+                flat.len()
+            ),
+            None, None, MessageType::Information,
+        );
+        flat
+    } else {
+        msg_list.push(
+            "Detected flat binary (no ELF header)".to_owned(),
+            None, None, MessageType::Information,
+        );
+        file_data
+    };
+
+    while binary_data.len() % 4 != 0 {
+        binary_data.push(0);
+    }
+    let image = build_ddr_image(&binary_data);
+
+    // One 64-bit little-endian doubleword per line. image is 8-byte aligned.
+    let mut out = String::with_capacity(image.len() / 8 * 17);
+    for chunk in image.chunks(8) {
+        let dw = u64::from_le_bytes([
+            chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
+        ]);
+        out.push_str(&format!("{dw:016X}\n"));
+    }
+
+    if let Err(e) = fs::write(mem_file_name, &out) {
+        msg_list.push(
+            format!("Failed to write boot ROM image {mem_file_name}: {e}"),
+            None, None, MessageType::Error,
+        );
+        print_results(msg_list, start_time);
+        return Err(1_i32);
+    }
+    msg_list.push(
+        format!(
+            "mem-out: {binary_path} → {mem_file_name} ({} doublewords, {} bytes)",
+            image.len() / 8,
+            image.len()
+        ),
+        None, None, MessageType::Information,
+    );
+    print_results(msg_list, start_time);
+    Ok(())
+}
+
 /// Convert an LLVM ELF or flat binary to the board wire format and optionally send it.
 ///
 /// Detects ELF magic automatically:
@@ -929,7 +1021,7 @@ pub fn set_matches() -> Command {
                 .short('c')
                 .long("opcode")
                 .num_args(1)
-                .required_unless_present_any(["elf_binary", "net_load"])
+                .required_unless_present_any(["elf_binary", "net_load", "mem_out"])
                 .help("Opcode source file from Verilog"),
         )
         .arg(
@@ -945,7 +1037,7 @@ pub fn set_matches() -> Command {
                 .short('N')
                 .long("net-load")
                 .num_args(1)
-                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes", "elf_binary"])
+                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes", "elf_binary", "mem_out"])
                 .help("ELF or flat binary: flatten and stream to the board over TCP (network boot). Needs --ip."),
         )
         .arg(
@@ -961,6 +1053,19 @@ pub fn set_matches() -> Command {
                 .help("Board TCP port for --net-load (default 5000)"),
         )
         .arg(
+            Arg::new("mem_out")
+                .long("mem-out")
+                .num_args(1)
+                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes", "elf_binary", "net_load"])
+                .help("ELF or flat binary: write a $readmemh boot-ROM image for boot_rom.v (resident netboot)."),
+        )
+        .arg(
+            Arg::new("mem_file")
+                .long("mem-file")
+                .num_args(1)
+                .help("Output path for --mem-out (default <input>.mem)"),
+        )
+        .arg(
             Arg::new("entry_point")
                 .long("entry")
                 .num_args(1)
@@ -970,7 +1075,7 @@ pub fn set_matches() -> Command {
             Arg::new("input")
                 .short('i')
                 .long("input")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "c_source", "elf_binary", "net_load"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "c_source", "elf_binary", "net_load", "mem_out"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .conflicts_with("c_source")
@@ -981,7 +1086,7 @@ pub fn set_matches() -> Command {
             Arg::new("c_source")
                 .short('C')
                 .long("c-source")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "input", "elf_binary", "net_load"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "input", "elf_binary", "net_load", "mem_out"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .conflicts_with("input")
