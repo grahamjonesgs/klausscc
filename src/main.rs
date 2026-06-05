@@ -613,7 +613,7 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
     // encoding and disassembly.  Segments separated by more than MAX_SEGMENT_GAP
     // bytes from the previous one are treated as a different physical memory
     // region and dropped from this cluster.
-    const MAX_SEGMENT_GAP: u64 = 0x10_0000; // 1 MB
+    const MAX_SEGMENT_GAP: u64 = 0x40_0000; // 4 MB
     #[allow(clippy::arithmetic_side_effects, reason = "prev_end = prev_addr + len, both bounded by usize")]
     let cluster: Vec<(u64, Vec<u8>)> = segments
         .into_iter()
