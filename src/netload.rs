@@ -7,6 +7,7 @@
 //! loss / retransmit that the kbt-over-UART path never needed and the earlier
 //! hand-rolled UDP design would have had to implement.
 
+use crate::helper::human_bytes;
 use crate::messages::{MessageType, MsgList};
 use core::time::Duration;
 use std::io::{Error, Read as _, Write as _};
@@ -97,8 +98,8 @@ pub fn net_load(
     } else {
         msg_list.push(
             format!(
-                "netboot OK: {} bytes, entry 0x{entry_pc:08X}, checksum 0x{board_cks:08X}",
-                image.len()
+                "netboot OK: {}, entry 0x{entry_pc:08X}, checksum 0x{board_cks:08X}",
+                human_bytes(image.len())
             ),
             None,
             None,

@@ -24,6 +24,27 @@ pub fn encode_word_kbt(w: u32) -> String {
     )
 }
 
+/// Format a byte count as a human-readable size (B / KiB / MiB / GiB), e.g.
+/// `9223315` -> `"8.80 MiB"`.  Used for progress/size display.
+#[must_use]
+#[allow(clippy::cast_precision_loss, reason = "rounding a byte count for display is fine")]
+#[allow(clippy::float_arithmetic, reason = "float math here is only for display formatting")]
+pub fn human_bytes(n: usize) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = 1_048_576.0;
+    const GIB: f64 = 1_073_741_824.0;
+    let f = n as f64;
+    if f >= GIB {
+        format!("{:.2} GiB", f / GIB)
+    } else if f >= MIB {
+        format!("{:.2} MiB", f / MIB)
+    } else if f >= KIB {
+        format!("{:.1} KiB", f / KIB)
+    } else {
+        format!("{n} B")
+    }
+}
+
 /// Encode a hex opcode/data string for the kbt wire format.
 ///
 /// Applies `encode_word_kbt` to each 8-character (32-bit word) chunk.

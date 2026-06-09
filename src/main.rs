@@ -49,7 +49,7 @@ mod netload;
 use chrono::{Local, NaiveTime};
 use clap::{Arg, Command};
 use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
-use helper::{build_ddr_image, create_bin_string, data_as_bytes, disassemble_flat_to_pass2, encode_word_kbt, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
+use helper::{build_ddr_image, create_bin_string, data_as_bytes, disassemble_flat_to_pass2, encode_word_kbt, human_bytes, is_valid_line, line_type, num_data_bytes, parse_expected_uart_values, strip_comments, HEAP_HEADER_WORDS};
 use netload::{net_load, NETBOOT_DEFAULT_PORT};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
@@ -159,7 +159,7 @@ fn main() -> Result<(), i32> {
             .get_one::<String>("port")
             .and_then(|p| p.parse().ok())
             .unwrap_or(NETBOOT_DEFAULT_PORT);
-        return run_netload(
+        let load_result = run_netload(
             net_binary_path,
             entry_addr,
             &board_ip,
@@ -167,6 +167,27 @@ fn main() -> Result<(), i32> {
             &mut msg_list,
             start_time,
         );
+
+        /* After a net-load, optionally monitor the board's UART (and forward
+         * keystrokes), exactly like -s -m.  The load itself is over TCP, so the
+         * monitor needs its own serial port: honour -s if given, otherwise
+         * auto-detect the first USB serial port (same as -s with no value). */
+        if load_result.is_ok() && monitor_flag {
+            let monitor_port = if output_serial_port.is_empty() {
+                AUTO_SERIAL
+            } else {
+                output_serial_port.as_str()
+            };
+            if let Err(err) = monitor_serial(monitor_port, debug_flag, &mut msg_list) {
+                msg_list.push(
+                    format!("Serial monitor stopped: \"{err}\""),
+                    None,
+                    None,
+                    MessageType::Warning,
+                );
+            }
+        }
+        return load_result;
     }
 
     // mem-out mode: flatten an ELF (or take a flat binary) and write a $readmemh
@@ -716,8 +737,8 @@ fn run_netload(
         let entry = entry_override.unwrap_or(board_entry as u32);
         msg_list.push(
             format!(
-                "Detected ELF file: {} bytes, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}, board entry 0x{entry:08X}",
-                flat.len()
+                "Detected ELF file: {}, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}, board entry 0x{entry:08X}",
+                human_bytes(flat.len())
             ),
             None, None, MessageType::Information,
         );
@@ -783,8 +804,8 @@ fn run_mem_out(
         })?;
         msg_list.push(
             format!(
-                "Detected ELF file: {} bytes, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}",
-                flat.len()
+                "Detected ELF file: {}, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}",
+                human_bytes(flat.len())
             ),
             None, None, MessageType::Information,
         );
@@ -883,8 +904,8 @@ fn run_elf2serial(
         let entry = entry_override.unwrap_or(board_entry as u32);
         msg_list.push(
             format!(
-                "Detected ELF file: {} bytes, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}, board entry 0x{entry:08X}",
-                flat.len()
+                "Detected ELF file: {}, ELF base 0x{elf_base:08X}, ELF entry 0x{elf_entry:08X}, board entry 0x{entry:08X}",
+                human_bytes(flat.len())
             ),
             None, None, MessageType::Information,
         );
@@ -948,12 +969,18 @@ fn run_elf2serial(
         None, None, MessageType::Information,
     );
 
-    write_binary_file(msg_list, kbt_file_name, &out);
+    /* Skip the on-disk .kbt / .code when streaming to the board over serial:
+     * the image is sent straight from memory (`out`), so writing these (large)
+     * files just adds several seconds for no benefit. */
+    if output_serial_port.is_empty() {
+        write_binary_file(msg_list, kbt_file_name, &out);
+    }
 
     // Optionally produce a .code disassembly listing alongside the .kbt.
     // Try to load the opcode file; if it exists and parses, disassemble binary_data.
-    // If the file is absent or fails to parse, skip silently.
-    if std::path::Path::new(opcode_file_name).exists() {
+    // If the file is absent or fails to parse, skip silently.  (Also skipped for
+    // a serial load — see above.)
+    if output_serial_port.is_empty() && std::path::Path::new(opcode_file_name).exists() {
         let mut tmp_msgs = MsgList::new();
         let mut opened: Vec<String> = Vec::new();
         let opt_opcodes = read_file_to_vector(opcode_file_name, &mut tmp_msgs, &mut opened)

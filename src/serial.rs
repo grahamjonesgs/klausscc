@@ -1,4 +1,4 @@
-use crate::helper::trim_newline;
+use crate::helper::{human_bytes, trim_newline};
 use crate::messages::{MessageType, MsgList};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
@@ -250,7 +250,9 @@ pub fn write_to_board_keep_port(
             let on_wire = written.saturating_sub(pending);
             let pct = on_wire.saturating_mul(100).checked_div(total).unwrap_or(100);
             if pct != last_pct {
-                eprint!("\rSending to board: {pct}% ({on_wire}/{total} bytes)");
+                let line = format!("Sending to board: {pct}% ({} / {})",
+                                   human_bytes(on_wire), human_bytes(total));
+                eprint!("\r{line:<50}");
                 last_pct = pct;
             }
         }
@@ -261,7 +263,9 @@ pub fn write_to_board_keep_port(
             let on_wire = total.saturating_sub(pending);
             let pct = on_wire.saturating_mul(100).checked_div(total).unwrap_or(100);
             if pct != last_pct {
-                eprint!("\rSending to board: {pct}% ({on_wire}/{total} bytes)");
+                let line = format!("Sending to board: {pct}% ({} / {})",
+                                   human_bytes(on_wire), human_bytes(total));
+                eprint!("\r{line:<50}");
                 last_pct = pct;
             }
             if pending == 0 {
