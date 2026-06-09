@@ -48,13 +48,17 @@ impl Default for &Message {
 pub struct MsgList {
     /// Vector of messages.
     pub list: Vec<Message>,
+    /// When true, each pushed message is printed immediately (streamed) rather
+    /// than collected and dumped later by `print_messages`.  Lets the user see
+    /// load progress in real time instead of one burst after a silent transfer.
+    pub live: bool,
 }
 
 /// Implementation of `MsgList`.
 impl MsgList {
     /// Create new `MsgList`.
     pub const fn new() -> Self {
-        Self { list: Vec::new() }
+        Self { list: Vec::new(), live: false }
     }
 
    
@@ -65,7 +69,9 @@ impl MsgList {
         warnings
     }
 
-     /// Push message to `MsgList`.
+     /// Push message to `MsgList`.  In live mode the message is also printed
+     /// immediately so the user sees progress in real time.
+     #[allow(clippy::print_stderr, reason = "Live mode intentionally streams each message to stderr (unbuffered)")]
      pub fn push(
         &mut self,
         name: String,
@@ -80,6 +86,58 @@ impl MsgList {
             level: msg_type,
             time: Some(Local::now().time()),
         });
+        if self.live {
+            if let Some(msg) = self.list.last() {
+                /* Stream to stderr: it is unbuffered (no LineWriter), so each
+                 * line shows immediately even with raw-mode / terminal quirks
+                 * that left stdout lines stuck until the next forced flush. */
+                eprintln!("{}", format_message(msg));
+            }
+        }
+    }
+}
+
+/// Format one message as a coloured, timestamped line.
+fn format_message(msg: &Message) -> String {
+    let message_level: ColoredString = match msg.level {
+        MessageType::Information => "I".to_owned().green(),
+        MessageType::Warning => "W".to_owned().yellow(),
+        MessageType::Error => "E".to_owned().red(),
+    };
+    if msg.line_number.is_some() {
+        if msg.file_name.is_some() {
+            format!(
+                "{} {} Line {} in file {}. {} ",
+                msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
+                message_level,
+                msg.line_number.unwrap_or_default(),
+                msg.file_name.clone().unwrap_or_default(),
+                msg.text
+            )
+        } else {
+            format!(
+                "{} {} Line {}. {} ",
+                msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
+                message_level,
+                msg.line_number.unwrap_or_default(),
+                msg.text
+            )
+        }
+    } else if msg.file_name.is_some() {
+        format!(
+            "{} {} In file {}. {} ",
+            msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
+            message_level,
+            msg.file_name.clone().unwrap_or_default(),
+            msg.text
+        )
+    } else {
+        format!(
+            "{} {} {} ",
+            msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
+            message_level,
+            msg.text
+        )
     }
 }
 
@@ -90,50 +148,13 @@ impl MsgList {
 #[allow(clippy::print_stdout, reason = "Printing to stdout is intended for user-facing message output")]
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
 pub fn print_messages(msg_list: &MsgList) {
+    /* In live mode every message was already printed as it was pushed, so
+     * printing them again here would duplicate the whole log. */
+    if msg_list.live {
+        return;
+    }
     for msg in &msg_list.list {
-        let message_level: ColoredString = match msg.level {
-            MessageType::Information => "I".to_owned().green(),
-            MessageType::Warning => "W".to_owned().yellow(),
-            MessageType::Error => "E".to_owned().red(),
-        };
-        println!(
-            "{}",
-            if msg.line_number.is_some() {
-                if msg.file_name.is_some() {
-                    format!(
-                        "{} {} Line {} in file {}. {} ",
-                        msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
-                        message_level,
-                        msg.line_number.unwrap_or_default(),
-                        msg.file_name.clone().unwrap_or_default(),
-                        msg.text
-                    )
-                } else {
-                    format!(
-                        "{} {} Line {}. {} ",
-                        msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
-                        message_level,
-                        msg.line_number.unwrap_or_default(),
-                        msg.text
-                    )
-                }
-            } else if msg.file_name.is_some() {
-                format!(
-                    "{} {} In file {}. {} ",
-                    msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
-                    message_level,
-                    msg.file_name.clone().unwrap_or_default(),
-                    msg.text
-                )
-            } else {
-                format!(
-                    "{} {} {} ",
-                    msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
-                    message_level,
-                    msg.text
-                )
-            }
-        );
+        println!("{}", format_message(msg));
     }
 }
 

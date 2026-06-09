@@ -192,6 +192,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
 ///
 /// Will send the program to the serial port, wait for the response, and return the open port.
 #[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling is intentional and improves readability in this context")]
+#[allow(clippy::print_stderr, reason = "In-place progress indicator (stderr is unbuffered) for the multi-second serial transfer")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_to_board_keep_port(
     binary_output: &str,
@@ -225,9 +226,51 @@ pub fn write_to_board_keep_port(
     if port.read(&mut read_buffer[..]).is_err() { //clear any old messages in buffer
     }
 
-    port.write_all(binary_output.as_bytes())?;
+    /* Send the image with a progress bar that tracks ACTUAL transmission.
+     *
+     * write_all() only queues bytes into the (large) USB-serial driver buffer
+     * and returns almost immediately, so a naive bar jumps straight to 100%.
+     * The real multi-second transmission then used to happen inside a single
+     * blocking port.flush() (tcdrain) — 23 s of dead silence, after which every
+     * later message (and the board's boot log) clumped out at once.
+     *
+     * Instead we poll bytes_to_write() — the count still pending transmission —
+     * to drive the bar, and never call the blocking tcdrain.  The driver keeps
+     * transmitting in the background; the loop just watches it drain. */
+    {
+        let bytes = binary_output.as_bytes();
+        let total = bytes.len();
+        let mut written = 0_usize;
+        let mut last_pct = usize::MAX;
 
-    port.flush()?;
+        for window in bytes.chunks(0x10000) {
+            port.write_all(window)?;
+            written = written.saturating_add(window.len());
+            let pending = usize::try_from(port.bytes_to_write().unwrap_or(0)).unwrap_or(0);
+            let on_wire = written.saturating_sub(pending);
+            let pct = on_wire.saturating_mul(100).checked_div(total).unwrap_or(100);
+            if pct != last_pct {
+                eprint!("\rSending to board: {pct}% ({on_wire}/{total} bytes)");
+                last_pct = pct;
+            }
+        }
+
+        /* Everything is queued; watch the driver buffer drain to the wire. */
+        loop {
+            let pending = usize::try_from(port.bytes_to_write().unwrap_or(0)).unwrap_or(0);
+            let on_wire = total.saturating_sub(pending);
+            let pct = on_wire.saturating_mul(100).checked_div(total).unwrap_or(100);
+            if pct != last_pct {
+                eprint!("\rSending to board: {pct}% ({on_wire}/{total} bytes)");
+                last_pct = pct;
+            }
+            if pending == 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        eprintln!();
+    }
 
     if skip_load_response {
         return Ok(port);
@@ -286,19 +329,19 @@ pub fn write_to_board(
     Ok(())
 }
 
-/// Print bytes to stdout, optionally showing each byte as hex alongside the character.
-#[allow(clippy::print_stdout, reason = "Printing to stdout is required for serial monitor output")]
+/// Print bytes to stderr (unbuffered), optionally showing each byte as hex alongside the character.
+#[allow(clippy::print_stderr, reason = "Serial monitor output goes to stderr (unbuffered) for immediate display")]
 fn print_bytes(data: &[u8], debug: bool) {
     if debug {
         for &b in data {
             if b.is_ascii_graphic() || b == b' ' {
-                print!("{:02X}('{}') ", b, char::from(b));
+                eprint!("{:02X}('{}') ", b, char::from(b));
             } else {
-                print!("{:02X} ", b);
+                eprint!("{:02X} ", b);
             }
         }
     } else {
-        print!("{}", String::from_utf8_lossy(data));
+        eprint!("{}", String::from_utf8_lossy(data));
     }
 }
 
@@ -318,7 +361,7 @@ pub fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut MsgList) -> R
 ///
 /// Used after `write_to_board_keep_port` to continue reading from the same port
 /// that was used to upload the program, ensuring no UART output is missed.
-#[allow(clippy::print_stdout, reason = "Printing to stdout is required for serial monitor output")]
+#[allow(clippy::print_stderr, reason = "Serial monitor output goes to stderr (unbuffered) for immediate display")]
 #[allow(clippy::question_mark_used, reason = "? operator is idiomatic for propagating errors")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
 pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
@@ -393,7 +436,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
         }
     }
 
-    println!("Monitoring serial port (Ctrl+C to stop)...\r");
+    eprintln!("Monitoring serial port (Ctrl+C to stop)...\r");
 
     let mut read_buf = [0_u8; 1024];
     let mut halt_received = false;
@@ -406,12 +449,12 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
                 // sends ASCII text, 0x00 cannot appear in normal output.
                 if let Some(pos) = data.iter().position(|&b| b == 0x00) {
                     print_bytes(&data[..pos], debug);
-                    io::stdout().flush().unwrap_or(());
+                    io::stderr().flush().unwrap_or(());
                     halt_received = true;
                     break 'monitor;
                 }
                 print_bytes(data, debug);
-                io::stdout().flush().unwrap_or(());
+                io::stderr().flush().unwrap_or(());
             }
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
@@ -429,9 +472,9 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
 
     let _ = crossterm::terminal::disable_raw_mode();
     if halt_received {
-        println!("\r\nCPU halted.");
+        eprintln!("\r\nCPU halted.");
     } else {
-        println!("\r\nSerial monitor stopped.");
+        eprintln!("\r\nSerial monitor stopped.");
     }
     drop(port);
     Ok(())

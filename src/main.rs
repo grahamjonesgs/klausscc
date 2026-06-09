@@ -74,6 +74,12 @@ fn main() -> Result<(), i32> {
     use files::output_macros_opcodes_html;
 
     let mut msg_list = MsgList::new();
+    /* Stream messages as they happen rather than dumping them all at the end:
+     * during a board load the transfer is otherwise silent and every status
+     * line (plus the board's boot log behind it) appears in one burst once the
+     * monitor starts.  print_messages() becomes a no-op; print_results() still
+     * prints the final summary line. */
+    msg_list.live = true;
     let start_time: NaiveTime = Local::now().time();
 
     let matches = set_matches().get_matches();
@@ -557,7 +563,7 @@ pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opco
 ///
 /// Takes the message list and start time and prints the results to the users.
 #[inline]
-#[allow(clippy::print_stdout, reason = "Printing to stdout is required for user feedback in this function")]
+#[allow(clippy::print_stderr, reason = "Final summary to stderr (unbuffered) for immediate display")]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
@@ -566,7 +572,7 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     #[allow(clippy::float_arithmetic, reason = "Needed for correct duration calculation")]
     #[allow(clippy::cast_precision_loss, reason = "Needed for correct duration calculation")]
     let time_taken: f64 = duration.num_milliseconds() as f64 / 1000.0;
-    println!(
+    eprintln!(
         "Completed with {} error{} and {} warning{} in {:.3} seconds",
         msg_list.number_by_type(&MessageType::Error),
         if msg_list.number_by_type(&MessageType::Error) == 1 { "" } else { "s" },
