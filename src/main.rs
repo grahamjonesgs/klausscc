@@ -54,7 +54,7 @@ use netload::{net_load, NETBOOT_DEFAULT_PORT};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
-use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, InputData, Opcode, Pass0, Pass1, Pass2};
+use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
 use serial::{monitor_serial, monitor_serial_port, run_test_monitor, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 use std::fs;
 
@@ -88,17 +88,14 @@ fn main() -> Result<(), i32> {
         .unwrap_or(&"opcode_select.vh".to_owned())
         .replace(' ', "");
     let input_file_name: String = matches.get_one::<String>("input").unwrap_or(&String::default()).replace(' ', "");
-    let c_source_file_name: String = matches.get_one::<String>("c_source").unwrap_or(&String::default()).replace(' ', "");
-    let is_c_source = !c_source_file_name.is_empty();
-    let actual_input_file_name = if is_c_source { c_source_file_name.clone() } else { input_file_name.clone() };
     let mut binary_file_name: String = matches
         .get_one::<String>("bitcode")
-        .unwrap_or(&filename_stem(&actual_input_file_name))
+        .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "");
     binary_file_name.push_str(".kbt");
     let mut output_file_name: String = matches
         .get_one::<String>("output")
-        .unwrap_or(&filename_stem(&actual_input_file_name))
+        .unwrap_or(&filename_stem(&input_file_name))
         .replace(' ', "");
     output_file_name.push_str(".code");
     let output_serial_port: String = matches.get_one::<String>("serial").unwrap_or(&String::default()).replace(' ', "");
@@ -114,34 +111,37 @@ fn main() -> Result<(), i32> {
         .unwrap_or(10);
     let test_list_file: String = matches.get_one::<String>("test_list").unwrap_or(&String::default()).replace(' ', "");
 
-    // elf2serial mode: convert a flat LLVM binary to the board wire format and optionally send it
-    if let Some(elf_binary_path) = matches.get_one::<String>("elf_binary") {
-        let entry_addr: Option<u32> = matches.get_one::<String>("entry_point").map(|s| {
-            if s.len() >= 2 && s.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) {
-                u32::from_str_radix(&s[2..], 16).unwrap_or(0x20)
-            } else {
-                s.parse::<u32>().unwrap_or(0x20)
-            }
-        });
-        let elf_stem = filename_stem(elf_binary_path);
-        let elf_binary_name = matches
-            .get_one::<String>("bitcode")
-            .map(String::as_str)
-            .unwrap_or(&elf_stem);
-        let mut elf_kbt_name = elf_binary_name.to_owned();
-        elf_kbt_name.push_str(".kbt");
-        return run_elf2serial(
-            elf_binary_path,
-            entry_addr,
-            &opcode_file_name,
-            &output_serial_port,
-            &elf_kbt_name,
-            monitor_flag,
-            debug_flag,
-            no_break_flag,
-            &mut msg_list,
-            start_time,
-        );
+    // Classify the input file by extension (case-insensitive).  The file type is
+    // determined from the name rather than from a mode-specific flag:
+    //   .kla  → assemble (this is the only mode that needs an opcode file)
+    //   .kbt  → pre-built board wire-format image, sent/monitored verbatim
+    //   else  → an ELF or flat binary, converted to the wire format (elf2serial)
+    let input_lower = input_file_name.to_ascii_lowercase();
+    let is_kbt_input = input_lower.ends_with(".kbt");
+    let is_binary_input = !input_file_name.is_empty() && !input_lower.ends_with(".kla") && !is_kbt_input;
+
+    // Monitor-only mode: `-m` on its own (optionally with `-s`) just opens the
+    // serial monitor — no input file, no assembly, no opcode file needed.  With
+    // no `-s` the first USB serial port is auto-detected.
+    if monitor_flag
+        && input_file_name.is_empty()
+        && matches.get_one::<String>("net_load").is_none()
+        && matches.get_one::<String>("mem_out").is_none()
+        && test_list_file.is_empty()
+        && !opcodes_flag
+        && !textmate_flag
+    {
+        let monitor_port = if output_serial_port.is_empty() { AUTO_SERIAL } else { output_serial_port.as_str() };
+        if let Err(err) = monitor_serial(monitor_port, debug_flag, &mut msg_list) {
+            msg_list.push(
+                format!("Serial monitor stopped: \"{err}\""),
+                None,
+                None,
+                MessageType::Warning,
+            );
+        }
+        print_messages(&msg_list);
+        return Ok(());
     }
 
     // net-load mode: flatten an ELF (or take a flat binary) and stream it to the
@@ -201,6 +201,57 @@ fn main() -> Result<(), i32> {
         return run_mem_out(mem_binary_path, &mem_file_name, &mut msg_list, start_time);
     }
 
+    // ELF / flat binary input: convert directly to the board wire format and
+    // optionally send it.  No opcode file is required — it is only used, if it
+    // happens to exist, to emit a .code disassembly listing alongside the .kbt.
+    if is_binary_input {
+        let entry_addr: Option<u32> = matches.get_one::<String>("entry_point").map(|s| {
+            if s.len() >= 2 && s.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) {
+                u32::from_str_radix(&s[2..], 16).unwrap_or(0x20)
+            } else {
+                s.parse::<u32>().unwrap_or(0x20)
+            }
+        });
+        return run_elf2serial(
+            &input_file_name,
+            entry_addr,
+            &opcode_file_name,
+            &output_serial_port,
+            &binary_file_name,
+            monitor_flag,
+            debug_flag,
+            no_break_flag,
+            &mut msg_list,
+            start_time,
+        );
+    }
+
+    // .kbt input: already in board wire format — send and/or monitor verbatim.
+    if is_kbt_input {
+        return run_kbt_send(
+            &input_file_name,
+            &output_serial_port,
+            monitor_flag,
+            debug_flag,
+            no_break_flag,
+            &mut msg_list,
+            start_time,
+        );
+    }
+
+    // From here on the only remaining work needs the opcode file: assembling a
+    // .kla file, or emitting the opcode/textmate JSON.  Require it explicitly.
+    if matches.get_one::<String>("opcode_file").is_none() {
+        msg_list.push(
+            "An opcode file (-c/--opcode) is required to assemble a .kla file or output opcode/textmate JSON".to_owned(),
+            None,
+            None,
+            MessageType::Error,
+        );
+        print_messages(&msg_list);
+        return Err(1_i32);
+    }
+
     // Parse the opcode file
     let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
     let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
@@ -245,24 +296,15 @@ fn main() -> Result<(), i32> {
         return run_test_list(&oplist, &macro_list, &test_list_file, &output_serial_port, test_timeout, !no_break_flag, &mut msg_list);
     }
 
-    // Handle C source compilation
-    let input_list = if is_c_source {
-        msg_list.push(format!("Compiling C source file {c_source_file_name}"), None, None, MessageType::Information);
-        if let Some(lines) = compile_c_to_kla(&c_source_file_name, &mut msg_list) { lines } else {
-            print_messages(&msg_list);
-            return Err(1_i32);
-        }
-    } else {
-        // Parse the input file
-        msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
-        let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
-        let input_list_option = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
-        if input_list_option.is_none() {
-            print_messages(&msg_list);
-            return Err(1_i32);
-        }
-        input_list_option.unwrap_or_else(|| [].to_vec())
-    };
+    // Parse the input file
+    msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
+    let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
+    let input_list_option = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files);
+    if input_list_option.is_none() {
+        print_messages(&msg_list);
+        return Err(1_i32);
+    }
+    let input_list = input_list_option.unwrap_or_else(|| [].to_vec());
 
     let input_list = remove_block_comments(input_list, &mut msg_list);
 
@@ -1034,6 +1076,79 @@ fn run_elf2serial(
     Ok(())
 }
 
+/// Send a pre-built `.kbt` board wire-format image to the board and/or monitor it.
+///
+/// A `.kbt` file already holds the complete wire-format string (`S…Z…X`) produced
+/// by an earlier assembly or elf2serial run, so it is sent verbatim — no opcode
+/// file and no re-encoding.  With `-m` and no `-s`, the serial port is
+/// auto-detected so a bare `-m` can both send and monitor.
+#[cfg(not(tarpaulin_include))]
+fn run_kbt_send(
+    kbt_path: &str,
+    output_serial_port: &str,
+    monitor_flag: bool,
+    debug_flag: bool,
+    no_break_flag: bool,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    let wire = match fs::read_to_string(kbt_path) {
+        Ok(contents) => contents,
+        Err(e) => {
+            msg_list.push(
+                format!("Cannot read kbt file {kbt_path}: {e}"),
+                None, None, MessageType::Error,
+            );
+            print_results(msg_list, start_time);
+            return Err(1_i32);
+        }
+    };
+    let wire_trimmed = wire.trim();
+
+    // A bare `-m` with no `-s` should still send: auto-detect the serial port.
+    let serial_port = if output_serial_port.is_empty() && monitor_flag {
+        AUTO_SERIAL
+    } else {
+        output_serial_port
+    };
+
+    if serial_port.is_empty() {
+        msg_list.push(
+            "Nothing to do: a .kbt input needs a serial port (-s) to send or -m to monitor".to_owned(),
+            None, None, MessageType::Warning,
+        );
+        print_results(msg_list, start_time);
+        return Ok(());
+    }
+
+    msg_list.push(
+        format!("Sending pre-built image {kbt_path} to board"),
+        None, None, MessageType::Information,
+    );
+
+    if monitor_flag {
+        match write_to_board_keep_port(wire_trimmed, serial_port, !no_break_flag, true, msg_list) {
+            Ok(port) => {
+                msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+                print_results(msg_list, start_time);
+                if let Err(err) = monitor_serial_port(port, debug_flag, msg_list) {
+                    msg_list.push(format!("Serial monitor stopped: \"{err}\""), None, None, MessageType::Warning);
+                }
+                return Ok(());
+            }
+            Err(err) => {
+                msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
+                print_results(msg_list, start_time);
+                return Err(1_i32);
+            }
+        }
+    }
+
+    write_to_device(msg_list, wire_trimmed, serial_port, !no_break_flag);
+    print_results(msg_list, start_time);
+    Ok(())
+}
+
 #[must_use]
 #[allow(clippy::too_many_lines, reason = "CLI definition requires many argument declarations")]
 pub fn set_matches() -> Command {
@@ -1045,32 +1160,23 @@ pub fn set_matches() -> Command {
         .about("Assembler for FPGA_CPU")
         .arg_required_else_help(true)
         .override_usage(
-            "klausscc --opcode <opcode_file> [OPTIONS] \
-             <--input <input> | --c-source <c_source> | --elf-binary <elf_binary> \
-             | --textmate | --opcodes | --test-list <test_list>>",
+            "klausscc [OPTIONS] \
+             <--input <input> | --textmate | --opcodes | --test-list <test_list> \
+             | --net-load <file> | --mem-out <file> | --monitor>",
         )
         .arg(
             Arg::new("opcode_file")
                 .short('c')
                 .long("opcode")
                 .num_args(1)
-                .required_unless_present_any(["elf_binary", "net_load", "mem_out"])
-                .help("Opcode source file from Verilog"),
-        )
-        .arg(
-            Arg::new("elf_binary")
-                .short('e')
-                .long("elf-binary")
-                .num_args(1)
-                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes", "net_load"])
-                .help("Flat binary from LLVM: skip assembly and convert directly to board wire format"),
+                .help("Opcode source file from Verilog (required only when assembling a .kla file or emitting opcode/textmate JSON)"),
         )
         .arg(
             Arg::new("net_load")
                 .short('N')
                 .long("net-load")
                 .num_args(1)
-                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes", "elf_binary", "mem_out"])
+                .conflicts_with_all(["input", "test_list", "textmate", "opcodes", "mem_out"])
                 .help("ELF or flat binary: flatten and stream to the board over TCP (network boot). Needs --ip."),
         )
         .arg(
@@ -1089,7 +1195,7 @@ pub fn set_matches() -> Command {
             Arg::new("mem_out")
                 .long("mem-out")
                 .num_args(1)
-                .conflicts_with_all(["input", "c_source", "test_list", "textmate", "opcodes", "elf_binary", "net_load"])
+                .conflicts_with_all(["input", "test_list", "textmate", "opcodes", "net_load"])
                 .help("ELF or flat binary: write a $readmemh boot-ROM image for boot_rom.v (resident netboot)."),
         )
         .arg(
@@ -1102,29 +1208,17 @@ pub fn set_matches() -> Command {
             Arg::new("entry_point")
                 .long("entry")
                 .num_args(1)
-                .help("Entry point address for elf-binary / net-load mode (hex 0x... or decimal). Optional for ELF files \u{2014} read from ELF header. Required for flat binaries (default 0x20)."),
+                .help("Entry point address for ELF / flat-binary input or net-load (hex 0x... or decimal). Optional for ELF files \u{2014} read from ELF header. Required for flat binaries (default 0x20)."),
         )
         .arg(
             Arg::new("input")
                 .short('i')
                 .long("input")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "c_source", "elf_binary", "net_load", "mem_out"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "net_load", "mem_out", "monitor"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
-                .conflicts_with("c_source")
                 .num_args(1)
-                .help("Input file to be assembled"),
-        )
-        .arg(
-            Arg::new("c_source")
-                .short('C')
-                .long("c-source")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "input", "elf_binary", "net_load", "mem_out"])
-                .conflicts_with("textmate")
-                .conflicts_with("opcodes")
-                .conflicts_with("input")
-                .num_args(1)
-                .help("C source file to compile with rcc and assemble"),
+                .help("Input file. Type is detected from the extension: .kla assembles (needs --opcode), .kbt sends a pre-built image, anything else (.elf or flat binary) converts to the board wire format"),
         )
         .arg(
             Arg::new("output")
@@ -1612,160 +1706,6 @@ pub fn run_test_list(
         Err(2_i32)
     } else {
         Ok(())
-    }
-}
-
-/// Compile C source file to KLA assembly using rcc, and add necessary includes and startup code.
-///
-/// Runs rcc on the C file, captures the output, prepends includes for UART and libc,
-/// and adds startup initialization code.
-#[inline]
-#[cfg(not(tarpaulin_include))]
-#[allow(clippy::arithmetic_side_effects, reason = "line_counter increments cannot overflow in practice")]
-pub fn compile_c_to_kla(c_file: &str, msg_list: &mut MsgList) -> Option<Vec<InputData>> {
-    use std::path::Path;
-    use std::process::Command;
-
-    // Run cpprcc (preprocessor) piped into rcc, equivalent to:
-    //   cpprcc myprogram.c | rcc -target=klacpu
-    let cpprcc_output = Command::new("cpprcc").arg(c_file).output();
-    let preprocessed = match cpprcc_output {
-        Ok(out) if out.status.success() => out.stdout,
-        Ok(out) => {
-            msg_list.push(
-                format!("cpprcc failed for {c_file}: {}", String::from_utf8_lossy(&out.stderr)),
-                None, None, MessageType::Error,
-            );
-            return None;
-        }
-        Err(err) => {
-            msg_list.push(
-                format!("Failed to run cpprcc on {c_file}: \"{err}\""),
-                None, None, MessageType::Error,
-            );
-            return None;
-        }
-    };
-
-    let rcc_output = Command::new("rcc")
-        .arg("-target=klacpu")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .and_then(|mut child| {
-            use std::io::Write as _;
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin.write_all(&preprocessed)?;
-            }
-            child.wait_with_output()
-        });
-
-    match rcc_output {
-        Ok(output) if output.status.success() => {
-            let kla_content = String::from_utf8_lossy(&output.stdout);
-            msg_list.push(
-                format!("Successfully compiled {c_file} with rcc"),
-                None,
-                None,
-                MessageType::Information,
-            );
-
-            // Split into lines
-            let lines: Vec<String> = kla_content.lines().map(String::from).collect();
-
-            // Create InputData vector
-            let mut input_data_list = Vec::new();
-            let mut line_counter = 1;
-
-            let source_parent = Path::new(c_file)
-                .parent()
-                .unwrap_or_else(|| Path::new(""));
-
-            // 1. _start preamble — must be first so it lands at address 0x000
-            for &preamble_line in &[
-                "_start",
-                "SETR A 0x8000000",
-                "SETSP A",
-                "SETR P 0",
-                "DELAYV 0x100",
-                "CALL main:",
-                "HALT",
-                "",
-            ] {
-                input_data_list.push(InputData {
-                    file_name: c_file.to_owned(),
-                    input: preamble_line.to_owned(),
-                    line_counter,
-                });
-                line_counter += 1;
-            }
-
-            // 2. Compiled C code (contains main: and user functions)
-            for line in lines {
-                input_data_list.push(InputData {
-                    file_name: c_file.to_owned(),
-                    input: line,
-                    line_counter,
-                });
-                line_counter += 1;
-            }
-
-            // 3. Library includes (libc, uart stubs) — after user code
-            for include_rel in ["../lib/libc.kla", "../lib/uart_stubs.kla"] {
-                let include_path = source_parent.join(include_rel);
-                let include_path_str = include_path.to_string_lossy().into_owned();
-
-                let mut include_stack: Vec<String> = Vec::new();
-                let include_lines = read_file_to_vector(&include_path_str, msg_list, &mut include_stack);
-                if include_lines.is_none() {
-                    msg_list.push(
-                        format!("Unable to load include file {include_path_str}"),
-                        None,
-                        None,
-                        MessageType::Error,
-                    );
-                    return None;
-                }
-
-                input_data_list.push(InputData {
-                    file_name: c_file.to_owned(),
-                    input: String::new(),
-                    line_counter,
-                });
-                line_counter += 1;
-
-                for included_line in include_lines.unwrap_or_default() {
-                    input_data_list.push(InputData {
-                        file_name: include_path_str.clone(),
-                        input: included_line.input,
-                        line_counter,
-                    });
-                    line_counter += 1;
-                }
-            }
-
-            Some(input_data_list)
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            msg_list.push(
-                format!("rcc compilation failed for {c_file}: {stderr}"),
-                None,
-                None,
-                MessageType::Error,
-            );
-            None
-        }
-        Err(err) => {
-            msg_list.push(
-                format!("Failed to run rcc on {c_file}: {err}"),
-                None,
-                None,
-                MessageType::Error,
-            );
-            None
-        }
     }
 }
 
