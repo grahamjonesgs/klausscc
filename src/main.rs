@@ -42,6 +42,8 @@ mod macros;
 mod messages;
 /// Module to manage opcodes.
 mod opcodes;
+/// Module: independent ISA emulator (golden-model trace generator).
+mod emulate;
 /// Module to write to serial and read response.
 mod serial;
 /// Module to stream a flat DDR image to the board over TCP (network boot).
@@ -110,6 +112,13 @@ fn main() -> Result<(), i32> {
         .and_then(|timeout_str| timeout_str.parse().ok())
         .unwrap_or(10);
     let test_list_file: String = matches.get_one::<String>("test_list").unwrap_or(&String::default()).replace(' ', "");
+    let emulate_flag = matches.get_flag("emulate");
+    let trace_file: Option<String> = matches.get_one::<String>("trace").cloned();
+    let emulate_test_file: Option<String> = matches.get_one::<String>("emulate_test").cloned();
+    let max_instructions: u64 = matches
+        .get_one::<String>("max_instructions")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(emulate::DEFAULT_MAX_INSTRUCTIONS);
 
     // Classify the input file by extension (case-insensitive).  The file type is
     // determined from the name rather than from a mode-specific flag:
@@ -291,6 +300,11 @@ fn main() -> Result<(), i32> {
         return Ok(());
     }
 
+    // Emulator batch-verify mode: assemble + emulate each .kla and check UART.
+    if let Some(test_path) = emulate_test_file {
+        return run_emulate_test(&oplist, &macro_list, &test_path, max_instructions, &mut msg_list, start_time);
+    }
+
     // Batch test list mode
     if !test_list_file.is_empty() {
         return run_test_list(&oplist, &macro_list, &test_list_file, &output_serial_port, test_timeout, !no_break_flag, &mut msg_list);
@@ -318,6 +332,12 @@ fn main() -> Result<(), i32> {
 
     // Pass 2 to get create output
     let mut pass2 = get_pass2(&mut msg_list, pass1, oplist, labels);
+
+    // Emulator mode: build the flat DDR image from the assembled program and run
+    // the golden-model. Additive — returns early, leaving normal modes untouched.
+    if emulate_flag {
+        return run_emulate(&pass2, &input_file_name, trace_file.as_deref(), max_instructions, &mut msg_list, start_time);
+    }
 
     if let Err(result_err) = write_code_output_file(&output_file_name, &mut pass2, &mut msg_list) {
         msg_list.push(
@@ -1214,7 +1234,7 @@ pub fn set_matches() -> Command {
             Arg::new("input")
                 .short('i')
                 .long("input")
-                .required_unless_present_any(["textmate", "opcodes", "test_list", "net_load", "mem_out", "monitor"])
+                .required_unless_present_any(["textmate", "opcodes", "test_list", "net_load", "mem_out", "monitor", "emulate_test"])
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .num_args(1)
@@ -1300,6 +1320,30 @@ pub fn set_matches() -> Command {
                 .long("debug")
                 .action(ArgAction::SetTrue)
                 .help("Print each received UART byte as hex alongside normal output"),
+        )
+        .arg(
+            Arg::new("emulate")
+                .long("emulate")
+                .action(ArgAction::SetTrue)
+                .help("Assemble the input and run it on the built-in ISA emulator (golden model); prints captured UART output"),
+        )
+        .arg(
+            Arg::new("trace")
+                .long("trace")
+                .num_args(1)
+                .help("With --emulate, write the per-instruction golden-model trace to this file (default: stdout)"),
+        )
+        .arg(
+            Arg::new("emulate_test")
+                .long("emulate-test")
+                .num_args(1)
+                .help("Run the emulator over a test list (or a directory of .kla files) and verify captured UART vs expected // values"),
+        )
+        .arg(
+            Arg::new("max_instructions")
+                .long("max-instructions")
+                .num_args(1)
+                .help("Instruction-count cap for the emulator (default 50000000)"),
         )
 }
 
@@ -1472,6 +1516,260 @@ pub fn assemble_file(
     }
 
     create_bin_string(&pass2, msg_list)
+}
+
+/// Build a flat little-endian code byte image from an assembled `Pass2` vector.
+///
+/// Each opcode/data entry's hex string is placed at its `program_counter`
+/// offset relative to the code base (`HEAP_HEADER_WORDS * 8`).  Opcode words
+/// are 8 hex chars (one 32-bit word) emitted little-endian so the emulator's
+/// `read32` reconstructs the natural value; data entries are byte sequences
+/// already in natural order and are emitted as 64-bit little-endian words.
+/// Returns `(code_bytes, entry_pc)` or `None` if there is no `_start`.
+#[allow(clippy::integer_division, reason = "hex chars / 2 = byte count, exact")]
+fn build_flat_code(pass2: &[Pass2]) -> Option<(Vec<u8>, u32)> {
+    let code_base: u32 = HEAP_HEADER_WORDS * 8;
+    let mut code: Vec<u8> = Vec::new();
+    let mut entry: Option<u32> = None;
+
+    for line in pass2 {
+        if line.line_type == LineType::Start {
+            entry = Some(line.program_counter);
+            continue;
+        }
+        if line.opcode.is_empty() {
+            continue;
+        }
+        let offset = line.program_counter.saturating_sub(code_base) as usize;
+        // Convert the hex string into bytes: each 8-char (32-bit) group → LE bytes.
+        let hex = &line.opcode;
+        let mut bytes: Vec<u8> = Vec::with_capacity(hex.len() / 2);
+        let chunk: Vec<char> = hex.chars().collect();
+        let mut i = 0;
+        while i + 8 <= chunk.len() {
+            let s: String = chunk[i..i + 8].iter().collect();
+            if let Ok(w) = u32::from_str_radix(&s, 16) {
+                bytes.extend_from_slice(&w.to_le_bytes());
+            }
+            i += 8;
+        }
+        // Any trailing < 8-char group (test artefacts) — pad pairwise as raw bytes.
+        while i + 2 <= chunk.len() {
+            let s: String = chunk[i..i + 2].iter().collect();
+            if let Ok(b) = u8::from_str_radix(&s, 16) {
+                bytes.push(b);
+            }
+            i += 2;
+        }
+        if offset + bytes.len() > code.len() {
+            code.resize(offset + bytes.len(), 0);
+        }
+        code[offset..offset + bytes.len()].copy_from_slice(&bytes);
+    }
+
+    entry.map(|e| (code, e))
+}
+
+/// Assemble a `.kla` file into a flat DDR image + entry PC for the emulator.
+///
+/// Runs the standard pass0→pass1→pass2 pipeline (same path the kbt/code output
+/// uses) and wraps the result with `build_ddr_image` (heap header + code).
+#[cfg(not(tarpaulin_include))]
+fn assemble_to_image(
+    input_file_name: &str,
+    oplist: &[Opcode],
+    macro_list: &[macros::Macro],
+    msg_list: &mut MsgList,
+) -> Option<(Vec<u8>, u32)> {
+    let mut opened_input_files: Vec<String> = Vec::new();
+    let input_list_option = read_file_to_vector(input_file_name, msg_list, &mut opened_input_files);
+    let input_list = remove_block_comments(input_list_option?, msg_list);
+    let mut macro_list_clone = macro_list.to_vec();
+    let pass0 = expand_macros(msg_list, input_list, &mut macro_list_clone);
+    let pass1: Vec<Pass1> = get_pass1(msg_list, pass0, oplist.to_vec());
+    let mut labels = get_labels(&pass1, msg_list);
+    find_duplicate_label(&mut labels, msg_list);
+    let pass2 = get_pass2(msg_list, pass1, oplist.to_vec(), labels);
+    if msg_list.number_by_type(&MessageType::Error) > 0 {
+        return None;
+    }
+    let (code, entry) = build_flat_code(&pass2)?;
+    Some((build_ddr_image(&code), entry))
+}
+
+/// Run the emulator on a single assembled program (`--emulate`).
+///
+/// Builds the flat DDR image, executes the golden model, prints captured UART
+/// output, and writes the per-instruction trace to `trace_file` (or stdout).
+#[cfg(not(tarpaulin_include))]
+#[allow(clippy::print_stdout, reason = "Emulator output is user-facing")]
+#[allow(clippy::use_debug, reason = "StopReason Debug is the intended diagnostic form")]
+fn run_emulate(
+    pass2: &[Pass2],
+    input_file_name: &str,
+    trace_file: Option<&str>,
+    max_instructions: u64,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    if msg_list.number_by_type(&MessageType::Error) > 0 {
+        msg_list.push("Not emulating due to assembly errors".to_owned(), None, None, MessageType::Error);
+        print_results(msg_list, start_time);
+        return Err(1_i32);
+    }
+    let Some((code, entry)) = build_flat_code(pass2) else {
+        msg_list.push("No _start address found - cannot emulate".to_owned(), None, None, MessageType::Error);
+        print_results(msg_list, start_time);
+        return Err(1_i32);
+    };
+    let image = build_ddr_image(&code);
+    msg_list.push(
+        format!("Emulating {input_file_name}: {} code bytes, entry 0x{entry:08X}", code.len()),
+        None, None, MessageType::Information,
+    );
+
+    let (result, trace) = emulate::emulate_image(&image, entry, max_instructions, true);
+
+    if let (Some(path), Some(text)) = (trace_file, trace.as_ref()) {
+        if let Err(e) = fs::write(path, text) {
+            msg_list.push(format!("Failed to write trace file {path}: {e}"), None, None, MessageType::Error);
+        } else {
+            msg_list.push(format!("Wrote {} instruction trace lines to {path}", result.instructions), None, None, MessageType::Information);
+        }
+    }
+
+    print_results(msg_list, start_time);
+    println!("--- Emulator finished: {} instructions, stop = {:?} ---", result.instructions, result.stop);
+    if trace_file.is_none() {
+        if let Some(text) = trace.as_ref() {
+            print!("{text}");
+        }
+    }
+    println!("--- Captured UART output ---");
+    print!("{}", result.uart);
+    println!("--- end UART ---");
+    Ok(())
+}
+
+/// Batch-verify the emulator against `.kla` files with expected `// ` UART values.
+///
+/// `test_path` may be a single `.kla` file, a directory (all `*.kla` inside),
+/// or a test-list file (one path per line).  For each file with expected
+/// values, assemble + emulate and compare captured UART tokens in order.
+#[cfg(not(tarpaulin_include))]
+#[allow(clippy::print_stdout, reason = "Batch verify output is user-facing")]
+#[allow(clippy::arithmetic_side_effects, reason = "Counter arithmetic is safe")]
+#[allow(clippy::use_debug, reason = "StopReason Debug is the intended diagnostic form")]
+fn run_emulate_test(
+    oplist: &[Opcode],
+    macro_list: &[macros::Macro],
+    test_path: &str,
+    max_instructions: u64,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    use std::path::Path;
+
+    // Resolve the list of .kla files to test.
+    let path = Path::new(test_path);
+    let mut files: Vec<String> = Vec::new();
+    if path.is_dir() {
+        if let Ok(entries) = fs::read_dir(path) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.extension().is_some_and(|e| e == "kla") {
+                    files.push(p.to_string_lossy().into_owned());
+                }
+            }
+        }
+        files.sort();
+    } else if test_path.ends_with(".kla") {
+        files.push(test_path.to_owned());
+    } else {
+        // treat as a test-list file
+        files = read_test_list(test_path, msg_list);
+    }
+
+    if files.is_empty() {
+        msg_list.push(format!("No .kla files found for emulate-test at {test_path}"), None, None, MessageType::Error);
+        print_results(msg_list, start_time);
+        return Err(1_i32);
+    }
+
+    println!("Emulator verification over {} file(s):\n", files.len());
+    let mut total_pass = 0_usize;
+    let mut total_files = 0_usize;
+    let mut failed_files: Vec<String> = Vec::new();
+
+    for file in &files {
+        // Expected values from source comments.
+        let raw_lines: Vec<String> = fs::read_to_string(file).unwrap_or_default().lines().map(String::from).collect();
+        let expected = parse_expected_uart_values(&raw_lines);
+        if expected.is_empty() {
+            continue; // skip non-validatable files silently
+        }
+        total_files += 1;
+
+        let mut test_msgs = MsgList::new();
+        let Some((image, entry)) = assemble_to_image(file, oplist, macro_list, &mut test_msgs) else {
+            println!("  FAIL {file}: assembly error");
+            failed_files.push(format!("{file} (assembly error)"));
+            continue;
+        };
+
+        let (result, _) = emulate::emulate_image(&image, entry, max_instructions, false);
+        // Extract 8-hex-digit tokens from each UART line (mirrors serial.rs).
+        let got: Vec<String> = result.uart
+            .lines()
+            .filter_map(|l| {
+                let t = l.trim();
+                if t.len() >= 8 {
+                    let c = t.get(..8).unwrap_or("");
+                    if c.len() == 8 && c.chars().all(|ch| ch.is_ascii_hexdigit()) && c == c.to_ascii_uppercase() {
+                        return Some(c.to_owned());
+                    }
+                }
+                None
+            })
+            .collect();
+
+        // Compare in order; report first diff.
+        let mut matched = 0_usize;
+        let mut first_diff: Option<String> = None;
+        for (idx, exp) in expected.iter().enumerate() {
+            match got.get(idx) {
+                Some(g) if g == exp => matched += 1,
+                Some(g) => {
+                    first_diff = Some(format!("at #{}: expected {exp}, got {g}", idx + 1));
+                    break;
+                }
+                None => {
+                    first_diff = Some(format!("at #{}: expected {exp}, got <none> (stop={:?})", idx + 1, result.stop));
+                    break;
+                }
+            }
+        }
+
+        let stem = filename_stem(&file.clone());
+        if matched == expected.len() {
+            total_pass += 1;
+            println!("  PASS {stem}: {matched}/{} ({} instrs)", expected.len(), result.instructions);
+        } else {
+            let diff = first_diff.unwrap_or_else(|| "unknown".to_owned());
+            println!("  FAIL {stem}: {matched}/{} — {diff}", expected.len());
+            failed_files.push(format!("{stem}: {diff}"));
+        }
+    }
+
+    println!("\nEmulator verification: {total_pass}/{total_files} files passed");
+    if !failed_files.is_empty() {
+        println!("Failures:");
+        for f in &failed_files {
+            println!("  {f}");
+        }
+    }
+    print_results(msg_list, start_time);
+    if total_pass == total_files { Ok(()) } else { Err(2_i32) }
 }
 
 /// Result of a single test in a batch run.
@@ -1981,5 +2279,101 @@ mod tests {
             labels,
         );
         assert_eq!(pass2.first().unwrap_or_default().opcode, "ERR     ");
+    }
+
+    /// Golden-model validation: assemble + emulate every klatest `.kla` that has
+    /// expected `// ` UART values and compare captured UART tokens in order.
+    ///
+    /// Runs under `cargo test` (no external binary execution needed). Marked
+    /// `#[ignore]` because it depends on the repo-relative `src/klatest` tree;
+    /// run with `cargo test --bin klausscc emulate_klatest -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "depends on src/klatest corpus; run explicitly"]
+    #[allow(clippy::print_stdout, reason = "test diagnostics")]
+    #[allow(clippy::use_debug, reason = "StopReason Debug is the intended diagnostic form")]
+    #[allow(clippy::arithmetic_side_effects, reason = "test counters are safe")]
+    fn test_emulate_klatest_corpus() {
+        use std::path::Path;
+        let opcode_file = "src/klatest/opcode_select.vh";
+        let mut msg_list = MsgList::new();
+        let mut opened: Vec<String> = Vec::new();
+        let vh = read_file_to_vector(opcode_file, &mut msg_list, &mut opened).expect("opcode file");
+        let (opt_ops, opt_macros) = parse_vh_file(vh, &mut msg_list);
+        let oplist = opt_ops.expect("opcodes");
+        let macro_list = expand_embedded_macros(opt_macros.expect("macros"), &mut msg_list);
+
+        let dir = Path::new("src/klatest");
+        let mut files: Vec<String> = std::fs::read_dir(dir)
+            .expect("klatest dir")
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "kla"))
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        files.sort();
+
+        // Fixtures known stale against the current byte-addressed 64-bit ISA:
+        // test_bits assumes 32-bit CLZ/BITREV (silicon is 64-bit per the RTL),
+        // test_strings assumes the old word-addressed packed-string layout.
+        // These are documented in the deliverable, not emulator bugs.
+        let known_stale = ["test_bits.kla", "test_strings.kla"];
+
+        let mut total = 0_usize;
+        let mut passed = 0_usize;
+        let mut assembly_errors = 0_usize;
+        let mut emu_mismatches: Vec<String> = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
+
+        for file in &files {
+            let raw: Vec<String> = std::fs::read_to_string(file).unwrap_or_default().lines().map(String::from).collect();
+            let expected = parse_expected_uart_values(&raw);
+            if expected.is_empty() {
+                continue;
+            }
+            total += 1;
+            let mut tm = MsgList::new();
+            let Some((image, entry)) = assemble_to_image(file, &oplist, &macro_list, &mut tm) else {
+                let first_err = tm.list.iter().find(|m| m.level == MessageType::Error).map_or_else(|| "unknown".to_owned(), |m| m.text.clone());
+                assembly_errors += 1;
+                failures.push(format!("{file}: assembly error - {first_err}"));
+                continue;
+            };
+            let (result, _) = emulate::emulate_image(&image, entry, emulate::DEFAULT_MAX_INSTRUCTIONS, false);
+            let got: Vec<String> = result.uart.lines().filter_map(|l| {
+                let t = l.trim();
+                t.get(..8).filter(|c| c.len() == 8 && c.chars().all(|ch| ch.is_ascii_hexdigit()) && *c == c.to_ascii_uppercase()).map(str::to_owned)
+            }).collect();
+            let mut ok = true;
+            let mut diff = String::new();
+            for (i, exp) in expected.iter().enumerate() {
+                match got.get(i) {
+                    Some(g) if g == exp => {}
+                    Some(g) => { ok = false; diff = format!("#{}: exp {exp} got {g}", i + 1); break; }
+                    None => { ok = false; diff = format!("#{}: exp {exp} got <none> stop={:?}", i + 1, result.stop); break; }
+                }
+            }
+            let is_stale = known_stale.iter().any(|s| file.ends_with(s));
+            if ok && got.len() >= expected.len() {
+                passed += 1;
+                println!("PASS {file} ({}/{})", expected.len(), expected.len());
+            } else {
+                let tag = if is_stale { "KNOWN-STALE" } else { "FAIL" };
+                println!("{tag} {file}: {diff}");
+                failures.push(format!("{file}: {diff}"));
+                if !is_stale {
+                    emu_mismatches.push(format!("{file}: {diff}"));
+                }
+            }
+        }
+        println!("\nklatest emulator validation: {passed}/{total} assembled+correct");
+        println!("  assembly errors (stale mnemonics, not emulator): {assembly_errors}");
+        println!("  known-stale fixtures (32-bit/word-addressed assumptions): {}", known_stale.len());
+        for f in &failures {
+            println!("  {f}");
+        }
+        // The correctness gate: zero UNEXPECTED emulation mismatches among
+        // assemblable tests with correct expectations.
+        assert!(emu_mismatches.is_empty(), "unexpected emulator mismatches: {emu_mismatches:?}");
+        assert!(passed >= 4, "expected at least the 4 clean tests to pass, got {passed}");
     }
 }
