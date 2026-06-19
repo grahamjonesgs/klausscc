@@ -221,6 +221,16 @@ fn main() -> Result<(), i32> {
                 s.parse::<u32>().unwrap_or(0x20)
             }
         });
+        if emulate_flag {
+            return run_emulate_elf(
+                &input_file_name,
+                entry_addr,
+                trace_file.as_deref(),
+                max_instructions,
+                &mut msg_list,
+                start_time,
+            );
+        }
         return run_elf2serial(
             &input_file_name,
             entry_addr,
@@ -1628,7 +1638,84 @@ fn run_emulate(
         None, None, MessageType::Information,
     );
 
-    let (result, trace) = emulate::emulate_image(&image, entry, max_instructions, true);
+    let (result, trace) = emulate::emulate_image(&image, entry, max_instructions, trace_file.is_some());
+
+    if let (Some(path), Some(text)) = (trace_file, trace.as_ref()) {
+        if let Err(e) = fs::write(path, text) {
+            msg_list.push(format!("Failed to write trace file {path}: {e}"), None, None, MessageType::Error);
+        } else {
+            msg_list.push(format!("Wrote {} instruction trace lines to {path}", result.instructions), None, None, MessageType::Information);
+        }
+    }
+
+    print_results(msg_list, start_time);
+    println!("--- Emulator finished: {} instructions, stop = {:?} ---", result.instructions, result.stop);
+    if trace_file.is_none() {
+        if let Some(text) = trace.as_ref() {
+            print!("{text}");
+        }
+    }
+    println!("--- Captured UART output ---");
+    print!("{}", result.uart);
+    println!("--- end UART ---");
+    Ok(())
+}
+
+/// Run the emulator on an ELF or flat binary input (`--emulate` with binary input).
+///
+/// Mirrors `run_elf2serial`'s ELF → flat → board-address conversion, then builds
+/// the DDR image and runs the golden model instead of sending it to the board, so
+/// prebuilt C ELFs (queens, test_64bit, …) can be cross-checked against the RTL.
+#[cfg(not(tarpaulin_include))]
+#[allow(clippy::print_stdout, reason = "Emulator output is user-facing")]
+#[allow(clippy::use_debug, reason = "StopReason Debug is the intended diagnostic form")]
+fn run_emulate_elf(
+    binary_path: &str,
+    entry_override: Option<u32>,
+    trace_file: Option<&str>,
+    max_instructions: u64,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    let file_data = fs::read(binary_path).map_err(|e| {
+        msg_list.push(
+            format!("Cannot read binary file {binary_path}: {e}"),
+            None, None, MessageType::Error,
+        );
+        1_i32
+    })?;
+
+    const ELF_MAGIC: &[u8] = b"\x7fELF";
+    let (binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
+        let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
+            msg_list.push(
+                format!("Failed to extract LOAD segments from ELF file {binary_path}"),
+                None, None, MessageType::Error,
+            );
+            1_i32
+        })?;
+        #[allow(clippy::arithmetic_side_effects, reason = "elf_entry >= elf_base by construction in parse_elf_to_flat")]
+        let board_entry = elf_entry.saturating_sub(elf_base) + u64::from(HEAP_HEADER_WORDS) * 8;
+        #[allow(clippy::cast_possible_truncation, reason = "board entry fits in u32 for realistic programs")]
+        let entry = entry_override.unwrap_or(board_entry as u32);
+        msg_list.push(
+            format!(
+                "Emulating ELF {binary_path}: {}, ELF base 0x{elf_base:08X}, board entry 0x{entry:08X}",
+                human_bytes(flat.len())
+            ),
+            None, None, MessageType::Information,
+        );
+        (flat, entry)
+    } else {
+        msg_list.push(
+            format!("Emulating flat binary {binary_path}"),
+            None, None, MessageType::Information,
+        );
+        (file_data, entry_override.unwrap_or(0x20_u32))
+    };
+
+    let image = build_ddr_image(&binary_data);
+    let (result, trace) = emulate::emulate_image(&image, entry_addr, max_instructions, trace_file.is_some());
 
     if let (Some(path), Some(text)) = (trace_file, trace.as_ref()) {
         if let Err(e) = fs::write(path, text) {
