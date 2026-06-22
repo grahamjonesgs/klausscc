@@ -1,33 +1,3 @@
-//#![warn(clippy::all, clippy::restriction, clippy::pedantic, clippy::nursery, clippy::cargo)]
-#![warn(clippy::all, clippy::restriction)]
-
-#![allow(clippy::allow_attributes, reason = "Needed to allow use of clippy restrictions")]
-#![allow(clippy::implicit_return, reason = "Needed for compatibility with code using implicit returns")]
-#![allow(clippy::as_conversions, reason = "Needed for data manipulation")]
-#![allow(clippy::separated_literal_suffix, reason = "Needed for readability of numeric literals")]
-#![allow(clippy::blanket_clippy_restriction_lints, reason = "Needed to enable clippy restrictions")]
-#![allow(clippy::multiple_crate_versions, reason = "Needed for compatibility with crates using multiple versions")]
-#![allow(clippy::single_call_fn, reason = "Needed for code clarity")]
-#![allow(clippy::redundant_test_prefix, reason = "Needed for compatibility with test naming")]
-#![allow(clippy::min_ident_chars, reason = "Single-char identifiers are idiomatic in closures")]
-#![allow(clippy::question_mark_used, reason = "The ? operator is idiomatic Rust")]
-#![allow(clippy::pattern_type_mismatch, reason = "Destructuring references is idiomatic")]
-#![allow(clippy::wildcard_enum_match_arm, reason = "Wildcard match arms are sometimes appropriate")]
-#![allow(clippy::std_instead_of_alloc, reason = "This is a std binary, not no_std")]
-#![allow(clippy::missing_inline_in_public_items, reason = "Not applicable to a binary crate")]
-#![allow(clippy::little_endian_bytes, reason = "Explicit LE byte reads are intentional")]
-#![allow(clippy::arbitrary_source_item_ordering, reason = "Item ordering is at author's discretion")]
-#![allow(clippy::absolute_paths, reason = "Fully-qualified paths are sometimes clearer")]
-#![allow(clippy::indexing_slicing, reason = "Bounds are validated by surrounding context")]
-#![allow(clippy::string_slice, reason = "String slices on known-ASCII hex strings are safe")]
-#![allow(clippy::missing_asserts_for_indexing, reason = "Bounds validated by loop conditions")]
-#![allow(clippy::default_numeric_fallback, reason = "Type context is clear from surrounding code")]
-#![allow(clippy::arithmetic_side_effects, reason = "Arithmetic operations are safe in this context")]
-#![allow(clippy::integer_division_remainder_used, reason = "Integer division and modulo are intentional")]
-#![allow(clippy::let_underscore_must_use, reason = "Intentional result discard for cleanup operations")]
-#![allow(clippy::let_underscore_untyped, reason = "Type is evident from context for discarded results")]
-#![allow(clippy::semicolon_outside_block, reason = "Semicolon placement inside blocks is intentional")]
-
 //! Top level file for Klausscc.
 
 /// Module to manage file read and write.
@@ -58,18 +28,16 @@ use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
 use serial::{monitor_serial, monitor_serial_port, run_test_monitor, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
+use std::fmt::Write as _;
 use std::fs;
+
+/// Magic bytes at the start of every ELF file (`0x7F` `E` `L` `F`).
+const ELF_MAGIC: &[u8] = b"\x7fELF";
 
 /// Main function for Klausscc.
 ///
 /// Main function to read CLI and call other functions.
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
-#[allow(
-    clippy::too_many_lines,
-    reason = "Main function requires many lines to handle CLI and file processing logic"
-)]
-#[allow(clippy::or_fun_call, reason = "Needed for simplicity of setting up strings and file names")]
-#[allow(clippy::shadow_reuse, reason = "Rebinding input_list after block_comment removal is clearer than a new name")]
 fn main() -> Result<(), i32> {
     use std::fs::remove_file;
 
@@ -469,12 +437,10 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
         return line.to_owned();
     }
     let _reg = words.next(); // skip register name
-    let val_str = match words.next() {
-        Some(s) => s,
-        None => return line.to_owned(),
+    let Some(val_str) = words.next() else {
+        return line.to_owned();
     };
     // Parse as signed 64-bit so we handle negative decimal and full-width hex.
-    #[allow(clippy::cast_possible_wrap, reason = "u64→i64 reinterpret is intentional for range check")]
     let val: i64 = if val_str.len() >= 2 && val_str.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
         let hex = &val_str[2..].replace('_', "");
         u64::from_str_radix(hex, 16).map_or(0, |v| v as i64)
@@ -496,8 +462,6 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
 #[inline]
-#[allow(clippy::min_ident_chars, reason = "Single-char closure args are idiomatic for simple predicates")]
-#[allow(clippy::indexing_slicing, reason = "Indices are guarded by parts.len() >= 3 check above")]
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = HEAP_HEADER_WORDS * 8; // Byte address: 4 header words × 8 bytes each (64-bit words)
@@ -559,7 +523,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         });
         if !is_valid_line(&mut oplist, strip_comments(&upgraded_line)) {
             msg_list.push(
-                format!("Error {}", upgraded_line),
+                format!("Error {upgraded_line}"),
                 Some(pass.line_counter),
                 Some(pass.file_name.clone()),
                 MessageType::Error,
@@ -567,7 +531,6 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         }
         if lt == LineType::Opcode {
             let num_args = num_arguments(&mut oplist, &strip_comments(&upgraded_line));
-            #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct program counter calculation")]
             if let Some(arguments) = num_args {
                 program_counter += (arguments + 1) * 4; // Each word = 4 bytes
             }
@@ -580,16 +543,11 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             } else {
                 // Keep inline data when no explicit .data section is active.
                 // This preserves label semantics for C compiler output data blocks.
-                //#[allow(clippy::arithmetic_side_effects, reason = "Correct program counter adjustment for inline data")]
-                #[allow(clippy::arithmetic_side_effects, reason = "Integer counter increment is intentional")]
-                #[allow(clippy::integer_division, reason = "hex_chars/2 = bytes: each word is 8 hex chars and 4 bytes")]
+                //
                 { program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, pass.file_name.clone()) / 2; }
             }
         }
     }
-    #[allow(clippy::integer_division, reason = "Needed for correct data size calculation")]
-    #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct data size calculation")]
-    #[allow(clippy::integer_division_remainder_used, reason = "Needed for correct data size calculation")]
     for data_pass in data_pass0 {
         let lt = line_type(&mut oplist, &data_pass.input_text_line);
         pass1.push(Pass1 {
@@ -601,7 +559,6 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
         });
 
         if lt == LineType::Data {
-            #[allow(clippy::integer_division, reason = "hex_chars/2 = bytes: each word is 8 hex chars and 4 bytes")]
             { program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, data_pass.file_name) / 2; }
         }
     }
@@ -656,14 +613,10 @@ pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opco
 ///
 /// Takes the message list and start time and prints the results to the users.
 #[inline]
-#[allow(clippy::print_stderr, reason = "Final summary to stderr (unbuffered) for immediate display")]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
     print_messages(msg_list);
-    #[allow(clippy::arithmetic_side_effects, reason = "Needed for correct duration calculation")]
     let duration = Local::now().time() - start_time;
-    #[allow(clippy::float_arithmetic, reason = "Needed for correct duration calculation")]
-    #[allow(clippy::cast_precision_loss, reason = "Needed for correct duration calculation")]
     let time_taken: f64 = duration.num_milliseconds() as f64 / 1000.0;
     eprintln!(
         "Completed with {} error{} and {} warning{} in {:.3} seconds",
@@ -688,6 +641,8 @@ pub fn print_results(msg_list: &MsgList, start_time: NaiveTime) {
 /// cannot be parsed or contains no LOAD segments with data.
 fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
     use object::{Object as _, ObjectSegment as _, ObjectSymbol as _};
+    /// Max gap between contiguous LOAD segments before the rest is dropped (see below).
+    const MAX_SEGMENT_GAP: u64 = 0x40_0000; // 4 MB
     let file = object::File::parse(data).ok()?;
 
     // Collect all LOAD segments that actually have bytes in the file.
@@ -712,13 +667,10 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
     // encoding and disassembly.  Segments separated by more than MAX_SEGMENT_GAP
     // bytes from the previous one are treated as a different physical memory
     // region and dropped from this cluster.
-    const MAX_SEGMENT_GAP: u64 = 0x40_0000; // 4 MB
-    #[allow(clippy::arithmetic_side_effects, reason = "prev_end = prev_addr + len, both bounded by usize")]
     let cluster: Vec<(u64, Vec<u8>)> = segments
         .into_iter()
         .scan(None::<u64>, |prev_end, (addr, bytes)| {
             let gap = prev_end.map_or(0, |end| addr.saturating_sub(end));
-            #[allow(clippy::arithmetic_side_effects, reason = "addr + len bounded by ELF file size")]
             { *prev_end = Some(addr + bytes.len() as u64); }
             if gap <= MAX_SEGMENT_GAP { Some(Some((addr, bytes))) } else { Some(None) }
         })
@@ -731,15 +683,12 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
     }
 
     let base = cluster[0].0;
-    #[allow(clippy::arithmetic_side_effects, reason = "addr >= base guaranteed by sort; len is usize")]
     let end = cluster
         .iter()
         .map(|(addr, bytes)| addr + bytes.len() as u64)
         .max()?;
-    #[allow(clippy::arithmetic_side_effects, reason = "end >= base guaranteed by construction")]
     let mut flat = vec![0_u8; (end - base) as usize];
     for (addr, bytes) in &cluster {
-        #[allow(clippy::arithmetic_side_effects, reason = "addr >= base guaranteed by sort")]
         let offset = (addr - base) as usize;
         flat[offset..offset + bytes.len()].copy_from_slice(bytes);
     }
@@ -794,7 +743,6 @@ fn run_netload(
         1_i32
     })?;
 
-    const ELF_MAGIC: &[u8] = b"\x7fELF";
     let (mut binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
         let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
             msg_list.push(
@@ -803,9 +751,7 @@ fn run_netload(
             );
             1_i32
         })?;
-        #[allow(clippy::arithmetic_side_effects, reason = "elf_entry >= elf_base by construction in parse_elf_to_flat")]
         let board_entry = elf_entry.saturating_sub(elf_base) + u64::from(HEAP_HEADER_WORDS) * 8;
-        #[allow(clippy::cast_possible_truncation, reason = "board entry fits in u32 for realistic programs")]
         let entry = entry_override.unwrap_or(board_entry as u32);
         msg_list.push(
             format!(
@@ -847,10 +793,9 @@ fn run_netload(
 ///
 /// The image is the same `build_ddr_image` DDR layout used for net-load, emitted
 /// as one 64-bit little-endian doubleword per line (16 hex chars) — matching
-/// `boot_rom.v` (DEPTH_DW × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
+/// `boot_rom.v` (`DEPTH_DW` × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
 /// word 0 (`heap_start` = image byte length) to know how much to copy to DDR.
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::integer_division, reason = "dword count = byte length / 8, exact since image is 8-aligned")]
 fn run_mem_out(
     binary_path: &str,
     mem_file_name: &str,
@@ -865,7 +810,6 @@ fn run_mem_out(
         1_i32
     })?;
 
-    const ELF_MAGIC: &[u8] = b"\x7fELF";
     let mut binary_data = if file_data.starts_with(ELF_MAGIC) {
         let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
             msg_list.push(
@@ -901,7 +845,7 @@ fn run_mem_out(
         let dw = u64::from_le_bytes([
             chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7],
         ]);
-        out.push_str(&format!("{dw:016X}\n"));
+        let _ = writeln!(out, "{dw:016X}");
     }
 
     if let Err(e) = fs::write(mem_file_name, &out) {
@@ -935,7 +879,7 @@ fn run_mem_out(
 /// The resulting wire string is written to a `.kbt` file and, when a serial port
 /// is given, sent to the board exactly like the normal assembly path.
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::too_many_arguments, reason = "All arguments are needed to mirror the normal send path")]
+#[allow(clippy::too_many_arguments, reason = "mirrors the full assemble→send path; all parameters are required")]
 fn run_elf2serial(
     binary_path: &str,
     entry_override: Option<u32>,
@@ -958,7 +902,6 @@ fn run_elf2serial(
         1_i32
     })?;
 
-    const ELF_MAGIC: &[u8] = b"\x7fELF";
     let (mut binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
         let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
             msg_list.push(
@@ -971,7 +914,6 @@ fn run_elf2serial(
         // The flat buffer starts at ELF VMA `elf_base` but is loaded by the board
         // immediately after the heap header (HEAP_HEADER_WORDS × 8 bytes).
         // board_entry = (elf_entry - elf_base) + HEAP_HEADER_WORDS * 8
-        #[allow(clippy::arithmetic_side_effects, reason = "elf_entry >= elf_base by construction in parse_elf_to_flat")]
         let board_entry = (elf_entry.saturating_sub(elf_base)) + u64::from(HEAP_HEADER_WORDS) * 8;
         let entry = entry_override.unwrap_or(board_entry as u32);
         msg_list.push(
@@ -1010,18 +952,14 @@ fn run_elf2serial(
     // The LLVM ELF stores instruction bytes in little-endian order, so read each
     // 4-byte chunk as LE to reconstruct the 32-bit value, then encode it with the
     // half-word byte-swap the board's serial loader expects.
-    #[allow(clippy::format_push_string, reason = "Word-by-word encoding matches kbt format")]
     for chunk in binary_data.chunks(4) {
         let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         out.push_str(&encode_word_kbt(word));
     }
 
     // Patch heap_start: lo32 = heap_start value (encoded for LE board), hi32 = 0.
-    #[allow(clippy::arithmetic_side_effects, reason = "len >= 1 because 'S' was pushed first")]
-    #[allow(clippy::integer_division, reason = "hex chars / 2 = bytes")]
     let heap_start_raw: u32 = ((out.len() - 1) / 2) as u32;
     let heap_start: u32 = (heap_start_raw + 7) & !7_u32; // align to 8-byte boundary
-    #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
     out.replace_range(
         heap_start_offset..heap_start_offset + 16,
         &format!("{}00000000", encode_word_kbt(heap_start)),
@@ -1180,7 +1118,6 @@ fn run_kbt_send(
 }
 
 #[must_use]
-#[allow(clippy::too_many_lines, reason = "CLI definition requires many argument declarations")]
 pub fn set_matches() -> Command {
     use clap::ArgAction;
 
@@ -1405,8 +1342,6 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
 /// Sends program to board, reads UART output, and verifies against expected values
 /// parsed from the source file comments.
 #[inline]
-#[allow(clippy::print_stdout, reason = "Printing to stdout is required for test result output")]
-#[allow(clippy::missing_errors_doc, reason = "Only test function to stdout is required for test result output")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
 pub fn run_test_mode(
     msg_list: &mut MsgList,
@@ -1536,7 +1471,6 @@ pub fn assemble_file(
 /// `read32` reconstructs the natural value; data entries are byte sequences
 /// already in natural order and are emitted as 64-bit little-endian words.
 /// Returns `(code_bytes, entry_pc)` or `None` if there is no `_start`.
-#[allow(clippy::integer_division, reason = "hex chars / 2 = byte count, exact")]
 fn build_flat_code(pass2: &[Pass2]) -> Option<(Vec<u8>, u32)> {
     let code_base: u32 = HEAP_HEADER_WORDS * 8;
     let mut code: Vec<u8> = Vec::new();
@@ -1612,8 +1546,6 @@ fn assemble_to_image(
 /// Builds the flat DDR image, executes the golden model, prints captured UART
 /// output, and writes the per-instruction trace to `trace_file` (or stdout).
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::print_stdout, reason = "Emulator output is user-facing")]
-#[allow(clippy::use_debug, reason = "StopReason Debug is the intended diagnostic form")]
 fn run_emulate(
     pass2: &[Pass2],
     input_file_name: &str,
@@ -1665,10 +1597,8 @@ fn run_emulate(
 ///
 /// Mirrors `run_elf2serial`'s ELF → flat → board-address conversion, then builds
 /// the DDR image and runs the golden model instead of sending it to the board, so
-/// prebuilt C ELFs (queens, test_64bit, …) can be cross-checked against the RTL.
+/// prebuilt C ELFs (queens, `test_64bit`, …) can be cross-checked against the RTL.
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::print_stdout, reason = "Emulator output is user-facing")]
-#[allow(clippy::use_debug, reason = "StopReason Debug is the intended diagnostic form")]
 fn run_emulate_elf(
     binary_path: &str,
     entry_override: Option<u32>,
@@ -1685,7 +1615,6 @@ fn run_emulate_elf(
         1_i32
     })?;
 
-    const ELF_MAGIC: &[u8] = b"\x7fELF";
     let (binary_data, entry_addr) = if file_data.starts_with(ELF_MAGIC) {
         let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data).ok_or_else(|| {
             msg_list.push(
@@ -1694,9 +1623,7 @@ fn run_emulate_elf(
             );
             1_i32
         })?;
-        #[allow(clippy::arithmetic_side_effects, reason = "elf_entry >= elf_base by construction in parse_elf_to_flat")]
         let board_entry = elf_entry.saturating_sub(elf_base) + u64::from(HEAP_HEADER_WORDS) * 8;
-        #[allow(clippy::cast_possible_truncation, reason = "board entry fits in u32 for realistic programs")]
         let entry = entry_override.unwrap_or(board_entry as u32);
         msg_list.push(
             format!(
@@ -1744,9 +1671,6 @@ fn run_emulate_elf(
 /// or a test-list file (one path per line).  For each file with expected
 /// values, assemble + emulate and compare captured UART tokens in order.
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::print_stdout, reason = "Batch verify output is user-facing")]
-#[allow(clippy::arithmetic_side_effects, reason = "Counter arithmetic is safe")]
-#[allow(clippy::use_debug, reason = "StopReason Debug is the intended diagnostic form")]
 fn run_emulate_test(
     oplist: &[Opcode],
     macro_list: &[macros::Macro],
@@ -1860,7 +1784,6 @@ fn run_emulate_test(
 }
 
 /// Result of a single test in a batch run.
-#[allow(clippy::arbitrary_source_item_ordering, reason = "Fields ordered by logical flow, not alphabetically")]
 struct BatchTestResult {
     /// File name of the test.
     file_name: String,
@@ -1883,7 +1806,6 @@ struct BatchTestResult {
 /// Each line is a test file path. Blank lines and lines starting with `//` or `#` are ignored.
 /// Paths are resolved relative to the directory containing the list file.
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::min_ident_chars, reason = "Single-char match binding is idiomatic for simple Ok/Err unwrapping")]
 fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
     use std::path::Path;
     let list_dir = Path::new(list_file)
@@ -1922,12 +1844,6 @@ fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
 ///
 /// For each test file: assembles, sends to board, verifies UART output,
 /// and prints per-test and aggregate results.
-#[allow(clippy::print_stdout, reason = "Printing to stdout is required for batch test output")]
-#[allow(clippy::arithmetic_side_effects, reason = "Counter arithmetic is safe")]
-#[allow(clippy::missing_inline_in_public_items, reason = "Only used in main batch test function, which is not performance critical")]
-#[allow(clippy::too_many_lines, reason = "Only for test batch management, which requires many lines to handle all the logic")]
-#[allow(clippy::missing_errors_doc, reason = "Error is a raw exit code, not a type worth documenting")]
-#[allow(clippy::min_ident_chars, reason = "Single-char loop variable is conventional for result iteration")]
 #[cfg(not(tarpaulin_include))]
 pub fn run_test_list(
     oplist: &[Opcode],
@@ -1972,7 +1888,7 @@ pub fn run_test_list(
         let mut test_msg_list = MsgList::new();
 
         // Assemble the test file
-        let bin_string = if let Some(bin) = assemble_file(test_file, oplist, macro_list, &mut test_msg_list) { bin } else {
+        let Some(bin_string) = assemble_file(test_file, oplist, macro_list, &mut test_msg_list) else {
             println!("  SKIP: assembly failed");
             print_messages(&test_msg_list);
             results.push(BatchTestResult {
@@ -2096,6 +2012,7 @@ pub fn run_test_list(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
 
     #[test]
@@ -2201,7 +2118,6 @@ mod tests {
         assert_eq!(msg_list.list.first().unwrap_or_default().text, "Error Test_not_code_line");
     }
 
-    #[allow(clippy::too_many_lines, reason = "Test function requires many lines to cover all test cases")]
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
     fn test_get_pass2_1() {
@@ -2376,9 +2292,6 @@ mod tests {
     /// run with `cargo test --bin klausscc emulate_klatest -- --ignored --nocapture`.
     #[test]
     #[ignore = "depends on src/klatest corpus; run explicitly"]
-    #[allow(clippy::print_stdout, reason = "test diagnostics")]
-    #[allow(clippy::use_debug, reason = "StopReason Debug is the intended diagnostic form")]
-    #[allow(clippy::arithmetic_side_effects, reason = "test counters are safe")]
     fn test_emulate_klatest_corpus() {
         use std::path::Path;
         let opcode_file = "src/klatest/opcode_select.vh";

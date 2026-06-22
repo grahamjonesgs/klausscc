@@ -41,7 +41,6 @@ fn image_checksum(image: &[u8]) -> u32 {
 }
 
 /// Connect to the board and stream the DDR image, then verify the reply.
-#[allow(clippy::question_mark_used, reason = "? is idiomatic for propagating io errors here")]
 #[cfg(not(tarpaulin_include))] // Cannot test live TCP in tarpaulin
 pub fn net_load(
     ip: &str,
@@ -65,7 +64,6 @@ pub fn net_load(
     // 12-byte header: magic, img_len, entry_pc (all little-endian).
     let mut hdr = Vec::with_capacity(12);
     hdr.extend_from_slice(&NETBOOT_MAGIC.to_le_bytes());
-    #[allow(clippy::cast_possible_truncation, reason = "image length fits in u32")]
     hdr.extend_from_slice(&(image.len() as u32).to_le_bytes());
     hdr.extend_from_slice(&entry_pc.to_le_bytes());
 

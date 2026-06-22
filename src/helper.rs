@@ -2,9 +2,10 @@ use crate::files::LineType;
 use crate::labels::label_name_from_string;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{disassemble_word, return_opcode, Opcode, Pass2};
+use std::fmt::Write as _;
 
 /// Number of reserved words at the start of memory for the heap header.
-/// Byte 0x00: heap_start (written by assembler), Byte 0x04: heap_end (written by assembler),
+/// Byte 0x00: `heap_start` (written by assembler), Byte 0x04: `heap_end` (written by assembler),
 /// Byte 0x08: reserved, Byte 0x0C: reserved. Code begins at byte 0x10.
 pub const HEAP_HEADER_WORDS: u32 = 4;
 /// Encode a 32-bit word for the kbt wire format (little-endian byte order).
@@ -13,7 +14,6 @@ pub const HEAP_HEADER_WORDS: u32 = 4;
 /// value must be transmitted LSByte-first so the CPU reads the correct value.
 /// e.g. instruction 0x400F0000 → "00000F40", entry 0x20 → "20000000".
 #[must_use]
-#[allow(clippy::arithmetic_side_effects, reason = "bit shifts on u32 are always safe")]
 pub fn encode_word_kbt(w: u32) -> String {
     format!(
         "{:02X}{:02X}{:02X}{:02X}",
@@ -27,8 +27,6 @@ pub fn encode_word_kbt(w: u32) -> String {
 /// Format a byte count as a human-readable size (B / KiB / MiB / GiB), e.g.
 /// `9223315` -> `"8.80 MiB"`.  Used for progress/size display.
 #[must_use]
-#[allow(clippy::cast_precision_loss, reason = "rounding a byte count for display is fine")]
-#[allow(clippy::float_arithmetic, reason = "float math here is only for display formatting")]
 pub fn human_bytes(n: usize) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = 1_048_576.0;
@@ -55,14 +53,12 @@ pub fn encode_hex_kbt(hex: &str) -> String {
     let mut result = String::with_capacity(hex.len());
     let mut i = 0;
     while i + 8 <= bytes.len() {
-        #[allow(clippy::string_slice, reason = "bounds guaranteed by while condition")]
         let chunk = &hex[i..i + 8];
         let w = u32::from_str_radix(chunk, 16).unwrap_or(0);
         result.push_str(&encode_word_kbt(w));
         i += 8;
     }
     // Pass through any trailing chars that don't form a full 32-bit word
-    #[allow(clippy::string_slice, reason = "i <= hex.len() by construction")]
     result.push_str(&hex[i..]);
     result
 }
@@ -84,9 +80,6 @@ pub fn encode_hex_kbt(hex: &str) -> String {
 /// delimiter; this function must be called **before** appending `Z` so that `Z` is
 /// not included in the sum.
 #[must_use]
-#[allow(clippy::arithmetic_side_effects, reason = "sum arithmetic is safe for realistic program sizes")]
-#[allow(clippy::integer_division_remainder_used, reason = "modulo is intentional for checksum wrapping")]
-#[allow(clippy::modulo_arithmetic, reason = "modulo is intentional for checksum calculation")]
 pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     // Strip S framing char only (Z/X are not present — caller hasn't appended them yet).
     let stripped: String = input_string.chars().filter(|&c| c != 'S').collect();
@@ -106,7 +99,6 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     // Process 8-char groups as LE-encoded 32-bit words.
     // Decode each word to its natural value V, accumulate V[31:16] + V[15:0].
     while i + 8 <= stripped.len() {
-        #[allow(clippy::string_slice, reason = "bounds guaranteed by while condition")]
         let chunk = &stripped[i..i + 8];
         let b0 = i32::from_str_radix(&chunk[0..2], 16).unwrap_or(0);
         let b1 = i32::from_str_radix(&chunk[2..4], 16).unwrap_or(0);
@@ -120,7 +112,6 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     }
     // Any trailing 4-char groups (test-only artefacts) summed as natural 16-bit.
     while i + 4 <= stripped.len() {
-        #[allow(clippy::string_slice, reason = "bounds guaranteed by while condition")]
         let chunk = &stripped[i..i + 4];
         let val = i32::from_str_radix(chunk, 16).unwrap_or(0);
         sum = (sum + val) % (0xFFFF_i32 + 1);
@@ -137,7 +128,6 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 ///
 /// Based on the Pass2 vector, create the bitcode, calculating the checksum, and adding control characters.
 /// Currently only ever sets the stack to 16 bytes (Z0010).
-#[allow(clippy::or_fun_call, reason = "Needed for simplicity of setting up default start address")]
 pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<String> {
     let mut output_string = String::default();
 
@@ -161,14 +151,10 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     // when heap_start itself is 8-byte aligned — required for MEMSET8→MEMGET64 coherency.
     // output_string is 'S' + hex_chars; hex_chars/2 = bytes (valid for both 32-bit opcodes
     // and 64-bit data words since both maintain a 2:1 hex-char to byte ratio)
-    #[allow(clippy::arithmetic_side_effects, reason = "Subtraction safe: string starts with 'S' so len >= 1")]
-    #[allow(clippy::integer_division, reason = "Integer division intentional: hex chars → bytes")]
     let heap_start_raw: u32 = ((output_string.len() - 1) / 2) as u32;
-    #[allow(clippy::arithmetic_side_effects, reason = "Addition safe: heap_start_raw + 7 cannot overflow for realistic program sizes")]
     let heap_start: u32 = (heap_start_raw + 7) & !7_u32; // align to 8-byte boundary
     // Emit heap_start as lo32 then hi32, each word encoded for LE board loading.
     // hi32 is always zero; encode_word_kbt(0) = "00000000" so only lo32 needs encoding.
-    #[allow(clippy::string_slice, reason = "Slice bounds are fixed and known safe")]
     output_string.replace_range(
         heap_start_offset..heap_start_offset + 16,
         &format!("{}00000000", encode_word_kbt(heap_start)),
@@ -236,8 +222,6 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
 /// program); the rest of the header is zero.  The entry point is transmitted
 /// separately in the netboot protocol header, not embedded here.
 #[must_use]
-#[allow(clippy::arithmetic_side_effects, reason = "lengths fit in u32 for realistic program sizes")]
-#[allow(clippy::cast_possible_truncation, reason = "image length fits in u32")]
 pub fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
     const HEADER_BYTES: usize = HEAP_HEADER_WORDS as usize * 8;
     let mut image = vec![0_u8; HEADER_BYTES];
@@ -257,7 +241,7 @@ pub fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
 
 /// Disassemble a flat byte slice into a `Vec<Pass2>` for use with `write_code_output_file`.
 ///
-/// Each 4-byte chunk is read as a big-endian 32-bit word (matching the KlaussCPU LLVM ELF
+/// Each 4-byte chunk is read as a big-endian 32-bit word (matching the `KlaussCPU` LLVM ELF
 /// byte order) and matched against `opcodes`.  When a match is found, register operands are
 /// extracted and any argument words that follow (determined by `opcode.variables`) are consumed
 /// and appended to the same entry's `opcode` hex string so `write_code_output_file` formats them
@@ -265,8 +249,6 @@ pub fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
 ///
 /// `base_addr` is the board byte address of the first byte in `binary` (normally
 /// `HEAP_HEADER_WORDS * 8 = 0x20`).
-#[allow(clippy::arithmetic_side_effects, reason = "index arithmetic is bounds-checked by the while condition")]
-#[allow(clippy::cast_possible_truncation, reason = "binary length fits in u32 for any realistic program")]
 pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcode]) -> Vec<Pass2> {
     let mut result: Vec<Pass2> = Vec::new();
     let mut i: usize = 0;
@@ -290,12 +272,12 @@ pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcod
             let off = i + 4 + arg_idx * 4;
             if off + 4 <= binary.len() {
                 let av = u32::from_le_bytes([binary[off], binary[off + 1], binary[off + 2], binary[off + 3]]);
-                opcode_hex.push_str(&format!("{av:08X}"));
+                let _ = write!(opcode_hex, "{av:08X}");
                 if arg_idx == 0 && arg_word_count == 1 {
-                    display_text.push_str(&format!(" 0x{av:X}"));
+                    let _ = write!(display_text, " 0x{av:X}");
                 } else if arg_idx == 0 {
                     // 64-bit: lo32 stored first — stash it, combine after reading hi32
-                    display_text.push_str(&format!(" 0x{av:08X}"));
+                    let _ = write!(display_text, " 0x{av:08X}");
                 } else {
                     // arg_idx == 1: hi32 — replace the lo32 placeholder with combined value
                     // The display_text already ends with " 0x{lo32:08X}"; replace with 64-bit
@@ -306,7 +288,7 @@ pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcod
                     ).unwrap_or(0);
                     display_text.truncate(display_text.len() - lo_str_len);
                     let val64 = (u64::from(av) << 32) | lo;
-                    display_text.push_str(&format!(" 0x{val64:X}"));
+                    let _ = write!(display_text, " 0x{val64:X}");
                 }
             } else {
                 arg_ok = false;
@@ -356,7 +338,6 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         } else {
             value_str.parse::<i64>().unwrap_or(0)
         };
-        #[allow(clippy::cast_sign_loss, reason = "Sign loss is intentional for u64 hex representation")]
         let v64 = value as u64;
         let lo32 = (v64 & 0xFFFF_FFFF) as u32;
         let hi32 = ((v64 >> 32) & 0xFFFF_FFFF) as u32;
@@ -381,9 +362,6 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         if byte_count <= 0 {
             return None;
         }
-        #[allow(clippy::integer_division, reason = "Integer division is intentional for word count calculation")]
-        #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic is intentional for word count rounding")]
-        #[allow(clippy::integer_division_remainder_used, reason = "Division remainder is intentional for rounding")]
         let word_count = (byte_count + 7) / 8;
         let mut data = String::default();
         for _ in 0..word_count {
@@ -405,9 +383,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
             let mut output_hex = String::default();
             // Length is based on multiples of 4
-            #[allow(clippy::integer_division, reason = "Integer division is intentional for string length calculation")]
-            #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional for string length calculation")]
-            #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for string length calculation")]  
+  
             output_hex.push_str(
                 format!(
                     "{:08X}",
@@ -419,8 +395,6 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
                 let hex = format!("{char:02X}");
                 output_hex.push_str(&hex);
             }
-            #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional for string length calculation")]
-            #[allow(clippy::integer_division_remainder_used, reason = "Integer division remainder is intentional for string length calculation")]
             let needed_bytes = 8 - (output_hex.len() % 8);
             for _n in 0..needed_bytes {
                 output_hex.push('0');
@@ -590,7 +564,6 @@ pub fn num_data_bytes(
 /// Returns trailing comments.
 ///
 /// Removes comments and starting and training whitespace.
-#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional for comment extraction")]
 pub fn return_comments(input: &str) -> String {
     input.find("//").map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
 }
@@ -609,8 +582,6 @@ pub fn strip_comments(input: &str) -> String {
 /// Parse expected UART hex values from source file comment headers.
 ///
 /// Extracts 8-digit uppercase hex values from lines matching the pattern `//   XXXXXXXX  (`.
-#[allow(clippy::arithmetic_side_effects, reason = "Slice indexing is safe after length check")]
-#[allow(clippy::min_ident_chars, reason = "Single-char closure arg is idiomatic for simple predicates")]
 pub fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
     let mut expected: Vec<String> = Vec::new();
     for line in lines {
@@ -651,8 +622,8 @@ pub fn trim_newline(input: &mut String) {
 }
 
 #[cfg(test)]
-#[allow(clippy::arbitrary_source_item_ordering, reason = "Test functions can be in any order")]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
     use crate::labels::{return_label_value, Label};
 

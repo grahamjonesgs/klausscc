@@ -28,7 +28,6 @@ pub enum MessageType {
 
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items, reason = "Default implementation for reference to Message is only used internally for tests")]
 impl Default for &Message {
     #[inline]
     fn default() -> &'static Message {
@@ -71,7 +70,6 @@ impl MsgList {
 
      /// Push message to `MsgList`.  In live mode the message is also printed
      /// immediately so the user sees progress in real time.
-     #[allow(clippy::print_stderr, reason = "Live mode intentionally streams each message to stderr (unbuffered)")]
      pub fn push(
         &mut self,
         name: String,
@@ -144,8 +142,6 @@ fn format_message(msg: &Message) -> String {
 /// Print out all messages.
 ///
 /// Prints all the message in passed `MsgList` vector to terminal with coloured messages.
-#[allow(clippy::module_name_repetitions, reason = "Function name matches module name for clarity in user-facing API")]
-#[allow(clippy::print_stdout, reason = "Printing to stdout is intended for user-facing message output")]
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
 pub fn print_messages(msg_list: &MsgList) {
     /* In live mode every message was already printed as it was pushed, so
@@ -160,6 +156,7 @@ pub fn print_messages(msg_list: &MsgList) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
 
     #[test]

@@ -38,9 +38,6 @@ impl Default for &Macro {
 ///
 /// Takes Vector of macros, and embeds macros recursively, up to 10 passes.
 /// Will create errors message for more than 10 passes.
-#[allow(clippy::too_many_lines, reason = "Function is complex due to macro expansion logic")]
-#[allow(clippy::module_name_repetitions, reason = "Module name repetition is acceptable for clarity in macro expansion context")]
-#[allow(clippy::arithmetic_side_effects, reason = "Macro expansion logic may involve arithmetic side effects")]
 pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed = true;
@@ -61,7 +58,6 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                         item_line_array.push(item_word.to_owned());
                     }
                     #[allow(clippy::unwrap_used, reason = "Unwrap is safe here due to prior check with is_some()")]
-                    #[allow(clippy::arithmetic_side_effects, reason = "Macro expansion logic may involve arithmetic side effects")]
                     if let Ok(variables_usize) = usize::try_from(return_macro(&item, &mut input_macros).unwrap().variables) {
                         if variables_usize < item_line_array.len() - 1 {
                             msg_list.push(
@@ -96,7 +92,6 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                 if item_word.contains('%') {
                                     let without_prefix = item_word.trim_start_matches('%');
                                     let int_value = without_prefix.parse::<u32>();
-                                    #[allow(clippy::arithmetic_side_effects, reason = "Macro expansion logic may involve arithmetic side effects")]
                                     if int_value.is_err() || int_value.clone().unwrap_or(0) < 1 {
                                         msg_list.push(
                                             format!(
@@ -184,7 +179,6 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
 /// Expands the input lines by expanding all macros.
 ///
 /// Takes the input list of all lines and macro vector and expands.
-#[allow(clippy::module_name_repetitions, reason = "Module name repetition is acceptable for clarity in macro expansion context")]
 pub fn expand_macros(
     msg_list: &mut MsgList,
     input_list: Vec<InputData>,
@@ -200,7 +194,6 @@ pub fn expand_macros(
                 &code_line.file_name,
                 msg_list,
             );
-            #[allow(clippy::arithmetic_side_effects, reason = "Macro expansion logic may involve arithmetic side effects")]
             if let Some(items_vec) = items {
                 //let macro_name = macro_name_from_string(&code_line.input).unwrap_or_default();
                 for item in items_vec {
@@ -300,7 +293,6 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
             .filter(|variable| !all_found_variables.contains(variable))
             .collect();
         let mut missing = String::default();
-        #[allow(clippy::unused_result_ok, reason = "write! to String always returns Ok, so result can be ignored")]
         for i in difference_all_variables {
             if !missing.is_empty() {
                 missing.push(' ');
@@ -373,7 +365,6 @@ pub fn return_macro_items_replace(
         if macro_line.name == first_word {
             found = true;
 
-            #[allow(clippy::arithmetic_side_effects, reason = "Macro variable count comparison may involve arithmetic side effects")]
             if input_line_array.len()
                 > (macro_line.variables + 1_u32)
                     .try_into()
@@ -394,7 +385,6 @@ pub fn return_macro_items_replace(
                     if item_word.contains('%') {
                         let without_prefix = item_word.trim_start_matches('%');
                         let int_value = without_prefix.parse::<u32>();
-                        #[allow(clippy::arithmetic_side_effects, reason = "Macro variable count comparison may involve arithmetic side effects")]
                         if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                             msg_list.push(
                                 format!(
@@ -442,8 +432,8 @@ pub fn return_macro_items_replace(
 }
 
 #[cfg(test)]
-#[allow(clippy::arbitrary_source_item_ordering, reason = "Test module item order does not affect test correctness")]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
 
     use super::*;
 

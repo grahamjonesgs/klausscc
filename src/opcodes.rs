@@ -34,7 +34,6 @@ pub struct Opcode {
 
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &InputData {
     #[inline]
     fn default() -> &'static InputData {
@@ -59,7 +58,6 @@ pub struct Pass0 {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass0 {
     #[inline]
     fn default() -> &'static Pass0 {
@@ -89,7 +87,6 @@ pub struct Pass1 {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass1 {
     #[inline]
     fn default() -> &'static Pass1 {
@@ -122,7 +119,6 @@ pub struct Pass2 {
 }
 
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::missing_docs_in_private_items, reason = "Private items are self-explanatory in this context")]
 impl Default for &Pass2 {
     #[inline]
     fn default() -> &'static Pass2 {
@@ -169,7 +165,6 @@ pub fn add_arguments(
     // Special case: 2-variable instruction with a single 64-bit literal (e.g. SETR64).
     // When exactly one value token follows the register(s), interpret it as a 64-bit immediate
     // and split into lo32 (var1 at PC+4) and hi32 (var2 at PC+8).
-    #[allow(clippy::cast_possible_truncation, reason = "Intentional 64-to-32 bit split for lo/hi word encoding")]
     if num_arguments == 2 {
         let words_vec: Vec<&str> = line.split_whitespace().collect();
         let val_idx = num_registers as usize + 1;
@@ -183,7 +178,6 @@ pub fn add_arguments(
     }
 
     let words = line.split_whitespace();
-    #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
     for (i, word) in words.enumerate() {
         if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
             arguments.push_str(&{
@@ -221,7 +215,6 @@ pub fn add_arguments(
     }
 
     // Can't be in tarpaulin as we can't test the error by passing wrong size
-    #[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
     if arguments.len() != 8 * num_arguments as usize {
         #[cfg(not(tarpaulin_include))]
         msg_list.push(
@@ -237,7 +230,6 @@ pub fn add_arguments(
 /// Updates opcode with register.
 ///
 /// Returns the hex code operand from the line, adding register values.
-#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
 pub fn add_registers(
     opcodes: &mut Vec<Opcode>,
     line: &String,
@@ -332,7 +324,6 @@ fn hex_nibble_to_reg(nibble: u32) -> &'static str {
 /// Returns `(mnemonic_with_registers, variables_count)` or `None` if no match.
 /// Register operands are extracted from the low nibbles of `word` in the same
 /// order they appear in source (reg1 at the highest of the occupied nibbles).
-#[allow(clippy::arithmetic_side_effects, reason = "nibble shifts are safe: n <= 3, shift <= 8")]
 pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> {
     for opcode in opcodes {
         // Compute mask/pattern from hex_code on the fly — '?' = wildcard nibble.
@@ -397,7 +388,6 @@ fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
 ///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None.
 /// Supports both 32-bit format (`32'hXXXX_XXXX`) and legacy 16-bit format (`16'hXXXX`).
-#[allow(clippy::arithmetic_side_effects, reason = "Needed for compatibility with generated code or macro expansion")]
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_comment: usize;
     let pos_end_comment: usize;
@@ -577,8 +567,8 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
 }
 
 #[cfg(test)]
-#[allow(clippy::arbitrary_source_item_ordering, reason = "Test functions are intentionally not ordered")]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
     use crate::labels;
 

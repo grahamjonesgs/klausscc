@@ -17,10 +17,6 @@
 //! table — so the emulator is a genuine second implementation, not a re-run of
 //! the assembler.
 
-#![allow(clippy::std_instead_of_core, reason = "std binary crate, not no_std")]
-#![allow(clippy::integer_division, reason = "byte/word arithmetic is intentional")]
-#![allow(clippy::manual_div_ceil, reason = "explicit form is clearer for masks")]
-#![allow(clippy::checked_conversions, reason = "narrowing is bounds-checked by context")]
 
 use std::fmt::Write as _;
 
@@ -64,6 +60,7 @@ pub struct EmulateResult {
 }
 
 /// The architectural machine state.
+#[allow(clippy::struct_excessive_bools, reason = "each bool is a distinct hardware condition flag (zero/sign/carry/overflow/equal/less/ult)")]
 pub struct Cpu {
     /// General-purpose registers R0..R15 (64-bit).
     regs: [u64; 16],
@@ -94,7 +91,7 @@ pub struct Cpu {
     halted: bool,
     /// Set when an unrecoverable stop condition occurs.
     stop: Option<StopReason>,
-    /// Pending memory write for trace annotation (addr, byte_enable, data).
+    /// Pending memory write for trace annotation (addr, `byte_enable`, data).
     last_write: Option<(u32, u8, u64)>,
 }
 
@@ -108,9 +105,6 @@ struct Fields {
     rs2: usize,
 }
 
-#[allow(clippy::cast_possible_truncation, reason = "deliberate 64→32/8 narrowing for byte/word extraction")]
-#[allow(clippy::cast_sign_loss, reason = "two's-complement reinterpretation is intentional")]
-#[allow(clippy::cast_possible_wrap, reason = "two's-complement reinterpretation is intentional")]
 impl Cpu {
     /// Build a CPU with a flat DDR image already laid out (heap header + code).
     ///
@@ -239,7 +233,7 @@ impl Cpu {
 
     /// Emit a register value over UART, byte-faithful to the RTL.
     ///
-    /// The RTL `t_tx_reg` (uart_tasks.vh:501) transmits the FULL 64-bit value as
+    /// The RTL `t_tx_reg` (`uart_tasks.vh:501`) transmits the FULL 64-bit value as
     /// 16 hex chars, most-significant nibble first, with NO trailing newline
     /// (NEWLINE is a separate opcode, `t_tx_newline`, emitting "\n\r"). We match
     /// that exactly so the emulator's UART byte stream cross-checks against the
@@ -317,7 +311,6 @@ impl Cpu {
     }
 
     /// Decode + execute a single instruction word, advancing PC.
-    #[allow(clippy::too_many_lines, reason = "single dispatch table mirroring the RTL opcode_select casez")]
     fn step(&mut self, word: u32) {
         let fields = Fields {
             rd: ((word >> 8) & 0xF) as usize,
@@ -349,7 +342,7 @@ impl Cpu {
             0x02 => {
                 // ADDI RRV: rd=[7:4] = reg[rs2] + sign_ext(imm32); sets ADD flags.
                 let a = self.regs[fields.rs2];
-                let b = imm() as i32 as i64 as u64;
+                let b = i64::from(imm() as i32) as u64;
                 self.regs[fields.rs1] = self.add_flags(a, b, 0);
                 self.pc = self.pc.wrapping_add(8);
             }
@@ -389,8 +382,6 @@ impl Cpu {
     }
 
     /// 3-register ALU operations (upper 16 bits = op code).
-    #[allow(clippy::too_many_lines, reason = "one arm per ALU op mirrors the RTL")]
-    #[allow(clippy::manual_checked_ops, reason = "div-by-zero is non-trapping with a specific result, not checked_div")]
     fn exec_rrr(&mut self, op_hi: u32, f: &Fields) {
         let a = self.regs[f.rs1];
         let b = self.regs[f.rs2];
@@ -424,6 +415,8 @@ impl Cpu {
             } else {
                 (a as i64).wrapping_div(b as i64) as u64
             }), // DIVR
+            // div-by-zero is non-trapping with an all-ones result (board semantics), not checked_div
+            #[allow(clippy::manual_checked_ops, reason = "div-by-zero returns all-ones, not None")]
             0x0015 => Some(if b == 0 { 0xFFFF_FFFF_FFFF_FFFF } else { a / b }), // DIVUR
             0x0016 => Some(if b == 0 {
                 a
@@ -471,11 +464,10 @@ impl Cpu {
     /// RV / R group: opcode classes 0x08?, 0x09?, 0x0A?, 0x0B?, 0x0F?
     /// (the register-immediate arithmetic/logic/bit/rotate/extend block).
     /// `op12` = word[15:4]; the destination register is rs2 = word[3:0].
-    #[allow(clippy::too_many_lines, reason = "one arm per RV/R op mirrors the RTL")]
     fn exec_rv_group(&mut self, op12: u32, full: u32, f: &Fields, imm: u32) {
         let rd = f.rs2; // for these forms reg is in [3:0]
         let rs = self.regs[rd];
-        let imm_s = imm as i32 as i64 as u64; // sign-extended
+        let imm_s = i64::from(imm as i32) as u64; // sign-extended
         let imm_z = u64::from(imm); // zero-extended
         let mut pc_adv: u32 = 4;
         match op12 {
@@ -551,7 +543,7 @@ impl Cpu {
                 self.regs[rd] = r;
             }
             0x08C => {
-                let r = (rs as i8) as i64 as u64; // SEXTB, sets zero/sign
+                let r = i64::from(rs as i8) as u64; // SEXTB, sets zero/sign
                 self.set_zs(r);
                 self.regs[rd] = r;
             }
@@ -568,25 +560,25 @@ impl Cpu {
                 self.regs[rd] = ((rs as i64) >> 1) as u64; // SHRAR arithmetic
             }
             0x091 => {
-                let r = rs << ((imm & 0x3F) as u64); // SHLV sets zero
+                let r = rs << u64::from(imm & 0x3F); // SHLV sets zero
                 self.zero = r == 0;
                 self.regs[rd] = r;
                 pc_adv = 8;
             }
             0x092 => {
-                let r = rs >> ((imm & 0x3F) as u64); // SHRV
+                let r = rs >> u64::from(imm & 0x3F); // SHRV
                 self.zero = r == 0;
                 self.regs[rd] = r;
                 pc_adv = 8;
             }
             0x093 => {
-                let r = ((rs as i64) >> ((imm & 0x3F) as i64)) as u64; // SHRAV
+                let r = ((rs as i64) >> i64::from(imm & 0x3F)) as u64; // SHRAV
                 self.zero = r == 0;
                 self.regs[rd] = r;
                 pc_adv = 8;
             }
             0x094 => {
-                let r = (rs as i16) as i64 as u64; // SEXTH
+                let r = i64::from(rs as i16) as u64; // SEXTH
                 self.set_zs(r);
                 self.regs[rd] = r;
             }
@@ -644,8 +636,8 @@ impl Cpu {
             }
             0x0AC => {
                 // BEXTR: start=imm[4:0], len=imm[12:8]; low 32 bits only; zero-extend.
-                let start = (imm & 0x1F) as u64;
-                let len = ((imm >> 8) & 0x1F) as u64;
+                let start = u64::from(imm & 0x1F);
+                let len = u64::from((imm >> 8) & 0x1F);
                 let src = rs & 0xFFFF_FFFF;
                 let mask = if len >= 32 { 0xFFFF_FFFF } else { (1_u64 << len) - 1 };
                 self.regs[rd] = (src >> start) & mask;
@@ -653,8 +645,8 @@ impl Cpu {
             }
             0x0AD => {
                 // BDEP: deposit len bits of rs at start into rs (low 32 bits).
-                let start = (imm & 0x1F) as u64;
-                let len = ((imm >> 8) & 0x1F) as u64;
+                let start = u64::from(imm & 0x1F);
+                let len = u64::from((imm >> 8) & 0x1F);
                 let mask = if len >= 32 { 0xFFFF_FFFF } else { (1_u64 << len) - 1 };
                 let field = (rs & mask) << start;
                 let clear = !(mask << start) & 0xFFFF_FFFF;
@@ -687,7 +679,7 @@ impl Cpu {
                 pc_adv = 8;
             }
             0x0F0 => {
-                self.regs[rd] = (rs as i32) as i64 as u64; // SEXTW
+                self.regs[rd] = i64::from(rs as i32) as u64; // SEXTW
             }
             0x0F1 => {
                 self.regs[rd] = rs & 0xFFFF_FFFF; // ZEXTW
@@ -1043,7 +1035,7 @@ impl Cpu {
             0x72 => {
                 // 0x720? MEMSETR RV: mem64[imm32]=rs ; 0x721? MEMREADR RV: rd=mem64[imm32]
                 let imm = self.read32(self.pc.wrapping_add(4)) & !7;
-                if (full >> 4) & 0xF == 0x0 {
+                if (full >> 4).trailing_zeros() >= 4 {
                     self.write64(imm, self.regs[f.rs2]); // MEMSETR, reg in [3:0]
                 } else {
                     self.regs[f.rs2] = self.read64(imm); // MEMREADR
@@ -1130,8 +1122,8 @@ impl Cpu {
             0xC3 => self.write_sub(ea & !1, self.regs[f.rs1], 2), // STIDX16
             0xC4 => self.regs[f.rs1] = self.read_sub(ea, 1),      // LDIDX8
             0xC5 => self.write_sub(ea, self.regs[f.rs1], 1),      // STIDX8
-            0xC6 => self.regs[f.rs1] = (self.read_sub(ea, 1) as i8) as i64 as u64, // LDIDX8_S
-            0xC7 => self.regs[f.rs1] = (self.read_sub(ea & !1, 2) as i16) as i64 as u64, // LDIDX16_S
+            0xC6 => self.regs[f.rs1] = i64::from(self.read_sub(ea, 1) as i8) as u64, // LDIDX8_S
+            0xC7 => self.regs[f.rs1] = i64::from(self.read_sub(ea & !1, 2) as i16) as u64, // LDIDX16_S
             _ => self.stop = Some(StopReason::InvalidOpcode(op << 8)),
         }
         self.pc = self.pc.wrapping_add(8);
@@ -1173,8 +1165,8 @@ pub const fn default_entry() -> u32 {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, reason = "tests may unwrap")]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
     use crate::helper::build_ddr_image;
 
@@ -1231,7 +1223,7 @@ mod tests {
         cpu
     }
 
-    /// Encode an RRR ALU op: op_hi in [31:16], rd[11:8], rs1[7:4], rs2[3:0].
+    /// Encode an RRR ALU op: `op_hi` in [31:16], rd[11:8], rs1[7:4], rs2[3:0].
     fn rrr(op_hi: u32, rd: u32, rs1: u32, rs2: u32) -> u32 {
         (op_hi << 16) | (rd << 8) | (rs1 << 4) | rs2
     }

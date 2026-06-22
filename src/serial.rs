@@ -2,6 +2,7 @@ use crate::helper::{human_bytes, trim_newline};
 use crate::messages::{MessageType, MsgList};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
+use std::fmt::Write as _;
 use std::time::Instant;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::io::{self, Error, Read as _, Write as _};
@@ -31,13 +32,10 @@ fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
 /// Formats the USB Port information into a human readable form.
 ///
 /// Gives more USB details.
-#[allow(clippy::ref_patterns, reason = "Pattern matching on references is intentional for clarity")]
-#[allow(clippy::arithmetic_side_effects, reason = "Arithmetic side effects are intentional and safe in this context")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn extra_usb_info(info: &UsbPortInfo) -> String {
     let mut output = String::default();
-    #[allow(clippy::format_push_string, reason = "Using format! with push_str for clarity and explicitness")]
-    output.push_str(&format!(" {:04x}:{:04x}", info.vid, info.pid));
+    let _ = write!(output, " {:04x}:{:04x}", info.vid, info.pid);
 
     let mut extra_items = Vec::new();
 
@@ -134,18 +132,18 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
                     if port_count > 0 {
                         all_ports.push_str(",\n");
                     }
-                    #[allow(clippy::format_push_string, reason = "Using format! with push_str for clarity and explicitness")]
                     if let SerialPortType::UsbPort(info) = port.port_type {
-                        all_ports.push_str(&format!(
+                        let _ = write!(
+                            all_ports,
                             "USB Serial Device{} {}",
                             extra_usb_info(&info),
                             port.port_name
-                        ));
+                        );
                         if check_usb_serial_possible(&info) {
                             suggested_port = Some(port.port_name.clone());
                         }
                     } else {
-                        all_ports.push_str(&format!(" Non USB Serial Device {}", port.port_name));
+                        let _ = write!(all_ports, " Non USB Serial Device {}", port.port_name);
                     }
 
                     max_ports = port_count.try_into().unwrap_or_default();
@@ -191,8 +189,6 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
 /// Output the code details file to given serial port, keeping the port open.
 ///
 /// Will send the program to the serial port, wait for the response, and return the open port.
-#[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling is intentional and improves readability in this context")]
-#[allow(clippy::print_stderr, reason = "In-place progress indicator (stderr is unbuffered) for the multi-second serial transfer")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_to_board_keep_port(
     binary_output: &str,
@@ -321,7 +317,6 @@ pub fn write_to_board_keep_port(
 /// Output the code details file to given serial port.
 ///
 /// Will send the program to the serial port, and wait for the response.
-#[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling is intentional and improves readability in this context")]
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 pub fn write_to_board(
     binary_output: &str,
@@ -334,14 +329,13 @@ pub fn write_to_board(
 }
 
 /// Print bytes to stderr (unbuffered), optionally showing each byte as hex alongside the character.
-#[allow(clippy::print_stderr, reason = "Serial monitor output goes to stderr (unbuffered) for immediate display")]
 fn print_bytes(data: &[u8], debug: bool) {
     if debug {
         for &b in data {
             if b.is_ascii_graphic() || b == b' ' {
                 eprint!("{:02X}('{}') ", b, char::from(b));
             } else {
-                eprint!("{:02X} ", b);
+                eprint!("{b:02X} ");
             }
         }
     } else {
@@ -353,8 +347,6 @@ fn print_bytes(data: &[u8], debug: bool) {
 ///
 /// Continuously reads from the serial port and prints received data to stdout.
 /// Runs until the user presses Ctrl+C, then closes the port cleanly.
-#[allow(clippy::print_stdout, reason = "Printing to stdout is required for serial monitor output")]
-#[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
 pub fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
     let port = return_port(port_name, msg_list)?;
@@ -365,8 +357,6 @@ pub fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut MsgList) -> R
 ///
 /// Used after `write_to_board_keep_port` to continue reading from the same port
 /// that was used to upload the program, ensuring no UART output is missed.
-#[allow(clippy::print_stderr, reason = "Serial monitor output goes to stderr (unbuffered) for immediate display")]
-#[allow(clippy::question_mark_used, reason = "? operator is idiomatic for propagating errors")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
 pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
     port.set_timeout(Duration::from_millis(500))?;
@@ -485,7 +475,6 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
 }
 
 /// Result of a test verification run.
-#[allow(clippy::arbitrary_source_item_ordering, reason = "Fields ordered by logical flow, not alphabetically")]
 pub struct TestResult {
     /// Number of expected values that matched.
     pub passed: usize,
@@ -518,9 +507,6 @@ fn extract_hex_value(line: &str) -> Option<String> {
 ///
 /// Reads UART output from the FPGA board and compares each hex line against the
 /// expected values in order. Stops when all expected values are matched or timeout.
-#[allow(clippy::print_stdout, reason = "Printing to stdout is required for test result output")]
-#[allow(clippy::question_mark_used, reason = "Using the question mark operator for error handling")]
-#[allow(clippy::arithmetic_side_effects, reason = "Index arithmetic is safe within bounds checks")]
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
 pub fn run_test_monitor(
     mut port: Box<dyn SerialPort>,
@@ -616,6 +602,7 @@ pub fn run_test_monitor(
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
 
     #[test]
