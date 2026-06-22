@@ -26,7 +26,6 @@ pub enum MessageType {
     Warning,
 }
 
-
 #[cfg(not(tarpaulin_include))]
 impl Default for &Message {
     #[inline]
@@ -57,10 +56,11 @@ pub struct MsgList {
 impl MsgList {
     /// Create new `MsgList`.
     pub const fn new() -> Self {
-        Self { list: Vec::new(), live: false }
+        Self {
+            list: Vec::new(),
+            live: false,
+        }
     }
-
-   
 
     /// Returns number of warnings in `MsgList`.
     pub fn number_by_type(&self, msg_type: &MessageType) -> usize {
@@ -68,15 +68,9 @@ impl MsgList {
         warnings
     }
 
-     /// Push message to `MsgList`.  In live mode the message is also printed
-     /// immediately so the user sees progress in real time.
-     pub fn push(
-        &mut self,
-        name: String,
-        line_number: Option<u32>,
-        file_name: Option<String>,
-        msg_type: MessageType,
-    ) {
+    /// Push message to `MsgList`.  In live mode the message is also printed
+    /// immediately so the user sees progress in real time.
+    pub fn push(&mut self, name: String, line_number: Option<u32>, file_name: Option<String>, msg_type: MessageType) {
         self.list.push(Message {
             text: name,
             line_number,
@@ -130,12 +124,7 @@ fn format_message(msg: &Message) -> String {
             msg.text
         )
     } else {
-        format!(
-            "{} {} {} ",
-            msg.time.unwrap_or_default().format("%H:%M:%S%.3f"),
-            message_level,
-            msg.text
-        )
+        format!("{} {} {} ", msg.time.unwrap_or_default().format("%H:%M:%S%.3f"), message_level, msg.text)
     }
 }
 
@@ -163,19 +152,11 @@ mod tests {
     // Test that the message list is created correctly
     fn test_msg_list() {
         let mut msg_list = MsgList::new();
-        msg_list.push(
-            "Test".to_owned(),
-            None,
-            Some("test".to_owned()),
-            MessageType::Information,
-        );
+        msg_list.push("Test".to_owned(), None, Some("test".to_owned()), MessageType::Information);
         assert_eq!(msg_list.list.len(), 1);
         assert_eq!(msg_list.list.first().unwrap_or_default().text, "Test");
         assert_eq!(msg_list.list.first().unwrap_or_default().text, "Test");
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().level,
-            MessageType::Information
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().level, MessageType::Information);
         assert_eq!(msg_list.list.first().unwrap_or_default().line_number, None);
     }
 

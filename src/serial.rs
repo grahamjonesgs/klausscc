@@ -1,13 +1,12 @@
 use crate::helper::{human_bytes, trim_newline};
 use crate::messages::{MessageType, MsgList};
-use core::sync::atomic::{AtomicBool, Ordering};
-use core::time::Duration;
-use std::fmt::Write as _;
-use std::time::Instant;
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
+use std::fmt::Write as _;
 use std::io::{self, Error, Read as _, Write as _};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 /// Used to define if a port request was not defined so is for auto.
 pub const AUTO_SERIAL: &str = "auto_serial_requested";
@@ -19,11 +18,7 @@ pub const AUTO_SERIAL: &str = "auto_serial_requested";
 fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
     let vid_pi = format!("{:04x}:{:04x}", info.vid, info.pid);
 
-    if vid_pi == "0403:6001"
-        || vid_pi == "0403:6010"
-        || vid_pi == "0403:6011"
-        || vid_pi == "0403:6014"
-    {
+    if vid_pi == "0403:6001" || vid_pi == "0403:6010" || vid_pi == "0403:6011" || vid_pi == "0403:6014" {
         return true;
     }
     false
@@ -81,7 +76,6 @@ pub fn find_possible_port() -> Option<String> {
     }
 }
 
-
 /// Return port from port name.
 ///
 /// If port name is `AUTO_SERIAL` then return the first USB serial port found.
@@ -118,12 +112,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
 
         return match available_ports {
             Err(_) => {
-                msg_list.push(
-                    "Error opening serial port, no ports found".to_owned(),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
+                msg_list.push("Error opening serial port, no ports found".to_owned(), None, None, MessageType::Error);
                 Err(Error::other("No ports found"))
             }
             Ok(ports) => {
@@ -133,12 +122,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
                         all_ports.push_str(",\n");
                     }
                     if let SerialPortType::UsbPort(info) = port.port_type {
-                        let _ = write!(
-                            all_ports,
-                            "USB Serial Device{} {}",
-                            extra_usb_info(&info),
-                            port.port_name
-                        );
+                        let _ = write!(all_ports, "USB Serial Device{} {}", extra_usb_info(&info), port.port_name);
                         if check_usb_serial_possible(&info) {
                             suggested_port = Some(port.port_name.clone());
                         }
@@ -159,12 +143,7 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
                     }
                 };
 
-                msg_list.push(
-                    format!("Error opening serial port, {ports_msg}"),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
+                msg_list.push(format!("Error opening serial port, {ports_msg}"), None, None, MessageType::Error);
 
                 if suggested_port.is_some() {
                     msg_list.push(
@@ -246,8 +225,7 @@ pub fn write_to_board_keep_port(
             let on_wire = written.saturating_sub(pending);
             let pct = on_wire.saturating_mul(100).checked_div(total).unwrap_or(100);
             if pct != last_pct {
-                let line = format!("Sending to board: {pct}% ({} / {})",
-                                   human_bytes(on_wire), human_bytes(total));
+                let line = format!("Sending to board: {pct}% ({} / {})", human_bytes(on_wire), human_bytes(total));
                 eprint!("\r{line:<50}");
                 last_pct = pct;
             }
@@ -259,8 +237,7 @@ pub fn write_to_board_keep_port(
             let on_wire = total.saturating_sub(pending);
             let pct = on_wire.saturating_mul(100).checked_div(total).unwrap_or(100);
             if pct != last_pct {
-                let line = format!("Sending to board: {pct}% ({} / {})",
-                                   human_bytes(on_wire), human_bytes(total));
+                let line = format!("Sending to board: {pct}% ({} / {})", human_bytes(on_wire), human_bytes(total));
                 eprint!("\r{line:<50}");
                 last_pct = pct;
             }
@@ -279,12 +256,7 @@ pub fn write_to_board_keep_port(
     let ret_msg_size = port.read(&mut read_buffer[..]).unwrap_or(0);
 
     if ret_msg_size == 0 {
-        msg_list.push(
-            "No message received from board".to_owned(),
-            None,
-            None,
-            MessageType::Warning,
-        );
+        msg_list.push("No message received from board".to_owned(), None, None, MessageType::Warning);
         return Ok(port);
     }
 
@@ -318,12 +290,7 @@ pub fn write_to_board_keep_port(
 ///
 /// Will send the program to the serial port, and wait for the response.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub fn write_to_board(
-    binary_output: &str,
-    port_name: &str,
-    send_break: bool,
-    msg_list: &mut MsgList,
-) -> Result<(), Error> {
+pub fn write_to_board(binary_output: &str, port_name: &str, send_break: bool, msg_list: &mut MsgList) -> Result<(), Error> {
     let _port = write_to_board_keep_port(binary_output, port_name, send_break, false, msg_list)?;
     Ok(())
 }
@@ -367,12 +334,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
     // Raw mode sends each keystroke immediately without buffering and without
     // the OS intercepting Ctrl+C as a signal, so we handle 0x03 manually below.
     if let Err(err) = crossterm::terminal::enable_raw_mode() {
-        msg_list.push(
-            format!("Failed to enable raw terminal mode: \"{err}\""),
-            None,
-            None,
-            MessageType::Warning,
-        );
+        msg_list.push(format!("Failed to enable raw terminal mode: \"{err}\""), None, None, MessageType::Warning);
     }
 
     // Flush the OS-level stdin buffer, then drain the crossterm event queue.
@@ -380,7 +342,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
     // (e.g. a Ctrl+Z from a previous run), the poll loop clears anything
     // crossterm has already read from that buffer into its own queue.
     {
-        use nix::sys::termios::{FlushArg, tcflush};
+        use nix::sys::termios::{tcflush, FlushArg};
         // SAFETY: 0 is the file descriptor for stdin, which is always valid in a process context.
         let stdin_fd = unsafe { std::os::unix::io::BorrowedFd::borrow_raw(0) };
         let _ = tcflush(stdin_fd, FlushArg::TCIFLUSH);
@@ -452,12 +414,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
             }
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
-                msg_list.push(
-                    format!("Serial monitor error: \"{err}\""),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
+                msg_list.push(format!("Serial monitor error: \"{err}\""), None, None, MessageType::Error);
                 drop(crossterm::terminal::disable_raw_mode());
                 return Err(err);
             }
@@ -493,10 +450,7 @@ fn extract_hex_value(line: &str) -> Option<String> {
     let trimmed = line.trim();
     if trimmed.len() >= 8 {
         let candidate = trimmed.get(..8).unwrap_or("");
-        if candidate.len() == 8
-            && candidate.chars().all(|ch| ch.is_ascii_hexdigit())
-            && candidate == candidate.to_ascii_uppercase()
-        {
+        if candidate.len() == 8 && candidate.chars().all(|ch| ch.is_ascii_hexdigit()) && candidate == candidate.to_ascii_uppercase() {
             return Some(candidate.to_owned());
         }
     }
@@ -508,12 +462,7 @@ fn extract_hex_value(line: &str) -> Option<String> {
 /// Reads UART output from the FPGA board and compares each hex line against the
 /// expected values in order. Stops when all expected values are matched or timeout.
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
-pub fn run_test_monitor(
-    mut port: Box<dyn SerialPort>,
-    expected_values: &[String],
-    timeout_secs: u64,
-    msg_list: &mut MsgList,
-) -> TestResult {
+pub fn run_test_monitor(mut port: Box<dyn SerialPort>, expected_values: &[String], timeout_secs: u64, msg_list: &mut MsgList) -> TestResult {
     let start = Instant::now();
     let timeout = Duration::from_secs(timeout_secs);
 
@@ -525,7 +474,11 @@ pub fn run_test_monitor(
     let mut passed: usize = 0;
     let mut failed: usize = 0;
 
-    println!("Test mode: expecting {} UART values (timeout {}s)...", expected_values.len(), timeout_secs);
+    println!(
+        "Test mode: expecting {} UART values (timeout {}s)...",
+        expected_values.len(),
+        timeout_secs
+    );
 
     while expected_index < expected_values.len() && start.elapsed() < timeout {
         match port.read(&mut buffer[..]) {
@@ -539,12 +492,7 @@ pub fn run_test_monitor(
                 continue;
             }
             Err(err) => {
-                msg_list.push(
-                    format!("Serial read error during test: \"{err}\""),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
+                msg_list.push(format!("Serial read error during test: \"{err}\""), None, None, MessageType::Error);
                 break;
             }
         }
@@ -569,7 +517,13 @@ pub fn run_test_monitor(
                         println!("  PASS [{}/{}]: {} == {}", expected_index + 1, expected_values.len(), hex_value, expected);
                         passed += 1;
                     } else {
-                        println!("  FAIL [{}/{}]: got {}, expected {}", expected_index + 1, expected_values.len(), hex_value, expected);
+                        println!(
+                            "  FAIL [{}/{}]: got {}, expected {}",
+                            expected_index + 1,
+                            expected_values.len(),
+                            hex_value,
+                            expected
+                        );
                         failed += 1;
                     }
                     expected_index += 1;

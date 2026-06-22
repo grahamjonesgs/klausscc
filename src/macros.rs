@@ -1,9 +1,9 @@
 use crate::helper::{return_comments, strip_comments};
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Pass0};
-use core::fmt::Write as _;
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 /// Holds instance of macro from opcode definition file.
@@ -61,10 +61,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                     if let Ok(variables_usize) = usize::try_from(return_macro(&item, &mut input_macros).unwrap().variables) {
                         if variables_usize < item_line_array.len() - 1 {
                             msg_list.push(
-                                format!(
-                                    "Too many variables in embedded macro \"{}\" in macro {}",
-                                    item, input_macro_line.name,
-                                ),
+                                format!("Too many variables in embedded macro \"{}\" in macro {}", item, input_macro_line.name,),
                                 None,
                                 None,
                                 MessageType::Warning,
@@ -95,11 +92,9 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                     if int_value.is_err() || int_value.clone().unwrap_or(0) < 1 {
                                         msg_list.push(
                                             format!(
-                                            "Invalid macro argument number {}, in embedded macro \"{}\" in {}",
-                                            without_prefix,
-                                            item,
-                                            input_macro_line.name,
-                                        ),
+                                                "Invalid macro argument number {}, in embedded macro \"{}\" in {}",
+                                                without_prefix, item, input_macro_line.name,
+                                            ),
                                             None,
                                             None,
                                             MessageType::Error,
@@ -119,11 +114,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                                             );
                                         } else {
                                             build_line.push(' ');
-                                            build_line.push_str(
-                                                item_line_array
-                                                    .get(idx)
-                                                    .unwrap_or(&String::new()),
-                                            );
+                                            build_line.push_str(item_line_array.get(idx).unwrap_or(&String::new()));
                                         }
                                     } else {
                                         msg_list.push(
@@ -166,12 +157,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
         input_macros.clone_from(&output_macros);
     }
     if changed {
-        msg_list.push(
-            format!("Too many macro passes, check {last_macro}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.push(format!("Too many macro passes, check {last_macro}"), None, None, MessageType::Error);
     }
     input_macros
 }
@@ -179,21 +165,11 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
 /// Expands the input lines by expanding all macros.
 ///
 /// Takes the input list of all lines and macro vector and expands.
-pub fn expand_macros(
-    msg_list: &mut MsgList,
-    input_list: Vec<InputData>,
-    macro_list: &mut [Macro],
-) -> Vec<Pass0> {
+pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<InputData>, macro_list: &mut [Macro]) -> Vec<Pass0> {
     let mut pass0: Vec<Pass0> = Vec::new();
     for code_line in input_list {
         if macro_name_from_string(&code_line.input).is_some() {
-            let items = return_macro_items_replace(
-                code_line.input.trim(),
-                macro_list,
-                code_line.line_counter,
-                &code_line.file_name,
-                msg_list,
-            );
+            let items = return_macro_items_replace(code_line.input.trim(), macro_list, code_line.line_counter, &code_line.file_name, msg_list);
             if let Some(items_vec) = items {
                 //let macro_name = macro_name_from_string(&code_line.input).unwrap_or_default();
                 for item in items_vec {
@@ -208,12 +184,7 @@ pub fn expand_macros(
                     });
                 }
             } else {
-                msg_list.push(
-                    format!("Macro not found {}", code_line.input),
-                    None,
-                    None,
-                    MessageType::Error,
-                );
+                msg_list.push(format!("Macro not found {}", code_line.input), None, None, MessageType::Error);
                 pass0.push(Pass0 {
                     file_name: code_line.file_name,
                     input_text_line: code_line.input,
@@ -279,10 +250,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
         items.push(item);
     }
 
-    if max_variable
-        != TryInto::<u32>::try_into(all_found_variables.clone().into_iter().unique().count())
-            .unwrap_or_default()
-    {
+    if max_variable != TryInto::<u32>::try_into(all_found_variables.clone().into_iter().unique().count()).unwrap_or_default() {
         for i in 1..max_variable {
             all_variables.push(i.into());
         }
@@ -365,11 +333,7 @@ pub fn return_macro_items_replace(
         if macro_line.name == first_word {
             found = true;
 
-            if input_line_array.len()
-                > (macro_line.variables + 1_u32)
-                    .try_into()
-                    .unwrap_or_default()
-            {
+            if input_line_array.len() > (macro_line.variables + 1_u32).try_into().unwrap_or_default() {
                 msg_list.push(
                     format!("Too many variables for macro {}", macro_line.name),
                     Some(input_line_number),
@@ -387,34 +351,21 @@ pub fn return_macro_items_replace(
                         let int_value = without_prefix.parse::<u32>();
                         if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
                             msg_list.push(
-                                format!(
-                                    "Invalid macro argument number {}, in macro {}",
-                                    without_prefix, macro_line.name
-                                ),
+                                format!("Invalid macro argument number {}, in macro {}", without_prefix, macro_line.name),
                                 Some(input_line_number),
                                 Some(filename.to_owned()),
                                 MessageType::Error,
                             );
-                        } else if int_value.clone().unwrap_or(0)
-                            > (input_line_array.len() - 1).try_into().unwrap_or_default()
-                        {
+                        } else if int_value.clone().unwrap_or(0) > (input_line_array.len() - 1).try_into().unwrap_or_default() {
                             msg_list.push(
-                                format!(
-                                    "Missing argument {} for macro {}",
-                                    int_value.clone().unwrap_or(0),
-                                    macro_line.name
-                                ),
+                                format!("Missing argument {} for macro {}", int_value.clone().unwrap_or(0), macro_line.name),
                                 Some(input_line_number),
                                 Some(filename.to_owned()),
                                 MessageType::Error,
                             );
                         } else {
                             build_line.push(' ');
-                            build_line.push_str(
-                                input_line_array
-                                    .get(int_value.clone().unwrap_or(0) as usize)
-                                    .unwrap_or(&""),
-                            );
+                            build_line.push_str(input_line_array.get(int_value.clone().unwrap_or(0) as usize).unwrap_or(&""));
                         }
                     } else {
                         build_line.push(' ');
@@ -504,11 +455,7 @@ mod tests {
         macros.push(Macro {
             name: String::from("$DELAY"),
             variables: 2,
-            items: vec![
-                String::from("DELAYV %1"),
-                String::from("DELAYV %2"),
-                String::from("PUSH %1"),
-            ],
+            items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %1")],
             comment: String::default(),
         });
         let input = String::from("$DELAY ARG_A  ARG_B");
@@ -531,11 +478,7 @@ mod tests {
         macros.push(Macro {
             name: String::from("$DELAY"),
             variables: 3,
-            items: vec![
-                String::from("DELAYV %1"),
-                String::from("DELAYV %2"),
-                String::from("PUSH %3"),
-            ],
+            items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
         });
         let input = String::from("   $DELAY %MACRO1  ARG_B ARG_C");
@@ -558,11 +501,7 @@ mod tests {
         macros.push(Macro {
             name: String::from("$DELAY1"),
             variables: 3,
-            items: vec![
-                String::from("DELAYV %1"),
-                String::from("DELAYV %2"),
-                String::from("PUSH %3"),
-            ],
+            items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
         });
         let input = String::from("$DELAY2 %MACRO1  ARG_B ARG_C");
@@ -578,11 +517,7 @@ mod tests {
         macros.push(Macro {
             name: String::from("$DELAY1"),
             variables: 3,
-            items: vec![
-                String::from("DELAYV %1"),
-                String::from("DELAYV %2"),
-                String::from("PUSH %3"),
-            ],
+            items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C ARG_D ARG_E");
@@ -601,11 +536,7 @@ mod tests {
         macros.push(Macro {
             name: String::from("$DELAY1"),
             variables: 3,
-            items: vec![
-                String::from("DELAYV %xyz"),
-                String::from("DELAYV %2"),
-                String::from("PUSH %3"),
-            ],
+            items: vec![String::from("DELAYV %xyz"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C");
@@ -624,11 +555,7 @@ mod tests {
         macros.push(Macro {
             name: String::from("$DELAY1"),
             variables: 3,
-            items: vec![
-                String::from("DELAYV %1"),
-                String::from("DELAYV %2"),
-                String::from("PUSH %3"),
-            ],
+            items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
         });
         let input = String::from("$DELAY1  ARG_A");
@@ -668,11 +595,7 @@ mod tests {
         macros_result.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
-            items: vec![
-                String::from("OPCODE1 %2"),
-                String::from("OPCODE2 %1"),
-                String::from("OPCODE3"),
-            ],
+            items: vec![String::from("OPCODE1 %2"), String::from("OPCODE2 %1"), String::from("OPCODE3")],
             comment: String::default(),
         });
 
@@ -693,10 +616,7 @@ mod tests {
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
 
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Too many macro passes, check $MACRO1"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Too many macro passes, check $MACRO1");
     }
 
     #[test]
@@ -807,11 +727,7 @@ mod tests {
         macros_result.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
-            items: vec![
-                String::from("OPCODE1"),
-                String::from("OPCODE2"),
-                String::from("OPCODE3"),
-            ],
+            items: vec![String::from("OPCODE1"), String::from("OPCODE2"), String::from("OPCODE3")],
             comment: String::default(),
         });
 
@@ -851,30 +767,12 @@ mod tests {
             },
         ];
         let pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(
-            strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()),
-            "MOV A"
-        );
-        assert_eq!(
-            strip_comments(&pass0.first().unwrap_or_default().file_name.clone()),
-            "File1"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()),
-            "RET B"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()),
-            "PUSH D"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(3).unwrap_or_default().input_text_line.clone()),
-            "POP C"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(3).unwrap_or_default().file_name.clone()),
-            "File2"
-        );
+        assert_eq!(strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()), "MOV A");
+        assert_eq!(strip_comments(&pass0.first().unwrap_or_default().file_name.clone()), "File1");
+        assert_eq!(strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()), "RET B");
+        assert_eq!(strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()), "PUSH D");
+        assert_eq!(strip_comments(&pass0.get(3).unwrap_or_default().input_text_line.clone()), "POP C");
+        assert_eq!(strip_comments(&pass0.get(3).unwrap_or_default().file_name.clone()), "File2");
     }
 
     #[test]
@@ -910,27 +808,12 @@ mod tests {
         ];
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(
-            strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()),
-            "MOV A"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()),
-            "RET B"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()),
-            "PUSH"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(3).unwrap_or_default().input_text_line.clone()),
-            "POP C"
-        );
+        assert_eq!(strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()), "MOV A");
+        assert_eq!(strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()), "RET B");
+        assert_eq!(strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()), "PUSH");
+        assert_eq!(strip_comments(&pass0.get(3).unwrap_or_default().input_text_line.clone()), "POP C");
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Missing argument 2 for macro $MACRO2"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Missing argument 2 for macro $MACRO2");
     }
 
     #[test]
@@ -966,23 +849,11 @@ mod tests {
         ];
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(
-            strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()),
-            "MOV A"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()),
-            "RET B"
-        );
-        assert_eq!(
-            strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()),
-            "PUSH D"
-        );
+        assert_eq!(strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()), "MOV A");
+        assert_eq!(strip_comments(&pass0.get(1).unwrap_or_default().input_text_line.clone()), "RET B");
+        assert_eq!(strip_comments(&pass0.get(2).unwrap_or_default().input_text_line.clone()), "PUSH D");
         assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Too many variables for macro $MACRO2"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Too many variables for macro $MACRO2");
     }
 
     #[test]
@@ -1018,10 +889,7 @@ mod tests {
         ];
 
         let _pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Macro not found $MACRO7 A B"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Macro not found $MACRO7 A B");
     }
 
     #[test]
@@ -1050,10 +918,7 @@ mod tests {
         }];
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(
-            strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()),
-            "OPCODE1 A B"
-        );
+        assert_eq!(strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()), "OPCODE1 A B");
     }
 
     #[test]

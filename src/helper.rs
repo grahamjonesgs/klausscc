@@ -15,13 +15,7 @@ pub const HEAP_HEADER_WORDS: u32 = 4;
 /// e.g. instruction 0x400F0000 → "00000F40", entry 0x20 → "20000000".
 #[must_use]
 pub fn encode_word_kbt(w: u32) -> String {
-    format!(
-        "{:02X}{:02X}{:02X}{:02X}",
-        w & 0xFF,
-        (w >> 8) & 0xFF,
-        (w >> 16) & 0xFF,
-        (w >> 24) & 0xFF,
-    )
+    format!("{:02X}{:02X}{:02X}{:02X}", w & 0xFF, (w >> 8) & 0xFF, (w >> 16) & 0xFF, (w >> 24) & 0xFF,)
 }
 
 /// Format a byte count as a human-readable size (B / KiB / MiB / GiB), e.g.
@@ -87,7 +81,9 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
     if !stripped.len().is_multiple_of(4) {
         msg_list.push(
             format!("LE checksum string length not multiple of 4, length is {}", stripped.len()),
-            None, None, MessageType::Error,
+            None,
+            None,
+            MessageType::Error,
         );
         return encode_word_kbt(0);
     }
@@ -153,19 +149,14 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
     // and 64-bit data words since both maintain a 2:1 hex-char to byte ratio)
     let heap_start_raw: u32 = ((output_string.len() - 1) / 2) as u32;
     let heap_start: u32 = (heap_start_raw + 7) & !7_u32; // align to 8-byte boundary
-    // Emit heap_start as lo32 then hi32, each word encoded for LE board loading.
-    // hi32 is always zero; encode_word_kbt(0) = "00000000" so only lo32 needs encoding.
+                                                         // Emit heap_start as lo32 then hi32, each word encoded for LE board loading.
+                                                         // hi32 is always zero; encode_word_kbt(0) = "00000000" so only lo32 needs encoding.
     output_string.replace_range(
         heap_start_offset..heap_start_offset + 16,
         &format!("{}00000000", encode_word_kbt(heap_start)),
     );
 
-    if pass2
-        .iter()
-        .filter(|x| x.line_type == LineType::Start)
-        .count()
-        == 1
-    {
+    if pass2.iter().filter(|x| x.line_type == LineType::Start).count() == 1 {
         let entry_pc = pass2
             .iter()
             .find(|x| x.line_type == LineType::Start)
@@ -179,26 +170,11 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
             })
             .program_counter;
         output_string.push_str(&encode_word_kbt(entry_pc));
-    } else if pass2
-        .iter()
-        .filter(|x| x.line_type == LineType::Start)
-        .count()
-        == 0
-    {
-        msg_list.push(
-            "No start address found".to_owned(),
-            None,
-            None,
-            MessageType::Error,
-        );
+    } else if pass2.iter().filter(|x| x.line_type == LineType::Start).count() == 0 {
+        msg_list.push("No start address found".to_owned(), None, None, MessageType::Error);
         return None;
     } else {
-        msg_list.push(
-            "Multiple start addresses found".to_owned(),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.push("Multiple start addresses found".to_owned(), None, None, MessageType::Error);
         return None;
     }
 
@@ -257,8 +233,7 @@ pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcod
         let word = u32::from_le_bytes([binary[i], binary[i + 1], binary[i + 2], binary[i + 3]]);
         let pc = base_addr.saturating_add(i as u32);
 
-        let (base_text, vars) = disassemble_word(word, opcodes)
-            .map_or_else(|| (format!("??? (0x{word:08X})"), 0_u32), |(t, v)| (t, v));
+        let (base_text, vars) = disassemble_word(word, opcodes).map_or_else(|| (format!("??? (0x{word:08X})"), 0_u32), |(t, v)| (t, v));
 
         let mut opcode_hex = format!("{word:08X}");
         let mut display_text = base_text;
@@ -282,10 +257,7 @@ pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcod
                     // arg_idx == 1: hi32 — replace the lo32 placeholder with combined value
                     // The display_text already ends with " 0x{lo32:08X}"; replace with 64-bit
                     let lo_str_len = " 0x".len() + 8; // " 0x" + 8 hex chars
-                    let lo = u64::from_str_radix(
-                        display_text.get(display_text.len() - 8..).unwrap_or("0"),
-                        16,
-                    ).unwrap_or(0);
+                    let lo = u64::from_str_radix(display_text.get(display_text.len() - 8..).unwrap_or("0"), 16).unwrap_or(0);
                     display_text.truncate(display_text.len() - lo_str_len);
                     let val64 = (u64::from(av) << 32) | lo;
                     let _ = write!(display_text, " 0x{val64:X}");
@@ -329,10 +301,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         if value_str.is_empty() {
             return None;
         }
-        let value: i64 = if value_str.len() >= 2
-            && (value_str.get(0..2).unwrap_or("  ") == "0x"
-                || value_str.get(0..2).unwrap_or("  ") == "0X")
-        {
+        let value: i64 = if value_str.len() >= 2 && (value_str.get(0..2).unwrap_or("  ") == "0x" || value_str.get(0..2).unwrap_or("  ") == "0X") {
             let without_prefix = value_str.trim_start_matches("0x").trim_start_matches("0X");
             i64::from_str_radix(without_prefix, 16).unwrap_or(0)
         } else {
@@ -350,9 +319,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         if count_str.is_empty() {
             return None;
         }
-        let byte_count: i64 = if count_str.len() >= 2
-            && (count_str.get(0..2).unwrap_or("  ") == "0x"
-                || count_str.get(0..2).unwrap_or("  ") == "0X")
+        let byte_count: i64 = if count_str.len() >= 2 && (count_str.get(0..2).unwrap_or("  ") == "0x" || count_str.get(0..2).unwrap_or("  ") == "0X")
         {
             let without_prefix = count_str.trim_start_matches("0x").trim_start_matches("0X");
             i64::from_str_radix(without_prefix, 16).unwrap_or(0)
@@ -383,14 +350,8 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
             let mut output_hex = String::default();
             // Length is based on multiples of 4
-  
-            output_hex.push_str(
-                format!(
-                    "{:08X}",
-                    (input_string.len() + 4 - input_string.len() % 4) / 4
-                )
-                .as_str(),
-            ); // Add length of string to start
+
+            output_hex.push_str(format!("{:08X}", (input_string.len() + 4 - input_string.len() % 4) / 4).as_str()); // Add length of string to start
             for char in input_string.as_bytes() {
                 let hex = format!("{char:02X}");
                 output_hex.push_str(&hex);
@@ -405,9 +366,7 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
     } else {
         // Check if next word is a number
         // let int_value: i64;
-        let int_value = if second_word.len() >= 2
-            && (second_word.get(0..2).unwrap_or("  ") == "0x"
-                || second_word.get(0..2).unwrap_or("  ") == "0X")
+        let int_value = if second_word.len() >= 2 && (second_word.get(0..2).unwrap_or("  ") == "0x" || second_word.get(0..2).unwrap_or("  ") == "0X")
         {
             let without_prefix1 = second_word.trim_start_matches("0x");
             let without_prefix2 = without_prefix1.trim_start_matches("0X");
@@ -541,12 +500,7 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
 /// Return number of bytes of data.
 ///
 /// From instruction name, option of number of bytes of data, or 0 is error.
-pub fn num_data_bytes(
-    line: &str,
-    msg_list: &mut MsgList,
-    line_number: u32,
-    filename: String,
-) -> u32 {
+pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: String) -> u32 {
     data_as_bytes(line).map_or_else(
         || {
             msg_list.push(
@@ -565,7 +519,9 @@ pub fn num_data_bytes(
 ///
 /// Removes comments and starting and training whitespace.
 pub fn return_comments(input: &str) -> String {
-    input.find("//").map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
+    input
+        .find("//")
+        .map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
 }
 
 /// Strip trailing comments.
@@ -577,7 +533,6 @@ pub fn strip_comments(input: &str) -> String {
         |location| input.get(0..location).unwrap_or("").trim().to_owned(),
     )
 }
-
 
 /// Parse expected UART hex values from source file comment headers.
 ///
@@ -592,10 +547,7 @@ pub fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
         let comment_body = trimmed.get(2..).unwrap_or("").trim();
         if comment_body.len() >= 8 {
             let candidate = comment_body.get(..8).unwrap_or("");
-            if candidate.len() == 8
-                && candidate.chars().all(|c| c.is_ascii_hexdigit())
-                && candidate == candidate.to_ascii_uppercase()
-            {
+            if candidate.len() == 8 && candidate.chars().all(|c| c.is_ascii_hexdigit()) && candidate == candidate.to_ascii_uppercase() {
                 expected.push(candidate.to_owned());
             }
         }
@@ -685,7 +637,10 @@ mod tests {
         // 10 × 8-char groups (8 header + "12344321" + entry); count=20.
         // sum: "28000000"→40 (0x28), "12344321"→21845, "01000000"→1 = 21886.
         // chk = (21886+20)%65536 = 21906 = 0x5592; LE → "92550000".
-        assert_eq!(bin_string, Some("S28000000000000000000000000000000000000000000000000000000000000001234432101000000Z92550000X".to_owned()));
+        assert_eq!(
+            bin_string,
+            Some("S28000000000000000000000000000000000000000000000000000000000000001234432101000000Z92550000X".to_owned())
+        );
     }
 
     #[test]
@@ -720,10 +675,7 @@ mod tests {
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Multiple start addresses found"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Multiple start addresses found");
     }
 
     #[test]
@@ -758,19 +710,13 @@ mod tests {
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "No start address found"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "No start address found");
     }
 
     #[test]
     // Test that comment is stripped
     fn test_strip_comments() {
-        assert_eq!(
-            strip_comments("Hello, world! //This is a comment"),
-            "Hello, world!"
-        );
+        assert_eq!(strip_comments("Hello, world! //This is a comment"), "Hello, world!");
         assert_eq!(strip_comments("Hello, world! //"), "Hello, world!");
         assert_eq!(strip_comments(""), "");
     }
@@ -778,10 +724,7 @@ mod tests {
     #[test]
     // Test that comment is returned
     fn test_return_comments() {
-        assert_eq!(
-            return_comments("Hello, world! //This is a comment"),
-            "This is a comment"
-        );
+        assert_eq!(return_comments("Hello, world! //This is a comment"), "This is a comment");
         assert_eq!(return_comments("Hello, world! //"), "");
         assert_eq!(return_comments("Hello, world!"), "");
     }
@@ -930,10 +873,7 @@ mod tests {
         let input = String::from("#TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
         assert_eq!(output, 0);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Error in data definition for #TEST"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Error in data definition for #TEST");
     }
 
     #[test]
@@ -941,7 +881,8 @@ mod tests {
     fn test_data_as_bytes1() {
         let input = String::from("#TEST 3");
         let output = data_as_bytes(&input);
-        assert_eq!(output, Some("000000000000000000000000000000000000000000000000".to_owned())); // 3 × 16 hex chars per 64-bit word
+        assert_eq!(output, Some("000000000000000000000000000000000000000000000000".to_owned()));
+        // 3 × 16 hex chars per 64-bit word
     }
 
     #[test]
@@ -1073,11 +1014,7 @@ mod tests {
     #[test]
     // Test parsing returns empty vec when no expected values
     fn test_parse_expected_uart_values2() {
-        let lines = vec![
-            "// This is a comment".to_owned(),
-            "// No hex values here".to_owned(),
-            "_start".to_owned(),
-        ];
+        let lines = vec!["// This is a comment".to_owned(), "// No hex values here".to_owned(), "_start".to_owned()];
         let result = parse_expected_uart_values(&lines);
         assert!(result.is_empty());
     }
@@ -1086,9 +1023,9 @@ mod tests {
     // Test parsing ignores non-comment lines and short hex values
     fn test_parse_expected_uart_values3() {
         let lines = vec![
-            "00000080".to_owned(),              // not a comment
-            "// 0x05".to_owned(),               // too short
-            "//   ZZZZZZZZ  (invalid)".to_owned(), // not hex
+            "00000080".to_owned(),                   // not a comment
+            "// 0x05".to_owned(),                    // too short
+            "//   ZZZZZZZZ  (invalid)".to_owned(),   // not hex
             "//   0000abcd  (lowercase)".to_owned(), // lowercase hex - should not match
             "//   0000ABCD  (uppercase)".to_owned(), // valid
         ];

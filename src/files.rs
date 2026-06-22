@@ -124,15 +124,8 @@ pub fn output_macros_opcodes_html(
         // Open the html file
         let html_output_file = File::create(html_filename.clone());
         if html_output_file.is_err() {
-            msg_list.push(
-                format!("Error opening file {html_filename}"),
-                None,
-                None,
-                MessageType::Warning,
-            );
-            return Err(html_output_file
-                .err()
-                .unwrap_or_else(|| Error::other("Unknown error")));
+            msg_list.push(format!("Error opening file {html_filename}"), None, None, MessageType::Warning);
+            return Err(html_output_file.err().unwrap_or_else(|| Error::other("Unknown error")));
         }
         let Ok(mut html_file) = html_output_file else {
             return Err(Error::other("Unknown error"));
@@ -140,46 +133,47 @@ pub fn output_macros_opcodes_html(
         html_file.write_all(b"<!DOCTYPE html>\n")?;
         html_file.write_all(b"<html>\n<head>\n<style>\n")?;
         html_file.write_all(b"#opcodes { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
-        html_file
-            .write_all(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n")?;
+        html_file.write_all(b"#opcodes td, #opcodes th { border: 1px solid #ddd; padding: 8px;}\n")?;
         //file.write_all(b"#opcodes tr:nth-child(even){background-color: #f2f2f2;}\n")?; // Banded table
         html_file.write_all(b"#opcodes tr:hover {background-color: #ddd;}\n")?;
-        html_file.write_all(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n")?;
-        html_file.write_all(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
         html_file
-            .write_all(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n")?;
+            .write_all(b"#opcodes th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #04AA6D; color: white;}\n")?;
+        html_file.write_all(b"#macros { font-family: Arial, Helvetica, sans-serif; border-collapse: collapse; width: 100%;}\n")?;
+        html_file.write_all(b"#macros td, #macros th { border: 1px solid #ddd; padding: 8px;}\n")?;
         //file.write_all(b"#macros tr:nth-child(even){background-color: #f2f2f2;}\n");  // Banded table
         html_file.write_all(b"#macros tr:hover {background-color: #ddd;}\n")?;
-        html_file.write_all(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n")?;
+        html_file
+            .write_all(b"#macros th { padding-top: 12px; padding-bottom: 12px; text-align: left; background-color: #3004aa; color: white;}\n")?;
         html_file.write_all(b"</style>\n</head>\n<body>\n")?;
         html_file.write_all(b"<h1>Klauss ISA Instruction set and macros</h1>\n")?;
-        html_file
-            .write_all(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes())?;
+        html_file.write_all(format!("Created {}", Local::now().format("%d/%m/%Y %H:%M")).as_bytes())?;
         html_file.write_all(b"<h2>Opcode Table</h2>\n\n<table id=\"opcodes\">\n")?;
-        html_file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n")?;
+        html_file.write_all(
+            b"<tr>\n    <th>Name</th>\n    <th>Opcode</th>\n    <th>Variables</th>\n    <th>Registers</th>\n    <th>Description</th>\n</tr>\n",
+        )?;
 
         let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
-        sorted_opcodes
-            .sort_by(|first: &Opcode, second: &Opcode| first.hex_code.cmp(&second.hex_code));
+        sorted_opcodes.sort_by(|first: &Opcode, second: &Opcode| first.hex_code.cmp(&second.hex_code));
 
         let mut old_section = String::default();
         for opcode in sorted_opcodes.clone() {
             if old_section != opcode.section {
                 html_file.write_all(
+                    format!(
+                        "<tr>\n    <td colspan=\"5\" style=\"background-color:#b0b0b0;\"><b>{}</b></td>\n</tr>\n",
+                        opcode.section
+                    )
+                    .as_bytes(),
+                )?;
+                old_section.clone_from(&opcode.section);
+            }
+            html_file.write_all(
                 format!(
-                    "<tr>\n    <td colspan=\"5\" style=\"background-color:#b0b0b0;\"><b>{}</b></td>\n</tr>\n",
-                    opcode.section
+                    "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
+                    opcode.text_name, opcode.hex_code, opcode.variables, opcode.registers, opcode.comment
                 )
                 .as_bytes(),
             )?;
-                old_section.clone_from(&opcode.section);
-            }
-            html_file.write_all(format!("<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
-            opcode.text_name,
-            opcode.hex_code,
-            opcode.variables,
-            opcode.registers,
-            opcode.comment).as_bytes())?;
         }
 
         html_file.write_all(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n")?;
@@ -191,19 +185,16 @@ pub fn output_macros_opcodes_html(
         for macro_item in sorted_macros.clone() {
             html_file.write_all(
                 format!(
-                "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
-                macro_item.name,
-                macro_item.variables,
-                macro_item.comment,
-                macro_item
-                    .items
-                    .iter()
-                    .fold(String::default(), |mut cur, nxt| {
+                    "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
+                    macro_item.name,
+                    macro_item.variables,
+                    macro_item.comment,
+                    macro_item.items.iter().fold(String::default(), |mut cur, nxt| {
                         cur.push_str("  ");
                         cur.push_str(nxt);
                         cur
                     })
-            )
+                )
                 .trim()
                 .as_bytes(),
             )?;
@@ -211,12 +202,7 @@ pub fn output_macros_opcodes_html(
         html_file.write_all(b"</table>\n")?;
         html_file.write_all(b"</body>\n</html>\n")?;
 
-        output_macros_opcodes_json(
-            filename_stem.clone(),
-            &sorted_opcodes,
-            &sorted_macros,
-            msg_list,
-        )?;
+        output_macros_opcodes_json(filename_stem.clone(), &sorted_opcodes, &sorted_macros, msg_list)?;
     }
     // Write out the Textmate
     if textmate_flag {
@@ -229,12 +215,7 @@ pub fn output_macros_opcodes_html(
 ///
 /// Writes all macros and opcodes to JSON files.
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-pub fn output_macros_opcodes_json(
-    filename_stem: String,
-    opcodes: &[Opcode],
-    macros: &[Macro],
-    msg_list: &mut MsgList,
-) -> Result<(), Error> {
+pub fn output_macros_opcodes_json(filename_stem: String, opcodes: &[Opcode], macros: &[Macro], msg_list: &mut MsgList) -> Result<(), Error> {
     let mut json_opcode_filename = filename_stem.clone();
     json_opcode_filename.push_str("_opcodes.json");
     let mut json_macro_filename = filename_stem;
@@ -257,46 +238,24 @@ pub fn output_macros_opcodes_json(
     // Write out the JSON opcode file
     let json_opcode_output_file = File::create(json_opcode_filename.clone());
     if json_opcode_output_file.is_err() {
-        msg_list.push(
-            format!("Error opening file {json_opcode_filename}"),
-            None,
-            None,
-            MessageType::Warning,
-        );
-        return Err(json_opcode_output_file
-            .err()
-            .unwrap_or_else(|| Error::other("Unknown error")));
+        msg_list.push(format!("Error opening file {json_opcode_filename}"), None, None, MessageType::Warning);
+        return Err(json_opcode_output_file.err().unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_opcode_file) = json_opcode_output_file else {
         return Err(Error::other("Unknown error"));
     };
-    json_opcode_file.write_all(
-        serde_json::to_string_pretty(&opcodes)
-            .unwrap_or_default()
-            .as_bytes(),
-    )?;
+    json_opcode_file.write_all(serde_json::to_string_pretty(&opcodes).unwrap_or_default().as_bytes())?;
 
     // Write out the JSON macro file
     let json_macro_output_file = File::create(json_macro_filename.clone());
     if json_macro_output_file.is_err() {
-        msg_list.push(
-            format!("Error opening file {json_macro_filename}"),
-            None,
-            None,
-            MessageType::Warning,
-        );
-        return Err(json_macro_output_file
-            .err()
-            .unwrap_or_else(|| Error::other("Unknown error")));
+        msg_list.push(format!("Error opening file {json_macro_filename}"), None, None, MessageType::Warning);
+        return Err(json_macro_output_file.err().unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_macro_file) = json_macro_output_file else {
         return Err(Error::other("Unknown error"));
     };
-    json_macro_file.write_all(
-        serde_json::to_string_pretty(&macros)
-            .unwrap_or_default()
-            .as_bytes(),
-    )?;
+    json_macro_file.write_all(serde_json::to_string_pretty(&macros).unwrap_or_default().as_bytes())?;
     Ok(())
 }
 
@@ -304,11 +263,7 @@ pub fn output_macros_opcodes_json(
 ///
 /// Writes all data of opcodes to textmate file.
 #[cfg(not(tarpaulin_include))]
-fn output_opcodes_textmate(
-    filename_stem: String,
-    opcodes: &[Opcode],
-    msg_list: &mut MsgList,
-) -> Result<(), Error> {
+fn output_opcodes_textmate(filename_stem: String, opcodes: &[Opcode], msg_list: &mut MsgList) -> Result<(), Error> {
     let mut textmate_opcode_filename = filename_stem;
     textmate_opcode_filename.push_str("_textmate.txt");
     msg_list.push(
@@ -320,15 +275,8 @@ fn output_opcodes_textmate(
 
     let textmate_opcode_output_file = File::create(textmate_opcode_filename.clone());
     if textmate_opcode_output_file.is_err() {
-        msg_list.push(
-            format!("Error opening file {textmate_opcode_filename}"),
-            None,
-            None,
-            MessageType::Warning,
-        );
-        return Err(textmate_opcode_output_file
-            .err()
-            .unwrap_or_else(|| Error::other("Unknown error")));
+        msg_list.push(format!("Error opening file {textmate_opcode_filename}"), None, None, MessageType::Warning);
+        return Err(textmate_opcode_output_file.err().unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
         return Err(Error::other("Unknown error"));
@@ -355,19 +303,10 @@ fn output_opcodes_textmate(
 /// Open text file and return as vector of strings.
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-pub fn read_file_to_vector(
-    filename: &str,
-    msg_list: &mut MsgList,
-    opened_files: &mut Vec<String>,
-) -> Option<Vec<InputData>> {
+pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList, opened_files: &mut Vec<String>) -> Option<Vec<InputData>> {
     let file_result = File::open(filename);
     if file_result.is_err() {
-        msg_list.push(
-            format!("Unable to open file {filename}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.push(format!("Unable to open file {filename}"), None, None, MessageType::Error);
         return None;
     }
 
@@ -375,12 +314,7 @@ pub fn read_file_to_vector(
 
     for file_found in opened_files.clone() {
         if file_found == filename {
-            msg_list.push(
-                format!("Recursive include of file {filename}"),
-                None,
-                None,
-                MessageType::Error,
-            );
+            msg_list.push(format!("Recursive include of file {filename}"), None, None, MessageType::Error);
             return None;
         }
     }
@@ -408,16 +342,10 @@ pub fn read_file_to_vector(
                     }
 
                     // Get the include file from the same directory as the previous file
-                    let parent = Path::new(filename)
-                        .parent()
-                        .unwrap_or_else(|| Path::new(""));
-                    let new_include_file = parent
-                        .join(include_file.unwrap_or_default())
-                        .to_string_lossy()
-                        .into_owned();
+                    let parent = Path::new(filename).parent().unwrap_or_else(|| Path::new(""));
+                    let new_include_file = parent.join(include_file.unwrap_or_default()).to_string_lossy().into_owned();
 
-                    let include_lines =
-                        read_file_to_vector(&new_include_file, msg_list, opened_files);
+                    let include_lines = read_file_to_vector(&new_include_file, msg_list, opened_files);
                     if include_lines.is_none() {
                         msg_list.push(
                             format!("Unable to open include file {new_include_file} in {filename}"),
@@ -506,10 +434,7 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
 /// Output the bitcode to given file.
 ///
 /// Based on the bitcode string outputs to file.
-pub fn write_binary_output_file(
-    filename: &impl AsRef<Path>,
-    output_string: &str,
-) -> Result<(), Error> {
+pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str) -> Result<(), Error> {
     match File::create(filename) {
         Ok(mut file) => {
             match file.write_all(output_string.as_bytes()) {
@@ -531,11 +456,7 @@ pub fn write_binary_output_file(
 /// Output the code details file to given filename.
 ///
 /// Writes all data to the detailed code file.
-pub fn write_code_output_file(
-    filename: impl AsRef<Path> + Copy,
-    pass2: &mut Vec<Pass2>,
-    msg_list: &mut MsgList,
-) -> Result<(), Error> {
+pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Result<(), Error> {
     let mut file = match File::create(filename) {
         Ok(file) => file,
         #[cfg(not(tarpaulin_include))] // Can't test error creating file
@@ -566,9 +487,7 @@ pub fn write_code_output_file(
         ("0000000000000000".to_owned(), "(reserved)"),
     ];
     for (i, (value, comment)) in heap_header.iter().enumerate() {
-        match file.write_all(
-            format!("0x{:08X}: {value:<33} -- {comment}\n", i * 8).as_bytes(),
-        ) {
+        match file.write_all(format!("0x{:08X}: {value:<33} -- {comment}\n", i * 8).as_bytes()) {
             Ok(()) => {}
             #[cfg(not(tarpaulin_include))]
             Err(err) => return Err(err),
@@ -597,20 +516,11 @@ pub fn write_code_output_file(
                 );
             }
         } else if pass.line_type == LineType::Label {
-            out_line = format!(
-                "0x{:08X}:                   -- {}\n",
-                pass.program_counter, pass.input_text_line
-            );
+            out_line = format!("0x{:08X}:                   -- {}\n", pass.program_counter, pass.input_text_line);
         } else if pass.line_type == LineType::Error {
-            out_line = format!(
-                "Error                         -- {}\n",
-                pass.input_text_line
-            );
+            out_line = format!("Error                         -- {}\n", pass.input_text_line);
         } else {
-            out_line = format!(
-                "                              -- {}\n",
-                pass.input_text_line
-            );
+            out_line = format!("                              -- {}\n", pass.input_text_line);
         }
         match file.write_all(out_line.as_bytes()) {
             Ok(()) => {}
@@ -843,10 +753,7 @@ mod test {
                 },
             ]
         );
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Comment not terminated in file test1.kla"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Comment not terminated in file test1.kla");
     }
 
     #[test]
@@ -867,20 +774,11 @@ mod test {
     #[test]
     // Check functions returns correct filename from !include
     fn test_get_include_filename() {
-        assert_eq!(
-            get_include_filename("!include myfile.name"),
-            Some("myfile.name".to_owned())
-        );
+        assert_eq!(get_include_filename("!include myfile.name"), Some("myfile.name".to_owned()));
         assert_eq!(get_include_filename("test_line"), None);
-        assert_eq!(
-            get_include_filename("!include myfile.name extra words"),
-            Some("myfile.name".to_owned())
-        );
+        assert_eq!(get_include_filename("!include myfile.name extra words"), Some("myfile.name".to_owned()));
         assert_eq!(get_include_filename("!include"), Some(String::default()));
-        assert_eq!(
-            get_include_filename("!include //test comment"),
-            Some(String::default())
-        );
+        assert_eq!(get_include_filename("!include //test comment"), Some(String::default()));
     }
 
     #[test]
@@ -889,9 +787,7 @@ mod test {
         assert_eq!(filename_stem(&"file.type".to_owned()), "file");
         assert_eq!(filename_stem(&"file".to_owned()), "file");
         assert_eq!(
-            filename_stem(&format!(
-                "{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file.kla"
-            )),
+            filename_stem(&format!("{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file.kla")),
             format!("{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file")
         );
         assert_eq!(
@@ -903,15 +799,9 @@ mod test {
     #[test]
     // Check for formatting of codes used for debug file
     fn test_format_opcodes() {
-        assert_eq!(
-            format_opcodes(&"0000000000000000".to_owned()),
-            "00000000 00000000"
-        );
+        assert_eq!(format_opcodes(&"0000000000000000".to_owned()), "00000000 00000000");
         assert_eq!(format_opcodes(&"0000".to_owned()), "0000              ");
-        assert_eq!(
-            format_opcodes(&"0123456789ABCDEF".to_owned()),
-            "01234567 89ABCDEF"
-        );
+        assert_eq!(format_opcodes(&"0123456789ABCDEF".to_owned()), "01234567 89ABCDEF");
         assert_eq!(format_opcodes(&"12345678".to_owned()), "12345678         ");
         assert_eq!(format_opcodes(&"123".to_owned()), "123");
     }
@@ -922,10 +812,7 @@ mod test {
         let mut msg_list = MsgList::new();
         let mut opened_files: Vec<String> = Vec::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list, &mut opened_files);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Unable to open file ////xxxxxxx"
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Unable to open file ////xxxxxxx");
     }
 
     #[test]
@@ -946,10 +833,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
-        assert_eq!(
-            lines.clone().unwrap().first().unwrap_or_default().input,
-            "Test line in file"
-        );
+        assert_eq!(lines.clone().unwrap().first().unwrap_or_default().input, "Test line in file");
         assert_eq!(lines.unwrap().len(), 4);
 
         drop(tmp_file1);
@@ -982,30 +866,15 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
         assert_eq!(
-            lines
-                .clone()
-                .unwrap_or_default()
-                .first()
-                .unwrap_or_default()
-                .input,
+            lines.clone().unwrap_or_default().first().unwrap_or_default().input,
             "Test line in file 1 line 0"
         );
         assert_eq!(
-            lines
-                .clone()
-                .unwrap_or_default()
-                .get(2)
-                .unwrap_or_default()
-                .input,
+            lines.clone().unwrap_or_default().get(2).unwrap_or_default().input,
             "Test line in file 2 line 1"
         );
         assert_eq!(
-            lines
-                .clone()
-                .unwrap_or_default()
-                .get(6)
-                .unwrap_or_default()
-                .input,
+            lines.clone().unwrap_or_default().get(6).unwrap_or_default().input,
             "Test line in file 1 line 2"
         );
         assert_eq!(lines.unwrap().len(), 7);

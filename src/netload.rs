@@ -9,9 +9,9 @@
 
 use crate::helper::human_bytes;
 use crate::messages::{MessageType, MsgList};
-use core::time::Duration;
 use std::io::{Error, Read as _, Write as _};
 use std::net::TcpStream;
+use std::time::Duration;
 
 /// Protocol magic — `b"KNET"` read as a little-endian u32 (matches the board's
 /// `NETBOOT_MAGIC`).
@@ -29,12 +29,7 @@ fn image_checksum(image: &[u8]) -> u32 {
     let mut sum: u32 = 0;
     let mut i = 0;
     while i + 4 <= image.len() {
-        sum = sum.wrapping_add(u32::from_le_bytes([
-            image[i],
-            image[i + 1],
-            image[i + 2],
-            image[i + 3],
-        ]));
+        sum = sum.wrapping_add(u32::from_le_bytes([image[i], image[i + 1], image[i + 2], image[i + 3]]));
         i += 4;
     }
     sum
@@ -42,20 +37,9 @@ fn image_checksum(image: &[u8]) -> u32 {
 
 /// Connect to the board and stream the DDR image, then verify the reply.
 #[cfg(not(tarpaulin_include))] // Cannot test live TCP in tarpaulin
-pub fn net_load(
-    ip: &str,
-    port: u16,
-    image: &[u8],
-    entry_pc: u32,
-    msg_list: &mut MsgList,
-) -> Result<(), Error> {
+pub fn net_load(ip: &str, port: u16, image: &[u8], entry_pc: u32, msg_list: &mut MsgList) -> Result<(), Error> {
     let addr = format!("{ip}:{port}");
-    msg_list.push(
-        format!("netboot: connecting to {addr}"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.push(format!("netboot: connecting to {addr}"), None, None, MessageType::Information);
 
     let mut stream = TcpStream::connect(&addr)?;
     let _ = stream.set_nodelay(true);
@@ -80,12 +64,7 @@ pub fn net_load(
     let board_cks = u32::from_le_bytes([ack[4], ack[5], ack[6], ack[7]]);
 
     if status != 0 {
-        msg_list.push(
-            format!("Board rejected image (status {status})"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.push(format!("Board rejected image (status {status})"), None, None, MessageType::Error);
     } else if board_cks != host_cks {
         msg_list.push(
             format!("Checksum mismatch: host 0x{host_cks:08X}, board 0x{board_cks:08X}"),

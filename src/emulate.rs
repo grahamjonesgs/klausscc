@@ -17,7 +17,6 @@
 //! table — so the emulator is a genuine second implementation, not a re-run of
 //! the assembler.
 
-
 use std::fmt::Write as _;
 
 /// Heap-header byte size (4 doublewords) — code starts here (0x20).
@@ -60,7 +59,10 @@ pub struct EmulateResult {
 }
 
 /// The architectural machine state.
-#[allow(clippy::struct_excessive_bools, reason = "each bool is a distinct hardware condition flag (zero/sign/carry/overflow/equal/less/ult)")]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "each bool is a distinct hardware condition flag (zero/sign/carry/overflow/equal/less/ult)"
+)]
 pub struct Cpu {
     /// General-purpose registers R0..R15 (64-bit).
     regs: [u64; 16],
@@ -273,11 +275,10 @@ impl Cpu {
                 self.trace_line(t, count, pc, word);
             }
         }
-        let stop = self.stop.clone().unwrap_or(if self.halted {
-            StopReason::Halt
-        } else {
-            StopReason::InstructionCap
-        });
+        let stop = self
+            .stop
+            .clone()
+            .unwrap_or(if self.halted { StopReason::Halt } else { StopReason::InstructionCap });
         EmulateResult {
             uart: std::mem::take(&mut self.uart),
             instructions: count,
@@ -406,8 +407,8 @@ impl Cpu {
             } // XORR
             0x0006 => Some(self.add_flags(a, b, u64::from(self.carry))), // ADDC
             0x0007 => Some(self.sub_flags(a, b, u64::from(self.carry))), // SUBC
-            0x0010 => Some((a as i64).wrapping_mul(b as i64) as u64),    // MULR
-            0x0011 => Some(a.wrapping_mul(b)),                           // MULUR
+            0x0010 => Some((a as i64).wrapping_mul(b as i64) as u64), // MULR
+            0x0011 => Some(a.wrapping_mul(b)),       // MULUR
             0x0012 => Some(((i128::from(a as i64) * i128::from(b as i64)) >> 64) as u64), // MULHR
             0x0013 => Some(((u128::from(a) * u128::from(b)) >> 64) as u64), // MULHUR
             0x0014 => Some(if b == 0 {
@@ -418,18 +419,14 @@ impl Cpu {
             // div-by-zero is non-trapping with an all-ones result (board semantics), not checked_div
             #[allow(clippy::manual_checked_ops, reason = "div-by-zero returns all-ones, not None")]
             0x0015 => Some(if b == 0 { 0xFFFF_FFFF_FFFF_FFFF } else { a / b }), // DIVUR
-            0x0016 => Some(if b == 0 {
-                a
-            } else {
-                (a as i64).wrapping_rem(b as i64) as u64
-            }), // MODR
-            0x0017 => Some(if b == 0 { a } else { a % b }), // MODUR
-            0x0020 => Some(a << sh),                        // SHLR (zero set below)
-            0x0021 => Some(a >> sh),                        // SHRR
-            0x0022 => Some(((a as i64) >> sh) as u64),      // SARR
-            0x0023 => Some(a.rotate_left(sh)),              // ROLR
-            0x0024 => Some(a.rotate_right(sh)),             // RORR
-            0x0030 => Some(u64::from(a == b)),              // CMPEQR (no flags)
+            0x0016 => Some(if b == 0 { a } else { (a as i64).wrapping_rem(b as i64) as u64 }), // MODR
+            0x0017 => Some(if b == 0 { a } else { a % b }),                                    // MODUR
+            0x0020 => Some(a << sh),                                                           // SHLR (zero set below)
+            0x0021 => Some(a >> sh),                                                           // SHRR
+            0x0022 => Some(((a as i64) >> sh) as u64),                                         // SARR
+            0x0023 => Some(a.rotate_left(sh)),                                                 // ROLR
+            0x0024 => Some(a.rotate_right(sh)),                                                // RORR
+            0x0030 => Some(u64::from(a == b)),                                                 // CMPEQR (no flags)
             0x0031 => Some(u64::from(a != b)),
             0x0032 => Some(u64::from((a as i64) < (b as i64))),
             0x0033 => Some(u64::from((a as i64) <= (b as i64))),
@@ -464,7 +461,7 @@ impl Cpu {
     /// RV / R group: opcode classes 0x08?, 0x09?, 0x0A?, 0x0B?, 0x0F?
     /// (the register-immediate arithmetic/logic/bit/rotate/extend block).
     /// `op12` = word[15:4]; the destination register is rs2 = word[3:0].
-    fn exec_rv_group(&mut self, op12: u32, full: u32, f: &Fields, imm: u32) {
+    fn exec_rv_group(&mut self, op12: u32, _full: u32, f: &Fields, imm: u32) {
         let rd = f.rs2; // for these forms reg is in [3:0]
         let rs = self.regs[rd];
         let imm_s = i64::from(imm as i32) as u64; // sign-extended
@@ -718,7 +715,6 @@ impl Cpu {
                 pc_adv = 12;
             }
             _ => {
-                let _ = full;
                 self.stop = Some(StopReason::InvalidOpcode(op12 << 4));
             }
         }
@@ -1116,13 +1112,13 @@ impl Cpu {
     fn exec_indexed_sub(&mut self, op: u32, f: &Fields, imm: u32) {
         let ea = (self.regs[f.rs2] as u32).wrapping_add(imm);
         match op {
-            0xC0 => self.regs[f.rs1] = self.read_sub(ea & !3, 4), // LDIDX32 (& ~3)
-            0xC1 => self.write_sub(ea & !3, self.regs[f.rs1], 4), // STIDX32
-            0xC2 => self.regs[f.rs1] = self.read_sub(ea & !1, 2), // LDIDX16
-            0xC3 => self.write_sub(ea & !1, self.regs[f.rs1], 2), // STIDX16
-            0xC4 => self.regs[f.rs1] = self.read_sub(ea, 1),      // LDIDX8
-            0xC5 => self.write_sub(ea, self.regs[f.rs1], 1),      // STIDX8
-            0xC6 => self.regs[f.rs1] = i64::from(self.read_sub(ea, 1) as i8) as u64, // LDIDX8_S
+            0xC0 => self.regs[f.rs1] = self.read_sub(ea & !3, 4),                          // LDIDX32 (& ~3)
+            0xC1 => self.write_sub(ea & !3, self.regs[f.rs1], 4),                          // STIDX32
+            0xC2 => self.regs[f.rs1] = self.read_sub(ea & !1, 2),                          // LDIDX16
+            0xC3 => self.write_sub(ea & !1, self.regs[f.rs1], 2),                          // STIDX16
+            0xC4 => self.regs[f.rs1] = self.read_sub(ea, 1),                               // LDIDX8
+            0xC5 => self.write_sub(ea, self.regs[f.rs1], 1),                               // STIDX8
+            0xC6 => self.regs[f.rs1] = i64::from(self.read_sub(ea, 1) as i8) as u64,       // LDIDX8_S
             0xC7 => self.regs[f.rs1] = i64::from(self.read_sub(ea & !1, 2) as i16) as u64, // LDIDX16_S
             _ => self.stop = Some(StopReason::InvalidOpcode(op << 8)),
         }
@@ -1133,8 +1129,8 @@ impl Cpu {
     fn exec_indexed64a(&mut self, op: u32, f: &Fields, imm: u32) {
         let ea = ((self.regs[f.rs2] as u32).wrapping_add(imm)) & !7;
         match op {
-            0xFC => self.regs[f.rs1] = self.read64(ea),      // LDIDX64A
-            0xFD => self.write64(ea, self.regs[f.rs1]),      // STIDX64A
+            0xFC => self.regs[f.rs1] = self.read64(ea), // LDIDX64A
+            0xFD => self.write64(ea, self.regs[f.rs1]), // STIDX64A
             _ => self.stop = Some(StopReason::InvalidOpcode(op << 8)),
         }
         self.pc = self.pc.wrapping_add(8);
@@ -1145,12 +1141,7 @@ impl Cpu {
 ///
 /// Returns the result and, if `want_trace`, the full trace text.
 #[must_use]
-pub fn emulate_image(
-    image: &[u8],
-    entry: u32,
-    max_instructions: u64,
-    want_trace: bool,
-) -> (EmulateResult, Option<String>) {
+pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, want_trace: bool) -> (EmulateResult, Option<String>) {
     let mut cpu = Cpu::new(image, entry);
     let mut trace = want_trace.then(String::new);
     let result = cpu.run(max_instructions, trace.as_mut());
@@ -1293,13 +1284,17 @@ mod tests {
         // 0x40 SETR P 1 (rd=15) (8)
         // 0x48 HALT
         let words = [
-            0x0000_0800, 5,        // SETR A 5
-            0x0000_0801, 0x10,     // SETR B 0x10
-            0x0000_0501,           // CMPRR A B
-            0x0000_1015, 0x40,     // JMPLT 0x40
-            0x0000_F011,           // HALT (fail)
-            0x0000_080F, 1,        // SETR P 1   (P = R15)
-            0x0000_F011,           // HALT
+            0x0000_0800,
+            5, // SETR A 5
+            0x0000_0801,
+            0x10,        // SETR B 0x10
+            0x0000_0501, // CMPRR A B
+            0x0000_1015,
+            0x40,        // JMPLT 0x40
+            0x0000_F011, // HALT (fail)
+            0x0000_080F,
+            1,           // SETR P 1   (P = R15)
+            0x0000_F011, // HALT
         ];
         let cpu = run_words(&words);
         assert_eq!(cpu.regs[15] as u32, 1, "JMPLT should be taken (A<B)");
@@ -1312,11 +1307,13 @@ mod tests {
         // MEMSET64RR = 0x70?? rs1=[7:4]=B(1), rs2=[3:0]=A(0) -> 0x7010
         // MEMREADRR = 0x71?? rd=[7:4]=C(2), addr=[3:0]=A(0) -> 0x7120
         let words = [
-            0x0000_0800, 0x200,           // SETR A 0x200
-            0x0000_0801, 0xDEAD_BEEF,     // SETR B 0xDEADBEEF
-            0x0000_7010,                  // MEMSET64RR B A
-            0x0000_7120,                  // MEMREADRR C A
-            0x0000_F011,                  // HALT
+            0x0000_0800,
+            0x200, // SETR A 0x200
+            0x0000_0801,
+            0xDEAD_BEEF, // SETR B 0xDEADBEEF
+            0x0000_7010, // MEMSET64RR B A
+            0x0000_7120, // MEMREADRR C A
+            0x0000_F011, // HALT
         ];
         let cpu = run_words(&words);
         assert_eq!(cpu.regs[2] as u32, 0xDEAD_BEEF);
@@ -1351,9 +1348,7 @@ mod tests {
     #[test]
     fn test_trace_memory_write_annotation() {
         // SETR A 0x200; SETR B 0xAA; MEMSET64RR B A; HALT — the store line has wr=.
-        let img = image_from_words(&[
-            0x0000_0800, 0x200, 0x0000_0801, 0xAA, 0x0000_7010, 0x0000_F011,
-        ]);
+        let img = image_from_words(&[0x0000_0800, 0x200, 0x0000_0801, 0xAA, 0x0000_7010, 0x0000_F011]);
         let (_r, trace) = emulate_image(&img, default_entry(), 100, true);
         let t = trace.expect("trace");
         // The MEMSET64RR line (3rd retired) should carry a wr= annotation at 0x200.

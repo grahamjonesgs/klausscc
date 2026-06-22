@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Struct for opcode argument.
 pub struct InputData {
-     /// File name of input file.
-     pub file_name: String,
+    /// File name of input file.
+    pub file_name: String,
     /// Text name of opcode.
     pub input: String,
     /// Line number of input file.
@@ -31,7 +31,6 @@ pub struct Opcode {
     /// Number of variables.
     pub variables: u32,
 }
-
 
 #[cfg(not(tarpaulin_include))]
 impl Default for &InputData {
@@ -73,8 +72,8 @@ impl Default for &Pass0 {
 #[derive(Debug)]
 /// Struct for Pass1.
 pub struct Pass1 {
-     /// File name of input file.
-     pub file_name: String,
+    /// File name of input file.
+    pub file_name: String,
     /// Line text.
     pub input_text_line: String,
     /// Line number of input file.
@@ -83,7 +82,6 @@ pub struct Pass1 {
     pub line_type: LineType,
     /// Program counter.
     pub program_counter: u32,
-    
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -104,16 +102,16 @@ impl Default for &Pass1 {
 #[derive(Debug, Clone)]
 /// Struct for Pass2.
 pub struct Pass2 {
-     /// File name of input file.
-     pub file_name: String,
+    /// File name of input file.
+    pub file_name: String,
     /// Line text.
     pub input_text_line: String,
     /// Line number of input file.
     pub line_counter: u32,
     /// Line type.
     pub line_type: LineType,
-     /// Opcode as string.
-     pub opcode: String,
+    /// Opcode as string.
+    pub opcode: String,
     /// Program counter.
     pub program_counter: u32,
 }
@@ -181,26 +179,14 @@ pub fn add_arguments(
     for (i, word) in words.enumerate() {
         if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
             arguments.push_str(&{
-                let this = convert_argument(
-                    &word.to_owned().to_uppercase(),
-                    msg_list,
-                    line_number,
-                    filename.to_owned(),
-                    labels,
-                );
+                let this = convert_argument(&word.to_owned().to_uppercase(), msg_list, line_number, filename.to_owned(), labels);
                 //let default = "00000000".to_owned();
                 this.unwrap_or_else(|| "00000000".to_owned())
             });
         }
         if i == num_registers as usize + 2 && num_arguments == 2 {
             arguments.push_str(&{
-                let this = convert_argument(
-                    &word.to_owned().to_uppercase(),
-                    msg_list,
-                    line_number,
-                    filename.to_owned(),
-                    labels,
-                );
+                let this = convert_argument(&word.to_owned().to_uppercase(), msg_list, line_number, filename.to_owned(), labels);
                 this.unwrap_or_else(|| "00000000".to_owned())
             });
         }
@@ -230,13 +216,7 @@ pub fn add_arguments(
 /// Updates opcode with register.
 ///
 /// Returns the hex code operand from the line, adding register values.
-pub fn add_registers(
-    opcodes: &mut Vec<Opcode>,
-    line: &String,
-    filename: String,
-    msg_list: &mut MsgList,
-    line_number: u32,
-) -> String {
+pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String, msg_list: &mut MsgList, line_number: u32) -> String {
     let num_registers = num_registers(opcodes, &(*line).to_uppercase()).unwrap_or(0);
 
     let mut opcode_found = {
@@ -254,10 +234,7 @@ pub fn add_registers(
         return "ERR     ".to_owned();
     }
 
-    let cloned_opcode_found = opcode_found
-        .get(..(8 - num_registers) as usize)
-        .unwrap_or("")
-        .to_owned();
+    let cloned_opcode_found = opcode_found.get(..(8 - num_registers) as usize).unwrap_or("").to_owned();
     opcode_found.clear();
     opcode_found.push_str(&cloned_opcode_found);
 
@@ -310,10 +287,22 @@ fn map_reg_to_hex(input: &str) -> String {
 /// Register nibble value to register name (inverse of `map_reg_to_hex`).
 fn hex_nibble_to_reg(nibble: u32) -> &'static str {
     match nibble & 0xF {
-        0x0 => "A", 0x1 => "B", 0x2 => "C", 0x3 => "D",
-        0x4 => "E", 0x5 => "F", 0x6 => "G", 0x7 => "H",
-        0x8 => "I", 0x9 => "J", 0xA => "K", 0xB => "L",
-        0xC => "M", 0xD => "N", 0xE => "O", _ => "P",
+        0x0 => "A",
+        0x1 => "B",
+        0x2 => "C",
+        0x3 => "D",
+        0x4 => "E",
+        0x5 => "F",
+        0x6 => "G",
+        0x7 => "H",
+        0x8 => "I",
+        0x9 => "J",
+        0xA => "K",
+        0xB => "L",
+        0xC => "M",
+        0xD => "N",
+        0xE => "O",
+        _ => "P",
     }
 }
 
@@ -480,14 +469,8 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         hex_code,
         registers: num_registers,
         variables: num_variables,
-        comment: input_line
-            .get(pos_comment..pos_end_comment)
-            .unwrap_or("")
-            .to_owned(),
-        text_name: input_line
-            .get(pos_name..pos_end_name)
-            .unwrap_or("")
-            .to_owned(),
+        comment: input_line.get(pos_comment..pos_end_comment).unwrap_or("").to_owned(),
+        text_name: input_line.get(pos_name..pos_end_name).unwrap_or("").to_owned(),
         section: String::default(),
     })
 }
@@ -495,10 +478,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 /// Parse file to opcode and macro vectors.
 ///
 /// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro).
-pub fn parse_vh_file(
-    input_list: Vec<InputData>,
-    msg_list: &mut MsgList,
-) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+pub fn parse_vh_file(input_list: Vec<InputData>, msg_list: &mut MsgList) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     if input_list.is_empty() {
         return (None, None);
     }
@@ -913,8 +893,7 @@ mod tests {
     #[test]
     // Test import with one argument and one register
     fn test_opcode_from_string2() {
-        let input =
-            "16'h086?: t_and_reg_value(w_var1);                  // ANDV AND register with value";
+        let input = "16'h086?: t_and_reg_value(w_var1);                  // ANDV AND register with value";
         let output = opcode_from_string(input);
         assert_eq!(
             output,
@@ -932,8 +911,7 @@ mod tests {
     #[test]
     // Test import with two arguments
     fn test_opcode_from_string3() {
-        let input =
-            "16'h0864: t_and_reg_value(w_var1,w_var2);        // MOV Move from addr to addr";
+        let input = "16'h0864: t_and_reg_value(w_var1,w_var2);        // MOV Move from addr to addr";
         let output = opcode_from_string(input);
         assert_eq!(
             output,
@@ -1116,22 +1094,10 @@ mod tests {
 
         let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Duplicate Macro definition $WAIT found"
-        );
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().line_number,
-            Some(3)
-        );
-        assert_eq!(
-            msg_list.list.get(1).unwrap_or_default().text,
-            "Duplicate Opcode CMPRR found"
-        );
-        assert_eq!(
-            msg_list.list.get(1).unwrap_or_default().line_number,
-            Some(4)
-        );
+        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Duplicate Macro definition $WAIT found");
+        assert_eq!(msg_list.list.first().unwrap_or_default().line_number, Some(3));
+        assert_eq!(msg_list.list.get(1).unwrap_or_default().text, "Duplicate Opcode CMPRR found");
+        assert_eq!(msg_list.list.get(1).unwrap_or_default().line_number, Some(4));
     }
     #[test]
     // Test empty list
