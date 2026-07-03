@@ -17,7 +17,7 @@
 //! table — so the emulator is a genuine second implementation, not a re-run of
 //! the assembler.
 
-use std::fmt::Write as _;
+use std::collections::VecDeque;
 
 /// Heap-header byte size (4 doublewords) — code starts here (0x20).
 #[allow(dead_code, reason = "used by default_entry() / tests; documents the code base")]
@@ -30,6 +30,28 @@ const MEM_SIZE: usize = 128 * 1024 * 1024;
 /// top of memory; we use a generous value below the 128 MiB ceiling so PUSH
 /// never wraps. Matches the board's full-descending stack convention.
 const STACK_TOP: u32 = 0x0800_0000;
+
+// ---- Memory-mapped I/O (bus_splitter address decode) ------------------------
+// The RTL bus_splitter routes addr[31:28] == 0xF to the MMIO space; within that,
+// addr[27:16] selects the device (0x001 == UART) and addr[15:0] is the register
+// offset.  See KlaussCPU.sv:843 (default read 0) and 2796-2800 (TX fire).
+
+/// UART device select value found in `addr[27:16]` of an MMIO access.
+const UART_DEV_SELECT: u32 = 0x001;
+/// UART `TX_DATA` register offset (`addr[15:0]`) — write transmits `data[7:0]`.
+const UART_TX_DATA: u32 = 0x0000;
+/// UART `RX_DATA` register offset — read returns the FIFO head and pops it once.
+const UART_RX_DATA: u32 = 0x0008;
+/// UART `STATUS` register offset — read returns {`RX_FULL`, `RX_EMPTY`, `TX_BUSY`}.
+const UART_STATUS: u32 = 0x0010;
+/// Modelled RX FIFO depth.  Only affects the `STATUS.RX_FULL` bit; the RTL depth is
+/// a parameter and the emulator has no external byte source that would fill it.
+const UART_RX_FIFO_DEPTH: usize = 16;
+
+/// True if `addr` decodes to the MMIO region (`addr[31:28] == 0xF`).
+const fn is_mmio(addr: u32) -> bool {
+    (addr >> 28) == 0xF
+}
 
 /// Reason the emulator stopped executing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,9 +70,8 @@ pub enum StopReason {
 
 /// Result of an emulation run.
 pub struct EmulateResult {
-    /// Captured UART output (TXR / TX* opcodes), exactly as the board would emit
-    /// for the validation harness: low-32-bit value as 8 uppercase hex chars,
-    /// one per line. See `tx_reg` for the format rationale.
+    /// Captured UART output: the byte stream written to the UART `TX_DATA` MMIO
+    /// register (`0xF001_0000`), one byte (`data[7:0]`) per store, in order.
     pub uart: String,
     /// Number of instructions retired.
     pub instructions: u64,
@@ -87,8 +108,11 @@ pub struct Cpu {
     ult: bool,
     /// Flat little-endian memory image (128 MiB).
     mem: Vec<u8>,
-    /// Captured UART output.
+    /// Captured UART output (`TX_DATA` writes, low byte per store).
     uart: String,
+    /// UART receive FIFO — head byte returned (and popped) by an `RX_DATA` read.
+    /// Empty unless a caller feeds it via [`Cpu::feed_uart_rx`].
+    uart_rx: VecDeque<u8>,
     /// True once a HALT (or other terminator) is reached.
     halted: bool,
     /// Set when an unrecoverable stop condition occurs.
@@ -130,6 +154,7 @@ impl Cpu {
             ult: false,
             mem,
             uart: String::new(),
+            uart_rx: VecDeque::new(),
             halted: false,
             stop: None,
             last_write: None,
@@ -148,7 +173,14 @@ impl Cpu {
     }
 
     /// Read a 64-bit little-endian doubleword.
-    fn read64(&self, addr: u32) -> u64 {
+    ///
+    /// Takes `&mut self` because an MMIO read (`RX_DATA`) is read-to-consume and
+    /// mutates the UART FIFO.  Instruction/immediate fetch uses `read32` instead,
+    /// so this never fires on a code fetch.
+    fn read64(&mut self, addr: u32) -> u64 {
+        if is_mmio(addr) {
+            return self.mmio_read(addr);
+        }
         let a = addr as usize;
         if a + 8 > self.mem.len() {
             return 0;
@@ -159,7 +191,13 @@ impl Cpu {
     }
 
     /// Read `n` bytes (1/2/4) zero-extended into a u64, little-endian.
-    fn read_sub(&self, addr: u32, n: usize) -> u64 {
+    fn read_sub(&mut self, addr: u32, n: usize) -> u64 {
+        if is_mmio(addr) {
+            // MMIO presents its value in the low bits; a sub-word load takes the
+            // low `n` bytes (addr[2]==0 lands the value in [31:0]).
+            let mask = if n >= 8 { u64::MAX } else { (1_u64 << (8 * n)) - 1 };
+            return self.mmio_read(addr) & mask;
+        }
         let a = addr as usize;
         let mut v: u64 = 0;
         for i in 0..n {
@@ -172,26 +210,71 @@ impl Cpu {
 
     /// Write a 64-bit doubleword, record the write for the trace.
     fn write64(&mut self, addr: u32, val: u64) {
-        let a = addr as usize;
-        if a + 8 <= self.mem.len() {
-            self.mem[a..a + 8].copy_from_slice(&val.to_le_bytes());
+        if is_mmio(addr) {
+            self.mmio_write(addr, val);
+        } else {
+            let a = addr as usize;
+            if a + 8 <= self.mem.len() {
+                self.mem[a..a + 8].copy_from_slice(&val.to_le_bytes());
+            }
         }
         self.last_write = Some((addr, 0xFF, val));
     }
 
     /// Write the low `n` bytes (1/2/4) at `addr`, little-endian; record write.
     fn write_sub(&mut self, addr: u32, val: u64, n: usize) {
+        // Byte-enable mask placed at the byte-lane within the doubleword, matching
+        // the RTL's byte-enable semantics for the trace `be` field.
+        let lane = (addr & 7) as usize;
+        let be_bits: u8 = ((1_u16 << n) - 1).rotate_left(lane as u32) as u8;
+        if is_mmio(addr) {
+            self.mmio_write(addr, val);
+            self.last_write = Some((addr & !7, be_bits, val));
+            return;
+        }
         let a = addr as usize;
         for i in 0..n {
             if a + i < self.mem.len() {
                 self.mem[a + i] = (val >> (8 * i)) as u8;
             }
         }
-        // Byte-enable mask placed at the byte-lane within the doubleword, matching
-        // the RTL's byte-enable semantics for the trace `be` field.
-        let lane = (addr & 7) as usize;
-        let be_bits: u8 = ((1_u16 << n) - 1).rotate_left(lane as u32) as u8;
         self.last_write = Some((addr & !7, be_bits, self.read64(addr & !7)));
+    }
+
+    // ---- memory-mapped I/O ---------------------------------------------------
+
+    /// Service an MMIO read (`addr[31:28] == 0xF`), returning the value in the low
+    /// bits of a 64-bit word.  `addr[27:16] == 0x001` selects the UART; every
+    /// other device/offset reads 0 (RTL `default: 0`).
+    fn mmio_read(&mut self, addr: u32) -> u64 {
+        if (addr >> 16) & 0xFFF != UART_DEV_SELECT {
+            return 0;
+        }
+        match addr & 0xFFFF {
+            UART_RX_DATA => u64::from(self.uart_rx.pop_front().unwrap_or(0)), // read-to-consume
+            UART_STATUS => {
+                // bit0 TX_BUSY (instant-transmit model → always 0),
+                // bit1 RX_EMPTY, bit2 RX_FULL.
+                let rx_empty = u64::from(self.uart_rx.is_empty());
+                let rx_full = u64::from(self.uart_rx.len() >= UART_RX_FIFO_DEPTH);
+                (rx_full << 2) | (rx_empty << 1)
+            }
+            _ => 0, // TX_DATA read-back / unmapped UART offset
+        }
+    }
+
+    /// Service an MMIO write.  A UART `TX_DATA` store transmits `data[7:0]`; every
+    /// other device/offset is ignored (RTL `default: 0`).
+    fn mmio_write(&mut self, addr: u32, data: u64) {
+        if (addr >> 16) & 0xFFF == UART_DEV_SELECT && (addr & 0xFFFF) == UART_TX_DATA {
+            self.tx_byte((data & 0xFF) as u8);
+        }
+    }
+
+    /// Feed bytes into the UART RX FIFO (for tests / an external input source).
+    #[allow(dead_code, reason = "public golden-model API; exercised by tests and external drivers")]
+    pub fn feed_uart_rx(&mut self, bytes: &[u8]) {
+        self.uart_rx.extend(bytes.iter().copied());
     }
 
     // ---- flag helpers --------------------------------------------------------
@@ -233,19 +316,7 @@ impl Cpu {
 
     // ---- UART output ---------------------------------------------------------
 
-    /// Emit a register value over UART, byte-faithful to the RTL.
-    ///
-    /// The RTL `t_tx_reg` (`uart_tasks.vh:501`) transmits the FULL 64-bit value as
-    /// 16 hex chars, most-significant nibble first, with NO trailing newline
-    /// (NEWLINE is a separate opcode, `t_tx_newline`, emitting "\n\r"). We match
-    /// that exactly so the emulator's UART byte stream cross-checks against the
-    /// RTL self-trace. (The old klatest expected-values are stale low-32/8-hex
-    /// and are superseded by the trace-based golden cross-check.)
-    fn tx_reg(&mut self, val: u64) {
-        let _ = write!(self.uart, "{val:016X}");
-    }
-
-    /// Emit a raw byte to the UART capture (TXCHARMEMR / TXSTRMEM*).
+    /// Emit a raw byte to the UART capture (a UART `TX_DATA` MMIO store).
     fn tx_byte(&mut self, b: u8) {
         self.uart.push(b as char);
     }
@@ -254,9 +325,11 @@ impl Cpu {
 
     /// Run until HALT / TRAP / cap / fault. Returns the result + trace (if any).
     ///
-    /// When `trace` is `Some`, one line per retired instruction is appended in
-    /// the `EMULATOR_ISA_SEMANTICS.md` "Trace format" layout.
-    pub fn run(&mut self, max_instructions: u64, mut trace: Option<&mut String>) -> EmulateResult {
+    /// When `trace` is `Some`, one line per retired instruction is written to the
+    /// sink in the `EMULATOR_ISA_SEMANTICS.md` "Trace format" layout.  The trace is
+    /// streamed as the run proceeds rather than buffered, so a multi-million
+    /// instruction run costs no extra memory.
+    pub fn run(&mut self, max_instructions: u64, mut trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
         let mut count: u64 = 0;
         while !self.halted && count < max_instructions {
             if self.stop.is_some() {
@@ -287,7 +360,10 @@ impl Cpu {
     }
 
     /// Append one trace line for the just-retired instruction.
-    fn trace_line(&self, out: &mut String, i: u64, pc: u32, word: u32) {
+    ///
+    /// Write errors (e.g. a broken pipe on stdout) are intentionally ignored — a
+    /// failed trace write must not abort the golden-model run.
+    fn trace_line(&self, out: &mut dyn std::io::Write, i: u64, pc: u32, word: u32) {
         let _ = write!(out, "i={i} pc={pc:08x} op={word:08x}");
         for (idx, r) in self.regs.iter().enumerate() {
             let _ = write!(out, " r{idx}={r:016x}");
@@ -308,7 +384,7 @@ impl Cpu {
         if let Some((addr, be, data)) = self.last_write {
             let _ = write!(out, " wr={addr:08x}/{be:02x}/{data:016x}");
         }
-        out.push('\n');
+        let _ = out.write_all(b"\n");
     }
 
     /// Decode + execute a single instruction word, advancing PC.
@@ -356,7 +432,6 @@ impl Cpu {
             0x20..=0x21 => self.exec_lcd(full, &fields),
             0x30 => self.exec_io(full, &fields),
             0x40 => self.exec_stack(full, &fields),
-            0x50 => self.exec_uart(full, &fields),
             0x60 => self.exec_interrupt(full, &fields),
             0x70..=0x7B => self.exec_mem(op, full, &fields),
             0xC0..=0xC7 => self.exec_indexed_sub(op, &fields, imm()),
@@ -843,94 +918,6 @@ impl Cpu {
         }
     }
 
-    /// UART ops (0x50xx).
-    fn exec_uart(&mut self, full: u32, f: &Fields) {
-        match full & 0xFFF0 {
-            0x5010 => {
-                // TXR R: send rs2 as hex.
-                let v = self.regs[f.rs2];
-                self.tx_reg(v);
-                self.pc = self.pc.wrapping_add(4);
-                return;
-            }
-            0x5020 => {
-                // TXMEMR R: send 64-bit value at mem[rs2] as hex (aligned doubleword).
-                let v = self.read64((self.regs[f.rs2] as u32) & !7);
-                self.tx_reg(v);
-                self.pc = self.pc.wrapping_add(4);
-                return;
-            }
-            0x5030 => {
-                // TXCHARMEMR R: send byte at mem[rs2] (byte-lane select).
-                let addr = self.regs[f.rs2] as u32;
-                let b = self.read_sub(addr, 1) as u8;
-                self.tx_byte(b);
-                self.pc = self.pc.wrapping_add(4);
-                return;
-            }
-            0x5040 => {
-                // TXSTRMEMR R: null-terminated string from mem[rs2].
-                let addr = self.regs[f.rs2] as u32;
-                self.tx_string(addr);
-                self.pc = self.pc.wrapping_add(4);
-                return;
-            }
-            0x5050 => {
-                // RXRB R: blocking receive — no input source modelled; return 0.
-                self.regs[f.rs2] = 0;
-                self.pc = self.pc.wrapping_add(4);
-                return;
-            }
-            0x5060 => {
-                // RXRNB R: non-blocking receive — FIFO empty: rd=0, zero_flag=1.
-                self.regs[f.rs2] = 0;
-                self.zero = true;
-                self.pc = self.pc.wrapping_add(4);
-                return;
-            }
-            _ => {}
-        }
-        match full {
-            0x5000 => {
-                // TESTMSG: fixed test string. Emit a stable marker (no expected value uses it).
-                self.uart.push_str("TEST\r\n");
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x5001 => {
-                // NEWLINE: RTL `t_tx_newline` (uart_tasks.vh:484) emits LF then CR.
-                self.uart.push_str("\n\r");
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x5002 => {
-                // TXMEM V: 64-bit value at mem[imm32] as hex (aligned doubleword).
-                let addr = self.read32(self.pc.wrapping_add(4)) & !7;
-                let v = self.read64(addr);
-                self.tx_reg(v);
-                self.pc = self.pc.wrapping_add(8);
-            }
-            0x5003 => {
-                // TXSTRMEM V: null-terminated string at mem[imm32].
-                let addr = self.read32(self.pc.wrapping_add(4));
-                self.tx_string(addr);
-                self.pc = self.pc.wrapping_add(8);
-            }
-            _ => self.stop = Some(StopReason::InvalidOpcode(full)),
-        }
-    }
-
-    /// Transmit a null-terminated little-endian string from memory.
-    fn tx_string(&mut self, start: u32) {
-        let mut addr = start;
-        loop {
-            let b = self.read_sub(addr, 1) as u8;
-            if b == 0 || (addr as usize) >= self.mem.len() {
-                break;
-            }
-            self.tx_byte(b);
-            addr = addr.wrapping_add(1);
-        }
-    }
-
     /// LCD ops (0x20xx) — modelled as no-ops (no architectural state).
     fn exec_lcd(&mut self, full: u32, _f: &Fields) {
         // 0x2021/0x2022/0x2023 are V (2-word); 0x200?/0x201? are R (1-word).
@@ -1137,15 +1124,29 @@ impl Cpu {
     }
 }
 
-/// Emulate a flat DDR image starting at `entry`. Convenience wrapper.
+/// Emulate a flat DDR image starting at `entry`, buffering the trace into a `String`.
 ///
-/// Returns the result and, if `want_trace`, the full trace text.
+/// Returns the result and, if `want_trace`, the full trace text.  This buffers the
+/// whole trace in memory — fine for tests and short programs, but the CLI streams
+/// instead via [`emulate_image_to_writer`] to stay bounded on long runs.
 #[must_use]
 pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, want_trace: bool) -> (EmulateResult, Option<String>) {
     let mut cpu = Cpu::new(image, entry);
-    let mut trace = want_trace.then(String::new);
-    let result = cpu.run(max_instructions, trace.as_mut());
+    let mut buf: Option<Vec<u8>> = want_trace.then(Vec::new);
+    let result = cpu.run(max_instructions, buf.as_mut().map(|b| b as &mut dyn std::io::Write));
+    let trace = buf.map(|b| String::from_utf8_lossy(&b).into_owned());
     (result, trace)
+}
+
+/// Emulate a flat DDR image starting at `entry`, streaming the per-instruction
+/// trace to `trace` (if `Some`) as the run proceeds.
+///
+/// Unlike [`emulate_image`], nothing is buffered: each retired instruction's line
+/// is written straight to the sink, so a multi-million instruction run uses no
+/// extra memory regardless of trace length.
+pub fn emulate_image_to_writer(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
+    let mut cpu = Cpu::new(image, entry);
+    cpu.run(max_instructions, trace)
 }
 
 /// The default entry point for an assembled `.kla` program (code base 0x20).
@@ -1186,13 +1187,50 @@ mod tests {
     }
 
     #[test]
-    fn test_txr_output_format() {
-        // SETR A 0xFF ; TXR A ; NEWLINE ; HALT
-        // RTL-faithful UART: full 64-bit value, 16 hex chars MS-first, then "\n\r".
-        let words = [0x0000_0800, 0x0000_00FF, 0x0000_5010, 0x0000_5001, 0x0000_F011];
+    fn test_mmio_uart_tx() {
+        // UART is now MMIO: a byte store to TX_DATA (0xF001_0000) transmits data[7:0].
+        //   SETR B 0xF0010000 ; SETR A 'H' ; MEMSET8 [B]=A ; SETR A 'i' ; MEMSET8 [B]=A ; HALT
+        // MEMSET8 (0x74): word 0x0000_74<rs1=data><rs2=addr>; here rs1=A(0), rs2=B(1).
+        let words = [
+            0x0000_0801,
+            0xF001_0000, // SETR B, 0xF0010000  (TX_DATA)
+            0x0000_0800,
+            0x0000_0048, // SETR A, 'H'
+            0x0000_7401, // MEMSET8 [B] = A
+            0x0000_0800,
+            0x0000_0069, // SETR A, 'i'
+            0x0000_7401, // MEMSET8 [B] = A
+            0x0000_F011, // HALT
+        ];
         let img = image_from_words(&words);
         let (r, _) = emulate_image(&img, default_entry(), 100, false);
-        assert_eq!(r.uart, "00000000000000FF\n\r");
+        assert_eq!(r.uart, "Hi");
+    }
+
+    #[test]
+    fn test_mmio_uart_rx_read_to_consume_and_status() {
+        // Feed one RX byte, then read STATUS / RX_DATA / STATUS via byte loads.
+        //   R1 = STATUS(0xF0010010), R2 = RX_DATA(0xF0010008)
+        //   R3 = [R1] status-before, R4 = [R2] consume, R5 = [R1] status-after, HALT
+        // MEMGET8 (0x75): word 0x0000_75<rs1=dest><rs2=addr>.
+        let words = [
+            0x0000_0801,
+            0xF001_0010, // SETR R1, STATUS
+            0x0000_0802,
+            0xF001_0008, // SETR R2, RX_DATA
+            0x0000_7531, // MEMGET8 R3 = [R1]  (status, RX not empty)
+            0x0000_7542, // MEMGET8 R4 = [R2]  (pop head byte)
+            0x0000_7551, // MEMGET8 R5 = [R1]  (status, RX now empty)
+            0x0000_F011, // HALT
+        ];
+        let img = image_from_words(&words);
+        let mut cpu = Cpu::new(&img, default_entry());
+        cpu.feed_uart_rx(&[0x41]); // 'A'
+        let _ = cpu.run(100, None);
+        // STATUS bits: bit0 TX_BUSY(=0), bit1 RX_EMPTY, bit2 RX_FULL.
+        assert_eq!(cpu.regs[3], 0b000, "RX_EMPTY clear while a byte is queued, TX never busy");
+        assert_eq!(cpu.regs[4], 0x41, "RX_DATA returns and pops the FIFO head");
+        assert_eq!(cpu.regs[5], 0b010, "RX_EMPTY set once the byte has been consumed");
     }
 
     #[test]

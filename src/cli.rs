@@ -162,8 +162,9 @@ pub fn set_matches() -> Command {
         .arg(
             Arg::new("trace")
                 .long("trace")
-                .num_args(1)
-                .help("With --emulate, write the per-instruction golden-model trace to this file (default: stdout)"),
+                .num_args(0..=1)
+                .default_missing_value("-")
+                .help("With --emulate, write the per-instruction golden-model trace. Give a path to write a file, or pass --trace with no value (or '-') to stream it to stdout"),
         )
         .arg(
             Arg::new("emulate_test")

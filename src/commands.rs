@@ -619,10 +619,53 @@ pub fn run_test_mode(
     }
 }
 
+/// Open the destination for the emulator's per-instruction trace.
+///
+/// Follows the `--trace` convention: `None` → no trace, `Some("-")` → stdout,
+/// `Some(path)` → that file.  Returns `Ok(None)` when no trace was requested,
+/// `Ok(Some(writer))` otherwise, or `Err(1)` if the file cannot be created (the
+/// error is already reported to `msg_list`).  The writer is line-buffered so the
+/// trace streams during the run instead of being held in memory.
+#[cfg(not(tarpaulin_include))]
+fn open_trace_writer(trace_file: Option<&str>, msg_list: &mut MsgList) -> Result<Option<Box<dyn std::io::Write>>, i32> {
+    use std::io::BufWriter;
+    match trace_file {
+        None => Ok(None),
+        Some("-") => Ok(Some(Box::new(BufWriter::new(std::io::stdout())))),
+        Some(path) => match std::fs::File::create(path) {
+            Ok(f) => Ok(Some(Box::new(BufWriter::new(f)))),
+            Err(e) => {
+                msg_list.push(format!("Failed to create trace file {path}: {e}"), None, None, MessageType::Error);
+                Err(1)
+            }
+        },
+    }
+}
+
+/// Finish a trace writer: flush it and, for a file destination, report the count.
+#[cfg(not(tarpaulin_include))]
+fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: Option<&str>, instructions: u64, msg_list: &mut MsgList) {
+    use std::io::Write as _;
+    if let Some(w) = writer.as_mut() {
+        let _ = w.flush();
+    }
+    if let Some(path) = trace_file {
+        if path != "-" {
+            msg_list.push(
+                format!("Wrote {instructions} instruction trace lines to {path}"),
+                None,
+                None,
+                MessageType::Information,
+            );
+        }
+    }
+}
+
 /// Run the emulator on a single assembled program (`--emulate`).
 ///
 /// Builds the flat DDR image, executes the golden model, prints captured UART
-/// output, and writes the per-instruction trace to `trace_file` (or stdout).
+/// output, and streams the per-instruction trace to `trace_file` (or, for `"-"`,
+/// stdout).
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_emulate(
     pass2: &[Pass2],
@@ -650,31 +693,22 @@ pub(crate) fn run_emulate(
         MessageType::Information,
     );
 
-    let (result, trace) = emulate::emulate_image(&image, entry, max_instructions, trace_file.is_some());
-
-    if let (Some(path), Some(text)) = (trace_file, trace.as_ref()) {
-        if let Err(e) = fs::write(path, text) {
-            msg_list.push(format!("Failed to write trace file {path}: {e}"), None, None, MessageType::Error);
-        } else {
-            msg_list.push(
-                format!("Wrote {} instruction trace lines to {path}", result.instructions),
-                None,
-                None,
-                MessageType::Information,
-            );
-        }
-    }
+    let mut trace_writer = open_trace_writer(trace_file, msg_list).inspect_err(|_| {
+        print_results(msg_list, start_time);
+    })?;
+    let result = emulate::emulate_image_to_writer(
+        &image,
+        entry,
+        max_instructions,
+        trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
+    );
+    finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
 
     print_results(msg_list, start_time);
     println!(
         "--- Emulator finished: {} instructions, stop = {:?} ---",
         result.instructions, result.stop
     );
-    if trace_file.is_none() {
-        if let Some(text) = trace.as_ref() {
-            print!("{text}");
-        }
-    }
     println!("--- Captured UART output ---");
     print!("{}", result.uart);
     println!("--- end UART ---");
@@ -725,31 +759,22 @@ pub(crate) fn run_emulate_elf(
     }
 
     let image = build_ddr_image(&binary_data);
-    let (result, trace) = emulate::emulate_image(&image, entry_addr, max_instructions, trace_file.is_some());
-
-    if let (Some(path), Some(text)) = (trace_file, trace.as_ref()) {
-        if let Err(e) = fs::write(path, text) {
-            msg_list.push(format!("Failed to write trace file {path}: {e}"), None, None, MessageType::Error);
-        } else {
-            msg_list.push(
-                format!("Wrote {} instruction trace lines to {path}", result.instructions),
-                None,
-                None,
-                MessageType::Information,
-            );
-        }
-    }
+    let mut trace_writer = open_trace_writer(trace_file, msg_list).inspect_err(|_| {
+        print_results(msg_list, start_time);
+    })?;
+    let result = emulate::emulate_image_to_writer(
+        &image,
+        entry_addr,
+        max_instructions,
+        trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
+    );
+    finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
 
     print_results(msg_list, start_time);
     println!(
         "--- Emulator finished: {} instructions, stop = {:?} ---",
         result.instructions, result.stop
     );
-    if trace_file.is_none() {
-        if let Some(text) = trace.as_ref() {
-            print!("{text}");
-        }
-    }
     println!("--- Captured UART output ---");
     print!("{}", result.uart);
     println!("--- end UART ---");
