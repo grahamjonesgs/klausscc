@@ -16,21 +16,21 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x07
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x07
+$NEWLINE
 
 // --- Test JMPZ: jump if zero ---
 SETR A 1
 DECR A                // A = 0, zero flag set
 JMPZ T1_PASS:
 SETR P 0xFFFFFFFF     // FAIL
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T2:
 T1_PASS:
 SETR P 0x1
-TXR P                 // Expect: 00000001
-NEWLINE
+$TXR P  // Expect: 00000001
+$NEWLINE
 
 // --- Test JMPNZ: jump if not zero ---
 T2:
@@ -38,13 +38,13 @@ SETR A 5
 ADDV A 0x0             // Clear stale zero flag (A=5, not zero)
 JMPNZ T2_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T3:
 T2_PASS:
 SETR P 0x2
-TXR P                 // Expect: 00000002
-NEWLINE
+$TXR P  // Expect: 00000002
+$NEWLINE
 
 // --- Test JMPE: jump if equal ---
 T3:
@@ -53,13 +53,13 @@ SETR B 0x42
 CMPRR A B             // Equal flag set
 JMPE T3_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T4:
 T3_PASS:
 SETR P 0x3
-TXR P                 // Expect: 00000003
-NEWLINE
+$TXR P  // Expect: 00000003
+$NEWLINE
 
 // --- Test JMPNE: jump if not equal ---
 T4:
@@ -68,13 +68,13 @@ SETR B 0x99
 CMPRR A B             // Not equal
 JMPNE T4_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T5:
 T4_PASS:
 SETR P 0x4
-TXR P                 // Expect: 00000004
-NEWLINE
+$TXR P  // Expect: 00000004
+$NEWLINE
 
 // --- Test JMPS: jump if sign (negative) ---
 T5:
@@ -82,13 +82,13 @@ SETR A 0x0
 DECR A                // A = 0xFFFFFFFF (negative)
 JMPS T5_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T6:
 T5_PASS:
 SETR P 0x5
-TXR P                 // Expect: 00000005
-NEWLINE
+$TXR P  // Expect: 00000005
+$NEWLINE
 
 // --- Test JMPNS: jump if not sign (positive) ---
 T6:
@@ -96,44 +96,47 @@ SETR A 0x1
 ADDV A 0x0             // Clear stale sign flag (A=1, positive)
 JMPNS T6_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T7:
 T6_PASS:
 SETR P 0x6
-TXR P                 // Expect: 00000006
-NEWLINE
+$TXR P  // Expect: 00000006
+$NEWLINE
 
 // --- Test JMPLT: signed less than ---
 T7:
 SETR A 0x5
 SETR B 0x10
-CMPLTRR A B           // A(5) < B(16)? yes
+CMPRR A B  // A(5) < B(16)? yes
 JMPLT T7_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T8:
 T7_PASS:
 SETR P 0x7
-TXR P                 // Expect: 00000007
-NEWLINE
+$TXR P  // Expect: 00000007
+$NEWLINE
 
 // --- Test JMPGT: signed greater than ---
 T8:
 SETR A 0x10
 SETR B 0x5
-CMPGTRR A B           // A(16) > B(5)? yes
+CMPRR A B  // A(16) > B(5)? yes
 JMPGT T8_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP DONE:
 T8_PASS:
 SETR P 0x8
-TXR P                 // Expect: 00000008
-NEWLINE
+$TXR P  // Expect: 00000008
+$NEWLINE
 
 DONE:
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

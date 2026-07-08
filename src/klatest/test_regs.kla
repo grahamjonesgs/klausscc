@@ -13,42 +13,45 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x01           // Test number on display
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x01 // Test number on display
+$NEWLINE
 
 // Test SETR
 SETR A 0xFF
-TXR A                 // Expect: 000000FF
-NEWLINE
+$TXR A  // Expect: 000000FF
+$NEWLINE
 
 // Test COPY (COPY dst src: first = second)
 COPY B A
-TXR B                 // Expect: 000000FF
-NEWLINE
+$TXR B  // Expect: 000000FF
+$NEWLINE
 
 // Test INCR
 INCR A
-TXR A                 // Expect: 00000100
-NEWLINE
+$TXR A  // Expect: 00000100
+$NEWLINE
 
 // Test DECR
 DECR B
-TXR B                 // Expect: 000000FE
-NEWLINE
+$TXR B  // Expect: 000000FE
+$NEWLINE
 
 // Test NEGR (twos complement)
 SETR C 0x2
 NEGR C
-TXR C                 // Expect: FFFFFFFE
-NEWLINE
+$TXR C  // Expect: FFFFFFFE
+$NEWLINE
 
 // Test ABSR
 SETR D 0x2
 NEGR D                // D = -2 (0xFFFFFFFE)
 ABSR D
-TXR D                 // Expect: 00000002
-NEWLINE
+$TXR D  // Expect: 00000002
+$NEWLINE
 
 // All pass
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

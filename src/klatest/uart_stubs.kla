@@ -1,0 +1,84 @@
+// Shared ISA-v2 UART output helpers (MMIO), replacing the retired v1 print
+// opcodes (TXR / NEWLINE / TXCHARMEMR / TXSTRMEMR). UART is memory-mapped:
+// TX_DATA lives at 0xF0010000 and a byte store transmits data[7:0].
+//
+// Every routine preserves ALL general-purpose registers (A..P) it does not
+// take as an argument, so it is a drop-in replacement for the single-opcode v1
+// primitives. Include this file at the END of a program (after HALT) so the
+// subroutines are never reached by fall-through:  !include uart_stubs.kla
+//
+// Calling convention (see the $TXR / $NEWLINE / $TXCHAR / $TXSTR macros):
+//   TX_HEX32 : prints reg A's low 32 bits as 8 uppercase hex digits.
+//   TX_NL    : prints a newline (0x0A).
+//   TX_CHAR  : prints reg A's low byte as a raw character.
+//   TX_STR   : prints the NUL-terminated string at address reg A.
+
+// --- TX_HEX32: print A[31:0] as 8 uppercase hex digits -----------------------
+TX_HEX32:
+PUSH B
+PUSH C
+PUSH D
+PUSH E
+SETR B 0xF0010000        // UART TX_DATA
+SETR C 28                // shift for the most-significant nibble of the low word
+TX_HEX32_LOOP:
+SHRR D A C               // D = A >> C  (count = C[5:0])
+ANDV D 0xF               // D = current nibble
+CMPRV D 10               // flags from D - 10 (signed)
+JMPLT TX_HEX32_DEC:      // 0-9 -> decimal digit
+ADDV D 0x37              // 10-15 -> 'A'..'F'
+JMP TX_HEX32_PUT:
+TX_HEX32_DEC:
+ADDV D 0x30              // '0'..'9'
+TX_HEX32_PUT:
+MEMSET8 D B              // transmit the character (data = D, address = B)
+SETR E 4
+SUBR C C E               // next nibble
+CMPRV C 0                // flags from C - 0 (signed)
+JMPGE TX_HEX32_LOOP:     // repeat while C >= 0
+POP E
+POP D
+POP C
+POP B
+RET
+
+// --- TX_NL: print a newline --------------------------------------------------
+TX_NL:
+PUSH A
+PUSH B
+SETR B 0xF0010000
+SETR A 0x0A              // '\n'
+MEMSET8 A B
+POP B
+POP A
+RET
+
+// --- TX_CHAR: print A's low byte as a raw character --------------------------
+TX_CHAR:
+PUSH B
+SETR B 0xF0010000
+MEMSET8 A B
+POP B
+RET
+
+// --- TX_STR: print the NUL-terminated string at address A --------------------
+TX_STR:
+PUSH A
+PUSH B
+PUSH C
+PUSH D
+SETR C 0xF0010000        // UART TX_DATA
+COPY D A                 // D = current byte address
+TX_STR_LOOP:
+MEMGET8 B D              // B = mem8[D]
+CMPRV B 0                // stop at the NUL terminator
+JMPE TX_STR_DONE:
+MEMSET8 B C              // transmit byte
+INCR D                   // advance
+JMP TX_STR_LOOP:
+TX_STR_DONE:
+POP D
+POP C
+POP B
+POP A
+RET

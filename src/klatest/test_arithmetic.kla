@@ -11,37 +11,40 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x02
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x02
+$NEWLINE
 
 // ADDRR: A + B -> A
 SETR A 0x10
 SETR B 0x20
-ADDRR A B
-TXR A                 // Expect: 00000030
-NEWLINE
+ADDR A A B
+$TXR A  // Expect: 00000030
+$NEWLINE
 
 // MINUSRR: A - B -> A
-MINUSRR A B
-TXR A                 // Expect: 00000010
-NEWLINE
+SUBR A A B
+$TXR A  // Expect: 00000010
+$NEWLINE
 
 // ADDV: A + immediate
 SETR A 0x0A
 ADDV A 100            // 0x0A + 100 = 10 + 100 = 110 = 0x6E
-TXR A                 // Expect: 0000006E
-NEWLINE
+$TXR A  // Expect: 0000006E
+$NEWLINE
 
 // MINUSV: A - immediate
 MINUSV A 0x10         // 0x6E - 0x10 = 0x5E
-TXR A                 // Expect: 0000005E
-NEWLINE
+$TXR A  // Expect: 0000005E
+$NEWLINE
 
 // Overflow test: 0xFFFFFFFF + 1 should wrap to 0
 SETR A 0xFFFFFFFF
 INCR A
-TXR A                 // Expect: 00000000
-NEWLINE
+$TXR A  // Expect: 00000000
+$NEWLINE
 
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

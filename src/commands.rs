@@ -1,11 +1,11 @@
 //! Subcommand handlers — each `run_*` function drives one CLI mode end to end
 //! (net-load, mem-out, elf2serial, kbt send, emulate, and the test runners).
 
-use crate::files::{filename_stem, read_file_to_vector, write_code_output_file};
+use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::{build_ddr_image, disassemble_flat_to_pass2, encode_word_kbt, human_bytes, parse_expected_uart_values, HEAP_HEADER_WORDS};
 use crate::messages::{print_messages, MessageType, MsgList};
 use crate::netload::net_load;
-use crate::opcodes::{parse_vh_file, Opcode, Pass2};
+use crate::opcodes::{Opcode, Pass2};
 use crate::serial::{monitor_serial_port, run_test_monitor, write_to_board_keep_port, AUTO_SERIAL};
 use crate::{assemble_file, assemble_to_image, build_flat_code, print_results, write_binary_file, write_to_device, ELF_MAGIC};
 use crate::{emulate, helper, macros};
@@ -310,7 +310,6 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
 pub(crate) fn run_elf2serial(
     binary_path: &str,
     entry_override: Option<u32>,
-    opcode_file_name: &str,
     output_serial_port: &str,
     kbt_file_name: &str,
     monitor_flag: bool,
@@ -411,31 +410,18 @@ pub(crate) fn run_elf2serial(
         write_binary_file(msg_list, kbt_file_name, &out);
     }
 
-    // Optionally produce a .code disassembly listing alongside the .kbt.
-    // Try to load the opcode file; if it exists and parses, disassemble binary_data.
-    // If the file is absent or fails to parse, skip silently.  (Also skipped for
-    // a serial load — see above.)
-    if output_serial_port.is_empty() && std::path::Path::new(opcode_file_name).exists() {
-        let mut tmp_msgs = MsgList::new();
-        let mut opened: Vec<String> = Vec::new();
-        let opt_opcodes = read_file_to_vector(opcode_file_name, &mut tmp_msgs, &mut opened).and_then(|vh| parse_vh_file(vh, &mut tmp_msgs).0);
-        if let Some(opcodes) = opt_opcodes {
-            let code_file_name = {
-                let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
-                format!("{stem}.code")
-            };
-            let mut pass2 = disassemble_flat_to_pass2(&binary_data, HEAP_HEADER_WORDS * 8, &opcodes);
-            if let Err(e) = write_code_output_file(&code_file_name, &mut pass2, msg_list) {
-                msg_list.push(
-                    format!("Failed to write disassembly file {code_file_name}: {e}"),
-                    None,
-                    None,
-                    MessageType::Warning,
-                );
-            }
-        } else {
+    // Optionally produce a .code disassembly listing alongside the .kbt, using
+    // the built-in ISA-v2 opcode table.  (Skipped for a serial load — see above.)
+    if output_serial_port.is_empty() {
+        let opcodes = crate::opcodes::v2_opcodes();
+        let code_file_name = {
+            let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
+            format!("{stem}.code")
+        };
+        let mut pass2 = disassemble_flat_to_pass2(&binary_data, HEAP_HEADER_WORDS * 8, &opcodes);
+        if let Err(e) = write_code_output_file(&code_file_name, &mut pass2, msg_list) {
             msg_list.push(
-                format!("Opcode file {opcode_file_name} found but could not be parsed — skipping .code output"),
+                format!("Failed to write disassembly file {code_file_name}: {e}"),
                 None,
                 None,
                 MessageType::Warning,

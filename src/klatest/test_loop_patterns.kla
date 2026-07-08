@@ -10,8 +10,8 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x10
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x10
+$NEWLINE
 
 // --- Countdown loop: count from 10 to 0, output count of iterations ---
 SETR A 10             // Counter
@@ -20,18 +20,18 @@ COUNTDOWN:
 INCR B
 DECR A
 JMPNZ COUNTDOWN:
-TXR B                 // Expect: 0000000A (10 iterations)
-NEWLINE
+$TXR B  // Expect: 0000000A (10 iterations)
+$NEWLINE
 
 // --- Sum 1 to 10 ---
 SETR A 10             // Count down from 10
 SETR B 0              // Accumulator
 SUM_LOOP:
-ADDRR B A             // B += A
+ADDR B B A  // B += A
 DECR A
 JMPNZ SUM_LOOP:
-TXR B                 // Expect: 00000037 (55)
-NEWLINE
+$TXR B  // Expect: 00000037 (55)
+$NEWLINE
 
 // --- Factorial 4! using loop with MULRR ---
 SETR A 4              // n = 4
@@ -39,12 +39,12 @@ SETR B 1              // result = 1
 FACT_LOOP:
 CMPRV A 0x0
 JMPE FACT_DONE:
-MULRR B A             // B = B * A
+MULR B B A  // B = B * A
 DECR A
 JMP FACT_LOOP:
 FACT_DONE:
-TXR B                 // Expect: 00000018 (24)
-NEWLINE
+$TXR B  // Expect: 00000018 (24)
+$NEWLINE
 
 // --- Find max of 4 values stored in registers ---
 SETR A 3
@@ -66,8 +66,11 @@ CMPRR A D
 JMPGT SKIP3:
 COPY A D              // A = D (D was larger)
 SKIP3:
-TXR A                 // Expect: 00000007 (max = 7)
-NEWLINE
+$TXR A  // Expect: 00000007 (max = 7)
+$NEWLINE
 
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

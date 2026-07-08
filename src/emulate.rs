@@ -3,8 +3,11 @@
 //! This is Phase-0 of the FPGA pipelining effort: an architectural reference
 //! model that executes a flat DDR image and emits a per-retired-instruction
 //! trace.  Semantics follow `EMULATOR_ISA_SEMANTICS.md` (RTL-verified corner
-//! cases, which OVERRIDE `CPU_ARCHITECTURE.md`) and the per-opcode encodings in
-//! the `--opcode` `opcode_select.vh` table.
+//! cases, which OVERRIDE `CPU_ARCHITECTURE.md`); the per-opcode *encodings* are
+//! the **ISA encoding v2** flag-day re-numbering documented in
+//! `ISA_ENCODING_V2.md`.  Execution semantics are identical to the v1 CPU (the
+//! "no benefit taken" checkpoint build) — only the instruction word layout has
+//! changed.
 //!
 //! The model is intentionally cycle-agnostic: each instruction commits
 //! atomically.  Cache, IFB, timing and the DDR multi-cycle pipeline are not
@@ -12,10 +15,24 @@
 //! WAIT are stubbed (documented in the summary); the validation corpus does
 //! not exercise them.
 //!
-//! Decoding is done directly from the 32-bit instruction word's opcode bit
-//! fields (CPU_ARCHITECTURE.md §15), independent of the assembler's opcode
-//! table — so the emulator is a genuine second implementation, not a re-run of
-//! the assembler.
+//! ## v2 word-0 layout (`ISA_ENCODING_V2.md` §1)
+//!
+//! ```text
+//!  31 30 29    26 25              16 15  12 11  8 7   4 3   0
+//! ┌─────┬────────┬──────────────────┬──────┬─────┬─────┬─────┐
+//! │ LEN │ CLASS  │ attributes + OP  │  x   │ rd  │ rs1 │ rs2 │
+//! └─────┴────────┴──────────────────┴──────┴─────┴─────┴─────┘
+//! ```
+//!
+//! - **LEN [31:30]**: `01`=1 word, `10`=2 words, `11`=3 words, `00`=illegal.
+//! - **CLASS [29:26]**: major class (1=ALU-rr, 2=ALU-imm, 3=cmp, 4=shift/bit,
+//!   5=unary, 6=load, 7=store, 8=branch, 9=stack, A=mul/div, B=system, C=I/O).
+//! - **rd [11:8]**, **rs1 [7:4]**, **rs2 [3:0]**: register fields (stores put
+//!   the data source in `rd`).  `imm32` at PC+4; `imm64` = lo32@PC+4, hi32@PC+8.
+//!
+//! Decoding is done directly from the 32-bit word's bit fields, independent of
+//! the assembler's opcode table — so the emulator is a genuine second
+//! implementation, not a re-run of the assembler.
 
 use std::collections::VecDeque;
 
@@ -119,16 +136,6 @@ pub struct Cpu {
     stop: Option<StopReason>,
     /// Pending memory write for trace annotation (addr, `byte_enable`, data).
     last_write: Option<(u32, u8, u64)>,
-}
-
-/// Decoded operand fields of an instruction word.
-struct Fields {
-    /// Bits [11:8] — rd for the RRR ALU format.
-    rd: usize,
-    /// Bits [7:4] — rs1 / first operand.
-    rs1: usize,
-    /// Bits [3:0] — rs2 / second operand (and destination for many R/RV forms).
-    rs2: usize,
 }
 
 impl Cpu {
@@ -387,64 +394,47 @@ impl Cpu {
         let _ = out.write_all(b"\n");
     }
 
-    /// Decode + execute a single instruction word, advancing PC.
+    // ---- v2 decode + execute -------------------------------------------------
+
+    /// Decode + execute a single v2 instruction word, advancing PC.
+    ///
+    /// The word is decoded straight from its bit fields (`ISA_ENCODING_V2.md` §1):
+    /// LEN gives the instruction length, CLASS selects the handler, and each
+    /// handler pulls its own attribute bits from `[25:16]`.
     fn step(&mut self, word: u32) {
-        let fields = Fields {
-            rd: ((word >> 8) & 0xF) as usize,
-            rs1: ((word >> 4) & 0xF) as usize,
-            rs2: (word & 0xF) as usize,
-        };
-        let imm = || self.read32(self.pc + 4);
-
-        // ---- 3-register ALU format (upper 16 bits non-zero) ------------------
-        let op_hi = word >> 16;
-        if op_hi != 0 {
-            self.exec_rrr(op_hi, &fields);
-            self.pc = self.pc.wrapping_add(4);
-            return;
-        }
-
-        // ---- legacy / non-ALU format (upper 16 bits == 0x0000) ---------------
-        // [15:8] = opcode class, [11:8]=secondary nibble for some.
-        let op = (word >> 8) & 0xFF; // [15:8]
-        let op12 = (word >> 4) & 0xFFF; // [15:4], used for the 08?/09?/0A?/0F?... groups
-        let full = word & 0xFFFF;
-
-        match op {
-            0x01 => {
-                // COPY RR: reg[rs1] = reg[rs2]  (rs1=[7:4] dest, rs2=[3:0] src)
-                self.regs[fields.rs1] = self.regs[fields.rs2];
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x02 => {
-                // ADDI RRV: rd=[7:4] = reg[rs2] + sign_ext(imm32); sets ADD flags.
-                let a = self.regs[fields.rs2];
-                let b = i64::from(imm() as i32) as u64;
-                self.regs[fields.rs1] = self.add_flags(a, b, 0);
-                self.pc = self.pc.wrapping_add(8);
-            }
-            0x05 => {
-                // CMPRR RR: flags from rs1 - rs2; equal/less/ult/sign. No writeback, no zero.
-                self.cmp(self.regs[fields.rs1], self.regs[fields.rs2]);
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x10..=0x1C => self.exec_flow(full, &fields),
-            0x20..=0x21 => self.exec_lcd(full, &fields),
-            0x30 => self.exec_io(full, &fields),
-            0x40 => self.exec_stack(full, &fields),
-            0x60 => self.exec_interrupt(full, &fields),
-            0x70..=0x7B => self.exec_mem(op, full, &fields),
-            0xC0..=0xC7 => self.exec_indexed_sub(op, &fields, imm()),
-            0xFC..=0xFD => self.exec_indexed64a(op, &fields, imm()),
-            0xF0..=0xF1 => {
-                // misc Fxxx (DELAY/NOP/HALT/RESET/TRAP) live in 0xF00.. range
-                self.exec_misc(full, &fields, imm());
-            }
-            0x08 | 0x09 | 0x0A | 0x0B | 0x0F => self.exec_rv_group(op12, full, &fields, imm()),
-            0x0C..=0x0E => self.exec_indexed64(op, &fields, imm()),
+        let len = word >> 30;
+        let inst_len: u32 = match len {
+            1 => 4,
+            2 => 8,
+            3 => 12,
             _ => {
+                // LEN=00 is illegal — this is how a stale v1 binary fails fast.
                 self.stop = Some(StopReason::InvalidOpcode(word));
+                return;
             }
+        };
+        let class = (word >> 26) & 0xF;
+        let rd = ((word >> 8) & 0xF) as usize;
+        let rs1 = ((word >> 4) & 0xF) as usize;
+        let rs2 = (word & 0xF) as usize;
+        let next = self.pc.wrapping_add(inst_len);
+        // imm32 (word at PC+4) — read unconditionally; unused for 1-word forms.
+        let imm32 = self.read32(self.pc.wrapping_add(4));
+
+        match class {
+            0x1 => self.v2_alu_rr(word, rd, rs1, rs2, next),
+            0x2 => self.v2_alu_imm(word, rd, rs1, imm32, len, next),
+            0x3 => self.v2_compare(word, rd, rs1, rs2, imm32, len, next),
+            0x4 => self.v2_shift_bit(word, rd, rs1, rs2, imm32, next),
+            0x5 => self.v2_unary(word, rd, rs1, next),
+            0x6 => self.v2_load(word, rd, rs1, rs2, imm32, next),
+            0x7 => self.v2_store(word, rd, rs1, rs2, imm32, next),
+            0x8 => self.v2_branch(word, rs2, imm32, next),
+            0x9 => self.v2_stack(word, rd, rs1, imm32, len, next),
+            0xA => self.v2_muldiv(word, rd, rs1, rs2, imm32, len, next),
+            0xB => self.v2_system(word, next),
+            0xC => self.pc = next, // I/O (LCD) — modelled as a no-op (no architectural state)
+            _ => self.stop = Some(StopReason::InvalidOpcode(word)),
         }
     }
 
@@ -457,670 +447,497 @@ impl Cpu {
         self.sign = (res >> 63) & 1 == 1;
     }
 
-    /// 3-register ALU operations (upper 16 bits = op code).
-    fn exec_rrr(&mut self, op_hi: u32, f: &Fields) {
-        let a = self.regs[f.rs1];
-        let b = self.regs[f.rs2];
-        let sh = (b & 0x3F) as u32; // shift/rotate counts masked to 6 bits
-        let res: Option<u64> = match op_hi {
-            0x0001 => Some(self.add_flags(a, b, 0)), // ADDR
-            0x0002 => Some(self.sub_flags(a, b, 0)), // SUBR
-            0x0003 => {
-                let r = a & b;
-                self.zero = r == 0;
-                Some(r)
-            } // ANDR sets zero
-            0x0004 => {
-                let r = a | b;
-                self.zero = r == 0;
-                Some(r)
-            } // ORR
-            0x0005 => {
-                let r = a ^ b;
-                self.zero = r == 0;
-                Some(r)
-            } // XORR
-            0x0006 => Some(self.add_flags(a, b, u64::from(self.carry))), // ADDC
-            0x0007 => Some(self.sub_flags(a, b, u64::from(self.carry))), // SUBC
-            0x0010 => Some((a as i64).wrapping_mul(b as i64) as u64), // MULR
-            0x0011 => Some(a.wrapping_mul(b)),       // MULUR
-            0x0012 => Some(((i128::from(a as i64) * i128::from(b as i64)) >> 64) as u64), // MULHR
-            0x0013 => Some(((u128::from(a) * u128::from(b)) >> 64) as u64), // MULHUR
-            0x0014 => Some(if b == 0 {
-                0xFFFF_FFFF_FFFF_FFFF
-            } else {
-                (a as i64).wrapping_div(b as i64) as u64
-            }), // DIVR
-            // div-by-zero is non-trapping with an all-ones result (board semantics), not checked_div
-            #[allow(clippy::manual_checked_ops, reason = "div-by-zero returns all-ones, not None")]
-            0x0015 => Some(if b == 0 { 0xFFFF_FFFF_FFFF_FFFF } else { a / b }), // DIVUR
-            0x0016 => Some(if b == 0 { a } else { (a as i64).wrapping_rem(b as i64) as u64 }), // MODR
-            0x0017 => Some(if b == 0 { a } else { a % b }),                                    // MODUR
-            0x0020 => Some(a << sh),                                                           // SHLR (zero set below)
-            0x0021 => Some(a >> sh),                                                           // SHRR
-            0x0022 => Some(((a as i64) >> sh) as u64),                                         // SARR
-            0x0023 => Some(a.rotate_left(sh)),                                                 // ROLR
-            0x0024 => Some(a.rotate_right(sh)),                                                // RORR
-            0x0030 => Some(u64::from(a == b)),                                                 // CMPEQR (no flags)
-            0x0031 => Some(u64::from(a != b)),
-            0x0032 => Some(u64::from((a as i64) < (b as i64))),
-            0x0033 => Some(u64::from((a as i64) <= (b as i64))),
-            0x0034 => Some(u64::from((a as i64) > (b as i64))),
-            0x0035 => Some(u64::from((a as i64) >= (b as i64))),
-            0x0036 => Some(u64::from(a < b)),
-            0x0037 => Some(u64::from(a <= b)),
-            0x0038 => Some(u64::from(a > b)),
-            0x0039 => Some(u64::from(a >= b)),
-            0x0040 => Some((a as i64).min(b as i64) as u64), // MINR
-            0x0041 => Some((a as i64).max(b as i64) as u64), // MAXR
-            0x0042 => Some(a.min(b)),                        // MINUR
-            0x0043 => Some(a.max(b)),                        // MAXUR
-            0x0050 => Some(a | (1 << sh)),                   // BSETRR
-            0x0051 => Some(a & !(1 << sh)),                  // BCLRRR
-            0x0052 => Some(a ^ (1 << sh)),                   // BTGLRR
-            0x0053 => Some((a >> sh) & 1),                   // BTSTRR -> 0/1
+    /// Class 1 — ALU reg-reg: `rd = rs1 OP rs2` (`ISA_ENCODING_V2.md` §2).
+    fn v2_alu_rr(&mut self, word: u32, rd: usize, rs1: usize, rs2: usize, next: u32) {
+        let op = (word >> 22) & 0xF;
+        let a = self.regs[rs1];
+        let b = self.regs[rs2];
+        let res = match op {
+            0 => self.add_flags(a, b, 0),                    // ADDR
+            1 => self.sub_flags(a, b, 0),                    // SUBR
+            2 => self.add_flags(a, b, u64::from(self.carry)), // ADDC
+            3 => self.sub_flags(a, b, u64::from(self.carry)), // SUBC
+            4 => { let r = a & b; self.zero = r == 0; r }    // ANDR — RRR logic sets zero
+            5 => { let r = a | b; self.zero = r == 0; r }    // ORR
+            6 => { let r = a ^ b; self.zero = r == 0; r }    // XORR
+            7 => (a as i64).min(b as i64) as u64,            // MINR (signed)
+            8 => (a as i64).max(b as i64) as u64,            // MAXR
+            9 => a.min(b),                                   // MINUR (unsigned)
+            10 => a.max(b),                                  // MAXUR
             _ => {
-                self.stop = Some(StopReason::InvalidOpcode(op_hi << 16));
-                None
+                self.stop = Some(StopReason::InvalidOpcode(word));
+                return;
             }
         };
-        if let Some(r) = res {
-            // ANDR/ORR/XORR/ADD/SUB already set their flags; shift forms set zero.
-            if matches!(op_hi, 0x0020..=0x0024) {
-                self.zero = r == 0;
-            }
-            self.regs[f.rd] = r;
-        }
+        self.regs[rd] = res;
+        self.pc = next;
     }
 
-    /// RV / R group: opcode classes 0x08?, 0x09?, 0x0A?, 0x0B?, 0x0F?
-    /// (the register-immediate arithmetic/logic/bit/rotate/extend block).
-    /// `op12` = word[15:4]; the destination register is rs2 = word[3:0].
-    fn exec_rv_group(&mut self, op12: u32, _full: u32, f: &Fields, imm: u32) {
-        let rd = f.rs2; // for these forms reg is in [3:0]
-        let rs = self.regs[rd];
-        let imm_s = i64::from(imm as i32) as u64; // sign-extended
-        let imm_z = u64::from(imm); // zero-extended
-        let mut pc_adv: u32 = 4;
-        match op12 {
-            0x080 => {
-                self.regs[rd] = imm_s; // SETR sign-extend
-                pc_adv = 8;
-            }
-            0x081 => {
-                self.regs[rd] = self.add_flags(rs, imm_z, 0); // ADDV zero-extend, ADD flags
-                pc_adv = 8;
-            }
-            0x082 => {
-                self.regs[rd] = self.sub_flags(rs, imm_z, 0); // MINUSV
-                pc_adv = 8;
-            }
-            0x083 => {
-                self.cmp(rs, imm_s); // CMPRV sign-extend, flags only
-                pc_adv = 8;
-            }
-            0x084 => {
-                self.regs[rd] = self.add_flags(rs, 1, 0); // INCR
-            }
-            0x085 => {
-                self.regs[rd] = self.sub_flags(rs, 1, 0); // DECR
-            }
-            0x086 => {
-                let r = rs & imm_z; // ANDV zero-extend, sets zero only
-                self.zero = r == 0;
-                self.regs[rd] = r;
-                pc_adv = 8;
-            }
-            0x087 => {
-                let r = rs | imm_z; // ORV
-                self.zero = r == 0;
-                self.regs[rd] = r;
-                pc_adv = 8;
-            }
-            0x088 => {
-                let r = rs ^ imm_z; // XORV
-                self.zero = r == 0;
-                self.regs[rd] = r;
-                pc_adv = 8;
-            }
-            0x089 => {
-                // SETFR: rd = {zero,equal,carry,overflow, 60'b0} in TOP 4 bits.
-                let mut v: u64 = 0;
-                if self.zero {
-                    v |= 1 << 63;
-                }
-                if self.equal {
-                    v |= 1 << 62;
-                }
-                if self.carry {
-                    v |= 1 << 61;
-                }
-                if self.overflow {
-                    v |= 1 << 60;
-                }
-                self.regs[rd] = v;
-            }
-            0x08A => {
-                let r = rs.wrapping_neg(); // NEGR sets zero
-                self.zero = r == 0;
-                self.regs[rd] = r;
-            }
-            0x08B => {
-                // ABSR: |rs| signed, sets zero AND overflow (ABSR is an overflow producer).
-                // INT_MIN is NOT special-cased: abs wraps to INT_MIN, overflow=0.
-                let v = rs as i64;
-                let r = v.wrapping_abs() as u64;
-                self.zero = r == 0;
-                self.overflow = false;
-                self.regs[rd] = r;
-            }
-            0x08C => {
-                let r = i64::from(rs as i8) as u64; // SEXTB, sets zero/sign
-                self.set_zs(r);
-                self.regs[rd] = r;
-            }
-            0x08D => {
-                self.regs[rd] = rs << 1; // SHLR1 (no flags per doc; logic)
-            }
-            0x08E => {
-                self.regs[rd] = rs >> 1; // SHRR1
-            }
-            0x08F => {
-                self.regs[rd] = rs << 1; // SHLAR (== logical left)
-            }
-            0x090 => {
-                self.regs[rd] = ((rs as i64) >> 1) as u64; // SHRAR arithmetic
-            }
-            0x091 => {
-                let r = rs << u64::from(imm & 0x3F); // SHLV sets zero
-                self.zero = r == 0;
-                self.regs[rd] = r;
-                pc_adv = 8;
-            }
-            0x092 => {
-                let r = rs >> u64::from(imm & 0x3F); // SHRV
-                self.zero = r == 0;
-                self.regs[rd] = r;
-                pc_adv = 8;
-            }
-            0x093 => {
-                let r = ((rs as i64) >> i64::from(imm & 0x3F)) as u64; // SHRAV
-                self.zero = r == 0;
-                self.regs[rd] = r;
-                pc_adv = 8;
-            }
-            0x094 => {
-                let r = i64::from(rs as i16) as u64; // SEXTH
-                self.set_zs(r);
-                self.regs[rd] = r;
-            }
-            0x095 => {
-                let r = rs & 0xFF; // ZEXTB sets zero
-                self.zero = r == 0;
-                self.regs[rd] = r;
-            }
-            0x096 => {
-                let r = rs & 0xFFFF; // ZEXTH
-                self.zero = r == 0;
-                self.regs[rd] = r;
-            }
-            0x097 => {
-                self.regs[rd] = rs.swap_bytes(); // BSWAP
-            }
-            0x098 => {
-                let r = !rs; // NOTR sets zero
-                self.zero = r == 0;
-                self.regs[rd] = r;
-            }
-            0x099 => {
-                // LEAPC: rd = PC_of_this_insn + sign_ext(imm32), zero-extended.
-                self.regs[rd] = u64::from(self.pc.wrapping_add(imm));
-                pc_adv = 8;
-            }
-            0x0A0 => {
-                self.regs[rd] = rs | (1 << (imm & 0x3F)); // BSET
-                pc_adv = 8;
-            }
-            0x0A1 => {
-                self.regs[rd] = rs & !(1 << (imm & 0x3F)); // BCLR
-                pc_adv = 8;
-            }
-            0x0A2 => {
-                self.regs[rd] = rs ^ (1 << (imm & 0x3F)); // BTGL
-                pc_adv = 8;
-            }
-            0x0A3 => {
-                let bit = (rs >> (imm & 0x3F)) & 1; // BTST: zero_flag = NOT(bit), no write
-                self.zero = bit == 0;
-                pc_adv = 8;
-            }
-            0x0A8 => {
-                self.regs[rd] = u64::from(rs.count_ones()); // POPCNT
-            }
-            0x0A9 => {
-                self.regs[rd] = u64::from(rs.leading_zeros()); // CLZ; CLZ(0)=64 (leading_zeros)
-            }
-            0x0AA => {
-                self.regs[rd] = u64::from(rs.trailing_zeros()); // CTZ; CTZ(0)=64
-            }
-            0x0AB => {
-                self.regs[rd] = rs.reverse_bits(); // BITREV
-            }
-            0x0AC => {
-                // BEXTR: start=imm[4:0], len=imm[12:8]; low 32 bits only; zero-extend.
-                let start = u64::from(imm & 0x1F);
-                let len = u64::from((imm >> 8) & 0x1F);
-                let src = rs & 0xFFFF_FFFF;
-                let mask = if len >= 32 { 0xFFFF_FFFF } else { (1_u64 << len) - 1 };
-                self.regs[rd] = (src >> start) & mask;
-                pc_adv = 8;
-            }
-            0x0AD => {
-                // BDEP: deposit len bits of rs at start into rs (low 32 bits).
-                let start = u64::from(imm & 0x1F);
-                let len = u64::from((imm >> 8) & 0x1F);
-                let mask = if len >= 32 { 0xFFFF_FFFF } else { (1_u64 << len) - 1 };
-                let field = (rs & mask) << start;
-                let clear = !(mask << start) & 0xFFFF_FFFF;
-                self.regs[rd] = (rs & clear) | (field & 0xFFFF_FFFF);
-                pc_adv = 8;
-            }
-            0x0B8 => {
-                self.regs[rd] = (rs as i64).wrapping_mul(imm_s as i64) as u64; // MULV signed imm
-                pc_adv = 8;
-            }
-            0x0B9 => {
-                // DIVV signed by sign_ext(imm); div-by-0 → all-ones, overflow=1, zero untouched.
-                let d = imm_s as i64;
-                if d == 0 {
-                    self.regs[rd] = 0xFFFF_FFFF_FFFF_FFFF;
-                    self.overflow = true;
+    /// Class 2 — ALU immediate: `rd = rs1 OP ext(imm)` (MOV/LEA ignore rs1).
+    fn v2_alu_imm(&mut self, word: u32, rd: usize, rs1: usize, imm32: u32, len: u32, next: u32) {
+        let op = (word >> 22) & 0xF;
+        let sgn = (word >> 20) & 1 == 1;
+        let ext = if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) };
+        let a = self.regs[rs1];
+        match op {
+            0 => self.regs[rd] = self.add_flags(a, ext, 0),                     // ADDI / ADDV
+            1 => self.regs[rd] = self.sub_flags(a, ext, 0),                     // MINUSV
+            2 => self.regs[rd] = self.add_flags(a, ext, u64::from(self.carry)), // ADC-imm
+            3 => self.regs[rd] = self.sub_flags(a, ext, u64::from(self.carry)), // SBC-imm
+            4 => self.regs[rd] = a & ext,                                       // ANDV — no flags
+            5 => self.regs[rd] = a | ext,                                       // ORV
+            6 => self.regs[rd] = a ^ ext,                                       // XORV
+            14 => self.regs[rd] = u64::from(self.pc.wrapping_add(imm32)),       // LEAPC: rd = PC + imm32
+            15 => {
+                // MOV: SETR (2-word, sign-extended) or SETR64 (3-word, full 64-bit).
+                self.regs[rd] = if len == 3 {
+                    let lo = self.read32(self.pc.wrapping_add(4));
+                    let hi = self.read32(self.pc.wrapping_add(8));
+                    (u64::from(hi) << 32) | u64::from(lo)
                 } else {
-                    self.regs[rd] = (rs as i64).wrapping_div(d) as u64;
-                }
-                pc_adv = 8;
-            }
-            0x0BA => {
-                // MODV signed; mod-by-0 → NO writeback at all, overflow=1, zero untouched.
-                let d = imm_s as i64;
-                if d == 0 {
-                    self.overflow = true;
-                } else {
-                    self.regs[rd] = (rs as i64).wrapping_rem(d) as u64;
-                }
-                pc_adv = 8;
-            }
-            0x0F0 => {
-                self.regs[rd] = i64::from(rs as i32) as u64; // SEXTW
-            }
-            0x0F1 => {
-                self.regs[rd] = rs & 0xFFFF_FFFF; // ZEXTW
-            }
-            0x0F8 => {
-                self.regs[rd] = rs.rotate_left(1); // ROLR1
-            }
-            0x0F9 => {
-                self.regs[rd] = rs.rotate_right(1); // RORR1
-            }
-            0x0FA => {
-                // ROLCR: rotate-left-through-carry (carry producer).
-                let new_carry = (rs >> 63) & 1 == 1;
-                self.regs[rd] = (rs << 1) | u64::from(self.carry);
-                self.carry = new_carry;
-            }
-            0x0FB => {
-                // RORCR: rotate-right-through-carry.
-                let new_carry = rs & 1 == 1;
-                self.regs[rd] = (rs >> 1) | (u64::from(self.carry) << 63);
-                self.carry = new_carry;
-            }
-            0x0FC => {
-                self.regs[rd] = rs.rotate_left(imm & 0x3F); // ROLV
-                pc_adv = 8;
-            }
-            0x0FD => {
-                self.regs[rd] = rs.rotate_right(imm & 0x3F); // RORV
-                pc_adv = 8;
-            }
-            0x0FE => {
-                // SETR64 (V64): rd = {hi32, lo32}; lo32 @ PC+4, hi32 @ PC+8.
-                let lo = self.read32(self.pc + 4);
-                let hi = self.read32(self.pc + 8);
-                self.regs[rd] = (u64::from(hi) << 32) | u64::from(lo);
-                pc_adv = 12;
+                    ext
+                };
             }
             _ => {
-                self.stop = Some(StopReason::InvalidOpcode(op12 << 4));
+                self.stop = Some(StopReason::InvalidOpcode(word));
+                return;
             }
         }
-        if self.stop.is_none() {
-            self.pc = self.pc.wrapping_add(pc_adv);
+        self.pc = next;
+    }
+
+    /// Class 3 — compare: flag-setting CMP (B=0) or boolean `rd=0/1` (B=1).
+    #[allow(clippy::too_many_arguments, reason = "decoded instruction fields are passed explicitly for clarity")]
+    fn v2_compare(&mut self, word: u32, rd: usize, rs1: usize, rs2: usize, imm32: u32, len: u32, next: u32) {
+        let pred = (word >> 23) & 0x7;
+        let inv = (word >> 22) & 1 == 1;
+        let boolean = (word >> 21) & 1 == 1;
+        let sgn = (word >> 20) & 1 == 1;
+        let lhs = self.regs[rs1];
+        // 2-word forms take a sign/zero-extended immediate; 1-word forms use rs2.
+        let rhs = if len == 2 {
+            if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) }
+        } else {
+            self.regs[rs2]
+        };
+        if boolean {
+            let base = match pred {
+                0 => lhs == rhs,                     // EQ
+                1 => (lhs as i64) < (rhs as i64),    // LT (signed)
+                2 => (lhs as i64) <= (rhs as i64),   // LE (signed)
+                3 => lhs < rhs,                      // ULT
+                4 => lhs <= rhs,                     // ULE
+                _ => {
+                    self.stop = Some(StopReason::InvalidOpcode(word));
+                    return;
+                }
+            };
+            self.regs[rd] = u64::from(base ^ inv);
+        } else {
+            self.cmp(lhs, rhs);
+        }
+        self.pc = next;
+    }
+
+    /// Class 4 — shift / rotate / bit manipulation.
+    fn v2_shift_bit(&mut self, word: u32, rd: usize, rs1: usize, rs2: usize, imm32: u32, next: u32) {
+        let op = (word >> 22) & 0xF;
+        let src = (word >> 21) & 1; // 0 = count in rs2[5:0], 1 = embedded N
+        let n = (word >> 15) & 0x3F;
+        let f = (word >> 14) & 1 == 1;
+        let a = self.regs[rs1];
+        let cnt = if src == 1 { n } else { (self.regs[rs2] & 0x3F) as u32 };
+        match op {
+            0 => { let r = a << cnt; if f { self.zero = r == 0; } self.regs[rd] = r; } // SHL
+            1 => { let r = a >> cnt; if f { self.zero = r == 0; } self.regs[rd] = r; } // SHR
+            2 => { let r = ((a as i64) >> cnt) as u64; if f { self.zero = r == 0; } self.regs[rd] = r; } // SAR
+            3 => {
+                let r = a.rotate_left(cnt); // ROL
+                if f {
+                    self.zero = r == 0;
+                    if cnt == 1 { self.carry = (a >> 63) & 1 == 1; }
+                }
+                self.regs[rd] = r;
+            }
+            4 => {
+                let r = a.rotate_right(cnt); // ROR
+                if f {
+                    self.zero = r == 0;
+                    if cnt == 1 { self.carry = a & 1 == 1; }
+                }
+                self.regs[rd] = r;
+            }
+            5 => {
+                // RCL — rotate left through carry (ROLCR).
+                let new_carry = (a >> 63) & 1 == 1;
+                let r = (a << 1) | u64::from(self.carry);
+                self.carry = new_carry;
+                if f { self.zero = r == 0; }
+                self.regs[rd] = r;
+            }
+            6 => {
+                // RCR — rotate right through carry (RORCR).
+                let new_carry = a & 1 == 1;
+                let r = (a >> 1) | (u64::from(self.carry) << 63);
+                self.carry = new_carry;
+                if f { self.zero = r == 0; }
+                self.regs[rd] = r;
+            }
+            8 => self.regs[rd] = a | (1 << cnt),   // BSET
+            9 => self.regs[rd] = a & !(1 << cnt),  // BCLR
+            10 => self.regs[rd] = a ^ (1 << cnt),  // BTGL
+            11 => {
+                // BTST — BTSTRR (reg) writes rd = bit; BTST-imm is flag-only (Z=~bit).
+                let bit = (a >> cnt) & 1;
+                if src == 0 {
+                    self.regs[rd] = bit;
+                } else {
+                    self.zero = bit == 0;
+                }
+            }
+            12 => {
+                // BEXTR — extract imm-described field (start[4:0], len[12:8]); low 32 bits.
+                let start = u64::from(imm32 & 0x1F);
+                let l = u64::from((imm32 >> 8) & 0x1F);
+                let mask = if l >= 32 { 0xFFFF_FFFF } else { (1_u64 << l) - 1 };
+                self.regs[rd] = ((a & 0xFFFF_FFFF) >> start) & mask;
+            }
+            13 => {
+                // BDEP — deposit rs2's low field into rs1(base) at start; low 32 bits.
+                let start = u64::from(imm32 & 0x1F);
+                let l = u64::from((imm32 >> 8) & 0x1F);
+                let mask = if l >= 32 { 0xFFFF_FFFF } else { (1_u64 << l) - 1 };
+                let field = (self.regs[rs2] & mask) << start;
+                let clear = !(mask << start) & 0xFFFF_FFFF;
+                self.regs[rd] = (a & clear) | (field & 0xFFFF_FFFF);
+            }
+            _ => {
+                self.stop = Some(StopReason::InvalidOpcode(word));
+                return;
+            }
+        }
+        self.pc = next;
+    }
+
+    /// Class 5 — unary: `rd = OP(rs1)`.
+    fn v2_unary(&mut self, word: u32, rd: usize, rs1: usize, next: u32) {
+        let op = (word >> 22) & 0xF;
+        let size = (word >> 20) & 0x3; // SEXT/ZEXT: 00=8 01=16 10=32
+        let f = (word >> 19) & 1 == 1;
+        let a = self.regs[rs1];
+        match op {
+            0 => self.regs[rd] = a, // COPY
+            1 => { let r = a.wrapping_neg(); if f { self.zero = r == 0; } self.regs[rd] = r; } // NEG
+            2 => { let r = !a; if f { self.zero = r == 0; } self.regs[rd] = r; } // NOT
+            3 => {
+                // ABS — INT_MIN wraps (result INT_MIN, overflow cleared); matches v1.
+                let r = (a as i64).wrapping_abs() as u64;
+                if f { self.zero = r == 0; self.overflow = false; }
+                self.regs[rd] = r;
+            }
+            4 => {
+                let r = match size { 0 => i64::from(a as i8), 1 => i64::from(a as i16), _ => i64::from(a as i32) } as u64;
+                if f { self.set_zs(r); }
+                self.regs[rd] = r;
+            }
+            5 => {
+                let r = match size { 0 => a & 0xFF, 1 => a & 0xFFFF, _ => a & 0xFFFF_FFFF };
+                if f { self.zero = r == 0; }
+                self.regs[rd] = r;
+            }
+            6 => self.regs[rd] = a.swap_bytes(),   // BSWAP (64-bit)
+            7 => self.regs[rd] = a.reverse_bits(), // BITREV
+            8 => { let r = u64::from(a.count_ones()); if f { self.zero = r == 0; } self.regs[rd] = r; } // POPCNT
+            9 => self.regs[rd] = u64::from(a.leading_zeros()),  // CLZ; CLZ(0)=64
+            10 => self.regs[rd] = u64::from(a.trailing_zeros()), // CTZ; CTZ(0)=64
+            12 => {
+                // GETF / SETFR: rd = {zero,equal,carry,overflow} in the top nibble [63:60].
+                let mut v = 0_u64;
+                if self.zero { v |= 1 << 63; }
+                if self.equal { v |= 1 << 62; }
+                if self.carry { v |= 1 << 61; }
+                if self.overflow { v |= 1 << 60; }
+                self.regs[rd] = v;
+            }
+            14 => self.regs[rd] = self.add_flags(a, 1, 0), // INC
+            15 => self.regs[rd] = self.sub_flags(a, 1, 0), // DEC
+            _ => {
+                self.stop = Some(StopReason::InvalidOpcode(word));
+                return;
+            }
+        }
+        self.pc = next;
+    }
+
+    /// Class 6 — loads: `rd = ext(mem[EA])`.
+    fn v2_load(&mut self, word: u32, rd: usize, rs1: usize, rs2: usize, imm32: u32, next: u32) {
+        let size = (word >> 24) & 0x3; // 00=8 01=16 10=32 11=64
+        let sgn = (word >> 23) & 1 == 1;
+        let mode = (word >> 21) & 0x3; // 00=[rs1] 01=rs1+imm32 10=[imm32] 11=rs1+rs2
+        let a = (word >> 20) & 1;
+        let size_bytes = 1_usize << size;
+        let ea_raw = self.ea(mode, rs1, rs2, imm32);
+        let ea = ea_raw & load_align_mask(size_bytes, mode, a);
+        let val = if size_bytes == 8 { self.read64(ea) } else { self.read_sub(ea, size_bytes) };
+        self.regs[rd] = if sgn && size_bytes < 8 { sign_extend(val, size_bytes) } else { val };
+        self.pc = next;
+    }
+
+    /// Class 7 — stores: `mem[EA] = reg[rd]` (rd field is the data source).
+    fn v2_store(&mut self, word: u32, rd: usize, rs1: usize, rs2: usize, imm32: u32, next: u32) {
+        let size = (word >> 24) & 0x3;
+        let mode = (word >> 21) & 0x3;
+        let a = (word >> 20) & 1;
+        let size_bytes = 1_usize << size;
+        let ea = self.ea(mode, rs1, rs2, imm32) & store_align_mask(size_bytes, mode, a);
+        let data = self.regs[rd];
+        if size_bytes == 8 {
+            self.write64(ea, data);
+        } else {
+            self.write_sub(ea, data, size_bytes);
+        }
+        self.pc = next;
+    }
+
+    /// Effective-address computation shared by loads and stores (MODE field).
+    fn ea(&self, mode: u32, rs1: usize, rs2: usize, imm32: u32) -> u32 {
+        match mode {
+            0 => self.regs[rs1] as u32,                                    // [rs1]
+            1 => (self.regs[rs1] as u32).wrapping_add(imm32),              // rs1 + imm32
+            2 => imm32,                                                    // [imm32] absolute
+            _ => (self.regs[rs1] as u32).wrapping_add(self.regs[rs2] as u32), // rs1 + rs2
         }
     }
 
-    /// Flow control (0x1000..0x102F absolute + 0x1030..0x1041 PC-relative).
-    fn exec_flow(&mut self, full: u32, f: &Fields) {
-        // JMPR R (0x102?) — single word, target in rs2.
-        if full & 0xFFF0 == 0x1020 {
-            self.pc = self.regs[f.rs2] as u32;
+    /// Class 8 — branch / call.
+    fn v2_branch(&mut self, word: u32, rs2: usize, imm32: u32, next: u32) {
+        let link = (word >> 25) & 1 == 1;  // call (push return address)
+        let rel = (word >> 24) & 1 == 1;   // PC-relative displacement
+        let rind = (word >> 23) & 1 == 1;  // target = rs2
+        let cond_code = (word >> 19) & 0xF;
+        let inv = (word >> 18) & 1 == 1;
+        let Some(cond) = self.eval_cond(cond_code) else {
+            self.stop = Some(StopReason::InvalidOpcode(word));
             return;
-        }
-        // RET (0x1012)
-        if full == 0x1012 {
-            let ra = self.read64(self.sp);
-            self.sp = self.sp.wrapping_add(8);
-            self.pc = ra as u32;
-            return;
-        }
-        let imm = self.read32(self.pc.wrapping_add(4));
-        let cond = self.flow_cond(full);
-        let is_call = matches!(full, 0x1009..=0x1011) || full == 0x1041;
-        let is_rel = (0x1030..=0x1041).contains(&full);
-        let next = self.pc.wrapping_add(8);
-        if is_call {
-            if cond {
+        };
+        let taken = cond ^ inv;
+        let target = if rind {
+            self.regs[rs2] as u32
+        } else if rel {
+            self.pc.wrapping_add(imm32)
+        } else {
+            imm32
+        };
+        if taken {
+            if link {
+                // Push the (zero-extended) return address = the fall-through PC.
                 self.sp = self.sp.wrapping_sub(8);
-                self.write64(self.sp, u64::from(next)); // push PC+8 zero-extended
-                self.pc = if is_rel { self.pc.wrapping_add(imm) } else { imm };
-            } else {
-                self.pc = next;
+                self.write64(self.sp, u64::from(next));
             }
-        } else if cond {
-            self.pc = if is_rel { self.pc.wrapping_add(imm) } else { imm };
+            self.pc = target;
         } else {
             self.pc = next;
         }
     }
 
-    /// Evaluate the branch/call condition for a flow opcode.
-    fn flow_cond(&self, full: u32) -> bool {
-        match full {
-            0x1000 | 0x1009 | 0x1030 | 0x1041 => true, // JMP/CALL/JMPREL/CALLREL
-            0x1001 | 0x100A | 0x1031 => self.zero,
-            0x1002 | 0x100B | 0x1032 => !self.zero,
-            0x1003 | 0x100C | 0x1033 => self.equal,
-            0x1004 | 0x100D | 0x1034 => !self.equal,
-            0x1005 | 0x100E | 0x1035 => self.carry,
-            0x1006 | 0x100F | 0x1036 => !self.carry,
-            0x1007 | 0x1010 => self.overflow,
-            0x1008 | 0x1011 => !self.overflow,
-            0x1013 | 0x1037 => self.sign,
-            0x1014 | 0x1038 => !self.sign,
-            0x1015 | 0x1039 => self.less,
-            0x1016 | 0x103A => self.less || self.equal,
-            0x1017 | 0x103B => !self.less && !self.equal,
-            0x1018 | 0x103C => !self.less,
-            0x1019 | 0x103D => self.ult,
-            0x101A | 0x103E => self.ult || self.equal,
-            0x101B | 0x103F => !self.ult && !self.equal,
-            0x101C | 0x1040 => !self.ult,
-            _ => false,
-        }
+    /// Evaluate a class-8 COND code against the flags. `None` = reserved/illegal.
+    fn eval_cond(&self, cond: u32) -> Option<bool> {
+        Some(match cond {
+            0 => true,                       // always
+            1 => self.zero,                  // Z
+            2 => self.carry,                 // C
+            3 => self.overflow,              // V
+            4 => self.sign,                  // S
+            5 => self.less,                  // LT
+            6 => self.less || self.equal,    // LE
+            7 => self.ult,                   // ULT
+            8 => self.ult || self.equal,     // ULE
+            9 => self.equal,                 // E
+            _ => return None,
+        })
     }
 
-    /// Stack ops (0x40xx) — PUSH/POP/PUSHV/GETSP/SETSP/ADDSP/PUSHV64/CALLR.
-    fn exec_stack(&mut self, full: u32, f: &Fields) {
-        match full & 0xFFF0 {
-            0x4000 => {
-                // PUSH R
+    /// Class 9 — stack / SP.
+    fn v2_stack(&mut self, word: u32, rd: usize, rs1: usize, imm32: u32, len: u32, next: u32) {
+        let op = (word >> 22) & 0xF;
+        match op {
+            0 => {
+                // PUSH rs1
                 self.sp = self.sp.wrapping_sub(8);
-                self.write64(self.sp, self.regs[f.rs2]);
-                self.pc = self.pc.wrapping_add(4);
+                self.write64(self.sp, self.regs[rs1]);
+                self.pc = next;
             }
-            0x4010 => {
-                // POP R
-                self.regs[f.rs2] = self.read64(self.sp);
-                self.sp = self.sp.wrapping_add(8);
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x4030 => {
-                // GETSP R: rd = zero_ext(SP)
-                self.regs[f.rs2] = u64::from(self.sp);
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x4040 => {
-                // SETSP R
-                self.sp = self.regs[f.rs2] as u32;
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x4070 => {
-                // CALLR R: push PC+4, jump to rs2
-                let next = self.pc.wrapping_add(4);
-                self.sp = self.sp.wrapping_sub(8);
-                self.write64(self.sp, u64::from(next));
-                self.pc = self.regs[f.rs2] as u32;
-            }
-            _ => match full {
-                0x4020 => {
-                    // PUSHV V: push zero_ext(imm32)
-                    let v = u64::from(self.read32(self.pc.wrapping_add(4)));
-                    self.sp = self.sp.wrapping_sub(8);
-                    self.write64(self.sp, v);
-                    self.pc = self.pc.wrapping_add(8);
-                }
-                0x4050 => {
-                    // ADDSP V: SP += sign_ext(imm32)
-                    let off = self.read32(self.pc.wrapping_add(4));
-                    self.sp = self.sp.wrapping_add(off);
-                    self.pc = self.pc.wrapping_add(8);
-                }
-                0x4060 => {
-                    // PUSHV64 V64: push {hi32,lo32}
+            1 => {
+                // PUSHI: PUSHV (2-word, zero-ext imm32) or PUSHV64 (3-word, imm64).
+                let v = if len == 3 {
                     let lo = self.read32(self.pc.wrapping_add(4));
                     let hi = self.read32(self.pc.wrapping_add(8));
-                    let v = (u64::from(hi) << 32) | u64::from(lo);
-                    self.sp = self.sp.wrapping_sub(8);
-                    self.write64(self.sp, v);
-                    self.pc = self.pc.wrapping_add(12);
+                    (u64::from(hi) << 32) | u64::from(lo)
+                } else {
+                    u64::from(imm32)
+                };
+                self.sp = self.sp.wrapping_sub(8);
+                self.write64(self.sp, v);
+                self.pc = next;
+            }
+            2 => {
+                // POP rd
+                self.regs[rd] = self.read64(self.sp);
+                self.sp = self.sp.wrapping_add(8);
+                self.pc = next;
+            }
+            3 => { self.regs[rd] = u64::from(self.sp); self.pc = next; } // GETSP
+            4 => { self.sp = self.regs[rs1] as u32; self.pc = next; }    // SETSP
+            5 => { self.sp = self.sp.wrapping_add(imm32); self.pc = next; } // ADDSP (imm sign-ext, 32-bit add)
+            6 => {
+                // RET — restore PC from [31:0] of the popped slot.
+                let ra = self.read64(self.sp);
+                self.sp = self.sp.wrapping_add(8);
+                self.pc = ra as u32;
+            }
+            7 => self.iret(), // IRET
+            _ => self.stop = Some(StopReason::InvalidOpcode(word)),
+        }
+    }
+
+    /// IRET — pop the saved interrupt context and restore PC[31:0] + flags[38:32].
+    fn iret(&mut self) {
+        let ctx = self.read64(self.sp);
+        self.sp = self.sp.wrapping_add(8);
+        self.pc = ctx as u32;
+        self.zero = (ctx >> 38) & 1 == 1;
+        self.equal = (ctx >> 37) & 1 == 1;
+        self.carry = (ctx >> 36) & 1 == 1;
+        self.overflow = (ctx >> 35) & 1 == 1;
+        self.sign = (ctx >> 34) & 1 == 1;
+        self.less = (ctx >> 33) & 1 == 1;
+        self.ult = (ctx >> 32) & 1 == 1;
+    }
+
+    /// Class A — mul / div / mod.
+    #[allow(clippy::too_many_arguments, reason = "decoded instruction fields are passed explicitly for clarity")]
+    fn v2_muldiv(&mut self, word: u32, rd: usize, rs1: usize, rs2: usize, imm32: u32, len: u32, next: u32) {
+        let op = (word >> 24) & 0x3; // 00=MUL 01=DIV 10=MOD
+        let sgn = (word >> 23) & 1 == 1;
+        let h = (word >> 22) & 1 == 1; // high half (MUL only)
+        let a = self.regs[rs1];
+        let is_imm = len == 2;
+        let b = if is_imm {
+            if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) }
+        } else {
+            self.regs[rs2]
+        };
+        match op {
+            0 => {
+                // MUL
+                self.regs[rd] = if h {
+                    if sgn {
+                        ((i128::from(a as i64) * i128::from(b as i64)) >> 64) as u64
+                    } else {
+                        ((u128::from(a) * u128::from(b)) >> 64) as u64
+                    }
+                } else if sgn {
+                    (a as i64).wrapping_mul(b as i64) as u64
+                } else {
+                    a.wrapping_mul(b)
+                };
+            }
+            1 => {
+                // DIV — divide-by-zero → all-ones result, overflow set, zero untouched.
+                if b == 0 {
+                    self.regs[rd] = 0xFFFF_FFFF_FFFF_FFFF;
+                    self.overflow = true;
+                } else if sgn {
+                    self.regs[rd] = (a as i64).wrapping_div(b as i64) as u64;
+                } else {
+                    self.regs[rd] = a / b;
                 }
-                _ => self.stop = Some(StopReason::InvalidOpcode(full)),
-            },
-        }
-    }
-
-    /// LCD ops (0x20xx) — modelled as no-ops (no architectural state).
-    fn exec_lcd(&mut self, full: u32, _f: &Fields) {
-        // 0x2021/0x2022/0x2023 are V (2-word); 0x200?/0x201? are R (1-word).
-        let two_word = matches!(full, 0x2021..=0x2023);
-        self.pc = self.pc.wrapping_add(if two_word { 8 } else { 4 });
-    }
-
-    /// Board I/O (0x30xx) — LEDs / 7-seg / switches. No architectural effect,
-    /// except SWR reads switches (modelled as 0).
-    fn exec_io(&mut self, full: u32, f: &Fields) {
-        match full & 0xFFF0 {
-            0x3010 => {
-                // SWR R: read switch status (modelled as 0).
-                self.regs[f.rs2] = 0;
-                self.pc = self.pc.wrapping_add(4);
-                return;
             }
-            0x3000 | 0x3020 | 0x3030 | 0x3040 | 0x3050 | 0x3060 => {
-                // LEDR / 7SEG*R / RGB*R — R form, no effect.
-                self.pc = self.pc.wrapping_add(4);
-                return;
-            }
-            _ => {}
-        }
-        // 0x3070..0x3075 are V (2-word); 0x3073 (7SEGBLANK) is 1-word.
-        let two_word = matches!(full, 0x3070 | 0x3071 | 0x3072 | 0x3074 | 0x3075);
-        self.pc = self.pc.wrapping_add(if two_word { 8 } else { 4 });
-    }
-
-    /// Interrupt ops (0x60xx) — INTSETRR / IRET. Stubbed: no interrupt model.
-    fn exec_interrupt(&mut self, full: u32, _f: &Fields) {
-        if full == 0x6011 {
-            // IRET: pop saved context, restore PC[31:0] and flags. With no
-            // interrupt dispatch modelled this still correctly unwinds an
-            // explicitly-pushed context if one exists.
-            let ctx = self.read64(self.sp);
-            self.sp = self.sp.wrapping_add(8);
-            self.pc = ctx as u32;
-            self.zero = (ctx >> 38) & 1 == 1;
-            self.equal = (ctx >> 37) & 1 == 1;
-            self.carry = (ctx >> 36) & 1 == 1;
-            self.overflow = (ctx >> 35) & 1 == 1;
-            self.sign = (ctx >> 34) & 1 == 1;
-            self.less = (ctx >> 33) & 1 == 1;
-            self.ult = (ctx >> 32) & 1 == 1;
-            return;
-        }
-        // INTSETRR RR: configure handler — no architectural register effect here.
-        self.pc = self.pc.wrapping_add(4);
-    }
-
-    /// Misc Fxxx ops — DELAY / NOP / HALT / RESET / TRAP.
-    fn exec_misc(&mut self, full: u32, _f: &Fields, _imm: u32) {
-        match full {
-            0xF010 => {
-                self.pc = self.pc.wrapping_add(4); // NOP
-            }
-            0xF011 => {
-                self.halted = true; // HALT
-            }
-            0xF012 => {
-                self.pc = 0x4; // RESET → PC=0x4
-            }
-            0xF013 => {
-                self.pc = self.pc.wrapping_add(8); // DELAYV V (spin → no-op)
-            }
-            0xF014 => {
-                self.stop = Some(StopReason::Trap); // TRAP
+            2 => {
+                // MOD — mod-by-zero: reg forms write the dividend, MODV writes nothing;
+                // overflow set either way, zero untouched.
+                if b == 0 {
+                    self.overflow = true;
+                    if !is_imm {
+                        self.regs[rd] = a;
+                    }
+                } else if sgn {
+                    self.regs[rd] = (a as i64).wrapping_rem(b as i64) as u64;
+                } else {
+                    self.regs[rd] = a % b;
+                }
             }
             _ => {
-                if full & 0xFFF0 == 0xF000 {
-                    self.pc = self.pc.wrapping_add(4); // DELAYR R (spin → no-op)
-                } else {
-                    self.stop = Some(StopReason::InvalidOpcode(full));
-                }
+                self.stop = Some(StopReason::InvalidOpcode(word));
+                return;
             }
         }
+        self.pc = next;
     }
 
-    /// 64-bit register-addressed and value-addressed memory (0x70xx..0x7Bxx).
-    fn exec_mem(&mut self, op: u32, full: u32, f: &Fields) {
+    /// Class B — system: NOP / HALT / WAIT / RESET / TRAP / DELAY.
+    fn v2_system(&mut self, word: u32, next: u32) {
+        let op = (word >> 16) & 0x3F;
         match op {
-            0x70 => {
-                // MEMSET64RR RR: mem64[rs2] = rs1  (rs1=[7:4]=data, rs2=[3:0]=addr).
-                // The 64-bit bus returns the aligned doubleword; the cache reads
-                // addr & ~7 for any byte address. Align to match the hardware.
-                let data = self.regs[f.rs1];
-                let address = (self.regs[f.rs2] as u32) & !7;
-                self.write64(address, data);
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x71 => {
-                // MEMREADRR RR: rd = mem64[rs2]  (rd=[7:4], addr=[3:0])
-                let addr = (self.regs[f.rs2] as u32) & !7;
-                self.regs[f.rs1] = self.read64(addr);
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x72 => {
-                // 0x720? MEMSETR RV: mem64[imm32]=rs ; 0x721? MEMREADR RV: rd=mem64[imm32]
-                let imm = self.read32(self.pc.wrapping_add(4)) & !7;
-                if (full >> 4).trailing_zeros() >= 4 {
-                    self.write64(imm, self.regs[f.rs2]); // MEMSETR, reg in [3:0]
-                } else {
-                    self.regs[f.rs2] = self.read64(imm); // MEMREADR
-                }
-                self.pc = self.pc.wrapping_add(8);
-            }
-            0x73 => {
-                // STIDX64R RRV: mem64[rs2 + reg[imm[3:0]]] = rs1
-                let imm = self.read32(self.pc.wrapping_add(4));
-                let off = self.regs[(imm & 0xF) as usize];
-                let addr = ((self.regs[f.rs2].wrapping_add(off)) as u32) & !7;
-                self.write64(addr, self.regs[f.rs1]);
-                self.pc = self.pc.wrapping_add(8);
-            }
-            0x74 => {
-                self.write_sub(self.regs[f.rs2] as u32, self.regs[f.rs1], 1); // MEMSET8
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x75 => {
-                self.regs[f.rs1] = self.read_sub(self.regs[f.rs2] as u32, 1); // MEMGET8
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x76 => {
-                self.write_sub((self.regs[f.rs2] as u32) & !1, self.regs[f.rs1], 2); // MEMSET16
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x77 => {
-                self.regs[f.rs1] = self.read_sub((self.regs[f.rs2] as u32) & !1, 2); // MEMGET16
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x78 => {
-                self.write_sub((self.regs[f.rs2] as u32) & !3, self.regs[f.rs1], 4); // MEMSET32
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x79 => {
-                // MEMGET32: ANY alignment (no & ~3) — reads 4 bytes from rs2 as-is.
-                self.regs[f.rs1] = self.read_sub(self.regs[f.rs2] as u32, 4);
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x7A => {
-                self.write64((self.regs[f.rs2] as u32) & !7, self.regs[f.rs1]); // MEMSET64
-                self.pc = self.pc.wrapping_add(4);
-            }
-            0x7B => {
-                self.regs[f.rs1] = self.read64((self.regs[f.rs2] as u32) & !7); // MEMGET64
-                self.pc = self.pc.wrapping_add(4);
-            }
-            _ => self.stop = Some(StopReason::InvalidOpcode(full)),
+            0 | 2 | 5 => self.pc = next,             // NOP / WAIT / DELAY (all stubbed as fall-through)
+            1 => self.halted = true,                 // HALT
+            3 => self.pc = 0x4,                      // RESET → PC = 0x4
+            4 => self.stop = Some(StopReason::Trap), // TRAP
+            _ => self.stop = Some(StopReason::InvalidOpcode(word)),
         }
     }
+}
 
-    /// 64-bit indexed memory (0x0C/0x0D/0x0E).
-    fn exec_indexed64(&mut self, op: u32, f: &Fields, imm: u32) {
-        let base = self.regs[f.rs2] as u32;
-        match op {
-            0x0C => {
-                // LDIDX64: rd = mem64[rs2 + zero_ext(imm32)]
-                let addr = base.wrapping_add(imm);
-                self.regs[f.rs1] = self.read64(addr);
+/// Address-alignment mask for a class-6 **load** of `size_bytes` in addressing
+/// `mode` with the `A` (force-align) bit. Mirrors the per-instruction masking of
+/// the v1 CPU: `MEMGET32` is unaligned-tolerant while `LDIDX32` forces `&~3`;
+/// the register/absolute 64-bit reads align while the indexed ones stay raw
+/// unless `A=1`.
+const fn load_align_mask(size_bytes: usize, mode: u32, a: u32) -> u32 {
+    match size_bytes {
+        2 => !1,
+        4 => {
+            if mode == 0 {
+                !0 // MEMGET32 — unaligned-tolerant
+            } else {
+                !3 // LDIDX32
             }
-            0x0D => {
-                // STIDX64: mem64[rs2 + zero_ext(imm32)] = rs1
-                let addr = base.wrapping_add(imm);
-                self.write64(addr, self.regs[f.rs1]);
-            }
-            0x0E => {
-                // LDIDX64R: rd = mem64[rs2 + reg[imm[3:0]]]
-                let off = self.regs[(imm & 0xF) as usize] as u32;
-                let addr = base.wrapping_add(off);
-                self.regs[f.rs1] = self.read64(addr);
-            }
-            _ => self.stop = Some(StopReason::InvalidOpcode(op << 8)),
         }
-        self.pc = self.pc.wrapping_add(8);
+        8 => {
+            if mode == 1 && a == 0 {
+                !0 // LDIDX64 — raw (A=0)
+            } else {
+                !7 // MEMREADRR / MEMGET64 / MEMREADR / LDIDX64A / LDIDX64R (aligned, like the store side)
+            }
+        }
+        _ => !0, // byte access: no masking
     }
+}
 
-    /// Indexed sub-word load/store (0xC0..0xC7).
-    fn exec_indexed_sub(&mut self, op: u32, f: &Fields, imm: u32) {
-        let ea = (self.regs[f.rs2] as u32).wrapping_add(imm);
-        match op {
-            0xC0 => self.regs[f.rs1] = self.read_sub(ea & !3, 4),                          // LDIDX32 (& ~3)
-            0xC1 => self.write_sub(ea & !3, self.regs[f.rs1], 4),                          // STIDX32
-            0xC2 => self.regs[f.rs1] = self.read_sub(ea & !1, 2),                          // LDIDX16
-            0xC3 => self.write_sub(ea & !1, self.regs[f.rs1], 2),                          // STIDX16
-            0xC4 => self.regs[f.rs1] = self.read_sub(ea, 1),                               // LDIDX8
-            0xC5 => self.write_sub(ea, self.regs[f.rs1], 1),                               // STIDX8
-            0xC6 => self.regs[f.rs1] = i64::from(self.read_sub(ea, 1) as i8) as u64,       // LDIDX8_S
-            0xC7 => self.regs[f.rs1] = i64::from(self.read_sub(ea & !1, 2) as i16) as u64, // LDIDX16_S
-            _ => self.stop = Some(StopReason::InvalidOpcode(op << 8)),
+/// Address-alignment mask for a class-7 **store**. Sub-word stores always align
+/// to their width; 64-bit stores align except the raw indexed `STIDX64` (A=0).
+const fn store_align_mask(size_bytes: usize, mode: u32, a: u32) -> u32 {
+    match size_bytes {
+        2 => !1,
+        4 => !3, // MEMSET32 / STIDX32
+        8 => {
+            if mode == 1 && a == 0 {
+                !0 // STIDX64 — raw
+            } else {
+                !7 // MEMSET64RR / MEMSET64 / STIDX64A / MEMSETR / STIDX64R
+            }
         }
-        self.pc = self.pc.wrapping_add(8);
+        _ => !0,
     }
+}
 
-    /// Forced-aligned 64-bit indexed memory (0xFC/0xFD) — address & ~7.
-    fn exec_indexed64a(&mut self, op: u32, f: &Fields, imm: u32) {
-        let ea = ((self.regs[f.rs2] as u32).wrapping_add(imm)) & !7;
-        match op {
-            0xFC => self.regs[f.rs1] = self.read64(ea), // LDIDX64A
-            0xFD => self.write64(ea, self.regs[f.rs1]), // STIDX64A
-            _ => self.stop = Some(StopReason::InvalidOpcode(op << 8)),
-        }
-        self.pc = self.pc.wrapping_add(8);
+/// Sign-extend the low `size_bytes` (1/2/4) of `val` to 64 bits.
+const fn sign_extend(val: u64, size_bytes: usize) -> u64 {
+    match size_bytes {
+        1 => val as u8 as i8 as i64 as u64,
+        2 => val as u16 as i16 as i64 as u64,
+        4 => val as u32 as i32 as i64 as u64,
+        _ => val,
     }
 }
 
@@ -1162,86 +979,22 @@ mod tests {
     use super::*;
     use crate::helper::build_ddr_image;
 
-    /// Assemble a tiny program from raw 32-bit words (already in board order) into
-    /// a flat code byte vector (little-endian), then wrap in a DDR image.
+    // ---- v2 instruction encoders (word 0) ------------------------------------
+    // Register letters A..P map to nibbles 0..15. `word0 = template | rd<<8 | rs1<<4 | rs2`.
+
+    /// SETR rd, imm32 (sign-extended MOV) — 2 words.
+    fn setr(rd: u32, imm: u32) -> [u32; 2] {
+        [0x8BD0_0000 | (rd << 8), imm]
+    }
+    const HALT: u32 = 0x6C01_0000;
+
+    /// Assemble raw 32-bit words (board order) into a flat DDR image.
     fn image_from_words(words: &[u32]) -> Vec<u8> {
         let mut code = Vec::new();
         for w in words {
             code.extend_from_slice(&w.to_le_bytes());
         }
         build_ddr_image(&code)
-    }
-
-    #[test]
-    fn test_setr_and_add_flags() {
-        // SETR A 0xFFFFFFFF ; INCR A  -> A wraps to 0, zero flag set.
-        // SETR A: 0x0000_0800 (rd=A=0), imm 0xFFFFFFFF
-        // INCR A: 0x0000_0840
-        let words = [0x0000_0800, 0xFFFF_FFFF, 0x0000_0840, 0x0000_F011];
-        let img = image_from_words(&words);
-        let mut cpu = Cpu::new(&img, default_entry());
-        let r = cpu.run(100, None);
-        assert_eq!(r.stop, StopReason::Halt);
-        assert_eq!(cpu.regs[0], 0);
-        assert!(cpu.zero);
-    }
-
-    #[test]
-    fn test_mmio_uart_tx() {
-        // UART is now MMIO: a byte store to TX_DATA (0xF001_0000) transmits data[7:0].
-        //   SETR B 0xF0010000 ; SETR A 'H' ; MEMSET8 [B]=A ; SETR A 'i' ; MEMSET8 [B]=A ; HALT
-        // MEMSET8 (0x74): word 0x0000_74<rs1=data><rs2=addr>; here rs1=A(0), rs2=B(1).
-        let words = [
-            0x0000_0801,
-            0xF001_0000, // SETR B, 0xF0010000  (TX_DATA)
-            0x0000_0800,
-            0x0000_0048, // SETR A, 'H'
-            0x0000_7401, // MEMSET8 [B] = A
-            0x0000_0800,
-            0x0000_0069, // SETR A, 'i'
-            0x0000_7401, // MEMSET8 [B] = A
-            0x0000_F011, // HALT
-        ];
-        let img = image_from_words(&words);
-        let (r, _) = emulate_image(&img, default_entry(), 100, false);
-        assert_eq!(r.uart, "Hi");
-    }
-
-    #[test]
-    fn test_mmio_uart_rx_read_to_consume_and_status() {
-        // Feed one RX byte, then read STATUS / RX_DATA / STATUS via byte loads.
-        //   R1 = STATUS(0xF0010010), R2 = RX_DATA(0xF0010008)
-        //   R3 = [R1] status-before, R4 = [R2] consume, R5 = [R1] status-after, HALT
-        // MEMGET8 (0x75): word 0x0000_75<rs1=dest><rs2=addr>.
-        let words = [
-            0x0000_0801,
-            0xF001_0010, // SETR R1, STATUS
-            0x0000_0802,
-            0xF001_0008, // SETR R2, RX_DATA
-            0x0000_7531, // MEMGET8 R3 = [R1]  (status, RX not empty)
-            0x0000_7542, // MEMGET8 R4 = [R2]  (pop head byte)
-            0x0000_7551, // MEMGET8 R5 = [R1]  (status, RX now empty)
-            0x0000_F011, // HALT
-        ];
-        let img = image_from_words(&words);
-        let mut cpu = Cpu::new(&img, default_entry());
-        cpu.feed_uart_rx(&[0x41]); // 'A'
-        let _ = cpu.run(100, None);
-        // STATUS bits: bit0 TX_BUSY(=0), bit1 RX_EMPTY, bit2 RX_FULL.
-        assert_eq!(cpu.regs[3], 0b000, "RX_EMPTY clear while a byte is queued, TX never busy");
-        assert_eq!(cpu.regs[4], 0x41, "RX_DATA returns and pops the FIFO head");
-        assert_eq!(cpu.regs[5], 0b010, "RX_EMPTY set once the byte has been consumed");
-    }
-
-    #[test]
-    fn test_div_by_zero() {
-        // SETR A 5 ; DIVV A 0 -> A = all ones, overflow set, zero untouched.
-        let words = [0x0000_0800, 0x0000_0005, 0x0000_0B90, 0x0000_0000, 0x0000_F011];
-        let img = image_from_words(&words);
-        let mut cpu = Cpu::new(&img, default_entry());
-        cpu.run(100, None);
-        assert_eq!(cpu.regs[0], 0xFFFF_FFFF_FFFF_FFFF);
-        assert!(cpu.overflow);
     }
 
     /// Run words and return the final CPU for assertions.
@@ -1252,87 +1005,123 @@ mod tests {
         cpu
     }
 
-    /// Encode an RRR ALU op: `op_hi` in [31:16], rd[11:8], rs1[7:4], rs2[3:0].
-    fn rrr(op_hi: u32, rd: u32, rs1: u32, rs2: u32) -> u32 {
-        (op_hi << 16) | (rd << 8) | (rs1 << 4) | rs2
+    #[test]
+    fn test_setr_and_inc_wraps_zero() {
+        // SETR A 0xFFFFFFFF (sign-extends to all-ones) ; INCR A -> 0, zero+carry set.
+        // INCR A: class-5 INC, rd=rs1=A -> 0x5788_0000.
+        let words = [0x8BD0_0000, 0xFFFF_FFFF, 0x5788_0000, HALT];
+        let cpu = run_words(&words);
+        assert_eq!(cpu.regs[0], 0);
+        assert!(cpu.zero);
+        assert!(cpu.carry);
+    }
+
+    #[test]
+    fn test_mmio_uart_tx() {
+        // SETR B TX_DATA ; SETR A 'H' ; MEMSET8 [B]=A ; SETR A 'i' ; MEMSET8 [B]=A ; HALT
+        // MEMSET8 data=rd=A(0), base=rs1=B(1): 0x5C00_0000 | 0<<8 | 1<<4 = 0x5C00_0010.
+        let words = [
+            0x8BD0_0100, 0xF001_0000, // SETR B, TX_DATA
+            0x8BD0_0000, 0x0000_0048, // SETR A, 'H'
+            0x5C00_0010, // MEMSET8 [B] = A
+            0x8BD0_0000, 0x0000_0069, // SETR A, 'i'
+            0x5C00_0010, // MEMSET8 [B] = A
+            HALT,
+        ];
+        let img = image_from_words(&words);
+        let (r, _) = emulate_image(&img, default_entry(), 100, false);
+        assert_eq!(r.uart, "Hi");
+    }
+
+    #[test]
+    fn test_mmio_uart_rx_read_to_consume_and_status() {
+        // R1=STATUS, R2=RX_DATA; R3=[R1] before, R4=[R2] consume, R5=[R1] after.
+        // MEMGET8 rd, base=rs1: 0x5800_0000 | rd<<8 | rs1<<4.
+        let words = [
+            0x8BD0_0100, 0xF001_0010, // SETR B(R1), STATUS
+            0x8BD0_0200, 0xF001_0008, // SETR C(R2), RX_DATA
+            0x5800_0310, // MEMGET8 D(R3) = [B]
+            0x5800_0420, // MEMGET8 E(R4) = [C]
+            0x5800_0510, // MEMGET8 F(R5) = [B]
+            HALT,
+        ];
+        let img = image_from_words(&words);
+        let mut cpu = Cpu::new(&img, default_entry());
+        cpu.feed_uart_rx(&[0x41]); // 'A'
+        let _ = cpu.run(100, None);
+        assert_eq!(cpu.regs[3], 0b000, "RX_EMPTY clear while a byte is queued, TX never busy");
+        assert_eq!(cpu.regs[4], 0x41, "RX_DATA returns and pops the FIFO head");
+        assert_eq!(cpu.regs[5], 0b010, "RX_EMPTY set once the byte has been consumed");
+    }
+
+    #[test]
+    fn test_div_by_zero() {
+        // SETR A 5 ; DIVV A 0 -> A = all ones, overflow set.
+        // DIVV rd=rs1=A: 0xA980_0000, imm 0.
+        let words = [0x8BD0_0000, 5, 0xA980_0000, 0, HALT];
+        let cpu = run_words(&words);
+        assert_eq!(cpu.regs[0], 0xFFFF_FFFF_FFFF_FFFF);
+        assert!(cpu.overflow);
     }
 
     #[test]
     fn test_arithmetic_family() {
-        // Mirrors test_arithmetic.kla intent with the REAL opcodes.
-        // SETR A 0x10; SETR B 0x20; ADDR A A B  -> A = 0x30
-        let mut w = vec![0x0000_0800, 0x10, 0x0000_0801, 0x20, rrr(0x0001, 0, 0, 1), 0x0000_F011];
-        let cpu = run_words(&w);
+        // SETR A 0x10 ; SETR B 0x20 ; ADDR A A B -> 0x30.
+        let cpu = run_words(&[0x8BD0_0000, 0x10, 0x8BD0_0100, 0x20, 0x4420_0001, HALT]);
         assert_eq!(cpu.regs[0] as u32, 0x30);
-        // SUBR A A B -> A = 0x10
-        w = vec![0x0000_0800, 0x30, 0x0000_0801, 0x20, rrr(0x0002, 0, 0, 1), 0x0000_F011];
-        let cpu = run_words(&w);
+        // SUBR A A B with A=0x30, B=0x20 -> 0x10.
+        let cpu = run_words(&[0x8BD0_0000, 0x30, 0x8BD0_0100, 0x20, 0x4460_0001, HALT]);
         assert_eq!(cpu.regs[0] as u32, 0x10);
-        // ADDV A 100 with A=0x0A -> 0x6E
-        let w = vec![0x0000_0800, 0x0A, 0x0000_0810, 100, 0x0000_F011];
-        let cpu = run_words(&w);
+        // ADDV A 100 (rd=rs1=A) with A=0x0A -> 0x6E.
+        let cpu = run_words(&[0x8BD0_0000, 0x0A, 0x8820_0000, 100, HALT]);
         assert_eq!(cpu.regs[0] as u32, 0x6E);
     }
 
     #[test]
     fn test_logic_family() {
-        // AND: 0xFF & 0x12 = 0x12 ; OR: 0xFF00|0x00FF=0xFFFF ; XOR: 0xFFFF^0x00FF=0xFF00
-        let cpu = run_words(&[0x0000_0800, 0xFF, 0x0000_0801, 0x12, rrr(0x0003, 0, 0, 1), 0x0000_F011]);
+        // ANDR: 0xFF & 0x12 = 0x12 ; ORR: 0xFF00|0x00FF=0xFFFF ; XORR: 0xFFFF^0x00FF=0xFF00
+        let cpu = run_words(&[0x8BD0_0000, 0xFF, 0x8BD0_0100, 0x12, 0x4500_0001, HALT]);
         assert_eq!(cpu.regs[0] as u32, 0x12);
-        let cpu = run_words(&[0x0000_0800, 0xFF00, 0x0000_0801, 0x00FF, rrr(0x0004, 0, 0, 1), 0x0000_F011]);
+        let cpu = run_words(&[0x8BD0_0000, 0xFF00, 0x8BD0_0100, 0x00FF, 0x4540_0001, HALT]);
         assert_eq!(cpu.regs[0] as u32, 0xFFFF);
-        let cpu = run_words(&[0x0000_0800, 0xFFFF, 0x0000_0801, 0x00FF, rrr(0x0005, 0, 0, 1), 0x0000_F011]);
+        let cpu = run_words(&[0x8BD0_0000, 0xFFFF, 0x8BD0_0100, 0x00FF, 0x4580_0001, HALT]);
         assert_eq!(cpu.regs[0] as u32, 0xFF00);
-        // BSWAP is 64-bit (matches RTL bit_reverse/byte-swap width): SETR sign-extends
-        // 0x12345678 to 0x0000000012345678, and swap_bytes -> 0x7856341200000000.
-        // (test_logic.kla's 0x78563412 expectation is a stale 32-bit assumption.)
-        let cpu = run_words(&[0x0000_0800, 0x1234_5678, 0x0000_0970, 0x0000_F011]);
+        // BSWAP A A is 64-bit: SETR sign-extends 0x12345678, swap_bytes -> 0x7856341200000000.
+        let cpu = run_words(&[0x8BD0_0000, 0x1234_5678, 0x5580_0000, HALT]);
         assert_eq!(cpu.regs[0], 0x7856_3412_0000_0000);
     }
 
     #[test]
     fn test_muldiv_family() {
-        // MULR 10*10=100; DIVR 100/10=10; MODR 10%7=3
-        let cpu = run_words(&[0x0000_0800, 10, 0x0000_0801, 10, rrr(0x0010, 0, 0, 1), 0x0000_F011]);
+        // MULR 10*10=100 ; DIVR 100/10=10 ; MODR 10%7=3
+        let cpu = run_words(&[0x8BD0_0000, 10, 0x8BD0_0100, 10, 0x6880_0001, HALT]);
         assert_eq!(cpu.regs[0] as u32, 100);
-        let cpu = run_words(&[0x0000_0800, 100, 0x0000_0801, 10, rrr(0x0014, 0, 0, 1), 0x0000_F011]);
+        let cpu = run_words(&[0x8BD0_0000, 100, 0x8BD0_0100, 10, 0x6980_0001, HALT]);
         assert_eq!(cpu.regs[0] as u32, 10);
-        let cpu = run_words(&[0x0000_0800, 10, 0x0000_0801, 7, rrr(0x0016, 0, 0, 1), 0x0000_F011]);
+        let cpu = run_words(&[0x8BD0_0000, 10, 0x8BD0_0100, 7, 0x6A80_0001, HALT]);
         assert_eq!(cpu.regs[0] as u32, 3);
-        // MULV signed: A=10, MULV A 5 -> 50
-        let cpu = run_words(&[0x0000_0800, 10, 0x0000_0B80, 5, 0x0000_F011]);
+        // MULV signed: A=10, MULV A 5 -> 50.
+        let cpu = run_words(&[0x8BD0_0000, 10, 0xA880_0000, 5, HALT]);
         assert_eq!(cpu.regs[0] as u32, 50);
         // MODV by 0 -> NO writeback (A stays 17), overflow set.
-        let cpu = run_words(&[0x0000_0800, 17, 0x0000_0BA0, 0, 0x0000_F011]);
+        let cpu = run_words(&[0x8BD0_0000, 17, 0xAA80_0000, 0, HALT]);
         assert_eq!(cpu.regs[0] as u32, 17);
         assert!(cpu.overflow);
     }
 
     #[test]
     fn test_compare_and_branch() {
-        // CMPRR with A<B sets less; JMPLT taken. Build:
-        // SETR A 5; SETR B 0x10; CMPRR A B; JMPLT PASS; SETR P 0xFF(fail path) HALT; PASS: SETR P 1; HALT
-        // Encode CMPRR A B = 0x0000_0501; JMPLT = 0x0000_1015.
-        // Layout addresses (code base 0x20):
-        // 0x20 SETR A 5      (8)
-        // 0x28 SETR B 0x10   (8)
-        // 0x30 CMPRR A B     (4)
-        // 0x34 JMPLT 0x40    (8)
-        // 0x3C HALT          (4)   <- fail lands here only if not taken
-        // 0x40 SETR P 1 (rd=15) (8)
-        // 0x48 HALT
+        // SETR A 5 ; SETR B 0x10 ; CMPRR A B ; JMPLT 0x40 ; HALT(fail) ; SETR P 1 ; HALT
+        // Layout (code base 0x20): 0x20 SETR A, 0x28 SETR B, 0x30 CMPRR, 0x34 JMPLT->0x40,
+        // 0x3C HALT(fail), 0x40 SETR P 1, 0x48 HALT.
         let words = [
-            0x0000_0800,
-            5, // SETR A 5
-            0x0000_0801,
-            0x10,        // SETR B 0x10
-            0x0000_0501, // CMPRR A B
-            0x0000_1015,
-            0x40,        // JMPLT 0x40
-            0x0000_F011, // HALT (fail)
-            0x0000_080F,
-            1,           // SETR P 1   (P = R15)
-            0x0000_F011, // HALT
+            0x8BD0_0000, 5,          // SETR A 5
+            0x8BD0_0100, 0x10,       // SETR B 0x10
+            0x4C00_0001,             // CMPRR A B  (rs1=A, rs2=B)
+            0xA028_0000, 0x40,       // JMPLT 0x40
+            HALT,                    // fail path
+            0x8BD0_0F00, 1,          // SETR P 1   (P = R15)
+            HALT,
         ];
         let cpu = run_words(&words);
         assert_eq!(cpu.regs[15] as u32, 1, "JMPLT should be taken (A<B)");
@@ -1341,17 +1130,15 @@ mod tests {
 
     #[test]
     fn test_memory_roundtrip() {
-        // SETR A 0x200 (addr); SETR B 0xDEADBEEF; MEMSET64RR B A; MEMREADRR C A; HALT
-        // MEMSET64RR = 0x70?? rs1=[7:4]=B(1), rs2=[3:0]=A(0) -> 0x7010
-        // MEMREADRR = 0x71?? rd=[7:4]=C(2), addr=[3:0]=A(0) -> 0x7120
+        // SETR A 0x200 ; SETR B 0xDEADBEEF ; MEMSET64RR B A ; MEMREADRR C A ; HALT
+        // MEMSET64RR data=rd=B(1), addr=rs1=A(0): 0x5F00_0100.
+        // MEMREADRR dest=rd=C(2), addr=rs1=A(0): 0x5B00_0200.
         let words = [
-            0x0000_0800,
-            0x200, // SETR A 0x200
-            0x0000_0801,
-            0xDEAD_BEEF, // SETR B 0xDEADBEEF
-            0x0000_7010, // MEMSET64RR B A
-            0x0000_7120, // MEMREADRR C A
-            0x0000_F011, // HALT
+            0x8BD0_0000, 0x200,       // SETR A 0x200
+            0x8BD0_0100, 0xDEAD_BEEF, // SETR B 0xDEADBEEF
+            0x5F00_0100,              // MEMSET64RR B A
+            0x5B00_0200,              // MEMREADRR C A
+            HALT,
         ];
         let cpu = run_words(&words);
         assert_eq!(cpu.regs[2] as u32, 0xDEAD_BEEF);
@@ -1359,24 +1146,66 @@ mod tests {
 
     #[test]
     fn test_shift_family() {
-        // SHLV A 4 with A=1 -> 0x10 ; SHRV A 2 with A=0x40 -> 0x10
-        let cpu = run_words(&[0x0000_0800, 1, 0x0000_0910, 4, 0x0000_F011]);
+        // SHLV A #4 with A=1 -> 0x10 ; SHRV A #2 with A=0x40 -> 0x10.
+        // SHLV template 0x5020_4000 | N<<15 (rd=rs1=A=0).
+        let cpu = run_words(&[0x8BD0_0000, 1, 0x5020_4000 | (4 << 15), HALT]);
         assert_eq!(cpu.regs[0] as u32, 0x10);
-        let cpu = run_words(&[0x0000_0800, 0x40, 0x0000_0920, 2, 0x0000_F011]);
+        let cpu = run_words(&[0x8BD0_0000, 0x40, 0x5060_4000 | (2 << 15), HALT]);
         assert_eq!(cpu.regs[0] as u32, 0x10);
     }
 
     #[test]
+    fn test_stack_push_pop() {
+        // SETR B 0x1234 ; PUSH B ; SETR B 0 ; POP B ; HALT -> B restored to 0x1234.
+        // PUSH rs1=B(1): 0x6400_0010 ; POP rd=B(1): 0x6480_0100.
+        let words = [0x8BD0_0100, 0x1234, 0x6400_0010, 0x8BD0_0100, 0, 0x6480_0100, HALT];
+        let cpu = run_words(&words);
+        assert_eq!(cpu.regs[1] as u32, 0x1234);
+    }
+
+    #[test]
+    fn test_call_and_ret() {
+        // SETR A 0 ; CALL FUNC(0x38) ; HALT ; NOP ; FUNC: SETR A 0x42 ; RET
+        // CALL: 0xA200_0000, target 0x38. RET: 0x6580_0000. NOP pads 0x34 so FUNC lands at 0x38.
+        let words = [
+            0x8BD0_0000, 0,          // 0x20 SETR A 0
+            0xA200_0000, 0x38,       // 0x28 CALL 0x38
+            HALT,                    // 0x30 (return lands here)
+            0x6C00_0000,             // 0x34 NOP (padding)
+            0x8BD0_0000, 0x42,       // 0x38 SETR A 0x42
+            0x6580_0000,             // 0x40 RET
+        ];
+        let cpu = run_words(&words);
+        assert_eq!(cpu.regs[0] as u32, 0x42);
+        assert_eq!(cpu.sp, STACK_TOP, "RET must unwind the pushed return address");
+    }
+
+    #[test]
+    fn test_clz_is_64bit() {
+        // CLZ A A with A=0xFF -> 56 (64-bit register). CLZ: 0x5640_0000.
+        let cpu = run_words(&[0x8BD0_0000, 0x00FF, 0x5640_0000, HALT]);
+        assert_eq!(cpu.regs[0], 56);
+    }
+
+    #[test]
+    fn test_setfr_layout() {
+        // SETR A 0xFFFFFFFF ; INCR A (zero=1) ; SETFR B -> top bit set.
+        // SETFR rd=B(1): 0x5700_0100.
+        let words = [0x8BD0_0000, 0xFFFF_FFFF, 0x5788_0000, 0x5700_0100, HALT];
+        let cpu = run_words(&words);
+        assert_eq!(cpu.regs[1] >> 63, 1);
+    }
+
+    #[test]
     fn test_trace_format() {
-        // SETR A 0xFF ; HALT — first trace line should reflect A=0xFF after commit.
-        let img = image_from_words(&[0x0000_0800, 0x0000_00FF, 0x0000_F011]);
+        // SETR A 0xFF ; HALT — first trace line reflects A=0xFF after commit.
+        let img = image_from_words(&[setr(0, 0xFF)[0], setr(0, 0xFF)[1], HALT]);
         let (_r, trace) = emulate_image(&img, default_entry(), 100, true);
         let t = trace.expect("trace");
         let first = t.lines().next().expect("a line");
-        assert!(first.starts_with("i=1 pc=00000020 op=00000800"), "got: {first}");
+        assert!(first.starts_with("i=1 pc=00000020 op=8bd00000"), "got: {first}");
         assert!(first.contains(" r0=00000000000000ff"), "r0 not updated: {first}");
         assert!(first.contains(" sp=08000000 f="), "sp/flags missing: {first}");
-        // f is exactly 7 chars after "f=".
         let fpos = first.find(" f=").unwrap() + 3;
         let fbits: String = first[fpos..].chars().take(7).collect();
         assert_eq!(fbits.len(), 7);
@@ -1385,31 +1214,27 @@ mod tests {
 
     #[test]
     fn test_trace_memory_write_annotation() {
-        // SETR A 0x200; SETR B 0xAA; MEMSET64RR B A; HALT — the store line has wr=.
-        let img = image_from_words(&[0x0000_0800, 0x200, 0x0000_0801, 0xAA, 0x0000_7010, 0x0000_F011]);
+        // SETR A 0x200 ; SETR B 0xAA ; MEMSET64RR B A ; HALT — store line has wr=.
+        let img = image_from_words(&[0x8BD0_0000, 0x200, 0x8BD0_0100, 0xAA, 0x5F00_0100, HALT]);
         let (_r, trace) = emulate_image(&img, default_entry(), 100, true);
         let t = trace.expect("trace");
-        // The MEMSET64RR line (3rd retired) should carry a wr= annotation at 0x200.
         let store_line = t.lines().nth(2).expect("store line");
         assert!(store_line.contains(" wr=00000200/ff/"), "missing wr: {store_line}");
     }
 
     #[test]
-    fn test_clz_is_64bit() {
-        // CLZ of 0x000000FF on a 64-bit register = 56 (matches the RTL, NOT 24).
-        let cpu = run_words(&[0x0000_0800, 0x00FF, 0x0000_0A90, 0x0000_F011]);
-        assert_eq!(cpu.regs[0], 56);
+    fn test_setr64_full_width() {
+        // SETR64 A 0xDEADBEEF_CAFEBABE -> full 64-bit load. 3-word: 0xCBC0_0000, lo, hi.
+        let words = [0xCBC0_0000, 0xCAFE_BABE, 0xDEAD_BEEF, HALT];
+        let cpu = run_words(&words);
+        assert_eq!(cpu.regs[0], 0xDEAD_BEEF_CAFE_BABE);
     }
 
     #[test]
-    fn test_setfr_layout() {
-        // Set zero flag via INCR of 0xFFFFFFFF, then SETFR B.
-        // SETR A 0xFFFFFFFF; INCR A (zero=1); SETFR B (B=[3:0]=1)
-        let words = [0x0000_0800, 0xFFFF_FFFF, 0x0000_0840, 0x0000_0891, 0x0000_F011];
-        let img = image_from_words(&words);
-        let mut cpu = Cpu::new(&img, default_entry());
-        cpu.run(100, None);
-        // SETFR B: rd=B=1; top bit (zero) set.
-        assert_eq!(cpu.regs[1] >> 63, 1);
+    fn test_stale_v1_binary_traps() {
+        // Any v1 word has bits [31:30] = 00 (LEN=00) -> ERR_INV_OPCODE on the first fetch.
+        let img = image_from_words(&[0x0000_0800, 0xFF, 0x0000_F011]);
+        let (r, _) = emulate_image(&img, default_entry(), 100, false);
+        assert!(matches!(r.stop, StopReason::InvalidOpcode(0x0000_0800)));
     }
 }

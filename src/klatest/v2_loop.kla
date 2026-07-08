@@ -1,0 +1,12 @@
+// v2 round-trip fixture: loop + compare + conditional branch. Prints "AB".
+// Emits characters from 'A' up to (but not including) 'C' over MMIO UART.
+_start
+SETR B 0xF0010000    // UART TX_DATA
+SETR C 0x41          // current char = 'A'
+SETR E 0x43          // sentinel = 'C'
+LOOP:
+MEMSET8 C B          // transmit current char
+INCR C               // advance
+CMPRR C E            // sets equal/less/ult from C - E
+JMPNE LOOP:          // repeat while C != E
+HALT

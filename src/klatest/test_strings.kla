@@ -1,8 +1,11 @@
 // Test 12: String Data Storage and Retrieval
-// Tests: #DATA string storage format, MEMREADRR word reads, TXSTRMEMR
-// Note: CPU is word-addressed (32 bits per address). String data is stored as:
-//   word 0: number of data words (length prefix)
-//   word 1+: characters packed 4 per word, big-endian, null-padded
+// Tests: #DATA string storage format, MEMGET32 packed-word reads.
+// String data is stored as:
+//   word 0 (4 bytes): number of data words (length prefix)
+//   word 1+:          characters packed 4 per word, big-endian, null-padded
+// The words are 4 bytes apart, so they are read with MEMGET32 (byte-addressed,
+// unaligned-tolerant) advancing the pointer by 4 — NOT MEMREADRR, which is a
+// 64-bit read masked to an 8-byte boundary.
 // Expected UART output:
 //   00000002  (length prefix of "HELLO": 2 data words)
 //   48454C4C  (packed "HELL")
@@ -13,71 +16,58 @@
 //   00000002  (length prefix of "12345": 2 data words)
 //   31323334  (packed "1234")
 //   35000000  (packed "5\0\0\0")
-// Expected 7SEG: 0x0C
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-7SEG1V 0x0C
-NEWLINE
+$NEWLINE
 
 // Verify packed string data for "HELLO"
 SETR A #STR1
-MEMREADRR B A         // B = length prefix
-TXR B                 // Expect: 00000002
-NEWLINE
-INCR A
-MEMREADRR B A         // B = "HELL" packed
-TXR B                 // Expect: 48454C4C
-NEWLINE
-INCR A
-MEMREADRR B A         // B = "O\0\0\0" packed
-TXR B                 // Expect: 4F000000
-NEWLINE
+MEMGET32 B A          // B = length prefix (word @ +0)
+$TXR B  // Expect: 00000002
+$NEWLINE
+ADDV A 4
+MEMGET32 B A          // B = "HELL" packed (word @ +4)
+$TXR B  // Expect: 48454C4C
+$NEWLINE
+ADDV A 4
+MEMGET32 B A          // B = "O\0\0\0" packed (word @ +8)
+$TXR B  // Expect: 4F000000
+$NEWLINE
 
 // Verify packed string data for "ABCDEF"
 SETR A #STR2
-MEMREADRR B A         // B = length prefix
-TXR B                 // Expect: 00000002
-NEWLINE
-INCR A
-MEMREADRR B A         // B = "ABCD" packed
-TXR B                 // Expect: 41424344
-NEWLINE
-INCR A
-MEMREADRR B A         // B = "EF\0\0" packed
-TXR B                 // Expect: 45460000
-NEWLINE
+MEMGET32 B A          // B = length prefix
+$TXR B  // Expect: 00000002
+$NEWLINE
+ADDV A 4
+MEMGET32 B A          // B = "ABCD" packed
+$TXR B  // Expect: 41424344
+$NEWLINE
+ADDV A 4
+MEMGET32 B A          // B = "EF\0\0" packed
+$TXR B  // Expect: 45460000
+$NEWLINE
 
 // Verify packed string data for "12345"
 SETR A #STR3
-MEMREADRR B A         // B = length prefix
-TXR B                 // Expect: 00000002
-NEWLINE
-INCR A
-MEMREADRR B A         // B = "1234" packed
-TXR B                 // Expect: 31323334
-NEWLINE
-INCR A
-MEMREADRR B A         // B = "5\0\0\0" packed
-TXR B                 // Expect: 35000000
-NEWLINE
+MEMGET32 B A          // B = length prefix
+$TXR B  // Expect: 00000002
+$NEWLINE
+ADDV A 4
+MEMGET32 B A          // B = "1234" packed
+$TXR B  // Expect: 31323334
+$NEWLINE
+ADDV A 4
+MEMGET32 B A          // B = "5\0\0\0" packed
+$TXR B  // Expect: 35000000
+$NEWLINE
 
-// Visual test: TXSTRMEMR prints actual strings to UART
-// (character output is not hex, so ignored by test harness)
-SETR A #STR1
-TXSTRMEMR A           // Should print "HELLO"
-NEWLINE
-SETR A #STR2
-TXSTRMEMR A           // Should print "ABCDEF"
-NEWLINE
-SETR A #STR3
-TXSTRMEMR A           // Should print "12345"
-NEWLINE
-
-LEDV 0xFF
 HALT
 
 #STR1 "HELLO"
 #STR2 "ABCDEF"
 #STR3 "12345"
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

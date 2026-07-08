@@ -20,8 +20,8 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x14
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x14
+$NEWLINE
 
 // ================================================================
 // PHASE 1: FIBONACCI SEQUENCE
@@ -32,9 +32,9 @@ NEWLINE
 SETR A #FIB_BUF        // A = base address of fibonacci buffer
 SETR B 1               // B = fib(n-2) = 1
 SETR C 1               // C = fib(n-1) = 1
-MEMSETRR B A           // FIB_BUF[0] = 1
-INCR A
-MEMSETRR C A           // FIB_BUF[1] = 1
+MEMSET64RR B A  // FIB_BUF[0] = 1
+ADDV A 8
+MEMSET64RR C A  // FIB_BUF[1] = 1
 SETR E 8               // 8 more to generate (10 total)
 
 FIB_LOOP:
@@ -42,22 +42,22 @@ CMPRV E 0x0
 JMPE FIB_DONE:
 
 COPY D B               // D = fib(n-2)
-ADDRR D C              // D = fib(n-2) + fib(n-1) = fib(n)
+ADDR D D C  // D = fib(n-2) + fib(n-1) = fib(n)
 COPY B C               // shift: B = old fib(n-1)
 COPY C D               // shift: C = new fib(n)
 
-INCR A
-MEMSETRR D A           // store fib(n) in buffer
+ADDV A 8
+MEMSET64RR D A  // store fib(n) in buffer
 
 DECR E
 JMP FIB_LOOP:
 
 FIB_DONE:
-TXR C                  // Output last fib = 55 = 0x37
-NEWLINE
+$TXR C  // Output last fib = 55 = 0x37
+$NEWLINE
 SETR A 10
-TXR A                  // Output count = 10 = 0x0A
-NEWLINE
+$TXR A  // Output count = 10 = 0x0A
+$NEWLINE
 
 // ================================================================
 // PHASE 2: BUBBLE SORT
@@ -68,19 +68,19 @@ NEWLINE
 // --- Initialize sort buffer ---
 SETR A #SORT_BUF
 SETR B 9
-MEMSETRR B A
-INCR A
+MEMSET64RR B A
+ADDV A 8
 SETR B 3
-MEMSETRR B A
-INCR A
+MEMSET64RR B A
+ADDV A 8
 SETR B 7
-MEMSETRR B A
-INCR A
+MEMSET64RR B A
+ADDV A 8
 SETR B 1
-MEMSETRR B A
-INCR A
+MEMSET64RR B A
+ADDV A 8
 SETR B 5
-MEMSETRR B A
+MEMSET64RR B A
 
 // --- Bubble sort (ascending) ---
 SETR H 4               // passes remaining (n - 1)
@@ -96,7 +96,7 @@ COPY E H               // E = comparisons to make this pass
 BS_INNER:
 // Load adjacent pair
 MEMREADRR B A          // B = arr[i]
-INCR A
+ADDV A 8
 MEMREADRR C A          // C = arr[i+1]
 
 // If arr[i] > arr[i+1], swap them
@@ -105,10 +105,10 @@ JMPGT BS_DO_SWAP:
 JMP BS_SKIP_SWAP:
 
 BS_DO_SWAP:
-DECR A                 // A -> arr[i]
-MEMSETRR C A           // arr[i] = smaller value
-INCR A                 // A -> arr[i+1]
-MEMSETRR B A           // arr[i+1] = larger value
+MINUSV A 8                 // A -> arr[i]
+MEMSET64RR C A  // arr[i] = smaller value
+ADDV A 8                 // A -> arr[i+1]
+MEMSET64RR B A  // arr[i+1] = larger value
 SETR F 1               // mark swap occurred
 
 BS_SKIP_SWAP:
@@ -126,12 +126,12 @@ BS_DONE:
 // Output first (smallest) and last (largest) elements
 SETR A #SORT_BUF
 MEMREADRR B A
-TXR B                  // Expect: 00000001 (smallest)
-NEWLINE
-ADDV A 4               // point to last element (index 4)
+$TXR B  // Expect: 00000001 (smallest)
+$NEWLINE
+ADDV A 32               // point to last element (index 4)
 MEMREADRR B A
-TXR B                  // Expect: 00000009 (largest)
-NEWLINE
+$TXR B  // Expect: 00000009 (largest)
+$NEWLINE
 
 // ================================================================
 // PHASE 3: GCD (EUCLIDEAN ALGORITHM)
@@ -142,15 +142,15 @@ NEWLINE
 SETR A 48
 SETR B 18
 CALL GCD_FUNC:
-TXR A                  // Expect: 00000006
-NEWLINE
+$TXR A  // Expect: 00000006
+$NEWLINE
 
 // GCD(252, 105) = 21
 SETR A 252
 SETR B 105
 CALL GCD_FUNC:
-TXR A                  // Expect: 00000015
-NEWLINE
+$TXR A  // Expect: 00000015
+$NEWLINE
 
 // ================================================================
 // PHASE 4: PRIME NUMBER DETECTION (TRIAL DIVISION)
@@ -181,16 +181,16 @@ INCR E                 // next candidate
 JMP PRIME_LOOP:
 
 PRIME_DONE:
-TXR F                  // Expect: 00000008 (8 primes found)
-NEWLINE
-TXR G                  // Expect: 00000013 (largest prime = 19)
-NEWLINE
+$TXR F  // Expect: 00000008 (8 primes found)
+$NEWLINE
+$TXR G  // Expect: 00000013 (largest prime = 19)
+$NEWLINE
 
 // ================================================================
 // ALL PHASES COMPLETE
 // ================================================================
 
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // ================================================================
@@ -209,7 +209,7 @@ PUSH C
 GCD_LOOP:
 CMPRV B 0x0
 JMPE GCD_RET:
-MODRR A B              // A = A % B (remainder)
+MODR A A B  // A = A % B (remainder)
 COPY C A               // C = remainder
 COPY A B               // A = old divisor
 COPY B C               // B = remainder
@@ -239,7 +239,7 @@ JMP IP_IS_PRIME:       // candidate <= divisor -> it's prime
 
 IP_CONTINUE:
 COPY A C               // A = candidate
-MODRR A B              // A = candidate % divisor
+MODR A A B  // A = candidate % divisor
 CMPRV A 0x0
 JMPE IP_NOT_PRIME:     // remainder is 0 -> divisible -> not prime
 
@@ -259,5 +259,8 @@ RET
 // ================================================================
 // DATA BUFFERS
 // ================================================================
-#FIB_BUF 10
-#SORT_BUF 5
+#FIB_BUF 80
+#SORT_BUF 40
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

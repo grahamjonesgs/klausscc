@@ -13,36 +13,36 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x0D
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x0D
+$NEWLINE
 
 // INCR then DECR cancels out
 SETR A 0x0
 INCR A
 DECR A
-TXR A                 // Expect: 00000000
-NEWLINE
+$TXR A  // Expect: 00000000
+$NEWLINE
 
 // DECR from zero wraps
 SETR A 0x0
 DECR A
-TXR A                 // Expect: FFFFFFFF
-NEWLINE
+$TXR A  // Expect: FFFFFFFF
+$NEWLINE
 
 // Max positive signed value
 SETR A 0x7FFFFFFF
-TXR A                 // Expect: 7FFFFFFF
-NEWLINE
+$TXR A  // Expect: 7FFFFFFF
+$NEWLINE
 
 // Overflow from max positive to min negative
 INCR A
-TXR A                 // Expect: 80000000
-NEWLINE
+$TXR A  // Expect: 80000000
+$NEWLINE
 
 // Test register P (last register)
 SETR P 0x1
-TXR P                 // Expect: 00000001
-NEWLINE
+$TXR P  // Expect: 00000001
+$NEWLINE
 
 // Set all 16 registers to their index and verify P
 SETR A 0x0
@@ -62,29 +62,32 @@ SETR N 0xD
 SETR O 0xE
 SETR P 0xF
 INCR P                // P = 0x10
-TXR P                 // Expect: 00000010
-NEWLINE
+$TXR P  // Expect: 00000010
+$NEWLINE
 
 // Sum all registers: A(0)+B(1)+C(2)+...+O(14)+P(16)
 // P is 16 (0xF + 1 from the INCR above), all others are their index
 // Sum = 0+1+2+3+4+5+6+7+8+9+10+11+12+13+14+16 = 120
-ADDRR A B             // A = 0+1 = 1
-ADDRR A C             // A = 1+2 = 3
-ADDRR A D             // A = 3+3 = 6
-ADDRR A E             // A = 6+4 = 10
-ADDRR A F             // A = 10+5 = 15
-ADDRR A G             // A = 15+6 = 21
-ADDRR A H             // A = 21+7 = 28
-ADDRR A I             // A = 28+8 = 36
-ADDRR A J             // A = 36+9 = 45
-ADDRR A K             // A = 45+10 = 55
-ADDRR A L             // A = 55+11 = 66
-ADDRR A M             // A = 66+12 = 78
-ADDRR A N             // A = 78+13 = 91
-ADDRR A O             // A = 91+14 = 105
-ADDRR A P             // A = 105+16 = 121
-TXR A                 // Expect: 00000079 (121 = 0x79)
-NEWLINE
+ADDR A A B  // A = 0+1 = 1
+ADDR A A C  // A = 1+2 = 3
+ADDR A A D  // A = 3+3 = 6
+ADDR A A E  // A = 6+4 = 10
+ADDR A A F  // A = 10+5 = 15
+ADDR A A G  // A = 15+6 = 21
+ADDR A A H  // A = 21+7 = 28
+ADDR A A I  // A = 28+8 = 36
+ADDR A A J  // A = 36+9 = 45
+ADDR A A K  // A = 45+10 = 55
+ADDR A A L  // A = 55+11 = 66
+ADDR A A M  // A = 66+12 = 78
+ADDR A A N  // A = 78+13 = 91
+ADDR A A O  // A = 91+14 = 105
+ADDR A A P  // A = 105+16 = 121
+$TXR A  // Expect: 00000079 (121 = 0x79)
+$NEWLINE
 
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

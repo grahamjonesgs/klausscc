@@ -17,13 +17,6 @@ pub fn set_matches() -> Command {
              | --net-load <file> | --mem-out <file> | --monitor>",
         )
         .arg(
-            Arg::new("opcode_file")
-                .short('c')
-                .long("opcode")
-                .num_args(1)
-                .help("Opcode source file from Verilog (required only when assembling a .kla file or emitting opcode/textmate JSON)"),
-        )
-        .arg(
             Arg::new("net_load")
                 .short('N')
                 .long("net-load")
@@ -70,7 +63,7 @@ pub fn set_matches() -> Command {
                 .conflicts_with("textmate")
                 .conflicts_with("opcodes")
                 .num_args(1)
-                .help("Input file. Type is detected from the extension: .kla assembles (needs --opcode), .kbt sends a pre-built image, anything else (.elf or flat binary) converts to the board wire format"),
+                .help("Input file. Type is detected from the extension: .kla assembles (ISA v2 opcode table is built in), .kbt sends a pre-built image, anything else (.elf or flat binary) converts to the board wire format"),
         )
         .arg(
             Arg::new("output")

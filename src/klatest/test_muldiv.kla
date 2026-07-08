@@ -15,64 +15,67 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x06
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x06
+$NEWLINE
 
 // MULRR: signed multiply
 SETR A 10
 SETR B 10
-MULRR A B
-TXR A                 // Expect: 00000064
-NEWLINE
+MULR A A B
+$TXR A  // Expect: 00000064
+$NEWLINE
 
 // MULURR: unsigned multiply
 SETR A 10
-MULURR A B
-TXR A                 // Expect: 00000064
-NEWLINE
+MULUR A A B
+$TXR A  // Expect: 00000064
+$NEWLINE
 
 // DIVRR: signed divide
 SETR A 100
 SETR B 10
-DIVRR A B
-TXR A                 // Expect: 0000000A
-NEWLINE
+DIVR A A B
+$TXR A  // Expect: 0000000A
+$NEWLINE
 
 // DIVURR: unsigned divide
 SETR A 100
-DIVURR A B
-TXR A                 // Expect: 0000000A
-NEWLINE
+DIVUR A A B
+$TXR A  // Expect: 0000000A
+$NEWLINE
 
 // MODRR: signed modulo
 SETR A 10
 SETR B 7
-MODRR A B
-TXR A                 // Expect: 00000003
-NEWLINE
+MODR A A B
+$TXR A  // Expect: 00000003
+$NEWLINE
 
 // MODURR: unsigned modulo
 SETR A 10
-MODURR A B
-TXR A                 // Expect: 00000003
-NEWLINE
+MODUR A A B
+$TXR A  // Expect: 00000003
+$NEWLINE
 
 // MULV: multiply by immediate
 SETR A 10
 MULV A 5
-TXR A                 // Expect: 00000032
-NEWLINE
+$TXR A  // Expect: 00000032
+$NEWLINE
 
 // DIVV: divide by immediate
 DIVV A 10
-TXR A                 // Expect: 00000005
-NEWLINE
+$TXR A  // Expect: 00000005
+$NEWLINE
 
 // MODV: modulo by immediate
 SETR A 17
 MODV A 5
-TXR A                 // Expect: 00000002
-NEWLINE
+$TXR A  // Expect: 00000002
+$NEWLINE
 
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

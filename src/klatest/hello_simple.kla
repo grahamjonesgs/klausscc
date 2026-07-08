@@ -7,13 +7,13 @@ SETR P 0xFFFFF
 COPY O P
 DELAYV 0x0500
 CALL main:
-TXR M
-NEWLINE
+$TXR M
+$NEWLINE
 HALT
 
 // ========== Compiled code ==========
 main:
-MEMSETRR O P
+MEMSET64RR O P
 DECR P
 COPY O P
 SETR M 42
@@ -23,3 +23,6 @@ INCR P
 MEMREADRR O P
 RET
 
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

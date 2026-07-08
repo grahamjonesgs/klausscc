@@ -7,9 +7,12 @@ STRING_PRINT:
 MEMREADRR B A          // B = mem[A] (read character)
 CMPRV B 0x0            // compare B to null terminator
 JMPE STRING_DONE:      // if zero, done
-TXCHARMEMR A           // send character at mem[A]
+$TXMEMCHAR A  // send character at mem[A]
 INCR A                 // advance pointer
 JMP STRING_PRINT:      // loop
 
 STRING_DONE:
 RET
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

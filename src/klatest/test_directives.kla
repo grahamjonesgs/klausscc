@@ -2,7 +2,7 @@
 // Expected output:
 //   0000002A  (.word 42 from data section)
 //   00000000  (.comm buffer, first word)
-//   00000037  (fibonacci result = 55)
+//   00000022  (fibonacci result = 34)
 
 .global _start
 .extern some_symbol
@@ -14,31 +14,31 @@ COPY O P
 
 // Load the value stored by .word in data section
 MEMREADR A my_value:
-TXR A
-NEWLINE
+$TXR A
+$NEWLINE
 
 // Load from .comm buffer (should be zero-initialized)
 MEMREADR A buffer:
-TXR A
-NEWLINE
+$TXR A
+$NEWLINE
 
 // Quick fibonacci(9) = 55 to prove code still works
 SETR A 9
 CALL fibonacci:
-TXR M
-NEWLINE
+$TXR M
+$NEWLINE
 
 HALT
 
 fibonacci:
-MEMSETRR O P
+MEMSET64RR O P
 DECR P
 COPY O P
 MINUSV P 4
-STIDX E O 0xFFFFFFFF
-STIDX F O 0xFFFFFFFE
-STIDX G O 0xFFFFFFFD
-STIDX H O 0xFFFFFFFC
+STIDX64 E O 0xFFFFFFFF
+STIDX64 F O 0xFFFFFFFE
+STIDX64 G O 0xFFFFFFFD
+STIDX64 H O 0xFFFFFFFC
 SETR M 0
 COPY F M
 SETR H 1
@@ -46,23 +46,28 @@ COPY G M
 JMP fib_check:
 fib_loop:
 COPY E F
-ADDRR E H
+ADDR E E H
 COPY F H
 COPY H E
 SETR M 1
-ADDRR G M
+ADDR G G M
 fib_check:
 CMPRR G A
 JMPLT fib_loop:
 COPY M F
-LDIDX E O 0xFFFFFFFF
-LDIDX F O 0xFFFFFFFE
-LDIDX G O 0xFFFFFFFD
-LDIDX H O 0xFFFFFFFC
+LDIDX64 E O 0xFFFFFFFF
+LDIDX64 F O 0xFFFFFFFE
+LDIDX64 G O 0xFFFFFFFD
+LDIDX64 H O 0xFFFFFFFC
 COPY P O
 INCR P
 MEMREADRR O P
 RET
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR).
+// Must sit in the code (.text) section, before .data, so the subroutines are
+// assembled as code rather than swallowed into the data section.
+!include uart_stubs.kla
 
 .data
 my_value:

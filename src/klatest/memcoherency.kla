@@ -47,8 +47,8 @@ MEMSET8 M N          // buf1[7] = 0x08
 SETR A #buf1
 MEMGET64 A A
 // Expected: 0807060504030201
-TXR A
-NEWLINE
+$TXR A
+$NEWLINE
 
 // ---- Test 2: write buf+4..+7 first, then buf+0..+3 ----
 // Expected: 0807060504030201 (same bytes as test 1, different write order)
@@ -84,8 +84,8 @@ MEMSET8 M N          // buf2[3] = 0x04
 SETR A #buf2
 MEMGET64 A A
 // Expected: 0807060504030201
-TXR A
-NEWLINE
+$TXR A
+$NEWLINE
 
 // ---- Test 3: write non-zero, then overwrite with zeros ----
 // Write 0xAA to all 8 bytes, then zero out bytes 0-3.
@@ -137,8 +137,8 @@ SETR A #buf3
 MEMGET64 A A
 // Expected: AAAAAAAA00000000 (bytes 4-7=0xAA at bits[63:32], bytes 0-3=0x00 at bits[31:0])
 // If zeros discarded: AAAAAAAAAAAAAAAA
-TXR A
-NEWLINE
+$TXR A
+$NEWLINE
 
 HALT
 NOP                  // 4-byte pad: aligns buf1 to 0x2B8 (8-byte boundary)
@@ -146,3 +146,6 @@ NOP                  // 4-byte pad: aligns buf1 to 0x2B8 (8-byte boundary)
 #buf1 1              // 8 bytes for test 1, at 0x2B8 (8-byte aligned)
 #buf2 1              // 8 bytes for test 2, at 0x2C0 (8-byte aligned)
 #buf3 1              // 8 bytes for test 3, at 0x2C8 (8-byte aligned)
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

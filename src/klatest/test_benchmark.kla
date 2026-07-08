@@ -17,10 +17,10 @@
 //   0000ABCD  (bit ops: pack nibbles via SHLV + ORV)
 //   0000000B  (bit ops: extract nibble via SHRV + ANDV)
 //   00000055  (bit ops: 0xFF XORV 0xAA)
-//   B3D50000  (bit ops: BITREV of 0x0000ABCD)
+//   00000000  (bit ops: BITREV of 0xABCD -- v2 reverses all 64 bits, so the meaningful bits land in [63:48]; low 32 bits = 0)
 //   00000008  (bit ops: BSETRR set bit 3 of zero = 8)
 //   0000000A  (bit ops: POPCNT of 0xABCD = 10)
-//   00000010  (bit ops: CLZ of 0x0000ABCD = 16)
+//   00000030  (bit ops: CLZ of 0xABCD -- v2 counts leading zeros over 64 bits = 48 = 0x30)
 //   FFFFFFFE  (multiply: MULHURR high of 0xFFFFFFFF * 0xFFFFFFFF)
 //   00000001  (multiply: MULURR low word)
 //   00000002  (flags: JMPC + JMPNC both passed)
@@ -32,8 +32,8 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x15
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x15
+$NEWLINE
 
 // ================================================================
 // PHASE 1: FIBONACCI SEQUENCE
@@ -42,35 +42,41 @@ NEWLINE
 // ================================================================
 
 SETR I #FIB_BUF        // I = base address (kept in I, freeing A)
+// The buffer base is only 4-byte aligned, but the 64-bit register-offset ops
+// (STIDX64R/LDIDX64R) force EA & ~7.  Round the base up to an 8-byte boundary so
+// the raw immediate ops (STIDX64/LDIDX64) and the masked register ops all land
+// on the same doubleword grid (the extra 8 bytes of #FIB_BUF absorb the round-up).
+ADDV I 7
+ANDV I 0xFFFFFFF8      // I = base aligned up to 8-byte boundary
 SETR B 1               // fib(n-2) = 1
 SETR C 1               // fib(n-1) = 1
-STIDX B I 0x0          // fib[0] = 1 (STIDX with immediate offset)
-STIDX C I 0x1          // fib[1] = 1
-SETR E 2               // current index
-SETR F 10              // total count
+STIDX64 B I 0x0  // fib[0] = 1 (immediate byte offset, base now 8-aligned)
+STIDX64 C I 0x8  // fib[1] = 1 (element 1 -> byte offset 8)
+SETR E 16              // current byte offset (element index 2 -> 2*8)
+SETR F 80              // total count limit in bytes (10 elements * 8)
 
 FIB_LOOP:
-CMPRR E F              // index vs limit
-JMPGE FIB_DONE:        // if index >= 10, done (exercises JMPGE)
+CMPRR E F              // byte offset vs limit
+JMPGE FIB_DONE:        // if offset >= 80 (index >= 10), done (exercises JMPGE)
 
 COPY D B               // D = fib(n-2)
-ADDRR D C              // D = fib(n-2) + fib(n-1)
+ADDR D D C  // D = fib(n-2) + fib(n-1)
 COPY B C               // shift window
 COPY C D
 
-STIDXR D I 0x4         // mem[I + E] = D (STIDXR: 0x4 = register E index)
-INCR E
+STIDX64R D I E  // mem[(I + E) & ~7] = D (E holds byte offset)
+ADDV E 8               // advance one doubleword (8 bytes)
 JMP FIB_LOOP:
 
 FIB_DONE:
-// Read back results using LDIDX
-LDIDX D I 0x9          // D = fib[9] = 55
-TXR D                  // Output: 00000037
-NEWLINE
+// Read back results using LDIDX (immediate byte offsets)
+LDIDX64 D I 0x48  // D = fib[9] = 55 (index 9 -> byte 72)
+$TXR D  // Output: 00000037
+$NEWLINE
 
-LDIDX D I 0x4          // D = fib[4] = 5
-TXR D                  // Output: 00000005
-NEWLINE
+LDIDX64 D I 0x20  // D = fib[4] = 5 (index 4 -> byte 32)
+$TXR D  // Output: 00000005
+$NEWLINE
 
 // ================================================================
 // PHASE 2: BUBBLE SORT
@@ -78,17 +84,19 @@ NEWLINE
 // Single-register ops (CMPGTRR) require register A.
 // ================================================================
 
-SETR I #SORT_BUF       // I = sort array base
+SETR I #SORT_BUF       // I = sort array base (only 4-byte aligned)
+ADDV I 7
+ANDV I 0xFFFFFFF8      // round base up to 8-byte boundary (see FIB note above)
 SETR B 9
-STIDX B I 0x0
+STIDX64 B I 0x0    // immediate byte offsets, base now 8-aligned
 SETR B 3
-STIDX B I 0x1
+STIDX64 B I 0x8    // element 1 -> byte offset 8
 SETR B 7
-STIDX B I 0x2
+STIDX64 B I 0x10   // element 2 -> byte offset 16
 SETR B 1
-STIDX B I 0x3
+STIDX64 B I 0x18   // element 3 -> byte offset 24
 SETR B 5
-STIDX B I 0x4
+STIDX64 B I 0x20   // element 4 -> byte offset 32
 
 SETR G 4               // outer passes remaining (n-1)
 
@@ -97,27 +105,27 @@ CMPRV G 0x0
 JMPE BS_SORT_DONE:
 
 SETR H 0               // swap flag
-SETR E 0               // index into array
+SETR E 0               // byte offset into array (element 0)
 COPY F G               // F = comparisons this pass
 
 BS_INNER:
-LDIDXR D I 0x4         // D = arr[E] (LDIDXR: register index 4 = E)
-INCR E
-LDIDXR C I 0x4         // C = arr[E] = arr[i+1]
+LDIDX64R D I E  // D = arr[E] (E = byte offset, EA masked & ~7)
+ADDV E 8               // advance one doubleword (8 bytes)
+LDIDX64R C I E  // C = arr[E] = arr[i+1]
 
 // Compare arr[i] > arr[i+1] using CMPGTRR (requires register A)
 COPY A D               // A = arr[i]
 COPY B C               // B = arr[i+1] (implicit operand for CMPGTRR)
-CMPGTRR A B            // A > B? (arr[i] > arr[i+1]?)
+CMPRR A B  // A > B? (arr[i] > arr[i+1]?)
 JMPGT BS_DO_SWAP:
 JMP BS_NO_SWAP:
 
 BS_DO_SWAP:
-// E = i+1. Swap via STIDXR (D and C still hold original values)
-STIDXR D I 0x4         // arr[i+1] = D (larger)
-DECR E
-STIDXR C I 0x4         // arr[i] = C (smaller)
-INCR E                 // restore E to i+1
+// E = byte offset of i+1. Swap via STIDXR (D and C still hold original values)
+STIDX64R D I E  // arr[i+1] = D (larger)
+MINUSV E 8             // step back one doubleword to arr[i]
+STIDX64R C I E  // arr[i] = C (smaller)
+ADDV E 8               // restore E to i+1
 SETR H 1               // mark swap
 
 BS_NO_SWAP:
@@ -132,12 +140,12 @@ DECR G
 JMP BS_OUTER:
 
 BS_SORT_DONE:
-LDIDX D I 0x0          // arr[0] = 1 (smallest)
-TXR D                  // Output: 00000001
-NEWLINE
-LDIDX D I 0x4          // arr[4] = 9 (largest)
-TXR D                  // Output: 00000009
-NEWLINE
+LDIDX64 D I 0x0  // arr[0] = 1 (smallest)
+$TXR D  // Output: 00000001
+$NEWLINE
+LDIDX64 D I 0x20  // arr[4] = 9 (largest, index 4 -> byte 32)
+$TXR D  // Output: 00000009
+$NEWLINE
 
 // ================================================================
 // PHASE 3: BINARY SEARCH
@@ -151,16 +159,16 @@ SETR G 5               // target
 SETR C 0               // low
 SETR F 4               // high
 CALL BSEARCH_FUNC:
-TXR E                  // Output: 00000002
-NEWLINE
+$TXR E  // Output: 00000002
+$NEWLINE
 
 // Search for 6 -> not found
 SETR G 6
 SETR C 0
 SETR F 4
 CALL BSEARCH_FUNC:
-TXR E                  // Output: FFFFFFFF
-NEWLINE
+$TXR E  // Output: FFFFFFFF
+$NEWLINE
 
 // ================================================================
 // PHASE 4: BIT MANIPULATION
@@ -175,47 +183,47 @@ SHLV A 4               // A = 0xAB0
 ORV A 0xC              // A = 0xABC
 SHLV A 4               // A = 0xABC0
 ORV A 0xD              // A = 0xABCD
-TXR A                  // Output: 0000ABCD
-NEWLINE
+$TXR A  // Output: 0000ABCD
+$NEWLINE
 
 // Extract nibble B (bits 11:8) using SHRV + ANDV
 COPY B A               // B = 0xABCD
 SHRV B 8               // B = 0x00000ABC
 ANDV B 0xF             // B = 0x0000000B
-TXR B                  // Output: 0000000B
-NEWLINE
+$TXR B  // Output: 0000000B
+$NEWLINE
 
 // XOR test using XORV
 SETR A 0xFF
 XORV A 0xAA            // A = 0xFF ^ 0xAA = 0x55
-TXR A                  // Output: 00000055
-NEWLINE
+$TXR A  // Output: 00000055
+$NEWLINE
 
 // BITREV: reverse all bits
 SETR A 0xABCD
-BITREV A               // 0x0000ABCD reversed = 0xB3D50000
-TXR A                  // Output: B3D50000
-NEWLINE
+BITREV A               // v2: 64-bit reverse -> 0xB3D5000000000000, low 32 bits = 0
+$TXR A  // Output: 00000000
+$NEWLINE
 
 // BSETRR: set bit N where N is in register B
 SETR A 0x0
 SETR B 3               // bit number 3
-BSETRR A B             // set bit B(3) in A -> A = 0x00000008
-TXR A                  // Output: 00000008
-NEWLINE
+BSETRR A A B  // set bit B(3) in A -> A = 0x00000008
+$TXR A  // Output: 00000008
+$NEWLINE
 
 // POPCNT: count set bits in 0xABCD
 // 0xA(2) + 0xB(3) + 0xC(2) + 0xD(3) = 10
 SETR A 0xABCD
 POPCNT A
-TXR A                  // Output: 0000000A
-NEWLINE
+$TXR A  // Output: 0000000A
+$NEWLINE
 
-// CLZ: count leading zeros of 0x0000ABCD = 16
+// CLZ: v2 counts leading zeros over 64 bits; 0xABCD has bit 15 as MSB -> 48
 SETR A 0xABCD
 CLZ A
-TXR A                  // Output: 00000010
-NEWLINE
+$TXR A  // Output: 00000030
+$NEWLINE
 
 // ================================================================
 // PHASE 5: EXTENDED PRECISION MULTIPLY
@@ -225,14 +233,14 @@ NEWLINE
 
 SETR A 0xFFFFFFFF
 SETR B 0xFFFFFFFF
-MULHURR A B            // A = upper 32 bits = 0xFFFFFFFE
-TXR A                  // Output: FFFFFFFE
-NEWLINE
+MULHUR A A B  // A = upper 32 bits = 0xFFFFFFFE
+$TXR A  // Output: FFFFFFFE
+$NEWLINE
 
 SETR A 0xFFFFFFFF      // reload A (clobbered by MULHURR)
-MULURR A B             // A = lower 32 bits = 0x00000001
-TXR A                  // Output: 00000001
-NEWLINE
+MULUR A A B  // A = lower 32 bits = 0x00000001
+$TXR A  // Output: 00000001
+$NEWLINE
 
 // ================================================================
 // PHASE 6: CARRY FLAG DETECTION
@@ -259,8 +267,8 @@ CF_PASS2:
 INCR C                 // score = 2
 
 CF_DONE:
-TXR C                  // Output: 00000002 (both carry tests passed)
-NEWLINE
+$TXR C  // Output: 00000002 (both carry tests passed)
+$NEWLINE
 
 // ================================================================
 // PHASE 7: GCD + PRIME DETECTION
@@ -271,8 +279,8 @@ NEWLINE
 SETR A 48
 SETR B 18
 CALL GCD_FUNC:
-TXR A                  // Output: 00000006
-NEWLINE
+$TXR A  // Output: 00000006
+$NEWLINE
 
 // Count primes from 2 to 20
 SETR E 2               // candidate
@@ -298,13 +306,13 @@ INCR E
 JMP PRIME_LOOP:
 
 PRIME_DONE:
-TXR F                  // Output: 00000008 (8 primes)
-NEWLINE
-TXR G                  // Output: 00000013 (largest = 19)
-NEWLINE
+$TXR F  // Output: 00000008 (8 primes)
+$NEWLINE
+$TXR G  // Output: 00000013 (largest = 19)
+$NEWLINE
 
 // ================================================================
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // ================================================================
@@ -325,18 +333,20 @@ BSR_CHECK:
 // Is low <= high? (CMPLERR compares A with implicit B)
 COPY A C               // A = low
 COPY B F               // B = high
-CMPLERR A B            // A <= B? (low <= high?)
+CMPRR A B  // A <= B? (low <= high?)
 JMPLE BSR_SEARCH:      // yes -> keep searching
 JMP BSR_NOT_FOUND:     // no -> target absent
 
 BSR_SEARCH:
-// mid = (low + high) / 2
+// mid = (low + high) / 2   (E holds the element INDEX, kept for output)
 COPY E C
-ADDRR E F              // E = low + high
+ADDR E E F  // E = low + high
 DIVV E 2               // E = mid (DIVV: divide by immediate)
 
-// Load arr[mid] via LDIDXR (0x4 = register E index)
-LDIDXR D I 0x4         // D = mem[I + E] = arr[mid]
+// Load arr[mid] via LDIDXR: scale the mid index to a byte offset (mid*8) in J
+COPY J E
+SHLV J 3               // J = mid * 8 (byte offset for the aligned register form)
+LDIDX64R D I J  // D = mem[(I + J) & ~7] = arr[mid]
 
 // Compare arr[mid] with target
 COPY A D               // A = arr[mid]
@@ -345,7 +355,7 @@ CMPRR A B              // sets flags for equal check
 JMPE BSR_FOUND:        // arr[mid] == target
 
 // Decide search direction: CMPGERR + JMPGE
-CMPGERR A B            // A >= B? (arr[mid] >= target?)
+CMPRR A B  // A >= B? (arr[mid] >= target?)
 JMPGE BSR_LEFT:        // yes -> search left half
 
 // arr[mid] < target -> search right half
@@ -378,7 +388,7 @@ PUSH C
 GCD_LOOP:
 CMPRV B 0x0
 JMPE GCD_RET:
-MODRR A B              // A = A % B
+MODR A A B  // A = A % B
 COPY C A               // C = remainder
 COPY A B               // A = old divisor
 COPY B C               // B = remainder
@@ -408,7 +418,7 @@ JMP IP_IS_PRIME:       // candidate <= divisor -> prime
 
 IP_CONTINUE:
 COPY A C               // A = candidate
-MODRR A B              // A = candidate % B (divisor)
+MODR A A B  // A = candidate % B (divisor)
 CMPRV A 0x0
 JMPE IP_NOT_PRIME:     // divisible -> not prime
 
@@ -428,5 +438,8 @@ RET
 // ================================================================
 // DATA BUFFERS
 // ================================================================
-#FIB_BUF 10
-#SORT_BUF 5
+#FIB_BUF 88    // 10 doublewords * 8 bytes + 8 slack for base round-up
+#SORT_BUF 48   // 5 doublewords * 8 bytes + 8 slack for base round-up
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

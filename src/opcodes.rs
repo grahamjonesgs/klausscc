@@ -15,21 +15,48 @@ pub struct InputData {
     pub line_counter: u32,
 }
 
+/// One source-operand slot of a v2 instruction, describing how the operand
+/// token maps onto the instruction word (`ISA_ENCODING_V2.md` §1). The uniform
+/// v2 layout is `word0 = template | rd<<8 | rs1<<4 | rs2` plus `N<<15` for the
+/// embedded shift/bit count.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Operand {
+    /// Destination register → word0[11:8].
+    Rd,
+    /// First source / base register → word0[7:4].
+    Rs1,
+    /// Second source / offset register → word0[3:0].
+    Rs2,
+    /// In-place register: one source token drives BOTH rd[11:8] and rs1[7:4].
+    /// v1's in-place forms (`ADDV A 5`, `NEGR A`, `SHLV A 4`) become v2's
+    /// 3-operand encodings with `rd == rs1`.
+    RdRs1,
+    /// Embedded 6-bit shift/bit count or position → word0[20:15].
+    Count,
+    /// 32-bit immediate word appended at PC+4.
+    Imm,
+    /// 64-bit immediate appended as lo32@PC+4, hi32@PC+8.
+    Imm64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Struct for opcode.
 pub struct Opcode {
     /// Comment from opcode definition file.
     pub comment: String,
-    /// Hexadecimal opcode.
+    /// Hexadecimal opcode template (word 0, register/count fields = 0).
     pub hex_code: String,
-    /// Number of registers.
+    /// Number of register/count source operands (tokens consumed into word 0).
     pub registers: u32,
     /// Section name from opcode definition file.
     pub section: String,
     /// Text name of opcode.
     pub text_name: String,
-    /// Number of variables.
+    /// Number of appended immediate words (imm32 → 1, imm64 → 2).
     pub variables: u32,
+    /// Ordered source-operand layout (empty for legacy `.vh`-parsed opcodes).
+    #[serde(default)]
+    pub ops: Vec<Operand>,
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -213,22 +240,109 @@ pub fn add_arguments(
     arguments
 }
 
+/// Parse a shift/bit count token (embedded `N` field): decimal or `0x` hex.
+fn parse_count(token: &str) -> Option<u32> {
+    if token.len() >= 2 && token.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
+        u32::from_str_radix(&token[2..].replace('_', ""), 16).ok()
+    } else {
+        token.parse::<u32>().ok()
+    }
+}
+
+/// Find the opcode whose `text_name` matches the first word of `line`.
+fn return_opcode_struct<'a>(line: &str, opcodes: &'a [Opcode]) -> Option<&'a Opcode> {
+    let first = line.split_whitespace().next().unwrap_or("").to_uppercase();
+    opcodes.iter().find(|o| o.text_name == first)
+}
+
 /// Updates opcode with register.
 ///
-/// Returns the hex code operand from the line, adding register values.
+/// Builds instruction word 0 (as an 8-hex string) from the opcode template and
+/// the register/count operands on the line.  For v2 opcodes (those carrying an
+/// [`Operand`] layout) the register fields are packed numerically per
+/// `ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place `rd==rs1`, embedded
+/// `N<<15`).  Opcodes without a layout fall back to the legacy trailing-nibble
+/// scheme (used by `.vh`-parsed tables).
+#[allow(clippy::ptr_arg, reason = "shares the &mut Vec<Opcode> signature convention with add_arguments / num_registers")]
 pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String, msg_list: &mut MsgList, line_number: u32) -> String {
-    let num_registers = num_registers(opcodes, &(*line).to_uppercase()).unwrap_or(0);
-
-    let mut opcode_found = {
-        let this = return_opcode(&line.to_uppercase(), opcodes);
-        this.unwrap_or_default()
+    let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes).cloned() else {
+        msg_list.push(
+            format!("Opcode not found - \"{line}\""),
+            Some(line_number),
+            Some(filename),
+            MessageType::Error,
+        );
+        return "ERR     ".to_owned();
     };
+
+    // Legacy path: opcodes with no v2 operand layout keep the trailing-nibble fill.
+    if opcode.ops.is_empty() {
+        return legacy_add_registers(&opcode, line, &filename, msg_list, line_number);
+    }
+
+    let Ok(mut word0) = u32::from_str_radix(&opcode.hex_code, 16) else {
+        msg_list.push(
+            format!("Incorrect opcode template - \"{line}\""),
+            Some(line_number),
+            Some(filename),
+            MessageType::Error,
+        );
+        return "ERR     ".to_owned();
+    };
+
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    let mut token_idx = 1_usize; // first operand token (after the mnemonic)
+    let mut ok = true;
+    for op in &opcode.ops {
+        match op {
+            Operand::Imm | Operand::Imm64 => {} // appended words — handled by add_arguments
+            Operand::Count => {
+                match tokens.get(token_idx).and_then(|t| parse_count(t)) {
+                    Some(count) => word0 |= (count & 0x3F) << 15,
+                    None => ok = false,
+                }
+                token_idx += 1;
+            }
+            Operand::Rd | Operand::Rs1 | Operand::Rs2 | Operand::RdRs1 => {
+                let nib = tokens.get(token_idx).map_or_else(|| "X".to_owned(), |t| map_reg_to_hex(t));
+                match u32::from_str_radix(&nib, 16) {
+                    Ok(n) => match op {
+                        Operand::Rd => word0 |= n << 8,
+                        Operand::Rs1 => word0 |= n << 4,
+                        Operand::Rs2 => word0 |= n,
+                        Operand::RdRs1 => word0 |= (n << 8) | (n << 4),
+                        _ => {}
+                    },
+                    Err(_) => ok = false,
+                }
+                token_idx += 1;
+            }
+        }
+    }
+
+    if !ok {
+        msg_list.push(
+            format!("Incorrect register definition - \"{line}\""),
+            Some(line_number),
+            Some(filename),
+            MessageType::Error,
+        );
+        return "ERR     ".to_owned();
+    }
+    format!("{word0:08X}")
+}
+
+/// Legacy trailing-nibble register packing for `.vh`-parsed opcodes (`hex_code`
+/// carries `?` wildcards in its trailing nibbles).
+fn legacy_add_registers(opcode: &Opcode, line: &str, filename: &str, msg_list: &mut MsgList, line_number: u32) -> String {
+    let num_registers = opcode.registers;
+    let mut opcode_found = opcode.hex_code.clone();
 
     if opcode_found.len() != 8 {
         msg_list.push(
             format!("Incorrect register definition - \"{line}\""),
             Some(line_number),
-            Some(filename),
+            Some(filename.to_owned()),
             MessageType::Error,
         );
         return "ERR     ".to_owned();
@@ -238,10 +352,7 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
     opcode_found.clear();
     opcode_found.push_str(&cloned_opcode_found);
 
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        // Append register hex digit for each register operand word (indices 1..=num_registers).
-        // Handles 1-, 2-, and 3-register instructions uniformly.
+    for (i, word) in line.split_whitespace().enumerate() {
         if i >= 1 && i <= num_registers as usize {
             opcode_found.push_str(&map_reg_to_hex(word));
         }
@@ -251,7 +362,7 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
         msg_list.push(
             format!("Incorrect register definition - \"{line}\""),
             Some(line_number),
-            Some(filename),
+            Some(filename.to_owned()),
             MessageType::Error,
         );
         return "ERR     ".to_owned();
@@ -315,26 +426,67 @@ fn hex_nibble_to_reg(nibble: u32) -> &'static str {
 /// order they appear in source (reg1 at the highest of the occupied nibbles).
 pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> {
     for opcode in opcodes {
-        // Compute mask/pattern from hex_code on the fly — '?' = wildcard nibble.
-        let mut mask: u32 = 0;
-        let mut pattern: u32 = 0;
-        for ch in opcode.hex_code.chars() {
-            mask <<= 4;
-            pattern <<= 4;
-            if ch != '?' {
-                mask |= 0xF_u32;
-                pattern |= ch.to_digit(16).unwrap_or(0);
+        if opcode.ops.is_empty() {
+            // Legacy path: '?' in hex_code marks a wildcard nibble.
+            let mut mask: u32 = 0;
+            let mut pattern: u32 = 0;
+            for ch in opcode.hex_code.chars() {
+                mask <<= 4;
+                pattern <<= 4;
+                if ch != '?' {
+                    mask |= 0xF_u32;
+                    pattern |= ch.to_digit(16).unwrap_or(0);
+                }
+            }
+            if (word & mask) == pattern {
+                let n = opcode.registers;
+                let mut text = opcode.text_name.clone();
+                for i in 1..=n {
+                    let shift = (n - i) * 4;
+                    let nibble = (word >> shift) & 0xF;
+                    text.push(' ');
+                    text.push_str(hex_nibble_to_reg(nibble));
+                }
+                return Some((text, opcode.variables));
+            }
+            continue;
+        }
+
+        // v2 path: build the fixed-bit mask from the operand layout, then match.
+        let Ok(template) = u32::from_str_radix(&opcode.hex_code, 16) else { continue };
+        let mut mask = 0xFFFF_FFFF_u32;
+        for op in &opcode.ops {
+            match op {
+                Operand::Rd => mask &= !(0xF << 8),
+                Operand::Rs1 => mask &= !(0xF << 4),
+                Operand::Rs2 => mask &= !0xF,
+                Operand::RdRs1 => mask &= !((0xF << 8) | (0xF << 4)),
+                Operand::Count => mask &= !(0x3F << 15),
+                Operand::Imm | Operand::Imm64 => {}
             }
         }
-        if (word & mask) == pattern {
-            let n = opcode.registers;
+        if (word & mask) == (template & mask) {
             let mut text = opcode.text_name.clone();
-            // reg1 occupies nibble (n-1), reg2 nibble (n-2), …, regN nibble 0.
-            for i in 1..=n {
-                let shift = (n - i) * 4;
-                let nibble = (word >> shift) & 0xF;
-                text.push(' ');
-                text.push_str(hex_nibble_to_reg(nibble));
+            for op in &opcode.ops {
+                match op {
+                    Operand::Rd | Operand::RdRs1 => {
+                        text.push(' ');
+                        text.push_str(hex_nibble_to_reg((word >> 8) & 0xF));
+                    }
+                    Operand::Rs1 => {
+                        text.push(' ');
+                        text.push_str(hex_nibble_to_reg((word >> 4) & 0xF));
+                    }
+                    Operand::Rs2 => {
+                        text.push(' ');
+                        text.push_str(hex_nibble_to_reg(word & 0xF));
+                    }
+                    Operand::Count => {
+                        text.push(' ');
+                        text.push_str(&((word >> 15) & 0x3F).to_string());
+                    }
+                    Operand::Imm | Operand::Imm64 => {}
+                }
             }
             return Some((text, opcode.variables));
         }
@@ -377,6 +529,7 @@ fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
 ///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None.
 /// Supports both 32-bit format (`32'hXXXX_XXXX`) and legacy 16-bit format (`16'hXXXX`).
+#[allow(dead_code, reason = "legacy `.vh` opcode-format parser; the v2 table is built in code but this is kept for backward compatibility and is exercised by unit tests")]
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_comment: usize;
     let pos_end_comment: usize;
@@ -467,6 +620,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 
     Some(Opcode {
         hex_code,
+        ops: Vec::new(),
         registers: num_registers,
         variables: num_variables,
         comment: input_line.get(pos_comment..pos_end_comment).unwrap_or("").to_owned(),
@@ -475,9 +629,244 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     })
 }
 
+/// Standard macro definitions bundled with the assembler (formerly the `.vh`
+/// header's `/* Macro definition */` block).
+const V2_MACROS: &[&str] = &[
+    "$POPALL POP A / POP B / POP C",
+    "$PUSHALL PUSH A / PUSH B / PUSH C",
+    "$WAIT DELAYV %1 / DELAYV %2",
+    "$TESTM NOP / NOP / NOP",
+    "$TESTM2 NOP",
+    "$IMBED1 DELAYV 0xFFFF",
+    "$IMBED3 $PUSHALL / $IMBED1",
+    "$UART_STRING PUSH A / PUSH B / SETR A %1",
+    // MMIO UART print helpers — replace the retired v1 print opcodes. Each
+    // expands to a call into uart_stubs.kla (which the program must `!include`)
+    // and preserves every register the printed value does not occupy.
+    "$TXR PUSH A / COPY A %1 / CALL TX_HEX32: / POP A",
+    "$NEWLINE CALL TX_NL:",
+    "$TXCHAR PUSH A / COPY A %1 / CALL TX_CHAR: / POP A",
+    "$TXMEMCHAR PUSH A / COPY A %1 / MEMGET8 A A / CALL TX_CHAR: / POP A",
+    "$TXSTR PUSH A / COPY A %1 / CALL TX_STR: / POP A",
+];
+
+/// Build an [`Opcode`] from a v2 template word and its operand layout, deriving
+/// the register/variable counts.
+fn op(name: &str, template: u32, ops: &[Operand]) -> Opcode {
+    let registers = ops
+        .iter()
+        .filter(|o| matches!(o, Operand::Rd | Operand::Rs1 | Operand::Rs2 | Operand::RdRs1 | Operand::Count))
+        .count() as u32;
+    let variables = ops
+        .iter()
+        .map(|o| match o {
+            Operand::Imm => 1,
+            Operand::Imm64 => 2,
+            _ => 0,
+        })
+        .sum();
+    Opcode {
+        text_name: name.to_owned(),
+        hex_code: format!("{template:08X}"),
+        registers,
+        variables,
+        comment: String::new(),
+        section: String::new(),
+        ops: ops.to_vec(),
+    }
+}
+
+/// The built-in ISA-encoding-v2 opcode table (`ISA_ENCODING_V2.md` §3/§6).
+///
+/// This is the authoritative symbol → number map the assembler emits; it
+/// replaces the external `opcode_select.vh` file the toolchain used to read on
+/// the command line.  Register fields follow the uniform v2 layout
+/// (`rd[11:8]`, `rs1[7:4]`, `rs2[3:0]`); [`Operand::RdRs1`] reproduces v1's
+/// in-place forms and [`Operand::Count`] carries the embedded shift/bit count.
+#[must_use]
+pub fn v2_opcodes() -> Vec<Opcode> {
+    vec![
+        op("ADDR", 0x4420_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("SUBR", 0x4460_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("ADDC", 0x44A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("SUBC", 0x44E0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("ANDR", 0x4500_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("ORR", 0x4540_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("XORR", 0x4580_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MINR", 0x45C0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MAXR", 0x4600_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MINUR", 0x4640_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MAXUR", 0x4680_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("ADDI", 0x8830_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("ADDV", 0x8820_0000, &[Operand::RdRs1, Operand::Imm]),
+        op("MINUSV", 0x8860_0000, &[Operand::RdRs1, Operand::Imm]),
+        op("ANDV", 0x8900_0000, &[Operand::RdRs1, Operand::Imm]),
+        op("ORV", 0x8940_0000, &[Operand::RdRs1, Operand::Imm]),
+        op("XORV", 0x8980_0000, &[Operand::RdRs1, Operand::Imm]),
+        op("LEAPC", 0x8B80_0000, &[Operand::Rd, Operand::Imm]),
+        op("SETR", 0x8BD0_0000, &[Operand::Rd, Operand::Imm]),
+        op("SETR64", 0xCBC0_0000, &[Operand::Rd, Operand::Imm64]),
+        op("CMPRR", 0x4C00_0000, &[Operand::Rs1, Operand::Rs2]),
+        op("CMPRV", 0x8C10_0000, &[Operand::Rs1, Operand::Imm]),
+        op("CMPEQR", 0x4C20_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPNER", 0x4C60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPLTR", 0x4CA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPGER", 0x4CE0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPLER", 0x4D20_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPGTR", 0x4D60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPULTR", 0x4DA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPUGER", 0x4DE0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPULER", 0x4E20_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("CMPUGTR", 0x4E60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("SHLR", 0x5000_4000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("SHRR", 0x5040_4000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("SARR", 0x5080_4000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("ROLR", 0x50C0_4000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("RORR", 0x5100_4000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("SHLV", 0x5020_4000, &[Operand::RdRs1, Operand::Count]),
+        op("SHRV", 0x5060_4000, &[Operand::RdRs1, Operand::Count]),
+        op("SHRAV", 0x50A0_4000, &[Operand::RdRs1, Operand::Count]),
+        op("ROLV", 0x50E0_4000, &[Operand::RdRs1, Operand::Count]),
+        op("RORV", 0x5120_4000, &[Operand::RdRs1, Operand::Count]),
+        op("SHLR1", 0x5020_8000, &[Operand::RdRs1]),
+        op("SHLAR", 0x5020_8000, &[Operand::RdRs1]),
+        op("SHRR1", 0x5060_8000, &[Operand::RdRs1]),
+        op("SHRAR", 0x50A0_8000, &[Operand::RdRs1]),
+        op("ROLR1", 0x50E0_C000, &[Operand::RdRs1]),
+        op("RORR1", 0x5120_C000, &[Operand::RdRs1]),
+        op("ROLCR", 0x5160_C000, &[Operand::RdRs1]),
+        op("RORCR", 0x51A0_C000, &[Operand::RdRs1]),
+        op("BSETRR", 0x5200_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("BCLRRR", 0x5240_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("BTGLRR", 0x5280_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("BTSTRR", 0x52C0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("BSET", 0x5220_0000, &[Operand::RdRs1, Operand::Count]),
+        op("BCLR", 0x5260_0000, &[Operand::RdRs1, Operand::Count]),
+        op("BTGL", 0x52A0_0000, &[Operand::RdRs1, Operand::Count]),
+        op("BTST", 0x52E0_0000, &[Operand::Rs1, Operand::Count]),
+        op("BEXTR", 0x9300_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("BDEP", 0x9340_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2, Operand::Imm]),
+        op("COPY", 0x5400_0000, &[Operand::Rd, Operand::Rs1]),
+        op("NEGR", 0x5448_0000, &[Operand::RdRs1]),
+        op("NOTR", 0x5488_0000, &[Operand::RdRs1]),
+        op("ABSR", 0x54C8_0000, &[Operand::RdRs1]),
+        op("SEXTB", 0x5508_0000, &[Operand::RdRs1]),
+        op("SEXTH", 0x5518_0000, &[Operand::RdRs1]),
+        op("SEXTW", 0x5520_0000, &[Operand::RdRs1]),
+        op("ZEXTB", 0x5548_0000, &[Operand::RdRs1]),
+        op("ZEXTH", 0x5558_0000, &[Operand::RdRs1]),
+        op("ZEXTW", 0x5560_0000, &[Operand::RdRs1]),
+        op("BSWAP", 0x5580_0000, &[Operand::RdRs1]),
+        op("BITREV", 0x55C0_0000, &[Operand::RdRs1]),
+        op("POPCNT", 0x5608_0000, &[Operand::RdRs1]),
+        op("CLZ", 0x5640_0000, &[Operand::RdRs1]),
+        op("CTZ", 0x5680_0000, &[Operand::RdRs1]),
+        op("SETFR", 0x5700_0000, &[Operand::Rd]),
+        op("INCR", 0x5788_0000, &[Operand::RdRs1]),
+        op("DECR", 0x57C8_0000, &[Operand::RdRs1]),
+        op("MEMGET8", 0x5800_0000, &[Operand::Rd, Operand::Rs1]),
+        op("MEMGET16", 0x5900_0000, &[Operand::Rd, Operand::Rs1]),
+        op("MEMGET32", 0x5A00_0000, &[Operand::Rd, Operand::Rs1]),
+        op("MEMREADRR", 0x5B00_0000, &[Operand::Rd, Operand::Rs1]),
+        op("MEMGET64", 0x5B10_0000, &[Operand::Rd, Operand::Rs1]),
+        op("LDIDX8", 0x9820_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("LDIDX8_S", 0x98A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("LDIDX16", 0x9920_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("LDIDX16_S", 0x99A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("LDIDX32", 0x9A20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("LDIDX64", 0x9B20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("LDIDX64A", 0x9B30_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("MEMREADR", 0x9B40_0000, &[Operand::Rd, Operand::Imm]),
+        op("LDIDX64R", 0x5B60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MEMSET8", 0x5C00_0000, &[Operand::Rd, Operand::Rs1]),
+        op("MEMSET16", 0x5D00_0000, &[Operand::Rd, Operand::Rs1]),
+        op("MEMSET32", 0x5E00_0000, &[Operand::Rd, Operand::Rs1]),
+        op("MEMSET64RR", 0x5F00_0000, &[Operand::Rd, Operand::Rs1]),
+        op("MEMSET64", 0x5F10_0000, &[Operand::Rd, Operand::Rs1]),
+        op("STIDX8", 0x9C20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("STIDX16", 0x9D20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("STIDX32", 0x9E20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("STIDX64", 0x9F20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("STIDX64A", 0x9F30_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("MEMSETR", 0x9F40_0000, &[Operand::Rd, Operand::Imm]),
+        op("STIDX64R", 0x5F60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("JMP", 0xA000_0000, &[Operand::Imm]),
+        op("JMPZ", 0xA008_0000, &[Operand::Imm]),
+        op("JMPNZ", 0xA00C_0000, &[Operand::Imm]),
+        op("JMPC", 0xA010_0000, &[Operand::Imm]),
+        op("JMPNC", 0xA014_0000, &[Operand::Imm]),
+        op("JMPO", 0xA018_0000, &[Operand::Imm]),
+        op("JMPNO", 0xA01C_0000, &[Operand::Imm]),
+        op("JMPS", 0xA020_0000, &[Operand::Imm]),
+        op("JMPNS", 0xA024_0000, &[Operand::Imm]),
+        op("JMPLT", 0xA028_0000, &[Operand::Imm]),
+        op("JMPGE", 0xA02C_0000, &[Operand::Imm]),
+        op("JMPLE", 0xA030_0000, &[Operand::Imm]),
+        op("JMPGT", 0xA034_0000, &[Operand::Imm]),
+        op("JMPULT", 0xA038_0000, &[Operand::Imm]),
+        op("JMPUGE", 0xA03C_0000, &[Operand::Imm]),
+        op("JMPULE", 0xA040_0000, &[Operand::Imm]),
+        op("JMPUGT", 0xA044_0000, &[Operand::Imm]),
+        op("JMPE", 0xA048_0000, &[Operand::Imm]),
+        op("JMPNE", 0xA04C_0000, &[Operand::Imm]),
+        op("CALL", 0xA200_0000, &[Operand::Imm]),
+        op("CALLZ", 0xA208_0000, &[Operand::Imm]),
+        op("CALLNZ", 0xA20C_0000, &[Operand::Imm]),
+        op("CALLC", 0xA210_0000, &[Operand::Imm]),
+        op("CALLNC", 0xA214_0000, &[Operand::Imm]),
+        op("CALLO", 0xA218_0000, &[Operand::Imm]),
+        op("CALLNO", 0xA21C_0000, &[Operand::Imm]),
+        op("CALLE", 0xA248_0000, &[Operand::Imm]),
+        op("CALLNE", 0xA24C_0000, &[Operand::Imm]),
+        op("JMPR", 0x6080_0000, &[Operand::Rs2]),
+        op("CALLR", 0x6280_0000, &[Operand::Rs2]),
+        op("PUSH", 0x6400_0000, &[Operand::Rs1]),
+        op("PUSHV", 0xA440_0000, &[Operand::Imm]),
+        op("PUSHV64", 0xE440_0000, &[Operand::Imm64]),
+        op("POP", 0x6480_0000, &[Operand::Rd]),
+        op("GETSP", 0x64C0_0000, &[Operand::Rd]),
+        op("SETSP", 0x6500_0000, &[Operand::Rs1]),
+        op("ADDSP", 0xA540_0000, &[Operand::Imm]),
+        op("RET", 0x6580_0000, &[]),
+        op("IRET", 0x65C0_0000, &[]),
+        op("MULUR", 0x6800_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MULHUR", 0x6840_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MULR", 0x6880_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MULHR", 0x68C0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MULV", 0xA880_0000, &[Operand::RdRs1, Operand::Imm]),
+        op("DIVUR", 0x6900_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("DIVR", 0x6980_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("DIVV", 0xA980_0000, &[Operand::RdRs1, Operand::Imm]),
+        op("MODUR", 0x6A00_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MODR", 0x6A80_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MODV", 0xAA80_0000, &[Operand::RdRs1, Operand::Imm]),
+        op("NOP", 0x6C00_0000, &[]),
+        op("HALT", 0x6C01_0000, &[]),
+        op("WAIT", 0x6C02_0000, &[]),
+        op("RESET", 0x6C03_0000, &[]),
+        op("TRAP", 0x6C04_0000, &[]),
+        op("DELAYR", 0x6C05_0000, &[Operand::Rs1]),
+        op("DELAYV", 0xAC05_0000, &[Operand::Imm]),
+        op("LCDCMDR", 0x7000_0000, &[Operand::Rs1]),
+        op("LCDDATAR", 0x7100_0000, &[Operand::Rs1]),
+        op("LCDCMDV", 0xB000_0000, &[Operand::Imm]),
+        op("LCDDATAV", 0xB100_0000, &[Operand::Imm]),
+        op("LCDRST", 0xB200_0000, &[Operand::Imm]),
+    ]
+}
+
+/// The built-in v2 opcode table plus the standard macro definitions — the
+/// in-code replacement for parsing an `opcode_select.vh` file.
+#[must_use]
+pub fn v2_opcodes_and_macros(msg_list: &mut MsgList) -> (Vec<Opcode>, Vec<Macro>) {
+    let macros = V2_MACROS.iter().filter_map(|line| macro_from_string(line, msg_list)).collect();
+    (v2_opcodes(), macros)
+}
+
 /// Parse file to opcode and macro vectors.
 ///
 /// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro).
+#[allow(dead_code, reason = "legacy `.vh` opcode-file parser; superseded by the built-in v2 table but retained for backward compatibility and unit tests")]
 pub fn parse_vh_file(input_list: Vec<InputData>, msg_list: &mut MsgList) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     if input_list.is_empty() {
         return (None, None);
@@ -507,6 +896,7 @@ pub fn parse_vh_file(input_list: Vec<InputData>, msg_list: &mut MsgList) -> (Opt
                 opcodes.push(Opcode {
                     text_name: opcode.text_name,
                     hex_code: opcode.hex_code,
+                    ops: Vec::new(),
                     registers: opcode.registers,
                     variables: opcode.variables,
                     comment: opcode.comment,
@@ -560,6 +950,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 1,
@@ -577,6 +968,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 1,
@@ -593,6 +985,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 1,
@@ -609,6 +1002,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 2,
@@ -626,6 +1020,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 2,
             registers: 2,
@@ -643,6 +1038,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 2,
@@ -660,6 +1056,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 2,
@@ -677,6 +1074,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 2,
@@ -694,6 +1092,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 2,
@@ -712,6 +1111,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("000056XX"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 2,
@@ -730,6 +1130,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("000056XX"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 1,
@@ -747,6 +1148,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("000056X"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 1,
@@ -765,6 +1167,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 1,
             registers: 0,
@@ -784,6 +1187,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 1,
             registers: 0,
@@ -803,6 +1207,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 1,
             registers: 0,
@@ -822,6 +1227,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 2,
             registers: 0,
@@ -841,6 +1247,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 2,
             registers: 0,
@@ -860,6 +1267,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("00000000"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 1,
             registers: 0,
@@ -883,6 +1291,7 @@ mod tests {
             Some(Opcode {
                 text_name: "COPY".to_owned(),
                 hex_code: "000001??".to_owned(),
+                ops: Vec::new(),
                 registers: 2,
                 variables: 0,
                 comment: "Copy register".to_owned(),
@@ -900,6 +1309,7 @@ mod tests {
             Some(Opcode {
                 text_name: "ANDV".to_owned(),
                 hex_code: "0000086?".to_owned(),
+                ops: Vec::new(),
                 registers: 1,
                 variables: 1,
                 comment: "AND register with value".to_owned(),
@@ -918,6 +1328,7 @@ mod tests {
             Some(Opcode {
                 text_name: "MOV".to_owned(),
                 hex_code: "00000864".to_owned(),
+                ops: Vec::new(),
                 registers: 0,
                 variables: 2,
                 comment: "Move from addr to addr".to_owned(),
@@ -968,6 +1379,7 @@ mod tests {
             Some(Opcode {
                 text_name: "abcd".to_owned(),
                 hex_code: "00001234".to_owned(),
+                ops: Vec::new(),
                 registers: 0,
                 variables: 0,
                 comment: String::default(),
@@ -986,6 +1398,7 @@ mod tests {
             Some(Opcode {
                 text_name: "MOV".to_owned(),
                 hex_code: "00000864".to_owned(),
+                ops: Vec::new(),
                 registers: 0,
                 variables: 2,
                 comment: String::default(),
@@ -1048,6 +1461,7 @@ mod tests {
             vec![Opcode {
                 text_name: "CMPRR".to_owned(),
                 hex_code: "000005??".to_owned(),
+                ops: Vec::new(),
                 registers: 2,
                 variables: 0,
                 comment: "Compare registers".to_owned(),
@@ -1151,6 +1565,7 @@ mod tests {
                 Opcode {
                     text_name: "PUSH".to_owned(),
                     hex_code: "000006??".to_owned(),
+                    ops: Vec::new(),
                     registers: 2,
                     variables: 0,
                     comment: "push value to reg".to_owned(),
@@ -1159,6 +1574,7 @@ mod tests {
                 Opcode {
                     text_name: "CMPRR".to_owned(),
                     hex_code: "000005??".to_owned(),
+                    ops: Vec::new(),
                     registers: 2,
                     variables: 0,
                     comment: "Compare registers".to_owned(),
@@ -1167,6 +1583,7 @@ mod tests {
                 Opcode {
                     text_name: "POP".to_owned(),
                     hex_code: "000016??".to_owned(),
+                    ops: Vec::new(),
                     registers: 2,
                     variables: 0,
                     comment: "push value to reg".to_owned(),
@@ -1190,6 +1607,7 @@ mod tests {
             Some(Opcode {
                 text_name: "ADDR".to_owned(),
                 hex_code: "00010???".to_owned(),
+                ops: Vec::new(),
                 registers: 3,
                 variables: 0,
                 comment: "RRR rd=rs1+rs2".to_owned(),
@@ -1208,6 +1626,7 @@ mod tests {
             Some(Opcode {
                 text_name: "SETR".to_owned(),
                 hex_code: "0000080?".to_owned(),
+                ops: Vec::new(),
                 registers: 1,
                 variables: 1,
                 comment: "RV Set register to a value".to_owned(),
@@ -1226,6 +1645,7 @@ mod tests {
             Some(Opcode {
                 text_name: "JMP".to_owned(),
                 hex_code: "00001000".to_owned(),
+                ops: Vec::new(),
                 registers: 0,
                 variables: 1,
                 comment: "V Jump".to_owned(),
@@ -1244,6 +1664,7 @@ mod tests {
             Some(Opcode {
                 text_name: "LDIDX".to_owned(),
                 hex_code: "00000C??".to_owned(),
+                ops: Vec::new(),
                 registers: 2,
                 variables: 1,
                 comment: "RRV first=mem[second+var1]".to_owned(),
@@ -1277,6 +1698,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("ADDR"),
             hex_code: String::from("00010???"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 3,

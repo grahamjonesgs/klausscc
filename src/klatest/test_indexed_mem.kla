@@ -1,57 +1,49 @@
-// Test 15: Indexed Memory Operations
-// Tests: STIDX, LDIDX, STIDXR, LDIDXR, MEMSETRR, MEMREADRR
-// Sets up an array in memory, writes via indexed addressing, reads back.
-// LDIDX/STIDX use an immediate offset (var1).
-// LDIDXR/STIDXR use register-based offset (var1 = register index holding offset).
+// Test: indexed 64-bit memory (base + immediate offset, base + register offset).
+// 64-bit loads/stores are 8-byte aligned, so array elements are one doubleword
+// (8 bytes) apart. Offsets 0, 8, 16 address distinct slots.
 // Expected UART output:
-//   000000AA  (STIDX/LDIDX: store 0xAA at base+0, load back)
-//   000000BB  (STIDX/LDIDX: store 0xBB at base+2, load back)
-//   000000CC  (STIDXR/LDIDXR: register-offset store and load at base+1)
-//   000000BB  (LDIDX: verify base+2 still intact after other writes)
-// Expected 7SEG: 0x0F
-// Expected LEDs: 0xFF = all pass
+//   000000AA  (STIDX64/LDIDX64: store 0xAA at base+0, load back)
+//   000000BB  (STIDX64/LDIDX64: store 0xBB at base+8, load back)
+//   000000CC  (STIDX64R/LDIDX64R: register-offset store and load at base+16)
+//   000000BB  (LDIDX64: verify base+8 still intact after the base+16 write)
 
 _start
 DELAYV 0x0500
-7SEG1V 0x0F
-NEWLINE
+$NEWLINE
 
-// Setup base address
 SETR A #ARRAY
 
-// STIDX/LDIDX: store 0xAA at array[0] (base + offset 0)
+// slot 0 (base + 0)
 SETR B 0xAA
-STIDX B A 0x0          // mem[A + 0] = B = 0xAA
+STIDX64 B A 0x0
 SETR D 0x0
-LDIDX D A 0x0          // D = mem[A + 0]
-TXR D                  // Expect: 000000AA
-NEWLINE
+LDIDX64 D A 0x0
+$TXR D  // Expect: 000000AA
+$NEWLINE
 
-// STIDX/LDIDX: store 0xBB at array[2] (base + offset 2)
+// slot 1 (base + 8)
 SETR B 0xBB
-STIDX B A 0x2          // mem[A + 2] = B = 0xBB
+STIDX64 B A 0x8
 SETR D 0x0
-LDIDX D A 0x2          // D = mem[A + 2]
-TXR D                  // Expect: 000000BB
-NEWLINE
+LDIDX64 D A 0x8
+$TXR D  // Expect: 000000BB
+$NEWLINE
 
-// STIDXR/LDIDXR: store 0xCC at array[1] via register offset
-// C holds offset value, 0x2 = register C's index for reg[var1]
-SETR C 0x1
+// slot 2 (base + register offset 16)
+SETR C 0x10
 SETR B 0xCC
-STIDXR B A 0x2         // mem[A + C] = B = 0xCC  (C=1, so array[1])
+STIDX64R B A C
 SETR D 0x0
-LDIDXR D A 0x2         // D = mem[A + C]          (C=1, so array[1])
-TXR D                  // Expect: 000000CC
-NEWLINE
+LDIDX64R D A C
+$TXR D  // Expect: 000000CC
+$NEWLINE
 
-// Verify array[2] still holds 0xBB (not corrupted by other writes)
+// verify slot 1 (base + 8) survived the slot-2 write
 SETR D 0x0
-LDIDX D A 0x2          // D = mem[A + 2]
-TXR D                  // Expect: 000000BB
-NEWLINE
+LDIDX64 D A 0x8
+$TXR D  // Expect: 000000BB
+$NEWLINE
 
-LEDV 0xFF
 HALT
-
-#ARRAY 4
+#ARRAY 32
+!include uart_stubs.kla

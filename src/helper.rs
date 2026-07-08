@@ -765,6 +765,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 0,
@@ -781,6 +782,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PULL"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 0,
@@ -798,6 +800,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
+            ops: Vec::new(),
             comment: String::default(),
             variables: 0,
             registers: 0,

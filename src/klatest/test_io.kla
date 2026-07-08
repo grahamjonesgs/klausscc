@@ -18,82 +18,85 @@
 
 _start
 DELAYV 0x0500
-NEWLINE
+$NEWLINE
 
 // Step 1: LED alternating pattern
 SETR A 0x1
-TXR A
-NEWLINE
-LEDV 0xAA
+$TXR A
+$NEWLINE
+// v2-removed (LEDV): LEDV 0xAA
 DELAYV 0xFFFF
 
 // Step 2: LED inverse pattern
 SETR A 0x2
-TXR A
-NEWLINE
-LEDV 0x55
+$TXR A
+$NEWLINE
+// v2-removed (LEDV): LEDV 0x55
 DELAYV 0xFFFF
 
 // Step 3: LED from register
 SETR A 0x3
-TXR A
-NEWLINE
+$TXR A
+$NEWLINE
 SETR B 0xFF
-LEDR B
+// v2-removed (LEDR): LEDR B
 DELAYV 0xFFFF
 
 // Step 4: 7-Seg 1
 SETR A 0x4
-TXR A
-NEWLINE
-7SEG1V 0x1111
+$TXR A
+$NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x1111
 DELAYV 0xFFFF
 
 // Step 5: 7-Seg 2
 SETR A 0x5
-TXR A
-NEWLINE
-7SEG2V 0x2222
+$TXR A
+$NEWLINE
+// v2-removed (7SEG2V): 7SEG2V 0x2222
 DELAYV 0xFFFF
 
 // Step 6: 7-Seg from register (both displays)
 SETR A 0x6
-TXR A
-NEWLINE
+$TXR A
+$NEWLINE
 SETR B 0xABCD
-7SEGR B
+// v2-removed (7SEGR): 7SEGR B
 DELAYV 0xFFFF
 
 // Step 7: 7-Seg blank
 SETR A 0x7
-TXR A
-NEWLINE
-7SEGBLANK
+$TXR A
+$NEWLINE
+// v2-removed (7SEGBLANK): 7SEGBLANK
 DELAYV 0xFFFF
 
 // Step 8: RGB LED 1
 SETR A 0x8
-TXR A
-NEWLINE
-RGB1V 0xFF0000
+$TXR A
+$NEWLINE
+// v2-removed (RGB1V): RGB1V 0xFF0000
 DELAYV 0xFFFF
 
 // Step 9: RGB LED 2
 SETR A 0x9
-TXR A
-NEWLINE
-RGB2V 0x00FF00
+$TXR A
+$NEWLINE
+// v2-removed (RGB2V): RGB2V 0x00FF00
 DELAYV 0xFFFF
 
 // Step 10: Read switches and display
 SETR A 0xA
-TXR A
-NEWLINE
-SWR C                 // Read switch state
-7SEGR C               // Display on 7-seg
-TXR C                 // Output switch value on UART
-NEWLINE
+$TXR A
+$NEWLINE
+// v2-removed (SWR): SWR C // Read switch state
+// v2-removed (7SEGR): 7SEGR C // Display on 7-seg
+$TXR C  // Output switch value on UART
+$NEWLINE
 DELAYV 0xFFFF
 
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

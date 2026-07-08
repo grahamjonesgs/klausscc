@@ -19,143 +19,143 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x13
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x13
+$NEWLINE
 
 // --- CMPLERR: signed less-or-equal (5 <= 10) ---
 SETR A 5
 SETR B 10
-CMPLERR A B            // A <= B? yes
+CMPRR A B  // A <= B? yes
 JMPLE T1_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T2:
 T1_PASS:
 SETR P 0x1
-TXR P                  // Expect: 00000001
-NEWLINE
+$TXR P  // Expect: 00000001
+$NEWLINE
 
 // --- CMPLERR: equal case (5 <= 5) ---
 T2:
 SETR A 5
 SETR B 5
-CMPLERR A B            // A <= B? yes (equal)
+CMPRR A B  // A <= B? yes (equal)
 JMPLE T2_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T3:
 T2_PASS:
 SETR P 0x2
-TXR P                  // Expect: 00000002
-NEWLINE
+$TXR P  // Expect: 00000002
+$NEWLINE
 
 // --- CMPGERR: signed greater-or-equal (10 >= 5) ---
 T3:
 SETR A 10
 SETR B 5
-CMPGERR A B            // A >= B? yes
+CMPRR A B  // A >= B? yes
 JMPGE T3_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T4:
 T3_PASS:
 SETR P 0x3
-TXR P                  // Expect: 00000003
-NEWLINE
+$TXR P  // Expect: 00000003
+$NEWLINE
 
 // --- CMPULTRR: unsigned less-than (5 < 0xFFFFFFFF) ---
 // In signed: 5 > -1, but unsigned: 5 < 4294967295
 T4:
 SETR A 5
 SETR B 0xFFFFFFFF
-CMPULTRR A B           // unsigned A < B? sets carry flag
-JMPC T4_PASS:
+CMPRR A B  // unsigned A < B? sets carry flag
+JMPULT T4_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T5:
 T4_PASS:
 SETR P 0x4
-TXR P                  // Expect: 00000004
-NEWLINE
+$TXR P  // Expect: 00000004
+$NEWLINE
 
 // --- CMPUGTRR: unsigned greater-than (0xFFFFFFFF > 5) ---
 T5:
 SETR A 0xFFFFFFFF
 SETR B 5
-CMPUGTRR A B           // unsigned A > B? sets greater flag
-JMPGT T5_PASS:
+CMPRR A B  // unsigned A > B? sets greater flag
+JMPUGT T5_PASS:
 SETR P 0xFFFFFFFF
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP T6:
 T5_PASS:
 SETR P 0x5
-TXR P                  // Expect: 00000005
-NEWLINE
+$TXR P  // Expect: 00000005
+$NEWLINE
 
 // --- MINRR: signed minimum ---
 T6:
 SETR A 3
 SETR B 7
-MINRR A B              // A = min(A, B) = min(3, 7) = 3
-TXR A                  // Expect: 00000003
-NEWLINE
+MINR A A B  // A = min(A, B) = min(3, 7) = 3
+$TXR A  // Expect: 00000003
+$NEWLINE
 
 // --- MAXRR: signed maximum ---
 SETR A 3
 SETR B 7
-MAXRR A B              // A = max(A, B) = max(3, 7) = 7
-TXR A                  // Expect: 00000007
-NEWLINE
+MAXR A A B  // A = max(A, B) = max(3, 7) = 7
+$TXR A  // Expect: 00000007
+$NEWLINE
 
 // --- MINURR: unsigned minimum ---
 // 5 vs 0xFFFFFFFF: unsigned min = 5
 SETR A 5
 SETR B 0xFFFFFFFF
-MINURR A B             // A = unsigned min(5, 0xFFFFFFFF) = 5
-TXR A                  // Expect: 00000005
-NEWLINE
+MINUR A A B  // A = unsigned min(5, 0xFFFFFFFF) = 5
+$TXR A  // Expect: 00000005
+$NEWLINE
 
 // --- MAXURR: unsigned maximum ---
 SETR A 5
 SETR B 0xFFFFFFFF
-MAXURR A B             // A = unsigned max(5, 0xFFFFFFFF) = 0xFFFFFFFF
-TXR A                  // Expect: FFFFFFFF
-NEWLINE
+MAXUR A A B  // A = unsigned max(5, 0xFFFFFFFF) = 0xFFFFFFFF
+$TXR A  // Expect: FFFFFFFF
+$NEWLINE
 
 // --- CALLZ: conditional call when zero flag set ---
 SETR A 0x1
 DECR A                 // A = 0, zero flag set
 CALLZ SUB_RET_A:
-TXR A                  // Expect: 0000000A
-NEWLINE
+$TXR A  // Expect: 0000000A
+$NEWLINE
 
 // --- CALLNZ: conditional call when zero flag clear ---
 SETR A 0x5
 ADDV A 0x0             // Clear stale zero flag (A=5, not zero)
 CALLNZ SUB_RET_B:
-TXR A                  // Expect: 0000000B
-NEWLINE
+$TXR A  // Expect: 0000000B
+$NEWLINE
 
 // --- JMPR: jump to address in register ---
 SETR A JMPR_TARGET:
 JMPR A
 SETR P 0xFFFFFFFF      // FAIL: should not reach here
-TXR P
-NEWLINE
+$TXR P
+$NEWLINE
 JMP DONE:
 
 JMPR_TARGET:
 SETR P 0xC
-TXR P                  // Expect: 0000000C
-NEWLINE
+$TXR P  // Expect: 0000000C
+$NEWLINE
 
 DONE:
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // Subroutines
@@ -166,3 +166,6 @@ RET
 SUB_RET_B:
 SETR A 0xB
 RET
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

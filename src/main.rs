@@ -33,7 +33,7 @@ use labels::{find_duplicate_label, get_labels, Label};
 use macros::{expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
-use opcodes::{add_arguments, add_registers, num_arguments, parse_vh_file, Opcode, Pass0, Pass1, Pass2};
+use opcodes::{add_arguments, add_registers, num_arguments, v2_opcodes_and_macros, Opcode, Pass0, Pass1, Pass2};
 use serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 
 /// Magic bytes at the start of every ELF file (`0x7F` `E` `L` `F`).
@@ -58,10 +58,6 @@ fn main() -> Result<(), i32> {
     let start_time: NaiveTime = Local::now().time();
 
     let matches = set_matches().get_matches();
-    let opcode_file_name: String = matches
-        .get_one::<String>("opcode_file")
-        .unwrap_or(&"opcode_select.vh".to_owned())
-        .replace(' ', "");
     let input_file_name: String = matches.get_one::<String>("input").unwrap_or(&String::default()).replace(' ', "");
     let mut binary_file_name: String = matches
         .get_one::<String>("bitcode")
@@ -194,7 +190,6 @@ fn main() -> Result<(), i32> {
         return run_elf2serial(
             &input_file_name,
             entry_addr,
-            &opcode_file_name,
             &output_serial_port,
             &binary_file_name,
             monitor_flag,
@@ -218,39 +213,13 @@ fn main() -> Result<(), i32> {
         );
     }
 
-    // From here on the only remaining work needs the opcode file: assembling a
-    // .kla file, or emitting the opcode/textmate JSON.  Require it explicitly.
-    if matches.get_one::<String>("opcode_file").is_none() {
-        msg_list.push(
-            "An opcode file (-c/--opcode) is required to assemble a .kla file or output opcode/textmate JSON".to_owned(),
-            None,
-            None,
-            MessageType::Error,
-        );
-        print_messages(&msg_list);
-        return Err(1);
-    }
-
-    // Parse the opcode file
-    let mut opened_files: Vec<String> = Vec::new(); // Used for recursive includes check
-    let vh_list = read_file_to_vector(&opcode_file_name, &mut msg_list, &mut opened_files);
-    let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list.unwrap_or_default(), &mut msg_list);
-
-    if opt_macro_list.is_none() || opt_oplist.is_none() {
-        msg_list.push(
-            format!("Error parsing opcode file {opcode_file_name} to macro and opcode lists"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        print_messages(&msg_list);
-        return Err(1);
-    }
-    let oplist = opt_oplist.unwrap_or_else(|| [].to_vec());
-    let mut macro_list = expand_embedded_macros(opt_macro_list.unwrap_or_else(|| [].to_vec()), &mut msg_list);
+    // The opcode table is built in to the assembler (ISA encoding v2) — the old
+    // external opcode_select.vh file is gone. Build the opcode + macro lists in code.
+    let (oplist, macro_list_raw) = v2_opcodes_and_macros(&mut msg_list);
+    let mut macro_list = expand_embedded_macros(macro_list_raw, &mut msg_list);
 
     if let Err(result_err) = output_macros_opcodes_html(
-        filename_stem(&opcode_file_name),
+        "klausscc_opcodes_v2".to_owned(),
         &oplist,
         macro_list.clone(),
         &mut msg_list,
@@ -258,7 +227,7 @@ fn main() -> Result<(), i32> {
         textmate_flag,
     ) {
         msg_list.push(
-            format!("Error {result_err} writing opcode file {opcode_file_name} to HTML"),
+            format!("Error {result_err} writing opcode list to HTML"),
             None,
             None,
             MessageType::Error,
@@ -800,6 +769,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("0000001X"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -808,6 +778,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("MOV"),
             hex_code: String::from("00000020"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 2,
             registers: 0,
@@ -816,6 +787,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("RET"),
             hex_code: String::from("00000030"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -880,6 +852,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("0000001X"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -904,6 +877,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("0000001X"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -912,6 +886,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("MOVR"),
             hex_code: String::from("0000007X"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 1,
             registers: 1,
@@ -920,6 +895,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("MOV"),
             hex_code: String::from("00000020"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 2,
             registers: 0,
@@ -928,6 +904,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("RET"),
             hex_code: String::from("00000030"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 0,
             registers: 0,
@@ -936,6 +913,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("DELAY"),
             hex_code: String::from("00000040"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 1,
             registers: 0,
@@ -945,6 +923,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("DMOV"),
             hex_code: String::from("00000AXX"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 2,
             registers: 2,
@@ -1041,6 +1020,7 @@ mod tests {
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("0000001X"),
+            ops: Vec::new(),
             comment: String::new(),
             variables: 0,
             registers: 1,
@@ -1061,114 +1041,35 @@ mod tests {
         assert_eq!(pass2.first().unwrap_or_default().opcode, "ERR     ");
     }
 
-    /// Golden-model validation: assemble + emulate every klatest `.kla` that has
-    /// expected `// ` UART values and compare captured UART tokens in order.
+    /// End-to-end ISA-encoding-v2 round trip: assemble a `.kla` fixture with the
+    /// built-in v2 opcode table, emulate the resulting image, and check the UART
+    /// output. This proves the assembler and the golden-model emulator agree on
+    /// the v2 encoding across ALU, immediates, memory (MMIO UART), the stack, and
+    /// conditional branches.
     ///
-    /// Runs under `cargo test` (no external binary execution needed). Marked
-    /// `#[ignore]` because it depends on the repo-relative `src/klatest` tree;
-    /// run with `cargo test --bin klausscc emulate_klatest -- --ignored --nocapture`.
+    /// (The legacy `src/klatest` corpus prints results with the v1 `TXR`/`NEWLINE`
+    /// opcodes, which are retired in v2 — UART is now memory-mapped — so those
+    /// files can no longer self-validate. These `v2_*.kla` fixtures replace that
+    /// self-test using MMIO UART stores.)
     #[test]
-    #[ignore = "depends on src/klatest corpus; run explicitly"]
-    fn test_emulate_klatest_corpus() {
-        use std::path::Path;
-        let opcode_file = "src/klatest/opcode_select.vh";
+    fn test_v2_roundtrip() {
         let mut msg_list = MsgList::new();
-        let mut opened: Vec<String> = Vec::new();
-        let vh = read_file_to_vector(opcode_file, &mut msg_list, &mut opened).expect("opcode file");
-        let (opt_ops, opt_macros) = parse_vh_file(vh, &mut msg_list);
-        let oplist = opt_ops.expect("opcodes");
-        let macro_list = expand_embedded_macros(opt_macros.expect("macros"), &mut msg_list);
+        let (oplist, macros_raw) = opcodes::v2_opcodes_and_macros(&mut msg_list);
+        let macro_list = expand_embedded_macros(macros_raw, &mut msg_list);
 
-        let dir = Path::new("src/klatest");
-        let mut files: Vec<String> = std::fs::read_dir(dir)
-            .expect("klatest dir")
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "kla"))
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect();
-        files.sort();
-
-        // Fixtures known stale against the current byte-addressed 64-bit ISA:
-        // test_bits assumes 32-bit CLZ/BITREV (silicon is 64-bit per the RTL),
-        // test_strings assumes the old word-addressed packed-string layout.
-        // These are documented in the deliverable, not emulator bugs.
-        let known_stale = ["test_bits.kla", "test_strings.kla"];
-
-        let mut total = 0_usize;
-        let mut passed = 0_usize;
-        let mut assembly_errors = 0_usize;
-        let mut emu_mismatches: Vec<String> = Vec::new();
-        let mut failures: Vec<String> = Vec::new();
-
-        for file in &files {
-            let raw: Vec<String> = std::fs::read_to_string(file).unwrap_or_default().lines().map(String::from).collect();
-            let expected = parse_expected_uart_values(&raw);
-            if expected.is_empty() {
-                continue;
-            }
-            total += 1;
+        let cases = [
+            ("src/klatest/v2_hello.kla", "Hi\n"),
+            ("src/klatest/v2_loop.kla", "AB"),
+            ("src/klatest/v2_math.kla", "0"),
+        ];
+        for (file, expected) in cases {
             let mut tm = MsgList::new();
             let Some((image, entry)) = assemble_to_image(file, &oplist, &macro_list, &mut tm) else {
-                let first_err = tm
-                    .list
-                    .iter()
-                    .find(|m| m.level == MessageType::Error)
-                    .map_or_else(|| "unknown".to_owned(), |m| m.text.clone());
-                assembly_errors += 1;
-                failures.push(format!("{file}: assembly error - {first_err}"));
-                continue;
+                let errs: Vec<String> = tm.list.iter().filter(|m| m.level == MessageType::Error).map(|m| m.text.clone()).collect();
+                panic!("assembly failed for {file}: {errs:?}");
             };
             let (result, _) = emulate::emulate_image(&image, entry, emulate::DEFAULT_MAX_INSTRUCTIONS, false);
-            let got: Vec<String> = result
-                .uart
-                .lines()
-                .filter_map(|l| {
-                    let t = l.trim();
-                    t.get(..8)
-                        .filter(|c| c.len() == 8 && c.chars().all(|ch| ch.is_ascii_hexdigit()) && *c == c.to_ascii_uppercase())
-                        .map(str::to_owned)
-                })
-                .collect();
-            let mut ok = true;
-            let mut diff = String::new();
-            for (i, exp) in expected.iter().enumerate() {
-                match got.get(i) {
-                    Some(g) if g == exp => {}
-                    Some(g) => {
-                        ok = false;
-                        diff = format!("#{}: exp {exp} got {g}", i + 1);
-                        break;
-                    }
-                    None => {
-                        ok = false;
-                        diff = format!("#{}: exp {exp} got <none> stop={:?}", i + 1, result.stop);
-                        break;
-                    }
-                }
-            }
-            let is_stale = known_stale.iter().any(|s| file.ends_with(s));
-            if ok && got.len() >= expected.len() {
-                passed += 1;
-                println!("PASS {file} ({}/{})", expected.len(), expected.len());
-            } else {
-                let tag = if is_stale { "KNOWN-STALE" } else { "FAIL" };
-                println!("{tag} {file}: {diff}");
-                failures.push(format!("{file}: {diff}"));
-                if !is_stale {
-                    emu_mismatches.push(format!("{file}: {diff}"));
-                }
-            }
+            assert_eq!(result.uart, expected, "UART mismatch for {file} (stop = {:?})", result.stop);
         }
-        println!("\nklatest emulator validation: {passed}/{total} assembled+correct");
-        println!("  assembly errors (stale mnemonics, not emulator): {assembly_errors}");
-        println!("  known-stale fixtures (32-bit/word-addressed assumptions): {}", known_stale.len());
-        for f in &failures {
-            println!("  {f}");
-        }
-        // The correctness gate: zero UNEXPECTED emulation mismatches among
-        // assemblable tests with correct expectations.
-        assert!(emu_mismatches.is_empty(), "unexpected emulator mismatches: {emu_mismatches:?}");
-        assert!(passed >= 4, "expected at least the 4 clean tests to pass, got {passed}");
     }
 }

@@ -22,12 +22,12 @@ SETR O 0
 MEMREADRR A O       // A = mem[0]  (heap_start placed here by assembler)
 
 // Send via UART as 8 hex digits
-TXR A
-NEWLINE
+$TXR A
+$NEWLINE
 
 // Display all 32 bits on both 7-segment displays
 // Upper 16 bits → display 1, lower 16 bits → display 2
-7SEGR A
+// v2-removed (7SEGR): 7SEGR A
 
 HALT
 

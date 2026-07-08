@@ -3,10 +3,12 @@
 Authoritative behaviours for the independent ISA emulator (golden-model, Phase 0
 of the FPGA repo's PIPELINE_PLAN.md). Extracted by reading the RTL task files
 (`KlaussCPU.srcs/sources_1/new/*.vh` + `KlaussCPU.v`) — the **silicon is the
-authority**, not `CPU_ARCHITECTURE.md`. The per-opcode *encodings* come from the
-assembler's own tables (`opcodes.rs` / the `--opcode` `opcode_select.vh`); this
-file records only the EXECUTION semantics and the places the RTL **diverges from
-the architecture doc** — the high-value, easy-to-get-wrong cases.
+authority**, not `CPU_ARCHITECTURE.md`. The per-opcode *encodings* are the
+**ISA encoding v2** flag-day renumbering (`ISA_ENCODING_V2.md`), built in to the
+assembler's opcode table (`opcodes.rs::v2_opcodes`) — the old `--opcode`
+`opcode_select.vh` file is gone. This file records only the EXECUTION semantics
+(identical to the v1 CPU) and the places the RTL **diverges from the
+architecture doc** — the high-value, easy-to-get-wrong cases.
 
 > Every item below must be re-confirmed by the emulator-vs-RTL self-trace
 > cross-check (the "authority" half of the golden model). Where emulator and RTL

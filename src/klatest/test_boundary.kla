@@ -12,89 +12,92 @@
 //   80000000  (NEGR 0x80000000 = 0x80000000, special case)
 //   00000001  (ABSR 0xFFFFFFFF = abs(-1) = 1)
 //   FFFFFFFE  (ADDRR 0xFFFFFFFF + 0xFFFFFFFF = 0xFFFFFFFE, unsigned wrap)
-//   00000004  (MULHRR: high word of 0x20000 * 0x20000 = 0x400000000)
+//   00000000  (MULHRR: MULHR = high 64 of 128-bit product; 0x20000*0x20000 fits in 64 bits, so high = 0)
 //   00000000  (MULHURR: high word of 0x100 * 0x100 = 0x10000, fits in low)
 // Expected 7SEG: 0x11
 // Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-7SEG1V 0x11
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x11
+$NEWLINE
 
 // INCR wrap: 0xFFFFFFFF + 1 = 0x00000000
 SETR A 0xFFFFFFFF
 INCR A                 // A = 0x00000000
 DECR A                 // A = 0xFFFFFFFF (verify round-trip)
-TXR A                  // Expect: FFFFFFFF
-NEWLINE
+$TXR A  // Expect: FFFFFFFF
+$NEWLINE
 
 // INCR at max
 SETR A 0xFFFFFFFF
 INCR A
-TXR A                  // Expect: 00000000
-NEWLINE
+$TXR A  // Expect: 00000000
+$NEWLINE
 
 // DECR across sign boundary: 0x80000001 - 1 = 0x80000000
 SETR A 0x80000001
 DECR A
-TXR A                  // Expect: 80000000
-NEWLINE
+$TXR A  // Expect: 80000000
+$NEWLINE
 
 // DECR sign flip: 0x80000000 - 1 = 0x7FFFFFFF
 SETR A 0x80000000
 DECR A
-TXR A                  // Expect: 7FFFFFFF
-NEWLINE
+$TXR A  // Expect: 7FFFFFFF
+$NEWLINE
 
 // Overflow addition: 0x7FFFFFFF + 0x7FFFFFFF + 2 = 0x100000000 = wraps to 0
 SETR A 0x7FFFFFFF
 SETR B 0x7FFFFFFF
-ADDRR A B
+ADDR A A B
 ADDV A 0x2             // Clear flags and trigger wrap
-TXR A                  // Expect: 00000000
-NEWLINE
+$TXR A  // Expect: 00000000
+$NEWLINE
 
 // NEGR of max positive: 0x7FFFFFFF -> 0x80000001
 SETR A 0x7FFFFFFF
 NEGR A
-TXR A                  // Expect: 80000001
-NEWLINE
+$TXR A  // Expect: 80000001
+$NEWLINE
 
 // NEGR special case: 0x80000000 -> 0x80000000 (twos complement self-inverse)
 SETR A 0x80000000
 NEGR A
-TXR A                  // Expect: 80000000
-NEWLINE
+$TXR A  // Expect: 80000000
+$NEWLINE
 
 // ABSR of -1: abs(0xFFFFFFFF) = 1
 SETR A 0xFFFFFFFF
 ABSR A
-TXR A                  // Expect: 00000001
-NEWLINE
+$TXR A  // Expect: 00000001
+$NEWLINE
 
 // Unsigned add: 0xFFFFFFFF + 0xFFFFFFFF = 0x1FFFFFFFE, low 32 = 0xFFFFFFFE
 SETR A 0xFFFFFFFF
 SETR B 0xFFFFFFFF
-ADDRR A B
-TXR A                  // Expect: FFFFFFFE
-NEWLINE
+ADDR A A B
+$TXR A  // Expect: FFFFFFFE
+$NEWLINE
 
 // MULHRR: high word of signed multiply
 // 0x20000 * 0x20000 = 0x400000000 -> high word = 0x00000004
 SETR A 0x20000
 SETR B 0x20000
-MULHRR A B
-TXR A                  // Expect: 00000004
-NEWLINE
+MULHR A A B
+$TXR A  // Expect: 00000004
+$NEWLINE
 
 // MULHURR: high word of unsigned multiply (small, fits in low word)
 // 0x100 * 0x100 = 0x10000 -> high word = 0x00000000
 SETR A 0x100
 SETR B 0x100
-MULHURR A B
-TXR A                  // Expect: 00000000
-NEWLINE
+MULHUR A A B
+$TXR A  // Expect: 00000000
+$NEWLINE
 
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla

@@ -1,0 +1,12 @@
+// v2 round-trip fixture: assemble with the built-in ISA-encoding-v2 table,
+// emulate, and expect the UART output "Hi\n".
+// UART is memory-mapped (TX_DATA at 0xF0010000); a byte store transmits it.
+_start
+SETR B 0xF0010000    // UART TX_DATA MMIO register
+SETR A 0x48          // 'H'
+MEMSET8 A B          // transmit A (data = rd, address = rs1)
+SETR A 0x69          // 'i'
+MEMSET8 A B
+SETR A 0x0A          // newline
+MEMSET8 A B
+HALT

@@ -13,16 +13,16 @@
 
 _start
 DELAYV 0x0500
-7SEG1V 0x09
-NEWLINE
+// v2-removed (7SEG1V): 7SEG1V 0x09
+$NEWLINE
 
 // Basic push/pop
 SETR A 0x11
 PUSH A
 SETR A 0x0            // Clear A
 POP A
-TXR A                 // Expect: 00000011
-NEWLINE
+$TXR A  // Expect: 00000011
+$NEWLINE
 
 // LIFO order test
 SETR A 0x11
@@ -30,17 +30,17 @@ SETR B 0x22
 PUSH A                // Push 0x11 first
 PUSH B                // Push 0x22 second
 POP C                 // Should get 0x22 (last in, first out)
-TXR C                 // Expect: 00000022
-NEWLINE
+$TXR C  // Expect: 00000022
+$NEWLINE
 POP C                 // Should get 0x11
-TXR C                 // Expect: 00000011
-NEWLINE
+$TXR C  // Expect: 00000011
+$NEWLINE
 
 // PUSHV: push immediate value
 PUSHV 0xFF
 POP A
-TXR A                 // Expect: 000000FF
-NEWLINE
+$TXR A  // Expect: 000000FF
+$NEWLINE
 
 // Triple push/pop: verify all three restore correctly
 SETR A 0xA
@@ -57,14 +57,17 @@ SETR C 0x0
 
 // Pop in reverse order
 POP C
-TXR C                 // Expect: 0000000C
-NEWLINE
+$TXR C  // Expect: 0000000C
+$NEWLINE
 POP B
-TXR B                 // Expect: 0000000B
-NEWLINE
+$TXR B  // Expect: 0000000B
+$NEWLINE
 POP A
-TXR A                 // Expect: 0000000A
-NEWLINE
+$TXR A  // Expect: 0000000A
+$NEWLINE
 
-LEDV 0xFF
+// v2-removed (LEDV): LEDV 0xFF
 HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla
