@@ -1,4 +1,4 @@
-0x00000000: 0000000000000350                  -- heap_start  (set by assembler)
+0x00000000: 000000000000045C                  -- heap_start  (set by assembler)
 0x00000008: 0000000000000000                  -- heap_end    (reserved)
 0x00000010: 0000000000000000                  -- (reserved)
 0x00000018: 0000000000000000                  -- (reserved)
@@ -7,194 +7,280 @@
                               -- //   0000002A  (6*7 = 42)
                               -- //   00000078  (5! = 120)
                               -- //   00000006  (gcd(48,18) = 6)
-                              -- //   00000037  (fib(9) = 55)
+                              -- //   00000022  (fib(9) = 34 (64-bit iterative))
                               -- //   00000001  (is_prime(17) = 1)
                               -- //   00000000  (is_prime(18) = 0)
                               -- //
                               -- 
                               -- _start
-0x00000020: 0000080F 000FFFFF -- SETR P 0xFFFFF
-0x00000028: 000001EF          -- COPY O P
-0x0000002C: 0000F013 00000500 -- DELAYV 0x0500
-0x00000034: 00005001          -- NEWLINE
+0x00000020: 8BD00F00 000FFFFF -- SETR P 0xFFFFF
+0x00000028: 54000EF0          -- COPY O P
+0x0000002C: AC050000 00000500 -- DELAYV 0x0500
+Error                         -- $NEWLINE
                               -- 
                               -- // Test 1: multiply(6, 7) = 42
-0x00000038: 00000800 00000006 -- SETR A 6
-0x00000040: 00000801 00000007 -- SETR B 7
-0x00000048: 00001009 000000DC -- CALL multiply:
-0x00000050: 0000501C          -- TXR M
-0x00000054: 00005001          -- NEWLINE
+0x00000034: 8BD00000 00000006 -- SETR A 6
+0x0000003C: 8BD00100 00000007 -- SETR B 7
+0x00000044: A2000000 000000A8 -- CALL multiply:
+Error                         -- $TXR M
+Error                         -- $NEWLINE
                               -- 
                               -- // Test 2: factorial(5) = 120
-0x00000058: 00000800 00000005 -- SETR A 5
-0x00000060: 00001009 000000FC -- CALL factorial:
-0x00000068: 0000501C          -- TXR M
-0x0000006C: 00005001          -- NEWLINE
+0x0000004C: 8BD00000 00000005 -- SETR A 5
+0x00000054: A2000000 000000CC -- CALL factorial:
+Error                         -- $TXR M
+Error                         -- $NEWLINE
                               -- 
                               -- // Test 3: gcd(48, 18) = 6
-0x00000070: 00000800 00000030 -- SETR A 48
-0x00000078: 00000801 00000012 -- SETR B 18
-0x00000080: 00001009 00000170 -- CALL gcd:
-0x00000088: 0000501C          -- TXR M
-0x0000008C: 00005001          -- NEWLINE
+0x0000005C: 8BD00000 00000030 -- SETR A 48
+0x00000064: 8BD00100 00000012 -- SETR B 18
+0x0000006C: A2000000 00000148 -- CALL gcd:
+Error                         -- $TXR M
+Error                         -- $NEWLINE
                               -- 
                               -- // Test 4: fibonacci(9) = 55
-0x00000090: 00000800 00000009 -- SETR A 9
-0x00000098: 00001009 000001D4 -- CALL fibonacci:
-0x000000A0: 0000501C          -- TXR M
-0x000000A4: 00005001          -- NEWLINE
+0x00000074: 8BD00000 00000009 -- SETR A 9
+0x0000007C: A2000000 000001B0 -- CALL fibonacci:
+Error                         -- $TXR M
+Error                         -- $NEWLINE
                               -- 
                               -- // Test 5: is_prime(17) = 1
-0x000000A8: 00000800 00000011 -- SETR A 17
-0x000000B0: 00001009 0000027C -- CALL is_prime:
-0x000000B8: 0000501C          -- TXR M
-0x000000BC: 00005001          -- NEWLINE
+0x00000084: 8BD00000 00000011 -- SETR A 17
+0x0000008C: A2000000 00000260 -- CALL is_prime:
+Error                         -- $TXR M
+Error                         -- $NEWLINE
                               -- 
                               -- // Test 6: is_prime(18) = 0
-0x000000C0: 00000800 00000012 -- SETR A 18
-0x000000C8: 00001009 0000027C -- CALL is_prime:
-0x000000D0: 0000501C          -- TXR M
-0x000000D4: 00005001          -- NEWLINE
+0x00000094: 8BD00000 00000012 -- SETR A 18
+0x0000009C: A2000000 00000260 -- CALL is_prime:
+Error                         -- $TXR M
+Error                         -- $NEWLINE
                               -- 
-0x000000D8: 0000F011          -- HALT
+0x000000A4: 6C010000          -- HALT
                               -- 
                               -- // ========== Compiled C functions ==========
-0x000000DC:                   -- multiply:
-0x000000DC: 000070EF          -- MEMSETRR O P
-0x000000E0: 0000085F          -- DECR P
-0x000000E4: 000001EF          -- COPY O P
-0x000000E8: 000001C0          -- COPY M A
-Error                         -- MULRR M B
-0x000000EC:                   -- L_1:
-0x000000EC: 000001FE          -- COPY P O
-0x000000F0: 0000084F          -- INCR P
-0x000000F4: 000071EF          -- MEMREADRR O P
-0x000000F8: 00001012          -- RET
-0x000000FC:                   -- factorial:
-0x000000FC: 000070EF          -- MEMSETRR O P
-0x00000100: 0000085F          -- DECR P
-0x00000104: 000001EF          -- COPY O P
-0x00000108: 0000082F 00000004 -- MINUSV P 4
-0x00000110: 00000D6E FFFFFFFF -- STIDX G O 0xFFFFFFFF
-0x00000118: 00000D7E FFFFFFFE -- STIDX H O 0xFFFFFFFE
-0x00000120: 00000806 00000001 -- SETR G 1
-0x00000128: 00000807 00000002 -- SETR H 2
-0x00000130: 00001000 00000140 -- JMP L_6:
-0x00000138:                   -- L_3:
-Error                         -- MULRR G H
-0x00000138:                   -- L_4:
-0x00000138: 0000080C 00000001 -- SETR M 1
-Error                         -- ADDRR H M
-0x00000140:                   -- L_6:
-0x00000140: 00000570          -- CMPRR H A
-0x00000144: 00001016 00000138 -- JMPLE L_3:
-0x0000014C: 000001C6          -- COPY M G
-0x00000150:                   -- L_2:
-0x00000150: 00000C6E FFFFFFFF -- LDIDX G O 0xFFFFFFFF
-0x00000158: 00000C7E FFFFFFFE -- LDIDX H O 0xFFFFFFFE
-0x00000160: 000001FE          -- COPY P O
-0x00000164: 0000084F          -- INCR P
-0x00000168: 000071EF          -- MEMREADRR O P
-0x0000016C: 00001012          -- RET
-0x00000170:                   -- gcd:
-0x00000170: 000070EF          -- MEMSETRR O P
-0x00000174: 0000085F          -- DECR P
-0x00000178: 000001EF          -- COPY O P
-0x0000017C: 0000082F 00000004 -- MINUSV P 4
-0x00000184: 00000D7E FFFFFFFF -- STIDX H O 0xFFFFFFFF
-0x0000018C: 00001000 000001A4 -- JMP L_9:
-0x00000194:                   -- L_8:
-0x00000194: 00000171          -- COPY H B
-0x00000198: 000001D1          -- COPY N B
-0x0000019C: 00000110          -- COPY B A
-Error                         -- MODRR B N
-0x000001A0: 00000107          -- COPY A H
-0x000001A4:                   -- L_9:
-0x000001A4: 0000080C 00000000 -- SETR M 0
-0x000001AC: 0000051C          -- CMPRR B M
-0x000001B0: 00001004 00000194 -- JMPNE L_8:
-0x000001B8: 000001C0          -- COPY M A
-0x000001BC:                   -- L_7:
-0x000001BC: 00000C7E FFFFFFFF -- LDIDX H O 0xFFFFFFFF
-0x000001C4: 000001FE          -- COPY P O
-0x000001C8: 0000084F          -- INCR P
-0x000001CC: 000071EF          -- MEMREADRR O P
-0x000001D0: 00001012          -- RET
-0x000001D4:                   -- fibonacci:
-0x000001D4: 000070EF          -- MEMSETRR O P
-0x000001D8: 0000085F          -- DECR P
-0x000001DC: 000001EF          -- COPY O P
-0x000001E0: 0000082F 00000004 -- MINUSV P 4
-0x000001E8: 00000D4E FFFFFFFF -- STIDX E O 0xFFFFFFFF
-0x000001F0: 00000D5E FFFFFFFE -- STIDX F O 0xFFFFFFFE
-0x000001F8: 00000D6E FFFFFFFD -- STIDX G O 0xFFFFFFFD
-0x00000200: 00000D7E FFFFFFFC -- STIDX H O 0xFFFFFFFC
-0x00000208: 0000080C 00000000 -- SETR M 0
-0x00000210: 0000015C          -- COPY F M
-0x00000214: 00000807 00000001 -- SETR H 1
-0x0000021C: 0000016C          -- COPY G M
-0x00000220: 00001000 0000023C -- JMP L_15:
-0x00000228:                   -- L_12:
-0x00000228: 00000145          -- COPY E F
-Error                         -- ADDRR E H
-0x0000022C: 00000157          -- COPY F H
-0x00000230: 00000174          -- COPY H E
-0x00000234:                   -- L_13:
-0x00000234: 0000080C 00000001 -- SETR M 1
-Error                         -- ADDRR G M
-0x0000023C:                   -- L_15:
-0x0000023C: 00000560          -- CMPRR G A
-0x00000240: 00001015 00000228 -- JMPLT L_12:
-0x00000248: 000001C5          -- COPY M F
-0x0000024C:                   -- L_11:
-0x0000024C: 00000C4E FFFFFFFF -- LDIDX E O 0xFFFFFFFF
-0x00000254: 00000C5E FFFFFFFE -- LDIDX F O 0xFFFFFFFE
-0x0000025C: 00000C6E FFFFFFFD -- LDIDX G O 0xFFFFFFFD
-0x00000264: 00000C7E FFFFFFFC -- LDIDX H O 0xFFFFFFFC
-0x0000026C: 000001FE          -- COPY P O
-0x00000270: 0000084F          -- INCR P
-0x00000274: 000071EF          -- MEMREADRR O P
-0x00000278: 00001012          -- RET
-0x0000027C:                   -- is_prime:
-0x0000027C: 000070EF          -- MEMSETRR O P
-0x00000280: 0000085F          -- DECR P
-0x00000284: 000001EF          -- COPY O P
-0x00000288: 0000082F 00000004 -- MINUSV P 4
-0x00000290: 00000D7E FFFFFFFF -- STIDX H O 0xFFFFFFFF
-0x00000298: 0000080C 00000001 -- SETR M 1
-0x000002A0: 0000050C          -- CMPRR A M
-0x000002A4: 00001017 000002BC -- JMPGT L_17:
-0x000002AC: 0000080C 00000000 -- SETR M 0
-0x000002B4: 00001000 00000338 -- JMP L_16:
-0x000002BC:                   -- L_17:
-0x000002BC: 0000080C 00000003 -- SETR M 3
-0x000002C4: 0000050C          -- CMPRR A M
-0x000002C8: 00001017 000002E0 -- JMPGT L_19:
-0x000002D0: 0000080C 00000001 -- SETR M 1
-0x000002D8: 00001000 00000338 -- JMP L_16:
-0x000002E0:                   -- L_19:
-0x000002E0: 00000807 00000002 -- SETR H 2
-0x000002E8: 00001000 00000320 -- JMP L_22:
-0x000002F0:                   -- L_21:
-0x000002F0: 000001C0          -- COPY M A
-Error                         -- MODRR M H
-0x000002F4: 0000080B 00000000 -- SETR L 0
-0x000002FC: 000005CB          -- CMPRR M L
-0x00000300: 00001004 00000318 -- JMPNE L_24:
-0x00000308: 0000080C 00000000 -- SETR M 0
-0x00000310: 00001000 00000338 -- JMP L_16:
-0x00000318:                   -- L_24:
-0x00000318: 0000080C 00000001 -- SETR M 1
-Error                         -- ADDRR H M
-0x00000320:                   -- L_22:
-0x00000320: 000001C7          -- COPY M H
-Error                         -- MULRR M H
-0x00000324: 000005C0          -- CMPRR M A
-0x00000328: 00001016 000002F0 -- JMPLE L_21:
-0x00000330: 0000080C 00000001 -- SETR M 1
-0x00000338:                   -- L_16:
-0x00000338: 00000C7E FFFFFFFF -- LDIDX H O 0xFFFFFFFF
-0x00000340: 000001FE          -- COPY P O
-0x00000344: 0000084F          -- INCR P
-0x00000348: 000071EF          -- MEMREADRR O P
-0x0000034C: 00001012          -- RET
+0x000000A8:                   -- multiply:
+0x000000A8: 5F000EF0          -- MEMSET64RR O P
+0x000000AC: 57C80FF0          -- DECR P
+0x000000B0: 54000EF0          -- COPY O P
+0x000000B4: 54000C00          -- COPY M A
+0x000000B8: 68800CC1          -- MULR M M B
+0x000000BC:                   -- L_1:
+0x000000BC: 54000FE0          -- COPY P O
+0x000000C0: 57880FF0          -- INCR P
+0x000000C4: 5B000EF0          -- MEMREADRR O P
+0x000000C8: 65800000          -- RET
+0x000000CC:                   -- factorial:
+0x000000CC: 5F000EF0          -- MEMSET64RR O P
+0x000000D0: 57C80FF0          -- DECR P
+0x000000D4: 54000EF0          -- COPY O P
+0x000000D8: 88600FF0 00000004 -- MINUSV P 4
+0x000000E0: 9F2006E0 FFFFFFFF -- STIDX64 G O 0xFFFFFFFF
+0x000000E8: 9F2007E0 FFFFFFFE -- STIDX64 H O 0xFFFFFFFE
+0x000000F0: 8BD00600 00000001 -- SETR G 1
+0x000000F8: 8BD00700 00000002 -- SETR H 2
+0x00000100: A0000000 00000118 -- JMP L_6:
+0x00000108:                   -- L_3:
+0x00000108: 68800667          -- MULR G G H
+0x0000010C:                   -- L_4:
+0x0000010C: 8BD00C00 00000001 -- SETR M 1
+0x00000114: 4420077C          -- ADDR H H M
+0x00000118:                   -- L_6:
+0x00000118: 4C000070          -- CMPRR H A
+0x0000011C: A0300000 00000108 -- JMPLE L_3:
+0x00000124: 54000C60          -- COPY M G
+0x00000128:                   -- L_2:
+0x00000128: 9B2006E0 FFFFFFFF -- LDIDX64 G O 0xFFFFFFFF
+0x00000130: 9B2007E0 FFFFFFFE -- LDIDX64 H O 0xFFFFFFFE
+0x00000138: 54000FE0          -- COPY P O
+0x0000013C: 57880FF0          -- INCR P
+0x00000140: 5B000EF0          -- MEMREADRR O P
+0x00000144: 65800000          -- RET
+0x00000148:                   -- gcd:
+0x00000148: 5F000EF0          -- MEMSET64RR O P
+0x0000014C: 57C80FF0          -- DECR P
+0x00000150: 54000EF0          -- COPY O P
+0x00000154: 88600FF0 00000004 -- MINUSV P 4
+0x0000015C: 9F2007E0 FFFFFFFF -- STIDX64 H O 0xFFFFFFFF
+0x00000164: A0000000 00000180 -- JMP L_9:
+0x0000016C:                   -- L_8:
+0x0000016C: 54000710          -- COPY H B
+0x00000170: 54000D10          -- COPY N B
+0x00000174: 54000100          -- COPY B A
+0x00000178: 6A80011D          -- MODR B B N
+0x0000017C: 54000070          -- COPY A H
+0x00000180:                   -- L_9:
+0x00000180: 8BD00C00 00000000 -- SETR M 0
+0x00000188: 4C00001C          -- CMPRR B M
+0x0000018C: A04C0000 0000016C -- JMPNE L_8:
+0x00000194: 54000C00          -- COPY M A
+0x00000198:                   -- L_7:
+0x00000198: 9B2007E0 FFFFFFFF -- LDIDX64 H O 0xFFFFFFFF
+0x000001A0: 54000FE0          -- COPY P O
+0x000001A4: 57880FF0          -- INCR P
+0x000001A8: 5B000EF0          -- MEMREADRR O P
+0x000001AC: 65800000          -- RET
+0x000001B0:                   -- fibonacci:
+0x000001B0: 5F000EF0          -- MEMSET64RR O P
+0x000001B4: 57C80FF0          -- DECR P
+0x000001B8: 54000EF0          -- COPY O P
+0x000001BC: 88600FF0 00000004 -- MINUSV P 4
+0x000001C4: 9F2004E0 FFFFFFFF -- STIDX64 E O 0xFFFFFFFF
+0x000001CC: 9F2005E0 FFFFFFFE -- STIDX64 F O 0xFFFFFFFE
+0x000001D4: 9F2006E0 FFFFFFFD -- STIDX64 G O 0xFFFFFFFD
+0x000001DC: 9F2007E0 FFFFFFFC -- STIDX64 H O 0xFFFFFFFC
+0x000001E4: 8BD00C00 00000000 -- SETR M 0
+0x000001EC: 540005C0          -- COPY F M
+0x000001F0: 8BD00700 00000001 -- SETR H 1
+0x000001F8: 540006C0          -- COPY G M
+0x000001FC: A0000000 00000220 -- JMP L_15:
+0x00000204:                   -- L_12:
+0x00000204: 54000450          -- COPY E F
+0x00000208: 44200447          -- ADDR E E H
+0x0000020C: 54000570          -- COPY F H
+0x00000210: 54000740          -- COPY H E
+0x00000214:                   -- L_13:
+0x00000214: 8BD00C00 00000001 -- SETR M 1
+0x0000021C: 4420066C          -- ADDR G G M
+0x00000220:                   -- L_15:
+0x00000220: 4C000060          -- CMPRR G A
+0x00000224: A0280000 00000204 -- JMPLT L_12:
+0x0000022C: 54000C50          -- COPY M F
+0x00000230:                   -- L_11:
+0x00000230: 9B2004E0 FFFFFFFF -- LDIDX64 E O 0xFFFFFFFF
+0x00000238: 9B2005E0 FFFFFFFE -- LDIDX64 F O 0xFFFFFFFE
+0x00000240: 9B2006E0 FFFFFFFD -- LDIDX64 G O 0xFFFFFFFD
+0x00000248: 9B2007E0 FFFFFFFC -- LDIDX64 H O 0xFFFFFFFC
+0x00000250: 54000FE0          -- COPY P O
+0x00000254: 57880FF0          -- INCR P
+0x00000258: 5B000EF0          -- MEMREADRR O P
+0x0000025C: 65800000          -- RET
+0x00000260:                   -- is_prime:
+0x00000260: 5F000EF0          -- MEMSET64RR O P
+0x00000264: 57C80FF0          -- DECR P
+0x00000268: 54000EF0          -- COPY O P
+0x0000026C: 88600FF0 00000004 -- MINUSV P 4
+0x00000274: 9F2007E0 FFFFFFFF -- STIDX64 H O 0xFFFFFFFF
+0x0000027C: 8BD00C00 00000001 -- SETR M 1
+0x00000284: 4C00000C          -- CMPRR A M
+0x00000288: A0340000 000002A0 -- JMPGT L_17:
+0x00000290: 8BD00C00 00000000 -- SETR M 0
+0x00000298: A0000000 00000328 -- JMP L_16:
+0x000002A0:                   -- L_17:
+0x000002A0: 8BD00C00 00000003 -- SETR M 3
+0x000002A8: 4C00000C          -- CMPRR A M
+0x000002AC: A0340000 000002C4 -- JMPGT L_19:
+0x000002B4: 8BD00C00 00000001 -- SETR M 1
+0x000002BC: A0000000 00000328 -- JMP L_16:
+0x000002C4:                   -- L_19:
+0x000002C4: 8BD00700 00000002 -- SETR H 2
+0x000002CC: A0000000 0000030C -- JMP L_22:
+0x000002D4:                   -- L_21:
+0x000002D4: 54000C00          -- COPY M A
+0x000002D8: 6A800CC7          -- MODR M M H
+0x000002DC: 8BD00B00 00000000 -- SETR L 0
+0x000002E4: 4C0000CB          -- CMPRR M L
+0x000002E8: A04C0000 00000300 -- JMPNE L_24:
+0x000002F0: 8BD00C00 00000000 -- SETR M 0
+0x000002F8: A0000000 00000328 -- JMP L_16:
+0x00000300:                   -- L_24:
+0x00000300: 8BD00C00 00000001 -- SETR M 1
+0x00000308: 4420077C          -- ADDR H H M
+0x0000030C:                   -- L_22:
+0x0000030C: 54000C70          -- COPY M H
+0x00000310: 68800CC7          -- MULR M M H
+0x00000314: 4C0000C0          -- CMPRR M A
+0x00000318: A0300000 000002D4 -- JMPLE L_21:
+0x00000320: 8BD00C00 00000001 -- SETR M 1
+0x00000328:                   -- L_16:
+0x00000328: 9B2007E0 FFFFFFFF -- LDIDX64 H O 0xFFFFFFFF
+0x00000330: 54000FE0          -- COPY P O
+0x00000334: 57880FF0          -- INCR P
+0x00000338: 5B000EF0          -- MEMREADRR O P
+0x0000033C: 65800000          -- RET
+                              -- 
+                              -- // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+                              -- // Shared ISA-v2 UART output helpers (MMIO), replacing the retired v1 print
+                              -- // opcodes (TXR / NEWLINE / TXCHARMEMR / TXSTRMEMR). UART is memory-mapped:
+                              -- // TX_DATA lives at 0xF0010000 and a byte store transmits data[7:0].
+                              -- //
+                              -- // Every routine preserves ALL general-purpose registers (A..P) it does not
+                              -- // take as an argument, so it is a drop-in replacement for the single-opcode v1
+                              -- // primitives. Include this file at the END of a program (after HALT) so the
+                              -- // subroutines are never reached by fall-through:  !include uart_stubs.kla
+                              -- //
+                              -- // Calling convention (see the $TXR / $NEWLINE / $TXCHAR / $TXSTR macros):
+                              -- //   TX_HEX32 : prints reg A's low 32 bits as 8 uppercase hex digits.
+                              -- //   TX_NL    : prints a newline (0x0A).
+                              -- //   TX_CHAR  : prints reg A's low byte as a raw character.
+                              -- //   TX_STR   : prints the NUL-terminated string at address reg A.
+                              -- 
+                              -- // --- TX_HEX32: print A[31:0] as 8 uppercase hex digits -----------------------
+0x00000340:                   -- TX_HEX32:
+0x00000340: 64000010          -- PUSH B
+0x00000344: 64000020          -- PUSH C
+0x00000348: 64000030          -- PUSH D
+0x0000034C: 64000040          -- PUSH E
+0x00000350: 8BD00100 F0010000 -- SETR B 0xF0010000        // UART TX_DATA
+0x00000358: 8BD00200 0000001C -- SETR C 28                // shift for the most-significant nibble of the low word
+0x00000360:                   -- TX_HEX32_LOOP:
+0x00000360: 50404302          -- SHRR D A C               // D = A >> C  (count = C[5:0])
+0x00000364: 89000330 0000000F -- ANDV D 0xF               // D = current nibble
+0x0000036C: 8C100030 0000000A -- CMPRV D 10               // flags from D - 10 (signed)
+0x00000374: A0280000 0000038C -- JMPLT TX_HEX32_DEC:      // 0-9 -> decimal digit
+0x0000037C: 88200330 00000037 -- ADDV D 0x37              // 10-15 -> 'A'..'F'
+0x00000384: A0000000 00000394 -- JMP TX_HEX32_PUT:
+0x0000038C:                   -- TX_HEX32_DEC:
+0x0000038C: 88200330 00000030 -- ADDV D 0x30              // '0'..'9'
+0x00000394:                   -- TX_HEX32_PUT:
+0x00000394: 5C000310          -- MEMSET8 D B              // transmit the character (data = D, address = B)
+0x00000398: 8BD00400 00000004 -- SETR E 4
+0x000003A0: 44600224          -- SUBR C C E               // next nibble
+0x000003A4: 8C100020 00000000 -- CMPRV C 0                // flags from C - 0 (signed)
+0x000003AC: A02C0000 00000360 -- JMPGE TX_HEX32_LOOP:     // repeat while C >= 0
+0x000003B4: 64800400          -- POP E
+0x000003B8: 64800300          -- POP D
+0x000003BC: 64800200          -- POP C
+0x000003C0: 64800100          -- POP B
+0x000003C4: 65800000          -- RET
+                              -- 
+                              -- // --- TX_NL: print a newline --------------------------------------------------
+0x000003C8:                   -- TX_NL:
+0x000003C8: 64000000          -- PUSH A
+0x000003CC: 64000010          -- PUSH B
+0x000003D0: 8BD00100 F0010000 -- SETR B 0xF0010000
+0x000003D8: 8BD00000 0000000A -- SETR A 0x0A              // '\n'
+0x000003E0: 5C000010          -- MEMSET8 A B
+0x000003E4: 64800100          -- POP B
+0x000003E8: 64800000          -- POP A
+0x000003EC: 65800000          -- RET
+                              -- 
+                              -- // --- TX_CHAR: print A's low byte as a raw character --------------------------
+0x000003F0:                   -- TX_CHAR:
+0x000003F0: 64000010          -- PUSH B
+0x000003F4: 8BD00100 F0010000 -- SETR B 0xF0010000
+0x000003FC: 5C000010          -- MEMSET8 A B
+0x00000400: 64800100          -- POP B
+0x00000404: 65800000          -- RET
+                              -- 
+                              -- // --- TX_STR: print the NUL-terminated string at address A --------------------
+0x00000408:                   -- TX_STR:
+0x00000408: 64000000          -- PUSH A
+0x0000040C: 64000010          -- PUSH B
+0x00000410: 64000020          -- PUSH C
+0x00000414: 64000030          -- PUSH D
+0x00000418: 8BD00200 F0010000 -- SETR C 0xF0010000        // UART TX_DATA
+0x00000420: 54000300          -- COPY D A                 // D = current byte address
+0x00000424:                   -- TX_STR_LOOP:
+0x00000424: 58000130          -- MEMGET8 B D              // B = mem8[D]
+0x00000428: 8C100010 00000000 -- CMPRV B 0                // stop at the NUL terminator
+0x00000430: A0480000 00000448 -- JMPE TX_STR_DONE:
+0x00000438: 5C000120          -- MEMSET8 B C              // transmit byte
+0x0000043C: 57880330          -- INCR D                   // advance
+0x00000440: A0000000 00000424 -- JMP TX_STR_LOOP:
+0x00000448:                   -- TX_STR_DONE:
+0x00000448: 64800300          -- POP D
+0x0000044C: 64800200          -- POP C
+0x00000450: 64800100          -- POP B
+0x00000454: 64800000          -- POP A
+0x00000458: 65800000          -- RET

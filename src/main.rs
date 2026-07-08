@@ -30,7 +30,7 @@ use commands::{
 use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
 use helper::{build_ddr_image, create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments, HEAP_HEADER_WORDS};
 use labels::{find_duplicate_label, get_labels, Label};
-use macros::{expand_embedded_macros, expand_macros};
+use macros::{apply_source_macros, expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
 use opcodes::{add_arguments, add_registers, num_arguments, v2_opcodes_and_macros, Opcode, Pass0, Pass1, Pass2};
@@ -268,6 +268,9 @@ fn main() -> Result<(), i32> {
     let input_list = input_list_option.unwrap_or_else(|| [].to_vec());
 
     let input_list = remove_block_comments(input_list, &mut msg_list);
+
+    // Fold in any `!macro` / `!macros` definitions from the source, then expand.
+    let input_list = apply_source_macros(input_list, &mut macro_list, &mut msg_list);
 
     // Pass 0 to add macros
     let pass0 = expand_macros(&mut msg_list, input_list, &mut macro_list);
@@ -653,6 +656,7 @@ pub fn assemble_file(input_file_name: &str, oplist: &[Opcode], macro_list: &[mac
     let input_list = remove_block_comments(input_list_option.unwrap_or_else(|| [].to_vec()), msg_list);
 
     let mut macro_list_clone = macro_list.to_vec();
+    let input_list = apply_source_macros(input_list, &mut macro_list_clone, msg_list);
     let pass0 = expand_macros(msg_list, input_list, &mut macro_list_clone);
     let pass1: Vec<Pass1> = get_pass1(msg_list, pass0, oplist.to_vec());
     let mut labels = get_labels(&pass1, msg_list);
@@ -743,6 +747,7 @@ pub(crate) fn assemble_to_image(
     let input_list_option = read_file_to_vector(input_file_name, msg_list, &mut opened_input_files);
     let input_list = remove_block_comments(input_list_option?, msg_list);
     let mut macro_list_clone = macro_list.to_vec();
+    let input_list = apply_source_macros(input_list, &mut macro_list_clone, msg_list);
     let pass0 = expand_macros(msg_list, input_list, &mut macro_list_clone);
     let pass1: Vec<Pass1> = get_pass1(msg_list, pass0, oplist.to_vec());
     let mut labels = get_labels(&pass1, msg_list);

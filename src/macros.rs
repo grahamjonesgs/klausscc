@@ -4,6 +4,7 @@ use crate::opcodes::{InputData, Pass0};
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
+use std::path::Path;
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 /// Holds instance of macro from opcode definition file.
@@ -200,6 +201,92 @@ pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<InputData>, macro_l
         }
     }
     pass0
+}
+
+/// Merge user macro definitions declared in the source into `macro_list`.
+///
+/// Scans `input_list` for the `!macro` (inline, single definition) and
+/// `!macros <file>` (external file of definitions) directives, adds each
+/// definition to `macro_list`, and returns the input with the directive lines
+/// removed. Redefining a macro that already exists (built-in or user) is an
+/// error. When any macro is added the embedded references are re-resolved so a
+/// user macro can build on the built-ins or on another user macro.
+///
+/// `!macros` files are resolved relative to the directory of the file that
+/// contains the directive, matching `!include`.
+pub fn apply_source_macros(input_list: Vec<InputData>, macro_list: &mut Vec<Macro>, msg_list: &mut MsgList) -> Vec<InputData> {
+    let mut output: Vec<InputData> = Vec::new();
+    let mut added = false;
+
+    for line in input_list {
+        let stripped = strip_comments(&line.input);
+        let first_word = stripped.split_whitespace().next().unwrap_or("");
+        match first_word {
+            "!macro" => {
+                // Inline definition: the remainder is "$NAME item / item / …".
+                let definition = stripped.trim().strip_prefix("!macro").unwrap_or("").trim();
+                added |= add_macro_definition(definition, macro_list, line.line_counter, &line.file_name, msg_list);
+            }
+            "!macros" => {
+                // External file of one macro definition per line.
+                let file_arg = stripped.split_whitespace().nth(1).unwrap_or("");
+                if file_arg.is_empty() {
+                    msg_list.push(
+                        format!("Missing file name for !macros in {}", line.file_name),
+                        Some(line.line_counter),
+                        Some(line.file_name.clone()),
+                        MessageType::Error,
+                    );
+                    continue;
+                }
+                let parent = Path::new(&line.file_name).parent().unwrap_or_else(|| Path::new(""));
+                let macros_path = parent.join(file_arg).to_string_lossy().into_owned();
+                match std::fs::read_to_string(&macros_path) {
+                    Ok(contents) => {
+                        for (index, definition) in contents.lines().enumerate() {
+                            let file_line = u32::try_from(index + 1).unwrap_or(0);
+                            added |= add_macro_definition(definition, macro_list, file_line, &macros_path, msg_list);
+                        }
+                    }
+                    Err(err) => msg_list.push(
+                        format!("Unable to open macros file {macros_path} in {}: {err}", line.file_name),
+                        Some(line.line_counter),
+                        Some(line.file_name.clone()),
+                        MessageType::Error,
+                    ),
+                }
+            }
+            _ => output.push(line),
+        }
+    }
+
+    if added {
+        let expanded = expand_embedded_macros(macro_list.clone(), msg_list);
+        *macro_list = expanded;
+    }
+    output
+}
+
+/// Parse one macro-definition line and add it to `macro_list`.
+///
+/// Blank or comment lines (anything [`macro_from_string`] rejects) are skipped.
+/// A definition whose name already exists is an error and is not added. Returns
+/// true only when a macro was actually appended.
+fn add_macro_definition(definition: &str, macro_list: &mut Vec<Macro>, line_number: u32, filename: &str, msg_list: &mut MsgList) -> bool {
+    let Some(new_macro) = macro_from_string(definition, msg_list) else {
+        return false;
+    };
+    if return_macro(&new_macro.name, macro_list).is_some() {
+        msg_list.push(
+            format!("Duplicate macro definition {} found", new_macro.name),
+            Some(line_number),
+            Some(filename.to_owned()),
+            MessageType::Error,
+        );
+        return false;
+    }
+    macro_list.push(new_macro);
+    true
 }
 
 /// Parse opcode definition line to macro.
@@ -919,6 +1006,98 @@ mod tests {
 
         let pass0 = expand_macros(&mut msg_list, input, macros);
         assert_eq!(strip_comments(&pass0.first().unwrap_or_default().input_text_line.clone()), "OPCODE1 A B");
+    }
+
+    #[test]
+    // Inline !macro is registered, its directive line removed, the rest passes through
+    fn test_apply_source_macros_inline() {
+        let mut msg_list = MsgList::new();
+        let macros = &mut Vec::<Macro>::new();
+        let input: Vec<InputData> = vec![
+            InputData {
+                input: String::from("!macro $INC3 ADDV %1 3"),
+                file_name: "F".to_owned(),
+                line_counter: 1,
+            },
+            InputData {
+                input: String::from("$INC3 A"),
+                file_name: "F".to_owned(),
+                line_counter: 2,
+            },
+            InputData {
+                input: String::from("NOP"),
+                file_name: "F".to_owned(),
+                line_counter: 3,
+            },
+        ];
+        let output = apply_source_macros(input, macros, &mut msg_list);
+        assert_eq!(output.len(), 2); // the !macro directive line is stripped
+        assert_eq!(output.first().unwrap().input, "$INC3 A");
+        assert_eq!(macros.len(), 1);
+        assert_eq!(macros.first().unwrap().name, "$INC3");
+        assert_eq!(macros.first().unwrap().items, vec![String::from("ADDV %1 3")]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+    }
+
+    #[test]
+    // Redefining an existing macro is an error and does not add a duplicate
+    fn test_apply_source_macros_redefine() {
+        let mut msg_list = MsgList::new();
+        let macros = &mut vec![Macro {
+            name: String::from("$FOO"),
+            variables: 0,
+            items: vec![String::from("NOP")],
+            comment: String::default(),
+        }];
+        let input: Vec<InputData> = vec![InputData {
+            input: String::from("!macro $FOO HALT"),
+            file_name: "F".to_owned(),
+            line_counter: 1,
+        }];
+        let output = apply_source_macros(input, macros, &mut msg_list);
+        assert!(output.is_empty()); // directive consumed
+        assert_eq!(macros.len(), 1); // no duplicate added
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.list.first().unwrap().text, "Duplicate macro definition $FOO found");
+    }
+
+    #[test]
+    // A user macro that references another user macro is embedded-expanded
+    fn test_apply_source_macros_embedded() {
+        let mut msg_list = MsgList::new();
+        let macros = &mut Vec::<Macro>::new();
+        let input: Vec<InputData> = vec![
+            InputData {
+                input: String::from("!macro $BASE NOP / NOP"),
+                file_name: "F".to_owned(),
+                line_counter: 1,
+            },
+            InputData {
+                input: String::from("!macro $WRAP $BASE / HALT"),
+                file_name: "F".to_owned(),
+                line_counter: 2,
+            },
+        ];
+        let _output = apply_source_macros(input, macros, &mut msg_list);
+        let wrap = macros.iter().find(|m| m.name == "$WRAP").unwrap();
+        assert_eq!(wrap.items, vec![String::from("NOP"), String::from("NOP"), String::from("HALT")]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+    }
+
+    #[test]
+    // A missing file name after !macros is reported as an error
+    fn test_apply_source_macros_missing_name() {
+        let mut msg_list = MsgList::new();
+        let macros = &mut Vec::<Macro>::new();
+        let input: Vec<InputData> = vec![InputData {
+            input: String::from("!macros"),
+            file_name: "F".to_owned(),
+            line_counter: 1,
+        }];
+        let output = apply_source_macros(input, macros, &mut msg_list);
+        assert!(output.is_empty());
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.list.first().unwrap().text, "Missing file name for !macros in F");
     }
 
     #[test]

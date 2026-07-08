@@ -12,433 +12,74 @@ $TXR M
 $NEWLINE
 HALT
 
-// ========== C library ==========
+// ========== C library (register calling convention) ==========
+// Rewritten for the ISA-v2 toolchain: args in A (and B), result in M — the
+// same convention main/factorial/gcd/is_prime already use. The previous
+// bundled libc read its args from the stack frame, which no caller here sets
+// up, so every string/number print walked garbage. Character output goes
+// through the shared MMIO helpers in uart_stubs.kla (TX_CHAR / TX_NL).
+//
+// String data is one character per .word (the char sits in byte 0, so words
+// are 8 bytes apart); print_str walks them with MEMGET8 and an 8-byte stride.
+
+// putchar(A): transmit A's low byte
 putchar:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-// save arg 0
-STIDX64 A O 0xFFFFFFFF
-COPY M O
-ADDV M 2
-MEMREADRR A M
-CALL _uart_tx_char:
-L_1:
-COPY P O
-INCR P
-MEMREADRR O P
+CALL TX_CHAR:
 RET
-puts:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 2
-STIDX64 H O 0xFFFFFFFF
-COPY M O
-ADDV M 3
-MEMREADRR H M
-JMP L_4:
-L_3:
-MEMREADRR A H
-CALL putchar:
-SETR M 1
-ADDR H H M
-L_4:
-MEMREADRR M H
-SETR L 0
-CMPRR M L
-JMPNE L_3:
-SETR A 10
-CALL putchar:
-L_2:
-LDIDX64 H O 0xFFFFFFFF
-COPY P O
-INCR P
-MEMREADRR O P
-RET
+
+// print_str(A): print the .word string at address A, stopping at the NUL word
 print_str:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 2
-STIDX64 H O 0xFFFFFFFF
-COPY M O
-ADDV M 3
-MEMREADRR H M
-JMP L_8:
-L_7:
-MEMREADRR A H
-CALL putchar:
-SETR M 1
-ADDR H H M
-L_8:
-MEMREADRR M H
-SETR L 0
-CMPRR M L
-JMPNE L_7:
-L_6:
-LDIDX64 H O 0xFFFFFFFF
-COPY P O
-INCR P
-MEMREADRR O P
+PUSH A
+PUSH B
+COPY B A
+print_str_loop:
+MEMGET8 A B            // A = next character (byte 0 of the word)
+CMPRV A 0
+JMPE print_str_done:
+CALL TX_CHAR:
+ADDV B 8              // advance to the next .word character
+JMP print_str_loop:
+print_str_done:
+POP B
+POP A
 RET
-print_unsigned:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-// save arg 0
-STIDX64 A O 0xFFFFFFFF
-COPY M O
-ADDV M 2
-MEMREADRR M M
-SETR L 10
-CMPRR M L
-JMPE L_11:
-COPY M O
-ADDV M 2
-MEMREADRR M M
-SETR L 10
-COPY A M
-DIVUR A A L
-CALL print_unsigned:
-L_11:
-COPY M O
-ADDV M 2
-MEMREADRR M M
-SETR L 10
-MODUR M M L
-SETR L 48
-ADDR M M L
-COPY A M
-CALL putchar:
-L_10:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-print_int:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 3
-STIDX64 H O 0xFFFFFFFF
-SETR M 0
-CMPRR H M
-JMPGE L_14:
-SETR A 45
-CALL putchar:
-COPY A H
-NEGR A
-COPY B H
-CALL _print_neg:
-JMP L_13:
-L_14:
-COPY A H
-CALL print_unsigned:
-L_13:
-LDIDX64 H O 0xFFFFFFFF
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-_print_neg:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-// save arg 0
-STIDX64 A O 0xFFFFFFFF
-// save arg 1
-STIDX64 B O 0xFFFFFFFE
-COPY M O
-ADDV M 2
-MEMREADRR M M
-SETR L 0
-CMPRR M L
-JMPGE L_17:
-SETR A 50
-CALL putchar:
-SETR A 49
-CALL putchar:
-SETR A 52
-CALL putchar:
-SETR A 55
-CALL putchar:
-SETR A 52
-CALL putchar:
-SETR A 56
-CALL putchar:
-SETR A 51
-CALL putchar:
-SETR A 54
-CALL putchar:
-SETR A 52
-CALL putchar:
-SETR A 56
-CALL putchar:
-JMP L_18:
-L_17:
-COPY M O
-ADDV M 2
-MEMREADRR M M
-COPY A M
-CALL print_unsigned:
-L_18:
-L_16:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-print_hex:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-// save arg 0
-STIDX64 A O 0xFFFFFFFF
-COPY M O
-ADDV M 2
-MEMREADRR A M
-CALL _uart_tx_hex:
-L_19:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-print_hex_prefix:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-// save arg 0
-STIDX64 A O 0xFFFFFFFF
-SETR A 48
-CALL putchar:
-SETR A 120
-CALL putchar:
-COPY M O
-ADDV M 2
-MEMREADRR A M
-CALL _uart_tx_hex:
-L_20:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
+
+// newline(): print a line feed
 newline:
-MEMSET64RR O P
-DECR P
-COPY O P
-CALL _uart_newline:
-L_21:
-COPY P O
-INCR P
-MEMREADRR O P
+CALL TX_NL:
 RET
-strlen:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-STIDX64 H O 0xFFFFFFFF
-SETR H 0
-JMP L_24:
-L_23:
-SETR M 1
-ADDR H H M
-SETR M 1
-ADDR A A M
-L_24:
-MEMREADRR M A
-SETR L 0
-CMPRR M L
-JMPNE L_23:
-COPY M H
-L_22:
-LDIDX64 H O 0xFFFFFFFF
-COPY P O
-INCR P
-MEMREADRR O P
+
+// print_unsigned(A): print A as unsigned decimal (recurses for the high digits)
+print_unsigned:
+PUSH B
+PUSH C
+CMPRV A 10
+JMPLT print_unsigned_ones:
+COPY C A
+SETR B 10
+DIVUR A A B            // A = A / 10
+CALL print_unsigned:
+COPY A C              // restore this frame's value
+print_unsigned_ones:
+SETR B 10
+MODUR A A B            // A = A % 10
+ADDV A 0x30          // '0' + digit
+CALL TX_CHAR:
+POP C
+POP B
 RET
-strcmp:
-MEMSET64RR O P
-DECR P
-COPY O P
-JMP L_28:
-L_27:
-SETR M 1
-ADDR A A M
-ADDR B B M
-L_28:
-MEMREADRR M A
-SETR L 0
-CMPRR M L
-JMPE L_30:
-MEMREADRR L B
-CMPRR M L
-JMPE L_27:
-L_30:
-MEMREADRR M A
-MEMREADRR L B
-SUBR M M L
-L_26:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-strcpy:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-COPY M O
-MINUSV M 0
-MEMSET64RR A M
-JMP L_33:
-L_32:
-MEMREADRR M B
-MEMSET64RR M A
-SETR M 1
-ADDR A A M
-ADDR B B M
-L_33:
-MEMREADRR M B
-SETR L 0
-CMPRR M L
-JMPNE L_32:
-SETR M 0
-MEMSET64RR M A
-COPY M O
-MINUSV M 0
-MEMREADRR M M
-L_31:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-memset:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-STIDX64 H O 0xFFFFFFFF
-COPY H A
-JMP L_37:
-L_36:
-MEMSET64RR B H
-SETR M 1
-ADDR H H M
-SETR M 1
-SUBR C C M
-L_37:
-SETR M 0
-CMPRR C M
-JMPGT L_36:
-COPY M A
-L_35:
-LDIDX64 H O 0xFFFFFFFF
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-memcpy:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 2
-STIDX64 G O 0xFFFFFFFF
-STIDX64 H O 0xFFFFFFFE
-COPY H A
-COPY G B
-JMP L_41:
-L_40:
-MEMREADRR M G
-MEMSET64RR M H
-SETR M 1
-ADDR H H M
-ADDR G G M
-SETR M 1
-SUBR C C M
-L_41:
-SETR M 0
-CMPRR C M
-JMPGT L_40:
-COPY M A
-L_39:
-LDIDX64 G O 0xFFFFFFFF
-LDIDX64 H O 0xFFFFFFFE
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-abs:
-MEMSET64RR O P
-DECR P
-COPY O P
-SETR M 0
-CMPRR A M
-JMPGE L_44:
-COPY M A
-NEGR M
-JMP L_43:
-L_44:
-COPY M A
-L_43:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-min:
-MEMSET64RR O P
-DECR P
-COPY O P
-CMPRR A B
-JMPGE L_47:
-COPY M A
-JMP L_46:
-L_47:
-COPY M B
-L_46:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-max:
-MEMSET64RR O P
-DECR P
-COPY O P
-CMPRR A B
-JMPLE L_50:
-COPY M A
-JMP L_49:
-L_50:
-COPY M B
-L_49:
-COPY P O
-INCR P
-MEMREADRR O P
-RET
-swap:
-MEMSET64RR O P
-DECR P
-COPY O P
-MINUSV P 1
-COPY M O
-MINUSV M 0
-MEMREADRR L A
-MEMSET64RR L M
-MEMREADRR M B
-MEMSET64RR M A
-COPY M O
-MINUSV M 0
-MEMREADRR M M
-MEMSET64RR M B
-L_52:
-COPY P O
-INCR P
-MEMREADRR O P
+
+// print_int(A): print A as signed decimal
+print_int:
+CMPRV A 0
+JMPGE print_int_pos:
+PUSH A
+SETR A 0x2D          // '-'
+CALL TX_CHAR:
+POP A
+NEGR A
+print_int_pos:
+CALL print_unsigned:
 RET
 
 // ========== User program ==========
@@ -451,17 +92,17 @@ STIDX64 G O 0xFFFFFFFF
 STIDX64 H O 0xFFFFFFFE
 SETR G 1
 SETR H 2
-JMP L_5:
-L_2:
+JMP LX_5:
+LX_2:
 MULR G G H
-L_3:
+LX_3:
 SETR M 1
 ADDR H H M
-L_5:
+LX_5:
 CMPRR H A
-JMPLE L_2:
+JMPLE LX_2:
 COPY M G
-L_1:
+LX_1:
 LDIDX64 G O 0xFFFFFFFF
 LDIDX64 H O 0xFFFFFFFE
 COPY P O
@@ -474,19 +115,19 @@ DECR P
 COPY O P
 MINUSV P 1
 STIDX64 H O 0xFFFFFFFF
-JMP L_8:
-L_7:
+JMP LX_8:
+LX_7:
 COPY H B
 COPY N B
 COPY B A
 MODR B B N
 COPY A H
-L_8:
+LX_8:
 SETR M 0
 CMPRR B M
-JMPNE L_7:
+JMPNE LX_7:
 COPY M A
-L_6:
+LX_6:
 LDIDX64 H O 0xFFFFFFFF
 COPY P O
 INCR P
@@ -500,36 +141,36 @@ MINUSV P 1
 STIDX64 H O 0xFFFFFFFF
 SETR M 1
 CMPRR A M
-JMPGT L_11:
+JMPGT LX_11:
 SETR M 0
-JMP L_10:
-L_11:
+JMP LX_10:
+LX_11:
 SETR M 3
 CMPRR A M
-JMPGT L_13:
+JMPGT LX_13:
 SETR M 1
-JMP L_10:
-L_13:
+JMP LX_10:
+LX_13:
 SETR H 2
-JMP L_16:
-L_15:
+JMP LX_16:
+LX_15:
 COPY M A
 MODR M M H
 SETR L 0
 CMPRR M L
-JMPNE L_18:
+JMPNE LX_18:
 SETR M 0
-JMP L_10:
-L_18:
+JMP LX_10:
+LX_18:
 SETR M 1
 ADDR H H M
-L_16:
+LX_16:
 COPY M H
 MULR M M H
 CMPRR M A
-JMPLE L_15:
+JMPLE LX_15:
 SETR M 1
-L_10:
+LX_10:
 LDIDX64 H O 0xFFFFFFFF
 COPY P O
 INCR P
@@ -668,79 +309,38 @@ SETR A s_primes
 CALL print_str:
 CALL newline:
 SETR H 2
-L_21:
+LX_21:
 COPY A H
 CALL is_prime:
 SETR L 0
 CMPRR M L
-JMPE L_25:
+JMPE LX_25:
 COPY A H
 CALL print_int:
 SETR A 32
 CALL putchar:
-L_25:
-L_22:
+LX_25:
+LX_22:
 SETR M 1
 ADDR H H M
 SETR M 30
 CMPRR H M
-JMPLE L_21:
+JMPLE LX_21:
 CALL newline:
 SETR A s_done
 CALL print_str:
 CALL newline:
 SETR M 0
-L_20:
+LX_20:
 LDIDX64 H O 0xFFFFFFFF
 COPY P O
 INCR P
 MEMREADRR O P
 RET
 
-// ========== UART stubs ==========
-// uart_stubs.kla - Low-level UART routines callable from C
-//
-// Calling convention: args in A-D, return in M
-// These are leaf functions (no calls), so no frame setup needed.
-//
-// Functions:
-//   _uart_tx_hex(val)    - print 32-bit value as 8 hex digits
-//   _uart_newline()      - print CR/LF
-//   _uart_tx_char(ch)    - print single ASCII character
-//
-// Usage from C:
-//   extern void _uart_tx_hex(int val);
-//   extern void _uart_newline(void);
-//   extern void _uart_tx_char(int ch);
-
-// ----------------------------------------------------------------
-// _uart_tx_hex: print register A as 8 hex digits
-// Input: A = value
-// ----------------------------------------------------------------
-_uart_tx_hex:
-$TXR A
-RET
-
-// ----------------------------------------------------------------
-// _uart_newline: print CR/LF
-// ----------------------------------------------------------------
-_uart_newline:
-$NEWLINE
-RET
-
-// ----------------------------------------------------------------
-// _uart_tx_char: print single ASCII char from A (low 8 bits)
-// We store the value to a scratch word then use TXCHARMEMR
-// Input: A = character value (low 8 bits used)
-// ----------------------------------------------------------------
-_uart_tx_char:
-SETR N #_CHAR_BUF
-MEMSET64RR A N
-$TXMEMCHAR N
-RET
-
-// Scratch buffer for putchar (1 word)
-#_CHAR_BUF 1
-
-// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+// ========== UART output helpers ==========
+// Shared ISA-v2 MMIO routines: TX_CHAR (raw byte), TX_NL (newline),
+// TX_HEX32 (8 hex digits), TX_STR (packed byte string), plus the
+// $TXR / $NEWLINE / $TXCHAR / $TXSTR macros used above. Include last so
+// the subroutines are never reached by fall-through.
 !include uart_stubs.kla
