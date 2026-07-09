@@ -39,17 +39,30 @@ architecture doc** — the high-value, easy-to-get-wrong cases.
 
 ## Flag rules (the biggest correctness trap)
 
+The architectural flags register is the **unified 4-bit `Z S C V`** (zero, sign,
+carry, overflow) — see `FLAG_UNIFICATION_CHANGES`. The old separate compare flags
+`E` (equal), `L` (signed less), `U` (unsigned less) are **RETIRED as storage**;
+they are **DERIVED on read**: `E = Z`, `L = S ^ V`, `U = C`. The derivations are
+bit-identical to the retired flags for every operand pair.
+
 Flags are **sticky** — an instruction that doesn't write a flag leaves the prior
 value. Conditional jumps read whatever the last flag-writer left.
 
 - **`overflow_flag`**: written ONLY by ADD/SUB-family, MUL, DIV/MOD, ABSR.
-- **`carry_flag`**: written ONLY by ADD/SUB-family and the carry-rotates.
+- **`carry_flag`**: written ONLY by ADD/SUB-family and the carry-rotates. It is the
+  **x86 borrow** convention: after `SUB`/`CMP`, `C = 1` ⟺ `a < b` (unsigned).
 - **`sign_flag`**: written by the arithmetic result MSB (ADD/SUB-family etc.);
   left stale by logic/shift/move/load/etc.
 - **`zero_flag`**: set from the 64-bit result by arithmetic AND by the **RRR**
   logic forms `ANDR`/`ORR`/`XORR`. **Asymmetry:** the **RV** immediate forms
   `ANDV`/`ORV`/`XORV` do **NOT** set `zero_flag`.
-- **`equal_flag` / `less_flag` / `ult_flag`**: set **only** by `CMPRR` / `CMPRV`.
+- **`CMPRR` / `CMPRV`** are now `SUB` **without writeback**: they set the full
+  `Z/S/C/V` from `a - b` (previously they set only `E/L/U` + sign). Because the
+  compare flags are derived, signed/unsigned branches are valid after *any*
+  arithmetic producer, not just after a `CMP`.
+- Branch conditions are derived from `Z/S/C/V`: `Z`→`Z`, `C`→`C`, `V`→`V`, `S`→`S`,
+  `LT`→`S^V`, `LE`→`Z|(S^V)`, `ULT`→`C`, `ULE`→`C|Z`, `E`→`Z` (alias of `Z`);
+  `INV` negates. `JMPE`/`JMPNE` alias `JMPZ`/`JMPNZ` (both read `Z`).
 - Logic ops, shifts, rotates, bit ops, sign/zero extends, min/max, the boolean
   `CMP*R` ops, ALL loads/stores, and all flow-control leave carry/overflow/sign
   at their **stale** values.
@@ -61,12 +74,14 @@ value. Conditional jumps read whatever the last flag-writer left.
   **`LDIDX32` (0xC0) masks `& ~3`**. They disagree on unaligned addresses —
   emulate each as written.
 - **`CMPRV` unsigned compare sign-extends the immediate first**, so a negative
-  imm becomes a large unsigned operand for the `ult` comparison.
-- **`SETFR` bit layout:** `rd = {zero, equal, carry, overflow, 60'b0}` — the four
-  flags occupy the **top** 4 bits [63:60].
+  imm becomes a large unsigned operand for the unsigned (`C`) comparison.
+- **`SETFR` (`GETF`) bit layout:** `rd = {zero, equal, carry, overflow, 60'b0}` —
+  the four flags occupy the **top** 4 bits [63:60]. `equal` is **derived** (`E = Z`).
 - **Interrupt saved-context slot** (pushed on dispatch, restored by `IRET`):
   `[31:0] = PC`, `[38:32] = {zero, equal, carry, overflow, sign, less, ult}`
-  (bit38→zero … bit32→ult), `[42:39] = INT_MASK`, `[63:43] = 0`.
+  (bit38→zero … bit32→ult), `[42:39] = INT_MASK`, `[63:43] = 0`. The 7-bit word is
+  presented with `E`/`L`/`U` **derived on read** (`E=Z`, `L=S^V`, `U=C`); `IRET`
+  **consumes only `Z/S/C/V`** (bits 38/36/35/34) and regenerates the derived bits.
 - **CALL/CALLR push a zero-extended return PC** (`PC+8` for V-format CALL,
   `PC+4` for CALLR). `RET`/`IRET` restore PC from `[31:0]` only.
 - **Shift/rotate counts masked to 6 bits** — count 64 aliases to 0 (no shift).
@@ -86,4 +101,6 @@ i=<n> pc=<8hex> op=<8hex> r0=<16hex> ... r15=<16hex> sp=<8hex> f=<zscoelu bits> 
 ```
 
 `f` = a fixed-order 7-char bitstring `{zero,sign,carry,overflow,equal,less,ult}`.
+The last three are **derived** (`equal=zero`, `less=sign^overflow`, `ult=carry`),
+matching the RTL self-trace which now presents the same derived word.
 `wr` present only when the instruction performed a memory write.

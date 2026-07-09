@@ -99,7 +99,7 @@ pub struct EmulateResult {
 /// The architectural machine state.
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "each bool is a distinct hardware condition flag (zero/sign/carry/overflow/equal/less/ult)"
+    reason = "each bool is a distinct hardware condition flag (zero/sign/carry/overflow)"
 )]
 pub struct Cpu {
     /// General-purpose registers R0..R15 (64-bit).
@@ -108,21 +108,18 @@ pub struct Cpu {
     sp: u32,
     /// Program counter (32-bit byte address).
     pc: u32,
-    // Seven condition flags (sticky — only written by the documented producers).
+    // The unified 4-bit flags register `Z S C V` (sticky — only written by the
+    // documented producers).  The old compare flags `E`/`L`/`U` are RETIRED as
+    // storage; they are DERIVED on read (`E = Z`, `L = S ^ V`, `U = C`) — see
+    // [`Cpu::flag_e`] / [`Cpu::flag_l`] / [`Cpu::flag_u`].
     /// Zero flag.
     zero: bool,
     /// Sign flag (MSB of an arithmetic result).
     sign: bool,
-    /// Carry / borrow out of bit 63.
+    /// Carry / borrow out of bit 63 (x86 borrow convention: `C = 1` ⟺ `a < b`).
     carry: bool,
     /// Signed overflow.
     overflow: bool,
-    /// Equal flag (set only by CMPRR / CMPRV).
-    equal: bool,
-    /// Signed less-than flag (set only by CMPRR / CMPRV).
-    less: bool,
-    /// Unsigned less-than flag (set only by CMPRR / CMPRV).
-    ult: bool,
     /// Flat little-endian memory image (128 MiB).
     mem: Vec<u8>,
     /// Captured UART output (`TX_DATA` writes, low byte per store).
@@ -156,9 +153,6 @@ impl Cpu {
             sign: false,
             carry: false,
             overflow: false,
-            equal: false,
-            less: false,
-            ult: false,
             mem,
             uart: String::new(),
             uart_rx: VecDeque::new(),
@@ -286,6 +280,26 @@ impl Cpu {
 
     // ---- flag helpers --------------------------------------------------------
 
+    // Derived compare flags (`E`/`L`/`U`).  The flag-unification model retires
+    // these as storage; they are computed on read from the unified `Z/S/C/V`
+    // register.  The derivations are bit-identical to the retired flags for every
+    // operand pair (proven RTL-side by `tb_flags.sv`).
+
+    /// Derived equal flag: `E = Z`.
+    const fn flag_e(&self) -> bool {
+        self.zero
+    }
+
+    /// Derived signed-less flag: `L = S ^ V`.
+    const fn flag_l(&self) -> bool {
+        self.sign ^ self.overflow
+    }
+
+    /// Derived unsigned-less flag: `U = C` (the x86 borrow convention, §1.3).
+    const fn flag_u(&self) -> bool {
+        self.carry
+    }
+
     /// Set zero/sign from a 64-bit result (the arithmetic producers).
     fn set_zs(&mut self, res: u64) {
         self.zero = res == 0;
@@ -376,6 +390,9 @@ impl Cpu {
             let _ = write!(out, " r{idx}={r:016x}");
         }
         let f = |b: bool| if b { '1' } else { '0' };
+        // Fixed 7-char field `{zero,sign,carry,overflow,equal,less,ult}` — the last
+        // three are DERIVED from Z/S/C/V (E/L/U retired as storage), matching the
+        // RTL self-trace which now presents the same derived word.
         let _ = write!(
             out,
             " sp={:08x} f={}{}{}{}{}{}{}",
@@ -384,9 +401,9 @@ impl Cpu {
             f(self.sign),
             f(self.carry),
             f(self.overflow),
-            f(self.equal),
-            f(self.less),
-            f(self.ult),
+            f(self.flag_e()),
+            f(self.flag_l()),
+            f(self.flag_u()),
         );
         if let Some((addr, be, data)) = self.last_write {
             let _ = write!(out, " wr={addr:08x}/{be:02x}/{data:016x}");
@@ -438,13 +455,13 @@ impl Cpu {
         }
     }
 
-    /// CMPRR / CMPRV flag computation: equal/less/ult/sign from a - b.
+    /// CMPRR / CMPRV flag computation.
+    ///
+    /// `CMP` is now `SUB` without writeback (§1.2): it computes `a - b` and sets
+    /// the **full** `Z/S/C/V` exactly like `SUB`, discarding the result.  The
+    /// retired `E/L/U` regenerate from these on read.
     fn cmp(&mut self, a: u64, b: u64) {
-        self.equal = a == b;
-        self.less = (a as i64) < (b as i64);
-        self.ult = a < b;
-        let res = a.wrapping_sub(b);
-        self.sign = (res >> 63) & 1 == 1;
+        let _ = self.sub_flags(a, b, 0);
     }
 
     /// Class 1 — ALU reg-reg: `rd = rs1 OP rs2` (`ISA_ENCODING_V2.md` §2).
@@ -652,9 +669,10 @@ impl Cpu {
             10 => self.regs[rd] = u64::from(a.trailing_zeros()), // CTZ; CTZ(0)=64
             12 => {
                 // GETF / SETFR: rd = {zero,equal,carry,overflow} in the top nibble [63:60].
+                // `equal` is DERIVED (E = Z) — retired as storage per §1.5.
                 let mut v = 0_u64;
                 if self.zero { v |= 1 << 63; }
-                if self.equal { v |= 1 << 62; }
+                if self.flag_e() { v |= 1 << 62; }
                 if self.carry { v |= 1 << 61; }
                 if self.overflow { v |= 1 << 60; }
                 self.regs[rd] = v;
@@ -741,18 +759,22 @@ impl Cpu {
     }
 
     /// Evaluate a class-8 COND code against the flags. `None` = reserved/illegal.
+    ///
+    /// Every relation is DERIVED from the unified `Z/S/C/V` register (§1.4); the
+    /// retired `E/L/U` no longer exist as storage.  `INV` (applied by the caller)
+    /// gives the negations (`NE`, `GE`, `GT`, `UGE`, `UGT`).
     fn eval_cond(&self, cond: u32) -> Option<bool> {
         Some(match cond {
-            0 => true,                       // always
-            1 => self.zero,                  // Z
-            2 => self.carry,                 // C
-            3 => self.overflow,              // V
-            4 => self.sign,                  // S
-            5 => self.less,                  // LT
-            6 => self.less || self.equal,    // LE
-            7 => self.ult,                   // ULT
-            8 => self.ult || self.equal,     // ULE
-            9 => self.equal,                 // E
+            0 => true,                          // always
+            1 => self.zero,                     // Z
+            2 => self.carry,                    // C (raw carry / borrow)
+            3 => self.overflow,                 // V
+            4 => self.sign,                     // S
+            5 => self.flag_l(),                 // LT  = S ^ V
+            6 => self.zero || self.flag_l(),    // LE  = Z | (S ^ V)
+            7 => self.flag_u(),                 // ULT = C
+            8 => self.flag_u() || self.zero,    // ULE = C | Z
+            9 => self.flag_e(),                 // E   = Z (alias of COND 1)
             _ => return None,
         })
     }
@@ -801,17 +823,18 @@ impl Cpu {
     }
 
     /// IRET — pop the saved interrupt context and restore PC[31:0] + flags[38:32].
+    ///
+    /// The 7-bit saved word is `{Z,E,C,V,S,L,U}` (bit38→Z … bit32→U), but only the
+    /// unified `Z/S/C/V` are consumed (§1.5); the derived `E`(bit37)/`L`(bit33)/
+    /// `U`(bit32) bits are ignored and regenerate from `Z/S/C/V` on read.
     fn iret(&mut self) {
         let ctx = self.read64(self.sp);
         self.sp = self.sp.wrapping_add(8);
         self.pc = ctx as u32;
         self.zero = (ctx >> 38) & 1 == 1;
-        self.equal = (ctx >> 37) & 1 == 1;
         self.carry = (ctx >> 36) & 1 == 1;
         self.overflow = (ctx >> 35) & 1 == 1;
         self.sign = (ctx >> 34) & 1 == 1;
-        self.less = (ctx >> 33) & 1 == 1;
-        self.ult = (ctx >> 32) & 1 == 1;
     }
 
     /// Class A — mul / div / mod.
@@ -1125,7 +1148,89 @@ mod tests {
         ];
         let cpu = run_words(&words);
         assert_eq!(cpu.regs[15] as u32, 1, "JMPLT should be taken (A<B)");
-        assert!(cpu.less);
+        // Signed-less is now DERIVED (L = S ^ V); CMP sets Z/S/C/V like SUB.
+        assert_eq!(cpu.eval_cond(5), Some(true), "signed-less (LT) must hold for A<B");
+    }
+
+    // ---- flag-unification model (FLAG_UNIFICATION_CHANGES) -------------------
+
+    #[test]
+    fn test_cmp_sets_full_zscv() {
+        // CMP ≡ SUB without writeback: equal operands must set zero and clear the
+        // borrow (previously CMP left Z/C/V stale — the whole point of §1.2).
+        // SETR A 7 ; SETR B 7 ; CMPRR A B ; HALT.
+        let cpu = run_words(&[0x8BD0_0000, 7, 0x8BD0_0100, 7, 0x4C00_0001, HALT]);
+        assert!(cpu.zero, "CMP of equal operands sets zero");
+        assert!(!cpu.carry, "no borrow when a == b");
+        assert!(!cpu.sign, "a - b == 0 is non-negative");
+        assert!(!cpu.overflow, "no signed overflow for 7 - 7");
+    }
+
+    #[test]
+    fn test_jmpz_after_cmp_taken() {
+        // The new-codegen win: JMPZ (COND 1 = Z) after a CMP of equal operands is
+        // taken because CMP now sets Z.  Under the old model CMP left Z stale, so
+        // this fell through to the HALT-fail path.
+        // 0x20 SETR A 7, 0x28 SETR B 7, 0x30 CMPRR A B, 0x34 JMPZ 0x40,
+        // 0x3C HALT(fail), 0x40 SETR P 1, 0x48 HALT.
+        let words = [
+            0x8BD0_0000, 7,          // SETR A 7
+            0x8BD0_0100, 7,          // SETR B 7
+            0x4C00_0001,             // CMPRR A B
+            0xA008_0000, 0x40,       // JMPZ 0x40
+            HALT,                    // fail path
+            0x8BD0_0F00, 1,          // SETR P 1
+            HALT,
+        ];
+        let cpu = run_words(&words);
+        assert_eq!(cpu.regs[15] as u32, 1, "JMPZ must be taken after CMP of equal operands");
+    }
+
+    #[test]
+    fn test_signed_branch_after_plain_sub() {
+        // Derived-after-arith: JMPLT (COND 5 = S ^ V) is valid after a plain SUB,
+        // not just after CMP.  3 - 5 = -2 (sign=1, overflow=0) ⇒ LT taken.  Under
+        // the old model `less` was CMP-only and stale here, so this failed.
+        // 0x20 SETR A 3, 0x28 SETR B 5, 0x30 SUBR A A B, 0x34 JMPLT 0x40, ...
+        let words = [
+            0x8BD0_0000, 3,          // SETR A 3
+            0x8BD0_0100, 5,          // SETR B 5
+            0x4460_0001,             // SUBR A A B  -> A = -2
+            0xA028_0000, 0x40,       // JMPLT 0x40
+            HALT,                    // fail path
+            0x8BD0_0F00, 1,          // SETR P 1
+            HALT,
+        ];
+        let cpu = run_words(&words);
+        assert_eq!(cpu.regs[15] as u32, 1, "JMPLT must be taken after a plain SUB that goes negative");
+    }
+
+    #[test]
+    fn test_borrow_polarity_ult_is_carry() {
+        // §1.3 x86 borrow convention: after CMP, C = 1 ⟺ a < b (unsigned).
+        // A=5, B=0x10 ⇒ a < b ⇒ carry (borrow) set, ULT/ULE derive true.
+        let cpu = run_words(&[0x8BD0_0000, 5, 0x8BD0_0100, 0x10, 0x4C00_0001, HALT]);
+        assert!(cpu.carry, "borrow set when a < b (unsigned)");
+        assert_eq!(cpu.eval_cond(2), Some(true), "COND C reads raw carry");
+        assert_eq!(cpu.eval_cond(7), Some(true), "ULT = C");
+        assert_eq!(cpu.eval_cond(8), Some(true), "ULE = C | Z");
+        assert!(cpu.flag_u(), "derived U = C");
+
+        // Reverse: A=0x10, B=5 ⇒ a > b ⇒ no borrow ⇒ ULT false (so UGE, ¬C, holds).
+        let cpu = run_words(&[0x8BD0_0000, 0x10, 0x8BD0_0100, 5, 0x4C00_0001, HALT]);
+        assert!(!cpu.carry, "no borrow when a > b (unsigned)");
+        assert_eq!(cpu.eval_cond(7), Some(false), "ULT false ⇒ UGE (¬C) taken");
+    }
+
+    #[test]
+    fn test_getf_derives_equal_from_zero() {
+        // GETF/SETFR nibble is {Z,E,C,V} at [63:60]; E is DERIVED (E = Z), so after
+        // a CMP of equal operands both bit63 and bit62 are set and carry (bit61) is 0.
+        // SETR A 7 ; SETR B 7 ; CMPRR A B ; SETFR C ; HALT.
+        let cpu = run_words(&[0x8BD0_0000, 7, 0x8BD0_0100, 7, 0x4C00_0001, 0x5700_0200, HALT]);
+        assert_eq!((cpu.regs[2] >> 63) & 1, 1, "zero bit set");
+        assert_eq!((cpu.regs[2] >> 62) & 1, 1, "derived equal bit set (E = Z)");
+        assert_eq!((cpu.regs[2] >> 61) & 1, 0, "carry bit clear (a == b, no borrow)");
     }
 
     #[test]
