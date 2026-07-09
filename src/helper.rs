@@ -313,6 +313,19 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
         return Some(format!("{lo32:08X}{hi32:08X}"));
     }
 
+    // Handle .zeropad N directive — EXACTLY N bytes of zero (no rounding).
+    // Assembler-internal: emitted by get_pass1 to 8-byte-align the start of a data
+    // section so 64-bit loads (MEMREADR / MEMGET64), which mask the address down to
+    // an 8-byte boundary, read .word data cleanly instead of the preceding word.
+    if first_word == ".zeropad" {
+        let count_str = words.next().unwrap_or("");
+        let byte_count: i64 = count_str.parse::<i64>().unwrap_or(0);
+        if byte_count <= 0 {
+            return None;
+        }
+        return Some("00".repeat(byte_count as usize));
+    }
+
     // Handle .space N directive — N bytes of zero, rounded up to 64-bit word boundary
     if first_word == ".space" {
         let count_str = words.next().unwrap_or("");
@@ -490,7 +503,7 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
     // Check for C compiler directives
     let first_word = line.split_whitespace().next().unwrap_or("");
     match first_word {
-        ".word" | ".space" => return LineType::Data,
+        ".word" | ".space" | ".zeropad" => return LineType::Data,
         ".text" | ".data" | ".rodata" | ".bss" | ".global" | ".globl" | ".extern" | ".comm" | ".lcomm" => return LineType::Comment,
         _ => {}
     }
@@ -937,6 +950,18 @@ mod tests {
         let input = String::from("#TEST FFFF DUMMY");
         let output = data_as_bytes(&input);
         assert_eq!(output, None);
+    }
+
+    #[test]
+    // .zeropad N emits EXACTLY N bytes of zero (no 8-byte rounding), unlike .space.
+    fn test_data_as_bytes_zeropad() {
+        assert_eq!(data_as_bytes(".zeropad 4"), Some("00000000".to_owned())); // 4 bytes
+        assert_eq!(data_as_bytes(".zeropad 2"), Some("0000".to_owned())); // 2 bytes, no rounding
+        assert_eq!(data_as_bytes(".zeropad 0"), None);
+        assert_eq!(data_as_bytes(".zeropad"), None);
+        // Contrast with .space, which rounds up to a whole 64-bit word.
+        assert_eq!(data_as_bytes(".space 4"), Some("0000000000000000".to_owned())); // 8 bytes
+        assert_eq!(line_type(&mut Vec::new(), ".zeropad 4"), LineType::Data);
     }
 
     #[test]

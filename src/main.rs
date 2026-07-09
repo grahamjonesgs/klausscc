@@ -520,6 +520,24 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             }
         }
     }
+    // 8-byte-align the start of the deferred data section. 64-bit loads
+    // (MEMREADR / MEMGET64) mask the effective address down to an 8-byte boundary,
+    // so a .word read from a 4-aligned address returns the preceding word instead.
+    // Code is 4-byte-granular, data elements are 8-byte multiples, so aligning the
+    // section start once keeps every label and .word in it aligned. The pad is a
+    // real stream entry, so the sequential .kbt, the offset-based image, and label
+    // addresses all stay consistent.
+    if !data_pass0.is_empty() && !program_counter.is_multiple_of(8) {
+        let pad = 8 - (program_counter % 8);
+        pass1.push(Pass1 {
+            input_text_line: format!(".zeropad {pad}"),
+            file_name: String::from("<align>"),
+            line_counter: 0,
+            program_counter,
+            line_type: LineType::Data,
+        });
+        program_counter += pad;
+    }
     for data_pass in data_pass0 {
         let lt = line_type(&mut oplist, &data_pass.input_text_line);
         pass1.push(Pass1 {

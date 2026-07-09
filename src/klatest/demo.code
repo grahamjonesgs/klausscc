@@ -1,4 +1,4 @@
-0x00000000: 000000000000087C                  -- heap_start  (set by assembler)
+0x00000000: 00000000000008E8                  -- heap_start  (set by assembler)
 0x00000008: 0000000000000000                  -- heap_end    (reserved)
 0x00000010: 0000000000000000                  -- (reserved)
 0x00000018: 0000000000000000                  -- (reserved)
@@ -16,7 +16,7 @@
 0x00000040: 540000C0          -- COPY A M // Macro expansion from $TXR
 0x00000044: A2000000 00000760 -- CALL TX_HEX32: // Macro expansion from $TXR
 0x0000004C: 64800000          -- POP A // Macro expansion from $TXR
-0x00000050: A2000000 000007E8 -- CALL TX_NL: // Macro expansion from $NEWLINE
+0x00000050: A2000000 000007F0 -- CALL TX_NL: // Macro expansion from $NEWLINE
 0x00000058: 6C010000          -- HALT
                               -- 
                               -- // ========== C library (register calling convention) ==========
@@ -31,7 +31,7 @@
                               -- 
                               -- // putchar(A): transmit A's low byte
 0x0000005C:                   -- putchar:
-0x0000005C: A2000000 00000810 -- CALL TX_CHAR:
+0x0000005C: A2000000 00000834 -- CALL TX_CHAR:
 0x00000064: 65800000          -- RET
                               -- 
                               -- // print_str(A): print the .word string at address A, stopping at the NUL word
@@ -43,7 +43,7 @@
 0x00000074: 58000010          -- MEMGET8 A B            // A = next character (byte 0 of the word)
 0x00000078: 8C100000 00000000 -- CMPRV A 0
 0x00000080: A0480000 000000A0 -- JMPE print_str_done:
-0x00000088: A2000000 00000810 -- CALL TX_CHAR:
+0x00000088: A2000000 00000834 -- CALL TX_CHAR:
 0x00000090: 88200110 00000008 -- ADDV B 8              // advance to the next .word character
 0x00000098: A0000000 00000074 -- JMP print_str_loop:
 0x000000A0:                   -- print_str_done:
@@ -53,7 +53,7 @@
                               -- 
                               -- // newline(): print a line feed
 0x000000AC:                   -- newline:
-0x000000AC: A2000000 000007E8 -- CALL TX_NL:
+0x000000AC: A2000000 000007F0 -- CALL TX_NL:
 0x000000B4: 65800000          -- RET
                               -- 
                               -- // print_unsigned(A): print A as unsigned decimal (recurses for the high digits)
@@ -71,7 +71,7 @@
 0x000000EC: 8BD00100 0000000A -- SETR B 10
 0x000000F4: 6A000001          -- MODUR A A B            // A = A % 10
 0x000000F8: 88200000 00000030 -- ADDV A 0x30          // '0' + digit
-0x00000100: A2000000 00000810 -- CALL TX_CHAR:
+0x00000100: A2000000 00000834 -- CALL TX_CHAR:
 0x00000108: 64800200          -- POP C
 0x0000010C: 64800100          -- POP B
 0x00000110: 65800000          -- RET
@@ -82,7 +82,7 @@
 0x0000011C: A02C0000 00000140 -- JMPGE print_int_pos:
 0x00000124: 64000000          -- PUSH A
 0x00000128: 8BD00000 0000002D -- SETR A 0x2D          // '-'
-0x00000130: A2000000 00000810 -- CALL TX_CHAR:
+0x00000130: A2000000 00000834 -- CALL TX_CHAR:
 0x00000138: 64800000          -- POP A
 0x0000013C: 54480000          -- NEGR A
 0x00000140:                   -- print_int_pos:
@@ -383,54 +383,80 @@
 0x000007AC:                   -- TX_HEX32_DEC:
 0x000007AC: 88200330 00000030 -- ADDV D 0x30              // '0'..'9'
 0x000007B4:                   -- TX_HEX32_PUT:
-0x000007B4: 5C000310          -- MEMSET8 D B              // transmit the character (data = D, address = B)
-0x000007B8: 8BD00400 00000004 -- SETR E 4
-0x000007C0: 44600224          -- SUBR C C E               // next nibble
-0x000007C4: 8C100020 00000000 -- CMPRV C 0                // flags from C - 0 (signed)
-0x000007CC: A02C0000 00000780 -- JMPGE TX_HEX32_LOOP:     // repeat while C >= 0
-0x000007D4: 64800400          -- POP E
-0x000007D8: 64800300          -- POP D
-0x000007DC: 64800200          -- POP C
-0x000007E0: 64800100          -- POP B
-0x000007E4: 65800000          -- RET
+0x000007B4: A2000000 000008B0 -- CALL TX_WAIT_READY:      // block until the transmitter is idle (avoids UART overrun)
+0x000007BC: 5C000310          -- MEMSET8 D B              // transmit the character (data = D, address = B)
+0x000007C0: 8BD00400 00000004 -- SETR E 4
+0x000007C8: 44600224          -- SUBR C C E               // next nibble
+0x000007CC: 8C100020 00000000 -- CMPRV C 0                // flags from C - 0 (signed)
+0x000007D4: A02C0000 00000780 -- JMPGE TX_HEX32_LOOP:     // repeat while C >= 0
+0x000007DC: 64800400          -- POP E
+0x000007E0: 64800300          -- POP D
+0x000007E4: 64800200          -- POP C
+0x000007E8: 64800100          -- POP B
+0x000007EC: 65800000          -- RET
                               -- 
                               -- // --- TX_NL: print a newline --------------------------------------------------
-0x000007E8:                   -- TX_NL:
-0x000007E8: 64000000          -- PUSH A
-0x000007EC: 64000010          -- PUSH B
-0x000007F0: 8BD00100 F0010000 -- SETR B 0xF0010000
-0x000007F8: 8BD00000 0000000A -- SETR A 0x0A              // '\n'
-0x00000800: 5C000010          -- MEMSET8 A B
-0x00000804: 64800100          -- POP B
-0x00000808: 64800000          -- POP A
-0x0000080C: 65800000          -- RET
+0x000007F0:                   -- TX_NL:
+0x000007F0: 64000000          -- PUSH A
+0x000007F4: 64000010          -- PUSH B
+0x000007F8: 8BD00100 F0010000 -- SETR B 0xF0010000
+0x00000800: 8BD00000 0000000D -- SETR A 0x0D              // '\r' — carriage return, so a real serial terminal
+0x00000808: A2000000 000008B0 -- CALL TX_WAIT_READY:      // returns to column 0 instead of "staircasing". The
+0x00000810: 5C000010          -- MEMSET8 A B              // C runtime (uart_putc) expands '\n' to CR+LF the same way.
+0x00000814: 8BD00000 0000000A -- SETR A 0x0A              // '\n' — line feed, advance to the next line
+0x0000081C: A2000000 000008B0 -- CALL TX_WAIT_READY:      // block until the transmitter is idle (avoids UART overrun)
+0x00000824: 5C000010          -- MEMSET8 A B
+0x00000828: 64800100          -- POP B
+0x0000082C: 64800000          -- POP A
+0x00000830: 65800000          -- RET
                               -- 
                               -- // --- TX_CHAR: print A's low byte as a raw character --------------------------
-0x00000810:                   -- TX_CHAR:
-0x00000810: 64000010          -- PUSH B
-0x00000814: 8BD00100 F0010000 -- SETR B 0xF0010000
-0x0000081C: 5C000010          -- MEMSET8 A B
-0x00000820: 64800100          -- POP B
-0x00000824: 65800000          -- RET
+0x00000834:                   -- TX_CHAR:
+0x00000834: 64000010          -- PUSH B
+0x00000838: 8BD00100 F0010000 -- SETR B 0xF0010000
+0x00000840: A2000000 000008B0 -- CALL TX_WAIT_READY:      // block until the transmitter is idle (avoids UART overrun)
+0x00000848: 5C000010          -- MEMSET8 A B
+0x0000084C: 64800100          -- POP B
+0x00000850: 65800000          -- RET
                               -- 
                               -- // --- TX_STR: print the NUL-terminated string at address A --------------------
-0x00000828:                   -- TX_STR:
-0x00000828: 64000000          -- PUSH A
-0x0000082C: 64000010          -- PUSH B
-0x00000830: 64000020          -- PUSH C
-0x00000834: 64000030          -- PUSH D
-0x00000838: 8BD00200 F0010000 -- SETR C 0xF0010000        // UART TX_DATA
-0x00000840: 54000300          -- COPY D A                 // D = current byte address
-0x00000844:                   -- TX_STR_LOOP:
-0x00000844: 58000130          -- MEMGET8 B D              // B = mem8[D]
-0x00000848: 8C100010 00000000 -- CMPRV B 0                // stop at the NUL terminator
-0x00000850: A0480000 00000868 -- JMPE TX_STR_DONE:
-0x00000858: 5C000120          -- MEMSET8 B C              // transmit byte
-0x0000085C: 57880330          -- INCR D                   // advance
-0x00000860: A0000000 00000844 -- JMP TX_STR_LOOP:
-0x00000868:                   -- TX_STR_DONE:
-0x00000868: 64800300          -- POP D
-0x0000086C: 64800200          -- POP C
-0x00000870: 64800100          -- POP B
-0x00000874: 64800000          -- POP A
-0x00000878: 65800000          -- RET
+0x00000854:                   -- TX_STR:
+0x00000854: 64000000          -- PUSH A
+0x00000858: 64000010          -- PUSH B
+0x0000085C: 64000020          -- PUSH C
+0x00000860: 64000030          -- PUSH D
+0x00000864: 8BD00200 F0010000 -- SETR C 0xF0010000        // UART TX_DATA
+0x0000086C: 54000300          -- COPY D A                 // D = current byte address
+0x00000870:                   -- TX_STR_LOOP:
+0x00000870: 58000130          -- MEMGET8 B D              // B = mem8[D]
+0x00000874: 8C100010 00000000 -- CMPRV B 0                // stop at the NUL terminator
+0x0000087C: A0480000 0000089C -- JMPE TX_STR_DONE:
+0x00000884: A2000000 000008B0 -- CALL TX_WAIT_READY:      // block until the transmitter is idle (avoids UART overrun)
+0x0000088C: 5C000120          -- MEMSET8 B C              // transmit byte
+0x00000890: 57880330          -- INCR D                   // advance
+0x00000894: A0000000 00000870 -- JMP TX_STR_LOOP:
+0x0000089C:                   -- TX_STR_DONE:
+0x0000089C: 64800300          -- POP D
+0x000008A0: 64800200          -- POP C
+0x000008A4: 64800100          -- POP B
+0x000008A8: 64800000          -- POP A
+0x000008AC: 65800000          -- RET
+                              -- 
+                              -- // --- TX_WAIT_READY: spin until the UART transmitter is no longer busy --------
+                              -- // Mirrors uart_tx_byte() in the C runtime (mmio.h): poll STATUS (0xF0010010)
+                              -- // and loop while TX_BUSY (bit 0) is set, so a store to TX_DATA never clobbers a
+                              -- // byte still being shifted out. Preserves every register (A/B saved & restored).
+                              -- // The emulator models instant transmit (TX_BUSY always 0), so this returns
+                              -- // immediately there and only actually waits on real hardware.
+0x000008B0:                   -- TX_WAIT_READY:
+0x000008B0: 64000000          -- PUSH A
+0x000008B4: 64000010          -- PUSH B
+0x000008B8: 8BD00100 F0010010 -- SETR B 0xF0010010        // UART STATUS
+0x000008C0:                   -- TX_WAIT_READY_LOOP:
+0x000008C0: 58000010          -- MEMGET8 A B              // A = STATUS[7:0]
+0x000008C4: 89000000 00000001 -- ANDV A 0x1               // isolate TX_BUSY (bit 0)
+0x000008CC: 8C100000 00000000 -- CMPRV A 0
+0x000008D4: A04C0000 000008C0 -- JMPNE TX_WAIT_READY_LOOP // still transmitting -> keep spinning
+0x000008DC: 64800100          -- POP B
+0x000008E0: 64800000          -- POP A
+0x000008E4: 65800000          -- RET

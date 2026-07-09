@@ -31,6 +31,7 @@ JMP TX_HEX32_PUT:
 TX_HEX32_DEC:
 ADDV D 0x30              // '0'..'9'
 TX_HEX32_PUT:
+CALL TX_WAIT_READY:      // block until the transmitter is idle (avoids UART overrun)
 MEMSET8 D B              // transmit the character (data = D, address = B)
 SETR E 4
 SUBR C C E               // next nibble
@@ -47,7 +48,11 @@ TX_NL:
 PUSH A
 PUSH B
 SETR B 0xF0010000
-SETR A 0x0A              // '\n'
+SETR A 0x0D              // '\r' — carriage return, so a real serial terminal
+CALL TX_WAIT_READY:      // returns to column 0 instead of "staircasing". The
+MEMSET8 A B              // C runtime (uart_putc) expands '\n' to CR+LF the same way.
+SETR A 0x0A              // '\n' — line feed, advance to the next line
+CALL TX_WAIT_READY:      // block until the transmitter is idle (avoids UART overrun)
 MEMSET8 A B
 POP B
 POP A
@@ -57,6 +62,7 @@ RET
 TX_CHAR:
 PUSH B
 SETR B 0xF0010000
+CALL TX_WAIT_READY:      // block until the transmitter is idle (avoids UART overrun)
 MEMSET8 A B
 POP B
 RET
@@ -73,12 +79,32 @@ TX_STR_LOOP:
 MEMGET8 B D              // B = mem8[D]
 CMPRV B 0                // stop at the NUL terminator
 JMPE TX_STR_DONE:
+CALL TX_WAIT_READY:      // block until the transmitter is idle (avoids UART overrun)
 MEMSET8 B C              // transmit byte
 INCR D                   // advance
 JMP TX_STR_LOOP:
 TX_STR_DONE:
 POP D
 POP C
+POP B
+POP A
+RET
+
+// --- TX_WAIT_READY: spin until the UART transmitter is no longer busy --------
+// Mirrors uart_tx_byte() in the C runtime (mmio.h): poll STATUS (0xF0010010)
+// and loop while TX_BUSY (bit 0) is set, so a store to TX_DATA never clobbers a
+// byte still being shifted out. Preserves every register (A/B saved & restored).
+// The emulator models instant transmit (TX_BUSY always 0), so this returns
+// immediately there and only actually waits on real hardware.
+TX_WAIT_READY:
+PUSH A
+PUSH B
+SETR B 0xF0010010        // UART STATUS
+TX_WAIT_READY_LOOP:
+MEMGET8 A B              // A = STATUS[7:0]
+ANDV A 0x1               // isolate TX_BUSY (bit 0)
+CMPRV A 0
+JMPNE TX_WAIT_READY_LOOP // still transmitting -> keep spinning
 POP B
 POP A
 RET
