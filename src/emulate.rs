@@ -456,6 +456,7 @@ impl Cpu {
             0xA => self.v2_muldiv(word, rd, rs1, rs2, imm32, len, next),
             0xB => self.v2_system(word, next),
             0xC => self.pc = next, // I/O (LCD) — modelled as a no-op (no architectural state)
+            0xD if len == 1 => self.v3_fused_branch(word, rs1, rs2, next),
             _ => self.stop = Some(StopReason::InvalidOpcode(word)),
         }
     }
@@ -566,6 +567,34 @@ impl Cpu {
             self.cmp(lhs, rhs);
         }
         self.pc = next;
+    }
+
+    /// Class D (ISA v3 B) — fused compare-and-branch, 1 word, flags untouched:
+    /// `if (rs1 PRED rhs) ^ INV { PC += 4*simm13 }`.  PRED `[25:23]` as class 3
+    /// (EQ, LT, LE, ULT, ULE), INV `[22]`, IMM `[21]` (rhs = simm4 `[3:0]`
+    /// instead of rs2), simm13 word displacement `[20:8]`.
+    fn v3_fused_branch(&mut self, word: u32, rs1: usize, rs2: usize, next: u32) {
+        let pred = (word >> 23) & 0x7;
+        let inv = (word >> 22) & 1 == 1;
+        let lhs = self.regs[rs1];
+        let rhs = if (word >> 21) & 1 == 1 { i64::from(((word << 28) as i32) >> 28) as u64 } else { self.regs[rs2] };
+        let base = match pred {
+            0 => lhs == rhs,
+            1 => (lhs as i64) < (rhs as i64),
+            2 => (lhs as i64) <= (rhs as i64),
+            3 => lhs < rhs,
+            4 => lhs <= rhs,
+            _ => {
+                self.stop = Some(StopReason::InvalidOpcode(word));
+                return;
+            }
+        };
+        if base ^ inv {
+            let disp = ((word << 11) as i32) >> 19; // sign-extend [20:8]
+            self.pc = self.pc.wrapping_add((disp << 2) as u32);
+        } else {
+            self.pc = next;
+        }
     }
 
     /// Class 4 — shift / rotate / bit manipulation.
@@ -844,6 +873,14 @@ impl Cpu {
                 self.regs[15] = self.read64(fp);
                 self.sp = fp.wrapping_add(8);
                 self.pc = next;
+            }
+            10 if len == 1 => {
+                // v3 C: LEAVERET — SP = R15; pop R15; pop PC (= LEAVE; RET).
+                let fp = self.regs[15] as u32;
+                self.regs[15] = self.read64(fp);
+                let ra = self.read64(fp.wrapping_add(8));
+                self.sp = fp.wrapping_add(16);
+                self.pc = ra as u32;
             }
             _ => self.stop = Some(StopReason::InvalidOpcode(word)),
         }
@@ -1394,6 +1431,42 @@ mod tests {
         let cpu = run_words(&[0x4BD7_7F00, 0x6600_0003, HALT]);
         assert_eq!(cpu.regs[15] as u32, STACK_TOP - 8);
         assert_eq!(cpu.sp, STACK_TOP - 8 - 24);
+    }
+
+    #[test]
+    fn test_v3_leaveret() {
+        // CALL f (short) ; HALT ; f: ENTER 1 ; SETR A,9 ; LEAVERET (0x6680_0000)
+        let cpu = run_words(&[
+            0x4BD7_7F00, // 0x20 SETR R15, 0x77
+            0x6300_0002, // 0x24 CALLREL +2 -> 0x2C
+            HALT,        // 0x28
+            0x6600_0001, // 0x2C ENTER 1
+            0x4BD0_9000, // 0x30 SETR A, 9
+            0x6680_0000, // 0x34 LEAVERET
+        ]);
+        assert_eq!(cpu.regs[0], 9);
+        assert_eq!(cpu.regs[15], 0x77);
+        assert_eq!(cpu.sp, STACK_TOP);
+        assert_eq!(cpu.pc, 0x28);
+    }
+
+    #[test]
+    fn test_v3_fused_branch() {
+        // A=3; loop: DECR A; BR.NE A, #0, -1 (imm form) -> A ends at 0.
+        // 0x7400_0000 = LEN01 cls D PRED=EQ INV=1 (0x0040_0000) IMM (0x0020_0000);
+        // disp13 = -1 -> 0x1FFF << 8.
+        let bne = 0x7400_0000 | 0x0040_0000 | 0x0020_0000 | (0x1FFF << 8);
+        let cpu = run_words(&[0x4BD0_3000, 0x57C8_0000, bne, HALT]);
+        assert_eq!(cpu.regs[0], 0);
+        // Signed LT on registers (not taken): A=-1, B=-2: BR.LT A, B, +2 falls through.
+        let blt = 0x7400_0000 | (1 << 23) | (2 << 8) | 0x01;
+        let cpu = run_words(&[0x4BDF_F000, 0x4BDF_E100, blt, 0x4BD0_7200, HALT]);
+        assert_eq!(cpu.regs[2], 7, "not taken -> fall through executes SETR C,7");
+        // ULT on registers (taken): A=1 <u B=-2 -> skip SETR.
+        let bult = 0x7400_0000 | (3 << 23) | (2 << 8) | 0x01;
+        let cpu = run_words(&[0x4BD0_1000, 0x4BDF_E100, bult, 0x4BD0_7200, HALT]);
+        assert_eq!(cpu.regs[2], 0, "taken -> SETR C,7 skipped");
+        assert!(!cpu.zero && !cpu.carry, "fused branch leaves the flags alone");
     }
 
     #[test]
