@@ -436,7 +436,12 @@ impl Cpu {
         let rs2 = (word & 0xF) as usize;
         let next = self.pc.wrapping_add(inst_len);
         // imm32 (word at PC+4) — read unconditionally; unused for 1-word forms.
-        let imm32 = self.read32(self.pc.wrapping_add(4));
+        // ISA v3 short 1-word forms carry their immediate in word 0 instead;
+        // `short_imm` returns it already extended/scaled to the 32-bit value
+        // the 2-word form would have held in word 1, so the class handlers
+        // below are shared between the two lengths.
+        let short = short_imm(word);
+        let imm32 = short.unwrap_or_else(|| self.read32(self.pc.wrapping_add(4)));
 
         match class {
             0x1 => self.v2_alu_rr(word, rd, rs1, rs2, next),
@@ -531,8 +536,9 @@ impl Cpu {
         let boolean = (word >> 21) & 1 == 1;
         let sgn = (word >> 20) & 1 == 1;
         let lhs = self.regs[rs1];
-        // 2-word forms take a sign/zero-extended immediate; 1-word forms use rs2.
-        let rhs = if len == 2 {
+        // 2-word forms (and the v3 short form, LEN=01 SGN=1 B=0) take a
+        // sign/zero-extended immediate; other 1-word forms use rs2.
+        let rhs = if len == 2 || (len == 1 && sgn && !boolean) {
             if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) }
         } else {
             self.regs[rs2]
@@ -916,6 +922,33 @@ impl Cpu {
 /// the v1 CPU: `MEMGET32` is unaligned-tolerant while `LDIDX32` forces `&~3`;
 /// the register/absolute 64-bit reads align while the indexed ones stay raw
 /// unless `A=1`.
+/// ISA v3 short 1-word forms (`ISA_V3_PROPOSAL.md` §3): the immediate is in
+/// word 0.  Returns the value the equivalent 2-word form carries in word 1
+/// (extended and, for loads/stores and branches, scaled), or `None` when the
+/// word is not a short form.
+///
+/// - A5 class 2, `LEN=01`: imm8 `[19:12]`, `SGN` `[20]` picks sign/zero extension.
+/// - A3 class 3, `LEN=01`, `SGN=1`, `B=0`: simm8 `[19:12]`.
+/// - A4 class 6/7, `LEN=01`, `MODE=01`: simm8 `[19:12]` << `SIZE` `[25:24]`.
+/// - A1 class 8, `LEN=01`, `RIND=0`: simm18 `[17:0]` << 2 (PC-relative).
+const fn short_imm(word: u32) -> Option<u32> {
+    if word >> 30 != 1 {
+        return None;
+    }
+    let i8v = (word >> 12) & 0xFF;
+    let s8 = ((i8v as u8) as i8) as i32 as u32;
+    match (word >> 26) & 0xF {
+        0x2 => Some(if (word >> 20) & 1 == 1 { s8 } else { i8v }),
+        0x3 if (word >> 20) & 1 == 1 && (word >> 21) & 1 == 0 => Some(s8),
+        0x6 | 0x7 if (word >> 21) & 0x3 == 1 => Some(s8 << ((word >> 24) & 0x3)),
+        0x8 if (word >> 23) & 1 == 0 => {
+            let d = ((word << 14) as i32) >> 14; // sign-extend [17:0]
+            Some((d << 2) as u32)
+        }
+        _ => None,
+    }
+}
+
 const fn load_align_mask(size_bytes: usize, mode: u32, a: u32) -> u32 {
     match size_bytes {
         2 => !1,
@@ -1283,6 +1316,71 @@ mod tests {
         let cpu = run_words(&words);
         assert_eq!(cpu.regs[0] as u32, 0x42);
         assert_eq!(cpu.sp, STACK_TOP, "RET must unwind the pushed return address");
+    }
+
+    // ---- ISA v3 short 1-word forms (ISA_V3_PROPOSAL.md §3) ----------------
+
+    #[test]
+    fn test_v3_short_alu_and_setr() {
+        let cpu = run_words(&[
+            0x4BDF_B000, // SETR  A, -5   (short, SGN=1: sign-extended)
+            0x4BCF_B100, // MOV   B, 0xFB (short, SGN=0: zero-extended)
+            0x483F_F210, // ADDI  C, B, -1 (short, sext)
+            0x482F_F310, // ADDV  D, B, 0xFF (short, zext)
+            HALT,
+        ]);
+        assert_eq!(cpu.regs[0], (-5_i64) as u64);
+        assert_eq!(cpu.regs[1], 0xFB);
+        assert_eq!(cpu.regs[2], 0xFA);
+        assert_eq!(cpu.regs[3], 0x1FA);
+    }
+
+    #[test]
+    fn test_v3_short_cmprv_negative() {
+        // The short CMPRV immediate is sign-extended (Fix 6 regression guard).
+        let cpu = run_words(&[0x4BDF_D000, 0x4C1F_D000, HALT]); // A=-3; CMPRV A,-3
+        assert!(cpu.zero, "A == -3 must set Z");
+        let cpu = run_words(&[0x4BDF_D000, 0x4C1F_C000, HALT]); // A=-3; CMPRV A,-4
+        assert!(!cpu.zero && !cpu.sign, "-3 - (-4) = 1");
+    }
+
+    #[test]
+    fn test_v3_short_load_store_scaled() {
+        let mut w = Vec::new();
+        w.extend_from_slice(&setr(1, 0x1000)); // B = 0x1000
+        w.extend_from_slice(&setr(0, 0x8000_0001)); // A = sext -> 0xFFFF_FFFF_8000_0001
+        w.extend_from_slice(&[
+            0x5F30_2010, // STIDX64 [B + 2*8], A  (short, A=1 aligned)
+            0x5B30_2210, // LDIDX64 C, [B + 2*8]
+            0x5E2F_F010, // STIDX32 [B - 1*4], A
+            0x5AAF_F310, // LDIDX32_S D, [B - 4]
+            0x5A2F_F410, // LDIDX32   E, [B - 4]
+            HALT,
+        ]);
+        let cpu = run_words(&w);
+        assert_eq!(cpu.regs[2], 0xFFFF_FFFF_8000_0001);
+        assert_eq!(cpu.regs[3], 0xFFFF_FFFF_8000_0001);
+        assert_eq!(cpu.regs[4], 0x8000_0001);
+    }
+
+    #[test]
+    fn test_v3_short_branch_and_call() {
+        let cpu = run_words(&[
+            0x4BD0_0000, // 0x20 SETR A, 0
+            0x6100_0002, // 0x24 JMPREL +2 words -> 0x2C
+            0x4BD0_1000, // 0x28 SETR A, 1 (skipped)
+            0x6300_0002, // 0x2C CALLREL +2 words -> 0x34, pushes PC+4 = 0x30
+            HALT,        // 0x30
+            0x4BD0_7100, // 0x34 SETR B, 7
+            0x6580_0000, // 0x38 RET
+        ]);
+        assert_eq!(cpu.regs[0], 0);
+        assert_eq!(cpu.regs[1], 7);
+        assert_eq!(cpu.sp, STACK_TOP);
+        assert_eq!(cpu.pc, 0x30, "short CALL must return to PC+4");
+        // Backward conditional: A=3; loop: DECR A; JMPNZ -1 word.
+        let cpu = run_words(&[0x4BD0_3000, 0x57C8_0000, 0x610F_FFFF, HALT]);
+        assert_eq!(cpu.regs[0], 0);
     }
 
     #[test]
