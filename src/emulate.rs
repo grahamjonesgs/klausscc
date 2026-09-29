@@ -535,14 +535,20 @@ impl Cpu {
         let inv = (word >> 22) & 1 == 1;
         let boolean = (word >> 21) & 1 == 1;
         let sgn = (word >> 20) & 1 == 1;
+        let short = len == 1 && sgn && !boolean;
         let lhs = self.regs[rs1];
         // 2-word forms (and the v3 short form, LEN=01 SGN=1 B=0) take a
         // sign/zero-extended immediate; other 1-word forms use rs2.
-        let rhs = if len == 2 || (len == 1 && sgn && !boolean) {
+        let rhs = if len == 2 || short {
             if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) }
         } else {
             self.regs[rs2]
         };
+        // v3 D2: W [19] = 32-bit compare of the low halves (not the short
+        // form, whose [19:12] is its immediate). Comparing {x[31:0], 0}
+        // gives exactly the 32-bit Z/S/C/V and 32-bit signed/unsigned order —
+        // the same trick the RTL uses at its dispatch mux.
+        let (lhs, rhs) = if !short && (word >> 19) & 1 == 1 { (lhs << 32, rhs << 32) } else { (lhs, rhs) };
         if boolean {
             let base = match pred {
                 0 => lhs == rhs,                     // EQ
@@ -1361,6 +1367,28 @@ mod tests {
         assert_eq!(cpu.regs[2], 0xFFFF_FFFF_8000_0001);
         assert_eq!(cpu.regs[3], 0xFFFF_FFFF_8000_0001);
         assert_eq!(cpu.regs[4], 0x8000_0001);
+    }
+
+    #[test]
+    fn test_v3_w_compare() {
+        // A = 0x1_0000_0005 (upper half set), B = 5: 64-bit CMPRR differs,
+        // 32-bit CMPRRW (0x4C08_0000 | rs1<<4 | rs2) is equal.
+        let mut w = Vec::new();
+        w.extend_from_slice(&[0xCBC0_0000, 5, 1]); // SETR64 A, 0x1_0000_0005
+        w.extend_from_slice(&[0x4BD0_5100]); // SETR B, 5
+        w.extend_from_slice(&[0x4C08_0001, HALT]); // CMPRRW A, B
+        let cpu = run_words(&w);
+        assert!(cpu.zero, "low halves equal");
+        // Signed 32-bit order: A = 0x0000_0000_8000_0000 (negative as i32) < B = 1.
+        let mut w = Vec::new();
+        w.extend_from_slice(&setr(0, 0x8000_0000));
+        w.extend_from_slice(&[0x5560_0000]); // ZEXTW A (clear sext upper half)
+        w.extend_from_slice(&[0x4BD0_1100, 0x4C08_0001, HALT]); // SETR B,1; CMPRRW A,B
+        let cpu = run_words(&w);
+        assert!(cpu.flag_l(), "i32 0x8000_0000 < 1 (signed)");
+        // CMPRVW (2-word, 0x8C18_0000): A=0xFFFF_FFFF_0000_0007 vs 7 -> equal.
+        let cpu = run_words(&[0xCBC0_0000, 7, 0xFFFF_FFFF, 0x8C18_0000, 7, HALT]);
+        assert!(cpu.zero);
     }
 
     #[test]
