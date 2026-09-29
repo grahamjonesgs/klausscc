@@ -37,6 +37,25 @@ pub enum Operand {
     Imm,
     /// 64-bit immediate appended as lo32@PC+4, hi32@PC+8.
     Imm64,
+    /// ISA v3 short form: literal 8-bit immediate → word0[19:12]
+    /// (-128..=255; the instruction's SGN bit picks the extension).
+    Imm8,
+    /// ISA v3 short load/store: literal BYTE offset, a multiple of
+    /// `1 << shift` whose scaled value fits simm8 → word0[19:12].
+    Off8(u8),
+    /// ISA v3 `ENTER`: literal frame size in 8-byte units → word0[21:0].
+    Frame22,
+}
+
+/// Parse a signed literal: decimal (optionally negative) or `0x` hex.
+fn parse_simm(token: &str) -> Option<i64> {
+    let (neg, t) = token.strip_prefix('-').map_or((false, token), |r| (true, r));
+    let v = if t.len() >= 2 && t.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
+        i64::from_str_radix(&t[2..].replace('_', ""), 16).ok()?
+    } else {
+        t.parse::<i64>().ok()?
+    };
+    Some(if neg { -v } else { v })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -296,6 +315,30 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
     for op in &opcode.ops {
         match op {
             Operand::Imm | Operand::Imm64 => {} // appended words — handled by add_arguments
+            Operand::Imm8 => {
+                match tokens.get(token_idx).and_then(|t| parse_simm(t)) {
+                    Some(v) if (-128..=255).contains(&v) => word0 |= ((v as u32) & 0xFF) << 12,
+                    _ => ok = false,
+                }
+                token_idx += 1;
+            }
+            Operand::Off8(shift) => {
+                let scale = 1_i64 << shift;
+                match tokens.get(token_idx).and_then(|t| parse_simm(t)) {
+                    Some(v) if v % scale == 0 && (-128..=127).contains(&(v / scale)) => {
+                        word0 |= (((v / scale) as u32) & 0xFF) << 12;
+                    }
+                    _ => ok = false,
+                }
+                token_idx += 1;
+            }
+            Operand::Frame22 => {
+                match tokens.get(token_idx).and_then(|t| parse_simm(t)) {
+                    Some(v) if (0..(1 << 22)).contains(&v) => word0 |= v as u32,
+                    _ => ok = false,
+                }
+                token_idx += 1;
+            }
             Operand::Count => {
                 match tokens.get(token_idx).and_then(|t| parse_count(t)) {
                     Some(count) => word0 |= (count & 0x3F) << 15,
@@ -462,6 +505,8 @@ pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> 
                 Operand::Rs2 => mask &= !0xF,
                 Operand::RdRs1 => mask &= !((0xF << 8) | (0xF << 4)),
                 Operand::Count => mask &= !(0x3F << 15),
+                Operand::Imm8 | Operand::Off8(_) => mask &= !(0xFF << 12),
+                Operand::Frame22 => mask &= !0x3F_FFFF,
                 Operand::Imm | Operand::Imm64 => {}
             }
         }
@@ -484,6 +529,19 @@ pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> 
                     Operand::Count => {
                         text.push(' ');
                         text.push_str(&((word >> 15) & 0x3F).to_string());
+                    }
+                    Operand::Imm8 => {
+                        text.push(' ');
+                        text.push_str(&((word >> 12) & 0xFF).to_string());
+                    }
+                    Operand::Off8(shift) => {
+                        let v = i64::from((((word >> 12) & 0xFF) as u8) as i8) << shift;
+                        text.push(' ');
+                        text.push_str(&v.to_string());
+                    }
+                    Operand::Frame22 => {
+                        text.push(' ');
+                        text.push_str(&(word & 0x3F_FFFF).to_string());
                     }
                     Operand::Imm | Operand::Imm64 => {}
                 }
@@ -676,7 +734,13 @@ const V2_MACROS: &[&str] = &[
 fn op(name: &str, template: u32, ops: &[Operand]) -> Opcode {
     let registers = ops
         .iter()
-        .filter(|o| matches!(o, Operand::Rd | Operand::Rs1 | Operand::Rs2 | Operand::RdRs1 | Operand::Count))
+        .filter(|o| {
+            matches!(
+                o,
+                Operand::Rd | Operand::Rs1 | Operand::Rs2 | Operand::RdRs1 | Operand::Count
+                    | Operand::Imm8 | Operand::Off8(_) | Operand::Frame22
+            )
+        })
         .count() as u32;
     let variables = ops
         .iter()
@@ -811,6 +875,35 @@ pub fn v2_opcodes() -> Vec<Opcode> {
         op("STIDX64A", 0x9F30_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
         op("MEMSETR", 0x9F40_0000, &[Operand::Rd, Operand::Imm]),
         op("STIDX64R", 0x5F60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        // ---- ISA v3 (ISA_V3_PROPOSAL.md): D1/D2 long forms, short 1-word
+        //      immediates (".S", literal immediates only), ENTER/LEAVE ----
+        op("LDIDX32_S", 0x9AA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        op("CMPRRW", 0x4C08_0000, &[Operand::Rs1, Operand::Rs2]),
+        op("CMPRVW", 0x8C18_0000, &[Operand::Rs1, Operand::Imm]),
+        op("SETR.S", 0x4BD0_0000, &[Operand::Rd, Operand::Imm8]),
+        op("ADDI.S", 0x4830_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm8]),
+        op("ADDV.S", 0x4820_0000, &[Operand::RdRs1, Operand::Imm8]),
+        op("MINUSV.S", 0x4860_0000, &[Operand::RdRs1, Operand::Imm8]),
+        op("ANDV.S", 0x4900_0000, &[Operand::RdRs1, Operand::Imm8]),
+        op("ORV.S", 0x4940_0000, &[Operand::RdRs1, Operand::Imm8]),
+        op("XORV.S", 0x4980_0000, &[Operand::RdRs1, Operand::Imm8]),
+        op("CMPRV.S", 0x4C10_0000, &[Operand::Rs1, Operand::Imm8]),
+        op("LDIDX8.S", 0x5820_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
+        op("LDIDX8_S.S", 0x58A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
+        op("LDIDX16.S", 0x5920_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(1)]),
+        op("LDIDX16_S.S", 0x59A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(1)]),
+        op("LDIDX32.S", 0x5A20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(2)]),
+        op("LDIDX32_S.S", 0x5AA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(2)]),
+        op("LDIDX64.S", 0x5B20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
+        op("LDIDX64A.S", 0x5B30_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
+        op("STIDX8.S", 0x5C20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
+        op("STIDX16.S", 0x5D20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(1)]),
+        op("STIDX32.S", 0x5E20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(2)]),
+        op("STIDX64.S", 0x5F20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
+        op("STIDX64A.S", 0x5F30_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
+        op("ENTER", 0x6600_0000, &[Operand::Frame22]),
+        op("LEAVE", 0x6640_0000, &[]),
+        op("LEAVERET", 0x6680_0000, &[]),
         op("JMP", 0xA000_0000, &[Operand::Imm]),
         op("JMPZ", 0xA008_0000, &[Operand::Imm]),
         op("JMPNZ", 0xA00C_0000, &[Operand::Imm]),
@@ -1728,5 +1821,37 @@ mod tests {
         let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
         // A=0, B=1, C=2 → "00010" + "0" + "1" + "2"
         assert_eq!(output, String::from("00010012"));
+    }
+
+    #[test]
+    // ISA v3 mnemonics encode to the same words the emulator/RTL tests use.
+    fn test_v3_short_forms_assemble() {
+        let mut msg_list = MsgList::new();
+        let opcodes = &mut v2_opcodes();
+        let cases = [
+            ("SETR.S A -5", "4BDFB000"),
+            ("ADDI.S C B -1", "483FF210"),
+            ("CMPRV.S A -3", "4C1FD000"),
+            ("STIDX64A.S A B 16", "5F302010"),
+            ("LDIDX64A.S C B 16", "5B302210"),
+            ("LDIDX32_S.S D B -4", "5AAFF310"),
+            ("CMPRRW A B", "4C080001"),
+            ("ENTER 3", "66000003"),
+            ("LEAVE", "66400000"),
+            ("LEAVERET", "66800000"),
+        ];
+        for (src, want) in cases {
+            let got = add_registers(opcodes, &src.to_owned(), "test".to_owned(), &mut msg_list, 1);
+            assert_eq!(got, want, "{src}");
+        }
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        // Out-of-range / misaligned short immediates are rejected.
+        for bad in ["SETR.S A 300", "LDIDX64A.S A B 12", "LDIDX64A.S A B 2048"] {
+            let got = add_registers(opcodes, &bad.to_owned(), "test".to_owned(), &mut msg_list, 1);
+            assert_eq!(got, "ERR     ", "{bad}");
+        }
+        // Disassembly round-trips the scaled offset.
+        let (text, vars) = disassemble_word(0x5AAF_F310, opcodes).unwrap();
+        assert_eq!((text.as_str(), vars), ("LDIDX32_S.S D B -4", 0));
     }
 }
