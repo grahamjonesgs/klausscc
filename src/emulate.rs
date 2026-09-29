@@ -830,6 +830,21 @@ impl Cpu {
                 self.pc = ra as u32;
             }
             7 => self.iret(), // IRET
+            8 if len == 1 => {
+                // v3 C: ENTER N — push R15; R15 = SP; SP -= 8*N  (N = [21:0]).
+                self.sp = self.sp.wrapping_sub(8);
+                self.write64(self.sp, self.regs[15]);
+                self.regs[15] = u64::from(self.sp);
+                self.sp = self.sp.wrapping_sub((word & 0x3F_FFFF) << 3);
+                self.pc = next;
+            }
+            9 if len == 1 => {
+                // v3 C: LEAVE — SP = R15; pop R15.
+                let fp = self.regs[15] as u32;
+                self.regs[15] = self.read64(fp);
+                self.sp = fp.wrapping_add(8);
+                self.pc = next;
+            }
             _ => self.stop = Some(StopReason::InvalidOpcode(word)),
         }
     }
@@ -1367,6 +1382,18 @@ mod tests {
         assert_eq!(cpu.regs[2], 0xFFFF_FFFF_8000_0001);
         assert_eq!(cpu.regs[3], 0xFFFF_FFFF_8000_0001);
         assert_eq!(cpu.regs[4], 0x8000_0001);
+    }
+
+    #[test]
+    fn test_v3_enter_leave() {
+        // R15 = 0x77; ENTER 3 (0x6600_0003); SETR A,5; LEAVE (0x6640_0000).
+        let cpu = run_words(&[0x4BD7_7F00, 0x6600_0003, 0x4BD0_5000, 0x6640_0000, HALT]);
+        assert_eq!(cpu.regs[15], 0x77, "LEAVE restores the caller's R15");
+        assert_eq!(cpu.sp, STACK_TOP, "LEAVE unwinds the whole frame");
+        // Frame state inside: R15 = SP_entry-8, SP = R15 - 24, [R15] = old R15.
+        let cpu = run_words(&[0x4BD7_7F00, 0x6600_0003, HALT]);
+        assert_eq!(cpu.regs[15] as u32, STACK_TOP - 8);
+        assert_eq!(cpu.sp, STACK_TOP - 8 - 24);
     }
 
     #[test]
