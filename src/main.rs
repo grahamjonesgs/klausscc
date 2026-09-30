@@ -33,7 +33,7 @@ use labels::{find_duplicate_label, get_labels, Label};
 use macros::{apply_source_macros, expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
-use opcodes::{add_arguments, add_registers, num_arguments, v2_opcodes_and_macros, Opcode, Pass0, Pass1, Pass2};
+use opcodes::{add_arguments, add_registers, num_arguments, pc_relative_bits, v2_opcodes_and_macros, Opcode, Pass0, Pass1, Pass2};
 use serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 
 /// Magic bytes at the start of every ELF file (`0x7F` `E` `L` `F`).
@@ -570,6 +570,21 @@ pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opco
                 msg_list,
                 line.line_counter,
             );
+            // ISA v3 PC-relative targets need this line's address.
+            let rel = pc_relative_bits(
+                &oplist,
+                &strip_comments(&line.input_text_line.clone()),
+                line.program_counter,
+                &mut labels,
+                msg_list,
+                line.line_counter,
+                &line.file_name,
+            );
+            if rel != 0 {
+                if let Some(w0) = opcode.get(..8).and_then(|h| u32::from_str_radix(h, 16).ok()) {
+                    opcode = format!("{:08X}{}", w0 | rel, &opcode[8..]);
+                }
+            }
             opcode.push_str(&add_arguments(
                 &mut oplist,
                 &strip_comments(&line.input_text_line.clone()),

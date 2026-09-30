@@ -3,6 +3,7 @@ use crate::labels::{convert_argument, Label};
 use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::messages::{MessageType, MsgList};
 use serde::{Deserialize, Serialize};
+use std::fmt::Write as _;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Struct for opcode argument.
@@ -45,6 +46,14 @@ pub enum Operand {
     Off8(u8),
     /// ISA v3 `ENTER`: literal frame size in 8-byte units → word0[21:0].
     Frame22,
+    /// ISA v3 fused branch: literal simm4 compare immediate → word0[3:0].
+    Simm4,
+    /// ISA v3 short branch target (label or address) → simm18 word
+    /// displacement from this instruction, word0[17:0]. Filled in pass 2.
+    Rel18,
+    /// ISA v3 fused branch target (label or address) → simm13 word
+    /// displacement from this instruction, word0[20:8]. Filled in pass 2.
+    Rel13,
 }
 
 /// Parse a signed literal: decimal (optionally negative) or `0x` hex.
@@ -339,6 +348,16 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
                 }
                 token_idx += 1;
             }
+            Operand::Simm4 => {
+                match tokens.get(token_idx).and_then(|t| parse_simm(t)) {
+                    Some(v) if (-8..=7).contains(&v) => word0 |= (v as u32) & 0xF,
+                    _ => ok = false,
+                }
+                token_idx += 1;
+            }
+            // PC-relative targets need this instruction's address: pass 2
+            // ORs them in via `pc_relative_bits`.
+            Operand::Rel18 | Operand::Rel13 => token_idx += 1,
             Operand::Count => {
                 match tokens.get(token_idx).and_then(|t| parse_count(t)) {
                     Some(count) => word0 |= (count & 0x3F) << 15,
@@ -502,11 +521,13 @@ pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> 
             match op {
                 Operand::Rd => mask &= !(0xF << 8),
                 Operand::Rs1 => mask &= !(0xF << 4),
-                Operand::Rs2 => mask &= !0xF,
+                Operand::Rs2 | Operand::Simm4 => mask &= !0xF,
                 Operand::RdRs1 => mask &= !((0xF << 8) | (0xF << 4)),
                 Operand::Count => mask &= !(0x3F << 15),
                 Operand::Imm8 | Operand::Off8(_) => mask &= !(0xFF << 12),
                 Operand::Frame22 => mask &= !0x3F_FFFF,
+                Operand::Rel18 => mask &= !0x3_FFFF,
+                Operand::Rel13 => mask &= !(0x1FFF << 8),
                 Operand::Imm | Operand::Imm64 => {}
             }
         }
@@ -543,6 +564,16 @@ pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> 
                         text.push(' ');
                         text.push_str(&(word & 0x3F_FFFF).to_string());
                     }
+                    Operand::Simm4 => {
+                        text.push(' ');
+                        text.push_str(&((((word & 0xF) << 28) as i32) >> 28).to_string());
+                    }
+                    Operand::Rel18 => {
+                        let _ = write!(text, " PC{:+}", (((word << 14) as i32) >> 14) * 4);
+                    }
+                    Operand::Rel13 => {
+                        let _ = write!(text, " PC{:+}", (((word << 11) as i32) >> 19) * 4);
+                    }
                     Operand::Imm | Operand::Imm64 => {}
                 }
             }
@@ -550,6 +581,48 @@ pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> 
         }
     }
     None
+}
+
+/// ISA v3 PC-relative targets (`Rel18` short branches, `Rel13` fused
+/// branches): the word-0 bits for this line, given its byte address `pc`.
+/// The target token is a label (`name:`) or an absolute address. Out-of-range
+/// or misaligned targets are reported as errors and yield 0.
+#[allow(clippy::too_many_arguments, reason = "mirrors add_arguments' reporting context")]
+pub fn pc_relative_bits(
+    opcodes: &[Opcode],
+    line: &str,
+    pc: u32,
+    labels: &mut Vec<Label>,
+    msg_list: &mut MsgList,
+    line_number: u32,
+    filename: &str,
+) -> u32 {
+    let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else { return 0 };
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    for (i, op) in opcode.ops.iter().enumerate() {
+        let (bits, shift, what) = match op {
+            Operand::Rel18 => (18_u32, 0_u32, "short branch"),
+            Operand::Rel13 => (13, 8, "fused branch"),
+            _ => continue,
+        };
+        let Some(tok) = tokens.get(i + 1) else { return 0 };
+        let Some(hex) = convert_argument(tok, msg_list, line_number, filename.to_owned(), labels) else { return 0 };
+        let Ok(target) = u32::from_str_radix(&hex, 16) else { return 0 };
+        let delta = i64::from(target) - i64::from(pc);
+        let words = delta / 4;
+        let lim = 1_i64 << (bits - 1);
+        if delta % 4 != 0 || words < -lim || words >= lim {
+            msg_list.push(
+                format!("{what} target out of range ({delta:+} bytes) - \"{line}\""),
+                Some(line_number),
+                Some(filename.to_owned()),
+                MessageType::Error,
+            );
+            return 0;
+        }
+        return ((words as u32) & ((1 << bits) - 1)) << shift;
+    }
+    0
 }
 
 /// Returns number of args for opcode.
@@ -738,7 +811,8 @@ fn op(name: &str, template: u32, ops: &[Operand]) -> Opcode {
             matches!(
                 o,
                 Operand::Rd | Operand::Rs1 | Operand::Rs2 | Operand::RdRs1 | Operand::Count
-                    | Operand::Imm8 | Operand::Off8(_) | Operand::Frame22
+                    | Operand::Imm8 | Operand::Off8(_) | Operand::Frame22 | Operand::Simm4
+                    | Operand::Rel18 | Operand::Rel13
             )
         })
         .count() as u32;
@@ -904,6 +978,48 @@ pub fn v2_opcodes() -> Vec<Opcode> {
         op("ENTER", 0x6600_0000, &[Operand::Frame22]),
         op("LEAVE", 0x6640_0000, &[]),
         op("LEAVERET", 0x6680_0000, &[]),
+        // ISA v3 A1 short PC-relative branches/calls (target within +-512 KB)
+        // and B fused compare-and-branch (target within +-16 KB, flags untouched).
+        op("JMP.S", 0x6100_0000, &[Operand::Rel18]),
+        op("JMPZ.S", 0x6108_0000, &[Operand::Rel18]),
+        op("JMPNZ.S", 0x610C_0000, &[Operand::Rel18]),
+        op("JMPC.S", 0x6110_0000, &[Operand::Rel18]),
+        op("JMPNC.S", 0x6114_0000, &[Operand::Rel18]),
+        op("JMPO.S", 0x6118_0000, &[Operand::Rel18]),
+        op("JMPNO.S", 0x611C_0000, &[Operand::Rel18]),
+        op("JMPS.S", 0x6120_0000, &[Operand::Rel18]),
+        op("JMPNS.S", 0x6124_0000, &[Operand::Rel18]),
+        op("JMPLT.S", 0x6128_0000, &[Operand::Rel18]),
+        op("JMPGE.S", 0x612C_0000, &[Operand::Rel18]),
+        op("JMPLE.S", 0x6130_0000, &[Operand::Rel18]),
+        op("JMPGT.S", 0x6134_0000, &[Operand::Rel18]),
+        op("JMPULT.S", 0x6138_0000, &[Operand::Rel18]),
+        op("JMPUGE.S", 0x613C_0000, &[Operand::Rel18]),
+        op("JMPULE.S", 0x6140_0000, &[Operand::Rel18]),
+        op("JMPUGT.S", 0x6144_0000, &[Operand::Rel18]),
+        op("JMPE.S", 0x6148_0000, &[Operand::Rel18]),
+        op("JMPNE.S", 0x614C_0000, &[Operand::Rel18]),
+        op("CALL.S", 0x6300_0000, &[Operand::Rel18]),
+        op("BEQ", 0x7400_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BEQI", 0x7420_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BNE", 0x7440_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BNEI", 0x7460_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BLT", 0x7480_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BLTI", 0x74A0_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BGE", 0x74C0_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BGEI", 0x74E0_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BLE", 0x7500_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BLEI", 0x7520_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BGT", 0x7540_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BGTI", 0x7560_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BULT", 0x7580_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BULTI", 0x75A0_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BUGE", 0x75C0_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BUGEI", 0x75E0_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BULE", 0x7600_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BULEI", 0x7620_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+        op("BUGT", 0x7640_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+        op("BUGTI", 0x7660_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
         op("JMP", 0xA000_0000, &[Operand::Imm]),
         op("JMPZ", 0xA008_0000, &[Operand::Imm]),
         op("JMPNZ", 0xA00C_0000, &[Operand::Imm]),
@@ -1853,5 +1969,33 @@ mod tests {
         // Disassembly round-trips the scaled offset.
         let (text, vars) = disassemble_word(0x5AAF_F310, opcodes).unwrap();
         assert_eq!((text.as_str(), vars), ("LDIDX32_S.S D B -4", 0));
+    }
+
+    #[test]
+    // ISA v3 PC-relative targets: short (simm18) and fused (simm13) branches.
+    fn test_v3_pc_relative_branches() {
+        let mut msg_list = MsgList::new();
+        let opcodes = &mut v2_opcodes();
+        let mut labels = vec![
+            Label { name: "LOOP:".to_owned(), program_counter: 0x28 },
+            Label { name: "FAR:".to_owned(), program_counter: 0x0004_0000 },
+        ];
+        // BNEI A 0 LOOP: at 0x30 -> -2 words in [20:8]; register fields in word0.
+        let line = "BNEI A 0 LOOP:".to_owned();
+        let w0 = u32::from_str_radix(&add_registers(opcodes, &line, "t".to_owned(), &mut msg_list, 1), 16).unwrap();
+        let rel = pc_relative_bits(opcodes, &line, 0x30, &mut labels, &mut msg_list, 1, "t");
+        assert_eq!(w0 | rel, 0x747F_FE00);
+        // JMP.S LOOP: at 0x40 -> -6 words in [17:0].
+        let rel = pc_relative_bits(opcodes, "JMP.S LOOP:", 0x40, &mut labels, &mut msg_list, 1, "t");
+        assert_eq!(0x6100_0000 | rel, 0x6103_FFFA);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        // A fused branch 256 KB away is out of simm13 range: reported, no bits.
+        let rel = pc_relative_bits(opcodes, "BEQ A B FAR:", 0x30, &mut labels, &mut msg_list, 1, "t");
+        assert_eq!(rel, 0);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        // ...but in range for a short branch.
+        let rel = pc_relative_bits(opcodes, "CALL.S FAR:", 0x30, &mut labels, &mut msg_list, 1, "t");
+        assert_eq!(rel, (0x0004_0000 - 0x30) / 4);
+        assert_eq!(disassemble_word(0x747F_FE00, opcodes).unwrap().0, "BNEI A 0 PC-8");
     }
 }
