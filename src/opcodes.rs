@@ -952,6 +952,11 @@ pub fn v2_opcodes() -> Vec<Opcode> {
         // ---- ISA v3 (ISA_V3_PROPOSAL.md): D1/D2 long forms, short 1-word
         //      immediates (".S", literal immediates only), ENTER/LEAVE ----
         op("LDIDX32_S", 0x9AA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+        // v3 D3: 32-bit W ops (result = sext of the low 32 bits)
+        op("ADDW", 0x4428_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("SUBW", 0x4468_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("MULW", 0x6888_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+        op("ADDIW", 0x8838_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
         op("CMPRRW", 0x4C08_0000, &[Operand::Rs1, Operand::Rs2]),
         op("CMPRVW", 0x8C18_0000, &[Operand::Rs1, Operand::Imm]),
         op("SETR.S", 0x4BD0_0000, &[Operand::Rd, Operand::Imm8]),
@@ -1952,6 +1957,8 @@ mod tests {
             ("LDIDX64A.S C B 16", "5B302210"),
             ("LDIDX32_S.S D B -4", "5AAFF310"),
             ("CMPRRW A B", "4C080001"),
+            ("ADDW C A B", "44280201"),
+            ("MULW F A B", "68880501"),
             ("ENTER 3", "66000003"),
             ("LEAVE", "66400000"),
             ("LEAVERET", "66800000"),

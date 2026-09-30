@@ -492,8 +492,18 @@ impl Cpu {
                 return;
             }
         };
+        // v3 D3: W [19] on ADD/SUB — result = sext of the low 32 bits; Z
+        // follows the W result (S/C/V are the 64-bit operation's).
+        let res = if (word >> 19) & 1 == 1 && op <= 1 { self.w32(res) } else { res };
         self.regs[rd] = res;
         self.pc = next;
+    }
+
+    /// ISA v3 D3 W result: sign-extend the low 32 bits; Z from the W value.
+    fn w32(&mut self, res: u64) -> u64 {
+        let w = i64::from(res as i32) as u64;
+        self.zero = w == 0;
+        w
     }
 
     /// Class 2 — ALU immediate: `rd = rs1 OP ext(imm)` (MOV/LEA ignore rs1).
@@ -503,7 +513,12 @@ impl Cpu {
         let ext = if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) };
         let a = self.regs[rs1];
         match op {
-            0 => self.regs[rd] = self.add_flags(a, ext, 0),                     // ADDI / ADDV
+            0 => {
+                // ADDI / ADDV; v3 D3 ADDIW = the 2-word form with W [19]
+                // (the short form's [19:12] is its immediate).
+                let r = self.add_flags(a, ext, 0);
+                self.regs[rd] = if len == 2 && (word >> 19) & 1 == 1 { self.w32(r) } else { r };
+            }
             1 => self.regs[rd] = self.sub_flags(a, ext, 0),                     // MINUSV
             2 => self.regs[rd] = self.add_flags(a, ext, u64::from(self.carry)), // ADC-imm
             3 => self.regs[rd] = self.sub_flags(a, ext, u64::from(self.carry)), // SBC-imm
@@ -928,6 +943,10 @@ impl Cpu {
                 } else {
                     a.wrapping_mul(b)
                 };
+                // v3 D3 MULW: W [19] on the low-half MUL.
+                if !h && (word >> 19) & 1 == 1 {
+                    self.regs[rd] = i64::from(self.regs[rd] as i32) as u64;
+                }
             }
             1 => {
                 // DIV — divide-by-zero → all-ones result, overflow set, zero untouched.
@@ -1467,6 +1486,28 @@ mod tests {
         let cpu = run_words(&[0x4BD0_1000, 0x4BDF_E100, bult, 0x4BD0_7200, HALT]);
         assert_eq!(cpu.regs[2], 0, "taken -> SETR C,7 skipped");
         assert!(!cpu.zero && !cpu.carry, "fused branch leaves the flags alone");
+    }
+
+    #[test]
+    fn test_v3_d3_w_alu() {
+        // A = 0x7FFF_FFFF, B = 1: ADDW -> 0xFFFF_FFFF_8000_0000 (sext of low 32).
+        let mut w = Vec::new();
+        w.extend_from_slice(&setr(0, 0x7FFF_FFFF));
+        w.extend_from_slice(&[0x4BD0_1100]); // SETR.S B,1
+        w.extend_from_slice(&[0x4428_0201]); // ADDW C, A, B
+        w.extend_from_slice(&[0x4468_0310]); // SUBW D, B, A = 1 - 0x7FFFFFFF -> sext
+        w.extend_from_slice(&[0x8838_0400, 0x8000_0000]); // ADDIW E, A, 0x80000000 -> 0xFFFF_FFFF (low 32) -> -1
+        w.extend_from_slice(&[0x6888_0501]); // MULW F, A, B
+        w.extend_from_slice(&[HALT]);
+        let cpu = run_words(&w);
+        assert_eq!(cpu.regs[2], 0xFFFF_FFFF_8000_0000);
+        assert_eq!(cpu.regs[3], i64::from(1_i32.wrapping_sub(0x7FFF_FFFF)) as u64);
+        assert_eq!(cpu.regs[4], u64::MAX);
+        assert_eq!(cpu.regs[5], 0x7FFF_FFFF);
+        // Z follows the W result: 0x1_0000_0000 + 0 -> W result 0 -> Z set.
+        let cpu = run_words(&[0xCBC0_0000, 0, 1, 0x4BD0_0100, 0x4428_0201, HALT]);
+        assert_eq!(cpu.regs[2], 0);
+        assert!(cpu.zero);
     }
 
     #[test]
