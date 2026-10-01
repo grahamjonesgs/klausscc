@@ -341,6 +341,8 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
     // Both are needed: tcflush clears bytes already in the kernel buffer
     // (e.g. a Ctrl+Z from a previous run), the poll loop clears anything
     // crossterm has already read from that buffer into its own queue.
+    // tcflush is Unix-only; on Windows the crossterm drain alone is used.
+    #[cfg(unix)]
     {
         use nix::sys::termios::{tcflush, FlushArg};
         // SAFETY: 0 is the file descriptor for stdin, which is always valid in a process context.
