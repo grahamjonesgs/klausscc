@@ -291,7 +291,10 @@ fn return_opcode_struct<'a>(line: &str, opcodes: &'a [Opcode]) -> Option<&'a Opc
 /// `ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place `rd==rs1`, embedded
 /// `N<<15`).  Opcodes without a layout fall back to the legacy trailing-nibble
 /// scheme (used by `.vh`-parsed tables).
-#[allow(clippy::ptr_arg, reason = "shares the &mut Vec<Opcode> signature convention with add_arguments / num_registers")]
+#[allow(
+    clippy::ptr_arg,
+    reason = "shares the &mut Vec<Opcode> signature convention with add_arguments / num_registers"
+)]
 pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String, msg_list: &mut MsgList, line_number: u32) -> String {
     let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes).cloned() else {
         msg_list.push(
@@ -515,7 +518,9 @@ pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> 
         }
 
         // v2 path: build the fixed-bit mask from the operand layout, then match.
-        let Ok(template) = u32::from_str_radix(&opcode.hex_code, 16) else { continue };
+        let Ok(template) = u32::from_str_radix(&opcode.hex_code, 16) else {
+            continue;
+        };
         let mut mask = 0xFFFF_FFFF_u32;
         for op in &opcode.ops {
             match op {
@@ -597,7 +602,9 @@ pub fn pc_relative_bits(
     line_number: u32,
     filename: &str,
 ) -> u32 {
-    let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else { return 0 };
+    let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
+        return 0;
+    };
     let tokens: Vec<&str> = line.split_whitespace().collect();
     for (i, op) in opcode.ops.iter().enumerate() {
         let (bits, shift, what) = match op {
@@ -606,7 +613,9 @@ pub fn pc_relative_bits(
             _ => continue,
         };
         let Some(tok) = tokens.get(i + 1) else { return 0 };
-        let Some(hex) = convert_argument(tok, msg_list, line_number, filename.to_owned(), labels) else { return 0 };
+        let Some(hex) = convert_argument(tok, msg_list, line_number, filename.to_owned(), labels) else {
+            return 0;
+        };
         let Ok(target) = u32::from_str_radix(&hex, 16) else { return 0 };
         let delta = i64::from(target) - i64::from(pc);
         let words = delta / 4;
@@ -660,7 +669,10 @@ fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
 ///
 /// Receive a line from the opcode definition file and if possible parse of Some(Opcode), or None.
 /// Supports both 32-bit format (`32'hXXXX_XXXX`) and legacy 16-bit format (`16'hXXXX`).
-#[allow(dead_code, reason = "legacy `.vh` opcode-format parser; the v2 table is built in code but this is kept for backward compatibility and is exercised by unit tests")]
+#[allow(
+    dead_code,
+    reason = "legacy `.vh` opcode-format parser; the v2 table is built in code but this is kept for backward compatibility and is exercised by unit tests"
+)]
 pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_comment: usize;
     let pos_end_comment: usize;
@@ -777,20 +789,15 @@ const V2_MACROS: &[&str] = &[
     // Save / restore the A–D scratch registers around a region of code.
     "$PUSHALL PUSH A / PUSH B / PUSH C / PUSH D",
     "$POPALL POP D / POP C / POP B / POP A",
-
     // --- Common register idioms ---
     "$CLR SETR %1 0",   // zero a register
     "$TEST CMPRV %1 0", // set flags from a register (compare against 0)
-
     // Call a subroutine while preserving the A–D scratch registers.
     "$CALLSAVE PUSH A / PUSH B / PUSH C / PUSH D / CALL %1 / POP D / POP C / POP B / POP A",
-
     // Copy one 64-bit word from address %2 to address %1, using %3 as scratch.
     "$MEMCPYW MEMREADRR %3 %2 / MEMSET64RR %3 %1",
-
     // Two back-to-back programmable delays (longer busy-wait).
     "$WAIT DELAYV %1 / DELAYV %2",
-
     // --- MMIO UART print helpers ---
     // Each expands to a call into uart_stubs.kla (which the program must
     // `!include`) and preserves every register the printed value does not
@@ -810,9 +817,17 @@ fn op(name: &str, template: u32, ops: &[Operand]) -> Opcode {
         .filter(|o| {
             matches!(
                 o,
-                Operand::Rd | Operand::Rs1 | Operand::Rs2 | Operand::RdRs1 | Operand::Count
-                    | Operand::Imm8 | Operand::Off8(_) | Operand::Frame22 | Operand::Simm4
-                    | Operand::Rel18 | Operand::Rel13
+                Operand::Rd
+                    | Operand::Rs1
+                    | Operand::Rs2
+                    | Operand::RdRs1
+                    | Operand::Count
+                    | Operand::Imm8
+                    | Operand::Off8(_)
+                    | Operand::Frame22
+                    | Operand::Simm4
+                    | Operand::Rel18
+                    | Operand::Rel13
             )
         })
         .count() as u32;
@@ -1101,7 +1116,10 @@ pub fn v2_opcodes_and_macros(msg_list: &mut MsgList) -> (Vec<Opcode>, Vec<Macro>
 /// Parse file to opcode and macro vectors.
 ///
 /// Parses the .vh verilog file, creates two vectors of macro and opcode, returning None, None or Some(Opcode), Some(Macro).
-#[allow(dead_code, reason = "legacy `.vh` opcode-file parser; superseded by the built-in v2 table but retained for backward compatibility and unit tests")]
+#[allow(
+    dead_code,
+    reason = "legacy `.vh` opcode-file parser; superseded by the built-in v2 table but retained for backward compatibility and unit tests"
+)]
 pub fn parse_vh_file(input_list: Vec<InputData>, msg_list: &mut MsgList) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     if input_list.is_empty() {
         return (None, None);
@@ -1984,8 +2002,14 @@ mod tests {
         let mut msg_list = MsgList::new();
         let opcodes = &mut v2_opcodes();
         let mut labels = vec![
-            Label { name: "LOOP:".to_owned(), program_counter: 0x28 },
-            Label { name: "FAR:".to_owned(), program_counter: 0x0004_0000 },
+            Label {
+                name: "LOOP:".to_owned(),
+                program_counter: 0x28,
+            },
+            Label {
+                name: "FAR:".to_owned(),
+                program_counter: 0x0004_0000,
+            },
         ];
         // BNEI A 0 LOOP: at 0x30 -> -2 words in [20:8]; register fields in word0.
         let line = "BNEI A 0 LOOP:".to_owned();

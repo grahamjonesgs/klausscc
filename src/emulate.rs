@@ -476,17 +476,32 @@ impl Cpu {
         let a = self.regs[rs1];
         let b = self.regs[rs2];
         let res = match op {
-            0 => self.add_flags(a, b, 0),                    // ADDR
-            1 => self.sub_flags(a, b, 0),                    // SUBR
+            0 => self.add_flags(a, b, 0),                     // ADDR
+            1 => self.sub_flags(a, b, 0),                     // SUBR
             2 => self.add_flags(a, b, u64::from(self.carry)), // ADDC
             3 => self.sub_flags(a, b, u64::from(self.carry)), // SUBC
-            4 => { let r = a & b; self.zero = r == 0; r }    // ANDR — RRR logic sets zero
-            5 => { let r = a | b; self.zero = r == 0; r }    // ORR
-            6 => { let r = a ^ b; self.zero = r == 0; r }    // XORR
-            7 => (a as i64).min(b as i64) as u64,            // MINR (signed)
-            8 => (a as i64).max(b as i64) as u64,            // MAXR
-            9 => a.min(b),                                   // MINUR (unsigned)
-            10 => a.max(b),                                  // MAXUR
+            4 => {
+                // ANDR — RRR logic sets zero
+                let r = a & b;
+                self.zero = r == 0;
+                r
+            }
+            5 => {
+                // ORR
+                let r = a | b;
+                self.zero = r == 0;
+                r
+            }
+            6 => {
+                // XORR
+                let r = a ^ b;
+                self.zero = r == 0;
+                r
+            }
+            7 => (a as i64).min(b as i64) as u64, // MINR (signed)
+            8 => (a as i64).max(b as i64) as u64, // MAXR
+            9 => a.min(b),                        // MINUR (unsigned)
+            10 => a.max(b),                       // MAXUR
             _ => {
                 self.stop = Some(StopReason::InvalidOpcode(word));
                 return;
@@ -556,7 +571,11 @@ impl Cpu {
         // 2-word forms (and the v3 short form, LEN=01 SGN=1 B=0) take a
         // sign/zero-extended immediate; other 1-word forms use rs2.
         let rhs = if len == 2 || short {
-            if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) }
+            if sgn {
+                i64::from(imm32 as i32) as u64
+            } else {
+                u64::from(imm32)
+            }
         } else {
             self.regs[rs2]
         };
@@ -564,14 +583,18 @@ impl Cpu {
         // form, whose [19:12] is its immediate). Comparing {x[31:0], 0}
         // gives exactly the 32-bit Z/S/C/V and 32-bit signed/unsigned order —
         // the same trick the RTL uses at its dispatch mux.
-        let (lhs, rhs) = if !short && (word >> 19) & 1 == 1 { (lhs << 32, rhs << 32) } else { (lhs, rhs) };
+        let (lhs, rhs) = if !short && (word >> 19) & 1 == 1 {
+            (lhs << 32, rhs << 32)
+        } else {
+            (lhs, rhs)
+        };
         if boolean {
             let base = match pred {
-                0 => lhs == rhs,                     // EQ
-                1 => (lhs as i64) < (rhs as i64),    // LT (signed)
-                2 => (lhs as i64) <= (rhs as i64),   // LE (signed)
-                3 => lhs < rhs,                      // ULT
-                4 => lhs <= rhs,                     // ULE
+                0 => lhs == rhs,                   // EQ
+                1 => (lhs as i64) < (rhs as i64),  // LT (signed)
+                2 => (lhs as i64) <= (rhs as i64), // LE (signed)
+                3 => lhs < rhs,                    // ULT
+                4 => lhs <= rhs,                   // ULE
                 _ => {
                     self.stop = Some(StopReason::InvalidOpcode(word));
                     return;
@@ -592,7 +615,11 @@ impl Cpu {
         let pred = (word >> 23) & 0x7;
         let inv = (word >> 22) & 1 == 1;
         let lhs = self.regs[rs1];
-        let rhs = if (word >> 21) & 1 == 1 { i64::from(((word << 28) as i32) >> 28) as u64 } else { self.regs[rs2] };
+        let rhs = if (word >> 21) & 1 == 1 {
+            i64::from(((word << 28) as i32) >> 28) as u64
+        } else {
+            self.regs[rs2]
+        };
         let base = match pred {
             0 => lhs == rhs,
             1 => (lhs as i64) < (rhs as i64),
@@ -621,14 +648,37 @@ impl Cpu {
         let a = self.regs[rs1];
         let cnt = if src == 1 { n } else { (self.regs[rs2] & 0x3F) as u32 };
         match op {
-            0 => { let r = a << cnt; if f { self.zero = r == 0; } self.regs[rd] = r; } // SHL
-            1 => { let r = a >> cnt; if f { self.zero = r == 0; } self.regs[rd] = r; } // SHR
-            2 => { let r = ((a as i64) >> cnt) as u64; if f { self.zero = r == 0; } self.regs[rd] = r; } // SAR
+            0 => {
+                // SHL
+                let r = a << cnt;
+                if f {
+                    self.zero = r == 0;
+                }
+                self.regs[rd] = r;
+            }
+            1 => {
+                // SHR
+                let r = a >> cnt;
+                if f {
+                    self.zero = r == 0;
+                }
+                self.regs[rd] = r;
+            }
+            2 => {
+                // SAR
+                let r = ((a as i64) >> cnt) as u64;
+                if f {
+                    self.zero = r == 0;
+                }
+                self.regs[rd] = r;
+            }
             3 => {
                 let r = a.rotate_left(cnt); // ROL
                 if f {
                     self.zero = r == 0;
-                    if cnt == 1 { self.carry = (a >> 63) & 1 == 1; }
+                    if cnt == 1 {
+                        self.carry = (a >> 63) & 1 == 1;
+                    }
                 }
                 self.regs[rd] = r;
             }
@@ -636,7 +686,9 @@ impl Cpu {
                 let r = a.rotate_right(cnt); // ROR
                 if f {
                     self.zero = r == 0;
-                    if cnt == 1 { self.carry = a & 1 == 1; }
+                    if cnt == 1 {
+                        self.carry = a & 1 == 1;
+                    }
                 }
                 self.regs[rd] = r;
             }
@@ -645,7 +697,9 @@ impl Cpu {
                 let new_carry = (a >> 63) & 1 == 1;
                 let r = (a << 1) | u64::from(self.carry);
                 self.carry = new_carry;
-                if f { self.zero = r == 0; }
+                if f {
+                    self.zero = r == 0;
+                }
                 self.regs[rd] = r;
             }
             6 => {
@@ -653,12 +707,14 @@ impl Cpu {
                 let new_carry = a & 1 == 1;
                 let r = (a >> 1) | (u64::from(self.carry) << 63);
                 self.carry = new_carry;
-                if f { self.zero = r == 0; }
+                if f {
+                    self.zero = r == 0;
+                }
                 self.regs[rd] = r;
             }
-            8 => self.regs[rd] = a | (1 << cnt),   // BSET
-            9 => self.regs[rd] = a & !(1 << cnt),  // BCLR
-            10 => self.regs[rd] = a ^ (1 << cnt),  // BTGL
+            8 => self.regs[rd] = a | (1 << cnt),  // BSET
+            9 => self.regs[rd] = a & !(1 << cnt), // BCLR
+            10 => self.regs[rd] = a ^ (1 << cnt), // BTGL
             11 => {
                 // BTST — BTSTRR (reg) writes rd = bit; BTST-imm is flag-only (Z=~bit).
                 let bit = (a >> cnt) & 1;
@@ -700,37 +756,81 @@ impl Cpu {
         let a = self.regs[rs1];
         match op {
             0 => self.regs[rd] = a, // COPY
-            1 => { let r = a.wrapping_neg(); if f { self.zero = r == 0; } self.regs[rd] = r; } // NEG
-            2 => { let r = !a; if f { self.zero = r == 0; } self.regs[rd] = r; } // NOT
+            1 => {
+                // NEG
+                let r = a.wrapping_neg();
+                if f {
+                    self.zero = r == 0;
+                }
+                self.regs[rd] = r;
+            }
+            2 => {
+                // NOT
+                let r = !a;
+                if f {
+                    self.zero = r == 0;
+                }
+                self.regs[rd] = r;
+            }
             3 => {
                 // ABS — INT_MIN wraps (result INT_MIN, overflow cleared); matches v1.
                 let r = (a as i64).wrapping_abs() as u64;
-                if f { self.zero = r == 0; self.overflow = false; }
+                if f {
+                    self.zero = r == 0;
+                    self.overflow = false;
+                }
                 self.regs[rd] = r;
             }
             4 => {
-                let r = match size { 0 => i64::from(a as i8), 1 => i64::from(a as i16), _ => i64::from(a as i32) } as u64;
-                if f { self.set_zs(r); }
+                let r = match size {
+                    0 => i64::from(a as i8),
+                    1 => i64::from(a as i16),
+                    _ => i64::from(a as i32),
+                } as u64;
+                if f {
+                    self.set_zs(r);
+                }
                 self.regs[rd] = r;
             }
             5 => {
-                let r = match size { 0 => a & 0xFF, 1 => a & 0xFFFF, _ => a & 0xFFFF_FFFF };
-                if f { self.zero = r == 0; }
+                let r = match size {
+                    0 => a & 0xFF,
+                    1 => a & 0xFFFF,
+                    _ => a & 0xFFFF_FFFF,
+                };
+                if f {
+                    self.zero = r == 0;
+                }
                 self.regs[rd] = r;
             }
             6 => self.regs[rd] = a.swap_bytes(),   // BSWAP (64-bit)
             7 => self.regs[rd] = a.reverse_bits(), // BITREV
-            8 => { let r = u64::from(a.count_ones()); if f { self.zero = r == 0; } self.regs[rd] = r; } // POPCNT
-            9 => self.regs[rd] = u64::from(a.leading_zeros()),  // CLZ; CLZ(0)=64
+            8 => {
+                // POPCNT
+                let r = u64::from(a.count_ones());
+                if f {
+                    self.zero = r == 0;
+                }
+                self.regs[rd] = r;
+            }
+            9 => self.regs[rd] = u64::from(a.leading_zeros()),   // CLZ; CLZ(0)=64
             10 => self.regs[rd] = u64::from(a.trailing_zeros()), // CTZ; CTZ(0)=64
             12 => {
                 // GETF / SETFR: rd = {zero,equal,carry,overflow} in the top nibble [63:60].
                 // `equal` is DERIVED (E = Z) — retired as storage per §1.5.
                 let mut v = 0_u64;
-                if self.zero { v |= 1 << 63; }
-                if self.flag_e() { v |= 1 << 62; }
-                if self.carry { v |= 1 << 61; }
-                if self.overflow { v |= 1 << 60; }
+                if self.zero {
+                    v |= 1 << 63;
+                }
+                if self.flag_e() {
+                    v |= 1 << 62;
+                }
+                if self.carry {
+                    v |= 1 << 61;
+                }
+                if self.overflow {
+                    v |= 1 << 60;
+                }
                 self.regs[rd] = v;
             }
             14 => self.regs[rd] = self.add_flags(a, 1, 0), // INC
@@ -752,7 +852,11 @@ impl Cpu {
         let size_bytes = 1_usize << size;
         let ea_raw = self.ea(mode, rs1, rs2, imm32);
         let ea = ea_raw & load_align_mask(size_bytes, mode, a);
-        let val = if size_bytes == 8 { self.read64(ea) } else { self.read_sub(ea, size_bytes) };
+        let val = if size_bytes == 8 {
+            self.read64(ea)
+        } else {
+            self.read_sub(ea, size_bytes)
+        };
         self.regs[rd] = if sgn && size_bytes < 8 { sign_extend(val, size_bytes) } else { val };
         self.pc = next;
     }
@@ -776,18 +880,18 @@ impl Cpu {
     /// Effective-address computation shared by loads and stores (MODE field).
     fn ea(&self, mode: u32, rs1: usize, rs2: usize, imm32: u32) -> u32 {
         match mode {
-            0 => self.regs[rs1] as u32,                                    // [rs1]
-            1 => (self.regs[rs1] as u32).wrapping_add(imm32),              // rs1 + imm32
-            2 => imm32,                                                    // [imm32] absolute
+            0 => self.regs[rs1] as u32,                                       // [rs1]
+            1 => (self.regs[rs1] as u32).wrapping_add(imm32),                 // rs1 + imm32
+            2 => imm32,                                                       // [imm32] absolute
             _ => (self.regs[rs1] as u32).wrapping_add(self.regs[rs2] as u32), // rs1 + rs2
         }
     }
 
     /// Class 8 — branch / call.
     fn v2_branch(&mut self, word: u32, rs2: usize, imm32: u32, next: u32) {
-        let link = (word >> 25) & 1 == 1;  // call (push return address)
-        let rel = (word >> 24) & 1 == 1;   // PC-relative displacement
-        let rind = (word >> 23) & 1 == 1;  // target = rs2
+        let link = (word >> 25) & 1 == 1; // call (push return address)
+        let rel = (word >> 24) & 1 == 1; // PC-relative displacement
+        let rind = (word >> 23) & 1 == 1; // target = rs2
         let cond_code = (word >> 19) & 0xF;
         let inv = (word >> 18) & 1 == 1;
         let Some(cond) = self.eval_cond(cond_code) else {
@@ -821,16 +925,16 @@ impl Cpu {
     /// gives the negations (`NE`, `GE`, `GT`, `UGE`, `UGT`).
     fn eval_cond(&self, cond: u32) -> Option<bool> {
         Some(match cond {
-            0 => true,                          // always
-            1 => self.zero,                     // Z
-            2 => self.carry,                    // C (raw carry / borrow)
-            3 => self.overflow,                 // V
-            4 => self.sign,                     // S
-            5 => self.flag_l(),                 // LT  = S ^ V
-            6 => self.zero || self.flag_l(),    // LE  = Z | (S ^ V)
-            7 => self.flag_u(),                 // ULT = C
-            8 => self.flag_u() || self.zero,    // ULE = C | Z
-            9 => self.flag_e(),                 // E   = Z (alias of COND 1)
+            0 => true,                       // always
+            1 => self.zero,                  // Z
+            2 => self.carry,                 // C (raw carry / borrow)
+            3 => self.overflow,              // V
+            4 => self.sign,                  // S
+            5 => self.flag_l(),              // LT  = S ^ V
+            6 => self.zero || self.flag_l(), // LE  = Z | (S ^ V)
+            7 => self.flag_u(),              // ULT = C
+            8 => self.flag_u() || self.zero, // ULE = C | Z
+            9 => self.flag_e(),              // E   = Z (alias of COND 1)
             _ => return None,
         })
     }
@@ -864,9 +968,21 @@ impl Cpu {
                 self.sp = self.sp.wrapping_add(8);
                 self.pc = next;
             }
-            3 => { self.regs[rd] = u64::from(self.sp); self.pc = next; } // GETSP
-            4 => { self.sp = self.regs[rs1] as u32; self.pc = next; }    // SETSP
-            5 => { self.sp = self.sp.wrapping_add(imm32); self.pc = next; } // ADDSP (imm sign-ext, 32-bit add)
+            3 => {
+                // GETSP
+                self.regs[rd] = u64::from(self.sp);
+                self.pc = next;
+            }
+            4 => {
+                // SETSP
+                self.sp = self.regs[rs1] as u32;
+                self.pc = next;
+            }
+            5 => {
+                // ADDSP (imm sign-ext, 32-bit add)
+                self.sp = self.sp.wrapping_add(imm32);
+                self.pc = next;
+            }
             6 => {
                 // RET — restore PC from [31:0] of the popped slot.
                 let ra = self.read64(self.sp);
@@ -925,7 +1041,11 @@ impl Cpu {
         let a = self.regs[rs1];
         let is_imm = len == 2;
         let b = if is_imm {
-            if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) }
+            if sgn {
+                i64::from(imm32 as i32) as u64
+            } else {
+                u64::from(imm32)
+            }
         } else {
             self.regs[rs2]
         };
@@ -1154,10 +1274,13 @@ mod tests {
         // SETR B TX_DATA ; SETR A 'H' ; MEMSET8 [B]=A ; SETR A 'i' ; MEMSET8 [B]=A ; HALT
         // MEMSET8 data=rd=A(0), base=rs1=B(1): 0x5C00_0000 | 0<<8 | 1<<4 = 0x5C00_0010.
         let words = [
-            0x8BD0_0100, 0xF001_0000, // SETR B, TX_DATA
-            0x8BD0_0000, 0x0000_0048, // SETR A, 'H'
+            0x8BD0_0100,
+            0xF001_0000, // SETR B, TX_DATA
+            0x8BD0_0000,
+            0x0000_0048, // SETR A, 'H'
             0x5C00_0010, // MEMSET8 [B] = A
-            0x8BD0_0000, 0x0000_0069, // SETR A, 'i'
+            0x8BD0_0000,
+            0x0000_0069, // SETR A, 'i'
             0x5C00_0010, // MEMSET8 [B] = A
             HALT,
         ];
@@ -1171,8 +1294,10 @@ mod tests {
         // R1=STATUS, R2=RX_DATA; R3=[R1] before, R4=[R2] consume, R5=[R1] after.
         // MEMGET8 rd, base=rs1: 0x5800_0000 | rd<<8 | rs1<<4.
         let words = [
-            0x8BD0_0100, 0xF001_0010, // SETR B(R1), STATUS
-            0x8BD0_0200, 0xF001_0008, // SETR C(R2), RX_DATA
+            0x8BD0_0100,
+            0xF001_0010, // SETR B(R1), STATUS
+            0x8BD0_0200,
+            0xF001_0008, // SETR C(R2), RX_DATA
             0x5800_0310, // MEMGET8 D(R3) = [B]
             0x5800_0420, // MEMGET8 E(R4) = [C]
             0x5800_0510, // MEMGET8 F(R5) = [B]
@@ -1248,12 +1373,16 @@ mod tests {
         // Layout (code base 0x20): 0x20 SETR A, 0x28 SETR B, 0x30 CMPRR, 0x34 JMPLT->0x40,
         // 0x3C HALT(fail), 0x40 SETR P 1, 0x48 HALT.
         let words = [
-            0x8BD0_0000, 5,          // SETR A 5
-            0x8BD0_0100, 0x10,       // SETR B 0x10
-            0x4C00_0001,             // CMPRR A B  (rs1=A, rs2=B)
-            0xA028_0000, 0x40,       // JMPLT 0x40
-            HALT,                    // fail path
-            0x8BD0_0F00, 1,          // SETR P 1   (P = R15)
+            0x8BD0_0000,
+            5, // SETR A 5
+            0x8BD0_0100,
+            0x10,        // SETR B 0x10
+            0x4C00_0001, // CMPRR A B  (rs1=A, rs2=B)
+            0xA028_0000,
+            0x40, // JMPLT 0x40
+            HALT, // fail path
+            0x8BD0_0F00,
+            1, // SETR P 1   (P = R15)
             HALT,
         ];
         let cpu = run_words(&words);
@@ -1284,12 +1413,16 @@ mod tests {
         // 0x20 SETR A 7, 0x28 SETR B 7, 0x30 CMPRR A B, 0x34 JMPZ 0x40,
         // 0x3C HALT(fail), 0x40 SETR P 1, 0x48 HALT.
         let words = [
-            0x8BD0_0000, 7,          // SETR A 7
-            0x8BD0_0100, 7,          // SETR B 7
-            0x4C00_0001,             // CMPRR A B
-            0xA008_0000, 0x40,       // JMPZ 0x40
-            HALT,                    // fail path
-            0x8BD0_0F00, 1,          // SETR P 1
+            0x8BD0_0000,
+            7, // SETR A 7
+            0x8BD0_0100,
+            7,           // SETR B 7
+            0x4C00_0001, // CMPRR A B
+            0xA008_0000,
+            0x40, // JMPZ 0x40
+            HALT, // fail path
+            0x8BD0_0F00,
+            1, // SETR P 1
             HALT,
         ];
         let cpu = run_words(&words);
@@ -1303,12 +1436,16 @@ mod tests {
         // the old model `less` was CMP-only and stale here, so this failed.
         // 0x20 SETR A 3, 0x28 SETR B 5, 0x30 SUBR A A B, 0x34 JMPLT 0x40, ...
         let words = [
-            0x8BD0_0000, 3,          // SETR A 3
-            0x8BD0_0100, 5,          // SETR B 5
-            0x4460_0001,             // SUBR A A B  -> A = -2
-            0xA028_0000, 0x40,       // JMPLT 0x40
-            HALT,                    // fail path
-            0x8BD0_0F00, 1,          // SETR P 1
+            0x8BD0_0000,
+            3, // SETR A 3
+            0x8BD0_0100,
+            5,           // SETR B 5
+            0x4460_0001, // SUBR A A B  -> A = -2
+            0xA028_0000,
+            0x40, // JMPLT 0x40
+            HALT, // fail path
+            0x8BD0_0F00,
+            1, // SETR P 1
             HALT,
         ];
         let cpu = run_words(&words);
@@ -1349,10 +1486,12 @@ mod tests {
         // MEMSET64RR data=rd=B(1), addr=rs1=A(0): 0x5F00_0100.
         // MEMREADRR dest=rd=C(2), addr=rs1=A(0): 0x5B00_0200.
         let words = [
-            0x8BD0_0000, 0x200,       // SETR A 0x200
-            0x8BD0_0100, 0xDEAD_BEEF, // SETR B 0xDEADBEEF
-            0x5F00_0100,              // MEMSET64RR B A
-            0x5B00_0200,              // MEMREADRR C A
+            0x8BD0_0000,
+            0x200, // SETR A 0x200
+            0x8BD0_0100,
+            0xDEAD_BEEF, // SETR B 0xDEADBEEF
+            0x5F00_0100, // MEMSET64RR B A
+            0x5B00_0200, // MEMREADRR C A
             HALT,
         ];
         let cpu = run_words(&words);
@@ -1383,12 +1522,15 @@ mod tests {
         // SETR A 0 ; CALL FUNC(0x38) ; HALT ; NOP ; FUNC: SETR A 0x42 ; RET
         // CALL: 0xA200_0000, target 0x38. RET: 0x6580_0000. NOP pads 0x34 so FUNC lands at 0x38.
         let words = [
-            0x8BD0_0000, 0,          // 0x20 SETR A 0
-            0xA200_0000, 0x38,       // 0x28 CALL 0x38
-            HALT,                    // 0x30 (return lands here)
-            0x6C00_0000,             // 0x34 NOP (padding)
-            0x8BD0_0000, 0x42,       // 0x38 SETR A 0x42
-            0x6580_0000,             // 0x40 RET
+            0x8BD0_0000,
+            0, // 0x20 SETR A 0
+            0xA200_0000,
+            0x38,        // 0x28 CALL 0x38
+            HALT,        // 0x30 (return lands here)
+            0x6C00_0000, // 0x34 NOP (padding)
+            0x8BD0_0000,
+            0x42,        // 0x38 SETR A 0x42
+            0x6580_0000, // 0x40 RET
         ];
         let cpu = run_words(&words);
         assert_eq!(cpu.regs[0] as u32, 0x42);

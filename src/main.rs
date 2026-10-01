@@ -226,12 +226,7 @@ fn main() -> Result<(), i32> {
         opcodes_flag,
         textmate_flag,
     ) {
-        msg_list.push(
-            format!("Error {result_err} writing opcode list to HTML"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.push(format!("Error {result_err} writing opcode list to HTML"), None, None, MessageType::Error);
     }
 
     if textmate_flag || opcodes_flag {
