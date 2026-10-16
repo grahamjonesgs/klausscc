@@ -13,7 +13,7 @@
 //! | 16     | sp       | 32   | 16    | sp      |
 //! | 17     | pc       | 32   | 17    | pc (= the CFI return-address column) |
 //! | 18     | flags    | 32   | -     | flags: bit3 Z, bit2 S, bit1 C, bit0 V |
-//! | 19     | `int_mask` | 32 | -     | per-source interrupt enables (not modelled: 0) |
+//! | 19     | `int_mask` | 32 | -     | per-source interrupt enables (`INT_MASK`) |
 //!
 //! Breakpoints and watchpoints are emulated (code is never patched): before
 //! each instruction the PC is checked against the breakpoint set, and every
@@ -24,7 +24,11 @@
 //! Stops: HALT reports "exited" with the low byte of r12 (main's return value
 //! once `crt0` halts); a TRAP (`__builtin_debugtrap`) reports SIGTRAP with the
 //! PC on the TRAP, and resuming skips it; an invalid opcode reports SIGILL and
-//! a PC outside RAM SIGSEGV.  UART output streams to stdout and stdin feeds the
+//! a PC outside RAM SIGSEGV, and a `WAIT` nothing can wake SIGSTOP.
+//! Continuing takes interrupts as they become ready; a single-step never does
+//! (like the planned board debug module), so stepping does not fall into a
+//! handler — a pending interrupt is taken on the next continue, and stepping
+//! a `WAIT` completes it as if woken.  UART output streams to stdout and stdin feeds the
 //! UART receive FIFO.  The debugger cannot read or write MMIO (`0xF000_0000+`)
 //! unless `monitor mmio on` is given: some device reads have side effects,
 //! e.g. popping the UART RX FIFO, and debuggers read memory freely.
@@ -250,10 +254,8 @@ impl EmuTarget {
     fn pump_uart(&mut self) {
         let out = self.cpu.take_uart();
         if !out.is_empty() {
-            // The emulator stores each transmitted byte as a char (Latin-1).
-            let bytes: Vec<u8> = out.chars().map(|c| c as u32 as u8).collect();
             let mut stdout = std::io::stdout();
-            let _ = stdout.write_all(&bytes);
+            let _ = stdout.write_all(&crate::emulate::uart_bytes(&out));
             let _ = stdout.flush();
         }
         let rx: Vec<u8> = self.uart_rx.try_iter().collect();
@@ -262,9 +264,10 @@ impl EmuTarget {
         }
     }
 
-    /// Execute one instruction, checking breakpoints first and watchpoints
-    /// after.  Returns the stop reason, or `None` to keep going.
-    fn step_instruction(&mut self) -> Option<SingleThreadStopReason<u32>> {
+    /// Advance one step (an instruction, or an interrupt entry when
+    /// `allow_irq`), checking breakpoints first and watchpoints after.
+    /// Returns the stop reason, or `None` to keep going.
+    fn step_instruction(&mut self, allow_irq: bool) -> Option<SingleThreadStopReason<u32>> {
         let pc = self.cpu.debug_regs().pc;
         if !self.resuming {
             if self.hw_breakpoints.contains(&pc) {
@@ -275,7 +278,7 @@ impl EmuTarget {
             }
         }
         self.resuming = false;
-        let stop = self.cpu.step_one();
+        let stop = self.cpu.step_one(allow_irq);
         if let Some((addr, is_store)) = self.cpu.take_watch_hit() {
             return Some(SingleThreadStopReason::Watch {
                 tid: (),
@@ -289,6 +292,10 @@ impl EmuTarget {
             StopReason::InvalidOpcode(_) => SingleThreadStopReason::Signal(Signal::SIGILL),
             StopReason::PcOutOfRange(_) => SingleThreadStopReason::Signal(Signal::SIGSEGV),
             StopReason::InstructionCap => SingleThreadStopReason::Signal(Signal::SIGXCPU),
+            StopReason::WaitForever(pc) => {
+                eprintln!("klausscc gdbserver: WAIT at 0x{pc:08X} can never be woken (no unmasked, vectored interrupt)");
+                SingleThreadStopReason::Signal(Signal::SIGSTOP)
+            }
         })
     }
 
@@ -297,14 +304,14 @@ impl EmuTarget {
             let stop = if self.skipped_trap {
                 None // skipping the TRAP was the step
             } else {
-                self.step_instruction()
+                self.step_instruction(false) // single-steps never take interrupts
             };
             self.pump_uart();
             return RunEvent::Stop(stop.unwrap_or(SingleThreadStopReason::DoneStep));
         }
         loop {
             for _ in 0..POLL_INTERVAL {
-                if let Some(stop) = self.step_instruction() {
+                if let Some(stop) = self.step_instruction(true) {
                     self.pump_uart();
                     return RunEvent::Stop(stop);
                 }
@@ -359,9 +366,31 @@ impl MonitorCmd for EmuTarget {
                 outputln!(out, "MMIO access disabled");
             }
             Ok("mmio") => outputln!(out, "MMIO access is {}", if self.allow_mmio { "on" } else { "off" }),
+            Ok("irq") => {
+                let st = self.cpu.irq_state();
+                outputln!(
+                    out,
+                    "INT_MASK   0x{:X}   INT_PENDING 0x{:X}{}",
+                    st.mask,
+                    st.pending,
+                    if st.waiting { "   (in WAIT)" } else { "" }
+                );
+                for (n, v) in st.vectors.iter().enumerate() {
+                    outputln!(out, "INT_VEC{n}   0x{v:08X}");
+                }
+                outputln!(
+                    out,
+                    "TIMER      period {} count {}   cycles {} (~{} ms)",
+                    st.timer_period,
+                    st.timer_count,
+                    st.cycles,
+                    st.cycles / 100_000
+                );
+            }
             _ => {
                 outputln!(out, "klausscc gdbserver monitor commands:");
                 outputln!(out, "  mmio on|off   allow debugger reads/writes of 0xF000_0000+ (default off)");
+                outputln!(out, "  irq           interrupt controller and timer state");
             }
         }
         Ok(())
@@ -375,7 +404,7 @@ impl SingleThreadBase for EmuTarget {
         regs.sp = d.sp;
         regs.pc = d.pc;
         regs.flags = u32::from(d.flags);
-        regs.int_mask = 0;
+        regs.int_mask = u32::from(d.int_mask);
         Ok(())
     }
 
@@ -385,6 +414,7 @@ impl SingleThreadBase for EmuTarget {
             sp: regs.sp,
             pc: regs.pc,
             flags: (regs.flags & 0xF) as u8,
+            int_mask: (regs.int_mask & 0xF) as u8,
         });
         Ok(())
     }
@@ -431,7 +461,7 @@ impl SingleRegisterAccess<()> for EmuTarget {
             KlaussRegId::Sp => d.sp.to_le_bytes().to_vec(),
             KlaussRegId::Pc => d.pc.to_le_bytes().to_vec(),
             KlaussRegId::Flags => u32::from(d.flags).to_le_bytes().to_vec(),
-            KlaussRegId::IntMask => 0_u32.to_le_bytes().to_vec(),
+            KlaussRegId::IntMask => u32::from(d.int_mask).to_le_bytes().to_vec(),
         };
         let n = bytes.len().min(buf.len());
         buf[..n].copy_from_slice(&bytes[..n]);
@@ -448,7 +478,7 @@ impl SingleRegisterAccess<()> for EmuTarget {
             KlaussRegId::Sp => d.sp = word(val)?,
             KlaussRegId::Pc => d.pc = word(val)?,
             KlaussRegId::Flags => d.flags = (word(val)? & 0xF) as u8,
-            KlaussRegId::IntMask => return Ok(()), // not modelled
+            KlaussRegId::IntMask => d.int_mask = (word(val)? & 0xF) as u8,
         }
         self.cpu.set_debug_regs(&d);
         Ok(())

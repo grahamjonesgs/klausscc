@@ -11,9 +11,20 @@
 //!
 //! The model is intentionally cycle-agnostic: each instruction commits
 //! atomically.  Cache, IFB, timing and the DDR multi-cycle pipeline are not
-//! modelled (they have no architectural effect).  Interrupts / timer MMIO /
-//! WAIT are stubbed (documented in the summary); the validation corpus does
-//! not exercise them.
+//! modelled (they have no architectural effect).
+//!
+//! Interrupts follow `CPU_ARCHITECTURE.md` §13.1 and the RTL (`KlaussCPU.sv`
+//! IRQ controller, `pipeline_core.sv` entry sequencer): the controller at
+//! `0xF00F_0000` (`INT_MASK`, `INT_PENDING`, `INT_VECn`, `TIMER_PERIOD`,
+//! `TIMER_COUNT`, the millisecond clock) with source 0 = the periodic timer.
+//! An unmasked, vectored pending source is taken between instructions: the
+//! context word `{INT_MASK, flags, PC}` is pushed, the source's mask bit
+//! cleared and the timer's pending bit acknowledged; `IRET` restores all of
+//! it, and `WAIT` sleeps until a source is ready.  Time is modelled as
+//! [`CYCLES_PER_INSTRUCTION`] cycles per retired instruction, so interrupt
+//! *timing* differs from the RTL (no golden-trace use) while the
+//! architectural effects match.  Blitter / Ethernet interrupts (sources 1-2)
+//! are not modelled.
 //!
 //! ## v2 word-0 layout (`ISA_ENCODING_V2.md` §1)
 //!
@@ -39,6 +50,18 @@ use std::collections::VecDeque;
 /// Heap-header byte size (4 doublewords) — code starts here (0x20).
 #[allow(dead_code, reason = "used by default_entry() / tests; documents the code base")]
 const CODE_BASE: u32 = 32;
+/// Modelled `i_Clk` cycles per retired instruction (timer, millisecond clock and
+/// the cycle counter).  The emulator is not cycle-accurate; this only sets how
+/// fast time passes relative to the instruction stream.
+pub const CYCLES_PER_INSTRUCTION: u64 = 2;
+/// `i_Clk` cycles per millisecond (100 MHz).
+const CYCLES_PER_MS: u64 = 100_000;
+/// `TIMER_PERIOD` reset value (~10.5 ms at 100 MHz).
+const TIMER_PERIOD_RESET: u32 = 0x000F_FFFF;
+/// Interrupt controller / timer device select (`addr[27:16]`).
+const IRQ_DEV_SELECT: u32 = 0x00F;
+/// Performance-counter device select (`addr[27:16]`).
+const PERF_DEV_SELECT: u32 = 0x00D;
 /// Default instruction-count cap to guard against runaway / infinite loops.
 pub const DEFAULT_MAX_INSTRUCTIONS: u64 = 50_000_000;
 /// Size of the modelled address space (128 MiB DDR2).
@@ -83,6 +106,8 @@ pub enum StopReason {
     InvalidOpcode(u32),
     /// PC left the modelled address space.
     PcOutOfRange(u32),
+    /// `WAIT` with no interrupt source able to wake it (PC after the WAIT).
+    WaitForever(u32),
 }
 
 /// Data access a debugger watchpoint triggers on.
@@ -118,6 +143,27 @@ pub struct DebugRegs {
     pub pc: u32,
     /// Flags nibble: bit 3 = Z, bit 2 = S, bit 1 = C, bit 0 = V.
     pub flags: u8,
+    /// Per-source interrupt enables (`INT_MASK`, 4 bits).
+    pub int_mask: u8,
+}
+
+/// Interrupt controller and timer state, for a debugger's `monitor irq`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IrqState {
+    /// `INT_MASK`.
+    pub mask: u8,
+    /// `INT_PENDING` (bit 0 = timer).
+    pub pending: u8,
+    /// `INT_VEC0..3`.
+    pub vectors: [u32; 4],
+    /// `TIMER_PERIOD`.
+    pub timer_period: u32,
+    /// `TIMER_COUNT`.
+    pub timer_count: u32,
+    /// Modelled cycles since reset.
+    pub cycles: u64,
+    /// True while parked in `WAIT`.
+    pub waiting: bool,
 }
 
 /// Result of an emulation run.
@@ -129,6 +175,13 @@ pub struct EmulateResult {
     pub instructions: u64,
     /// Why execution stopped.
     pub stop: StopReason,
+}
+
+/// The raw UART bytes in `uart`, which stores each transmitted byte as one
+/// `char` (Latin-1), so multi-byte UTF-8 output can be written back verbatim.
+#[must_use]
+pub fn uart_bytes(uart: &str) -> Vec<u8> {
+    uart.chars().map(|c| c as u32 as u8).collect()
 }
 
 /// The architectural machine state.
@@ -172,6 +225,24 @@ pub struct Cpu {
     watches: Vec<Watch>,
     /// First watchpoint hit by the current instruction: (watch address, was a store).
     watch_hit: Option<(u32, bool)>,
+    /// `INT_MASK`: per-source interrupt enables (4 bits).
+    int_mask: u8,
+    /// `INT_VEC0..3`: handler addresses (0 disables a source).
+    int_vec: [u32; 4],
+    /// Source 0 pending (`r_timer_interrupt`), cleared when it is dispatched.
+    timer_pending: bool,
+    /// `TIMER_PERIOD`.
+    timer_period: u32,
+    /// Timer counter; rolls over (setting `timer_pending`) past the period.
+    timer_count: u32,
+    /// Modelled `i_Clk` cycles since reset.
+    cycles: u64,
+    /// Retired instructions since reset (the `PERF_INSTR` counter).
+    instret: u64,
+    /// Cycle / instruction values at the last `PERF_CTRL` clear.
+    perf_base: (u64, u64),
+    /// Parked in `WAIT` until an interrupt source is ready.
+    waiting: bool,
 }
 
 impl Cpu {
@@ -200,6 +271,15 @@ impl Cpu {
             last_write: None,
             watches: Vec::new(),
             watch_hit: None,
+            int_mask: 0,
+            int_vec: [0; 4],
+            timer_pending: false,
+            timer_period: TIMER_PERIOD_RESET,
+            timer_count: 0,
+            cycles: 0,
+            instret: 0,
+            perf_base: (0, 0),
+            waiting: false,
         }
     }
 
@@ -323,8 +403,17 @@ impl Cpu {
     /// bits of a 64-bit word.  `addr[27:16] == 0x001` selects the UART; every
     /// other device/offset reads 0 (RTL `default: 0`).
     fn mmio_read(&mut self, addr: u32) -> u64 {
-        if (addr >> 16) & 0xFFF != UART_DEV_SELECT {
-            return 0;
+        match (addr >> 16) & 0xFFF {
+            IRQ_DEV_SELECT => return self.irq_mmio_read(addr & 0xFFFF),
+            PERF_DEV_SELECT => {
+                return match addr & 0xFFFF {
+                    0x0008 => self.cycles - self.perf_base.0,  // PERF_CYCLES
+                    0x0010 => self.instret - self.perf_base.1, // PERF_INSTR
+                    _ => 0,
+                };
+            }
+            UART_DEV_SELECT => {}
+            _ => return 0,
         }
         match addr & 0xFFFF {
             UART_RX_DATA => u64::from(self.uart_rx.pop_front().unwrap_or(0)), // read-to-consume
@@ -342,8 +431,147 @@ impl Cpu {
     /// Service an MMIO write.  A UART `TX_DATA` store transmits `data[7:0]`; every
     /// other device/offset is ignored (RTL `default: 0`).
     fn mmio_write(&mut self, addr: u32, data: u64) {
-        if (addr >> 16) & 0xFFF == UART_DEV_SELECT && (addr & 0xFFFF) == UART_TX_DATA {
-            self.tx_byte((data & 0xFF) as u8);
+        match (addr >> 16) & 0xFFF {
+            UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
+            IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
+            PERF_DEV_SELECT if addr as u16 == 0 && data & 1 != 0 => self.perf_base = (self.cycles, self.instret),
+            _ => {}
+        }
+    }
+
+    // ---- interrupt controller / timer (0xF00F_0000) ---------------------------
+
+    /// Read an interrupt-controller register (RTL `KlaussCPU.sv` read mux).
+    fn irq_mmio_read(&self, offset: u32) -> u64 {
+        match offset {
+            0x0000 => u64::from(self.int_mask),
+            0x0008 => u64::from(self.timer_pending), // INT_PENDING: [0]=timer (blitter/eth not modelled)
+            0x0010 | 0x0018 | 0x0020 | 0x0028 => u64::from(self.int_vec[((offset - 0x10) / 8) as usize]),
+            0x0030 => u64::from(self.timer_period),
+            0x0038 => u64::from(self.timer_count),
+            0x0040 => self.cycles / CYCLES_PER_MS, // free-running millisecond clock
+            _ => 0,
+        }
+    }
+
+    /// Write an interrupt-controller register; `INT_PENDING` / `TIMER_COUNT` are read-only.
+    fn irq_mmio_write(&mut self, offset: u32, data: u64) {
+        match offset {
+            0x0000 => self.int_mask = (data & 0xF) as u8,
+            0x0010 | 0x0018 | 0x0020 | 0x0028 => self.int_vec[((offset - 0x10) / 8) as usize] = data as u32,
+            0x0030 => {
+                self.timer_period = data as u32;
+                self.timer_count = 0; // restart with the new period
+            }
+            _ => {}
+        }
+    }
+
+    /// Advance modelled time: the cycle counter and the timer, which sets its
+    /// pending bit when the count passes `TIMER_PERIOD` and restarts from 0.
+    fn tick(&mut self, cycles: u64) {
+        self.cycles += cycles;
+        let count = u64::from(self.timer_count) + cycles;
+        if count > u64::from(self.timer_period) {
+            self.timer_count = 0;
+            self.timer_pending = true;
+        } else {
+            self.timer_count = count as u32;
+        }
+    }
+
+    /// The source that would be dispatched now: pending, vectored and unmasked
+    /// (priority timer > blitter > Ethernet; only the timer is modelled).
+    fn irq_ready(&self) -> Option<usize> {
+        (self.timer_pending && self.timer_can_fire()).then_some(0)
+    }
+
+    /// True if the timer can raise a dispatchable interrupt.
+    const fn timer_can_fire(&self) -> bool {
+        self.int_vec[0] != 0 && self.int_mask & 1 != 0
+    }
+
+    /// Jump modelled time to the timer's next expiry (sets it pending).
+    fn skip_to_timer_expiry(&mut self) {
+        let remaining = u64::from(self.timer_period.saturating_sub(self.timer_count)) + 1;
+        self.tick(remaining);
+    }
+
+    /// Interrupt entry (`pipeline_core.sv` IRQ sequencer): push the context
+    /// word at SP-8, mask the source, acknowledge it, jump to its vector.
+    fn take_irq(&mut self, src: usize) {
+        let b = |f: bool| u64::from(f);
+        let ctx = (u64::from(self.int_mask) << 39)
+            | (b(self.zero) << 38)
+            | (b(self.flag_e()) << 37)
+            | (b(self.carry) << 36)
+            | (b(self.overflow) << 35)
+            | (b(self.sign) << 34)
+            | (b(self.flag_l()) << 33)
+            | (b(self.flag_u()) << 32)
+            | u64::from(self.pc);
+        self.sp = self.sp.wrapping_sub(8);
+        self.write64(self.sp, ctx);
+        self.int_mask &= !(1 << src);
+        if src == 0 {
+            self.timer_pending = false;
+        }
+        self.pc = self.int_vec[src];
+        self.waiting = false;
+    }
+
+    /// One step of the machine: take a ready interrupt (entry is a step of
+    /// its own), or wake from / finish a `WAIT`, or retire one instruction,
+    /// returning its `(pc, word)` for the trace.  With `allow_irq` false (a
+    /// debugger single-step) no interrupt is taken, and a `WAIT` completes as
+    /// if woken, leaving the interrupt pending for the next continue.
+    fn advance(&mut self, allow_irq: bool) -> Option<(u32, u32)> {
+        if self.waiting {
+            if !allow_irq {
+                if self.timer_can_fire() {
+                    self.skip_to_timer_expiry();
+                }
+                self.waiting = false;
+                return None;
+            }
+            if self.irq_ready().is_none() {
+                if !self.timer_can_fire() {
+                    self.stop = Some(StopReason::WaitForever(self.pc));
+                    return None;
+                }
+                self.skip_to_timer_expiry();
+            }
+        }
+        if allow_irq {
+            if let Some(src) = self.irq_ready() {
+                self.take_irq(src);
+                return None;
+            }
+        }
+        let pc = self.pc;
+        if (pc as usize) + 4 > self.mem.len() {
+            self.stop = Some(StopReason::PcOutOfRange(pc));
+            return None;
+        }
+        let word = self.read32(pc);
+        self.last_write = None;
+        self.step(word);
+        self.instret += 1;
+        self.tick(CYCLES_PER_INSTRUCTION);
+        Some((pc, word))
+    }
+
+    /// Interrupt controller and timer state.
+    #[must_use]
+    pub const fn irq_state(&self) -> IrqState {
+        IrqState {
+            mask: self.int_mask,
+            pending: self.timer_pending as u8,
+            vectors: self.int_vec,
+            timer_period: self.timer_period,
+            timer_count: self.timer_count,
+            cycles: self.cycles,
+            waiting: self.waiting,
         }
     }
 
@@ -363,6 +591,7 @@ impl Cpu {
             sp: self.sp,
             pc: self.pc,
             flags: (u8::from(self.zero) << 3) | (u8::from(self.sign) << 2) | (u8::from(self.carry) << 1) | u8::from(self.overflow),
+            int_mask: self.int_mask,
         }
     }
 
@@ -375,6 +604,7 @@ impl Cpu {
         self.sign = regs.flags & 4 != 0;
         self.carry = regs.flags & 2 != 0;
         self.overflow = regs.flags & 1 != 0;
+        self.int_mask = regs.int_mask & 0xF;
     }
 
     /// Read RAM without side effects (MMIO is not touched).  Returns the
@@ -443,23 +673,19 @@ impl Cpu {
         self.read32(addr)
     }
 
-    /// Execute one instruction.  Returns why execution stopped, if it did
-    /// (HALT, TRAP, invalid opcode, PC out of range); `None` to keep going.
-    pub fn step_one(&mut self) -> Option<StopReason> {
+    /// Advance one step — retire one instruction, or take a ready interrupt
+    /// (its entry is a step of its own, so a breakpoint on the handler is
+    /// seen), or finish a `WAIT`.  With `allow_irq` false (a single-step) no
+    /// interrupt is taken.  Returns why execution stopped, if it did (HALT,
+    /// TRAP, invalid opcode, PC out of range, WAIT forever); `None` to go on.
+    pub fn step_one(&mut self, allow_irq: bool) -> Option<StopReason> {
         if self.halted {
             return Some(StopReason::Halt);
         }
         if let Some(stop) = &self.stop {
             return Some(stop.clone());
         }
-        let pc = self.pc;
-        if (pc as usize) + 4 > self.mem.len() {
-            self.stop = Some(StopReason::PcOutOfRange(pc));
-            return self.stop.clone();
-        }
-        let word = self.read32(pc);
-        self.last_write = None;
-        self.step(word);
+        self.advance(allow_irq);
         if self.halted {
             Some(StopReason::Halt)
         } else {
@@ -567,17 +793,11 @@ impl Cpu {
             if self.stop.is_some() {
                 break;
             }
-            let pc = self.pc;
-            if (pc as usize) + 4 > self.mem.len() {
-                self.stop = Some(StopReason::PcOutOfRange(pc));
-                break;
-            }
-            let word = self.read32(pc);
-            self.last_write = None;
-            self.step(word);
-            count += 1;
-            if let Some(t) = trace.as_deref_mut() {
-                self.trace_line(t, count, pc, word);
+            if let Some((pc, word)) = self.advance(true) {
+                count += 1;
+                if let Some(t) = trace.as_deref_mut() {
+                    self.trace_line(t, count, pc, word);
+                }
             }
         }
         let stop = self
@@ -1228,7 +1448,8 @@ impl Cpu {
         }
     }
 
-    /// IRET — pop the saved interrupt context and restore PC[31:0] + flags[38:32].
+    /// IRET — pop the saved interrupt context and restore PC[31:0], flags[38:32]
+    /// and `INT_MASK` [42:39].
     ///
     /// The 7-bit saved word is `{Z,E,C,V,S,L,U}` (bit38→Z … bit32→U), but only the
     /// unified `Z/S/C/V` are consumed (§1.5); the derived `E`(bit37)/`L`(bit33)/
@@ -1241,6 +1462,7 @@ impl Cpu {
         self.carry = (ctx >> 36) & 1 == 1;
         self.overflow = (ctx >> 35) & 1 == 1;
         self.sign = (ctx >> 34) & 1 == 1;
+        self.int_mask = ((ctx >> 39) & 0xF) as u8;
     }
 
     /// Class A — mul / div / mod.
@@ -1316,7 +1538,13 @@ impl Cpu {
     fn v2_system(&mut self, word: u32, next: u32) {
         let op = (word >> 16) & 0x3F;
         match op {
-            0 | 2 | 5 => self.pc = next,             // NOP / WAIT / DELAY (all stubbed as fall-through)
+            0 | 5 => self.pc = next, // NOP / DELAY (DELAY's wait is not modelled)
+            2 => {
+                // WAIT: sleep until an interrupt source is ready; the IRQ
+                // pushes the following instruction as the resume address.
+                self.pc = next;
+                self.waiting = true;
+            }
             1 => self.halted = true,                 // HALT
             3 => self.pc = 0x4,                      // RESET → PC = 0x4
             4 => self.stop = Some(StopReason::Trap), // TRAP
@@ -1756,7 +1984,7 @@ mod tests {
     #[test]
     fn test_debug_step_one_and_regs() {
         let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
-        assert_eq!(cpu.step_one(), None);
+        assert_eq!(cpu.step_one(true), None);
         assert_eq!(cpu.debug_regs().r[0], 0x200);
         assert_eq!(cpu.debug_regs().pc, 0x28, "SETR is 2 words");
         let mut regs = cpu.debug_regs();
@@ -1764,8 +1992,8 @@ mod tests {
         regs.flags = 0b1010; // Z and C
         cpu.set_debug_regs(&regs);
         assert_eq!(cpu.debug_regs(), regs);
-        while cpu.step_one().is_none() {}
-        assert_eq!(cpu.step_one(), Some(StopReason::Halt), "HALT stays final");
+        while cpu.step_one(true).is_none() {}
+        assert_eq!(cpu.step_one(true), Some(StopReason::Halt), "HALT stays final");
     }
 
     #[test]
@@ -1777,7 +2005,7 @@ mod tests {
             kind: WatchKind::Write,
         }]);
         let mut hits = Vec::new();
-        while cpu.step_one().is_none() {
+        while cpu.step_one(true).is_none() {
             if let Some(hit) = cpu.take_watch_hit() {
                 hits.push((hit, cpu.debug_regs().pc));
             }
@@ -1793,7 +2021,7 @@ mod tests {
             kind: WatchKind::Read,
         }]);
         let mut reads = 0;
-        while cpu.step_one().is_none() {
+        while cpu.step_one(true).is_none() {
             reads += usize::from(cpu.take_watch_hit().is_some());
         }
         assert_eq!(reads, 1, "only MEMREADRR reads 0x200");
@@ -1820,15 +2048,101 @@ mod tests {
     fn test_debug_trap_stops_on_the_trap_and_clear_stop_resumes() {
         // TRAP ; SETR A 7 ; HALT
         let mut cpu = Cpu::new(&image_from_words(&[0x6C04_0000, 0x8BD0_0000, 7, HALT]), default_entry());
-        assert_eq!(cpu.step_one(), Some(StopReason::Trap));
+        assert_eq!(cpu.step_one(true), Some(StopReason::Trap));
         assert_eq!(cpu.debug_regs().pc, 0x20, "PC stays on the TRAP");
         assert_eq!(cpu.fetch_word(0x20), 0x6C04_0000);
         let mut regs = cpu.debug_regs();
         regs.pc += 4;
         cpu.set_debug_regs(&regs);
         cpu.clear_stop();
-        assert_eq!(cpu.step_one(), None);
+        assert_eq!(cpu.step_one(true), None);
         assert_eq!(cpu.debug_regs().r[0], 7);
+    }
+
+    // ---- interrupts / timer -----------------------------------------------------
+
+    /// MEMSET32 data=rd, addr=rs1.
+    const fn memset32(rd: u32, rs1: u32) -> u32 {
+        0x5E00_0000 | (rd << 8) | (rs1 << 4)
+    }
+    const WAIT: u32 = 0x6C02_0000;
+    const IRET: u32 = 0x65C0_0000;
+
+    /// Install a timer handler at 0x70, period 100 cycles, unmask, WAIT; the
+    /// handler sets C = 0x77 and IRETs to 0x60, which sets D = 0x55 and halts.
+    fn timer_program() -> Vec<u32> {
+        let mut w = Vec::new();
+        w.extend(setr(0, 0x70)); // 0x20
+        w.extend(setr(1, 0xF00F_0010)); // 0x28  INT_VEC0
+        w.push(memset32(0, 1)); // 0x30
+        w.extend(setr(0, 100)); // 0x34
+        w.extend(setr(1, 0xF00F_0030)); // 0x3C  TIMER_PERIOD
+        w.push(memset32(0, 1)); // 0x44
+        w.extend(setr(0, 1)); // 0x48
+        w.extend(setr(1, 0xF00F_0000)); // 0x50  INT_MASK
+        w.push(memset32(0, 1)); // 0x58
+        w.push(WAIT); // 0x5C
+        w.extend(setr(3, 0x55)); // 0x60  resume point
+        w.push(HALT); // 0x68
+        w.push(0x6C00_0000); // 0x6C  NOP
+        w.extend(setr(2, 0x77)); // 0x70  handler
+        w.push(IRET); // 0x78
+        w
+    }
+
+    #[test]
+    fn test_timer_irq_wakes_wait_and_iret_restores() {
+        let mut cpu = Cpu::new(&image_from_words(&timer_program()), default_entry());
+        let result = cpu.run(1000, None);
+        assert_eq!(result.stop, StopReason::Halt);
+        assert_eq!(cpu.regs[2], 0x77, "handler ran");
+        assert_eq!(cpu.regs[3], 0x55, "IRET resumed after the WAIT");
+        assert_eq!(cpu.int_mask, 1, "IRET restored the mask the entry cleared");
+        assert_eq!(cpu.sp, STACK_TOP, "IRET popped the context word");
+        let ctx = cpu.peek64(STACK_TOP - 8);
+        assert_eq!(ctx as u32, 0x60, "pushed resume PC");
+        assert_eq!((ctx >> 39) & 0xF, 1, "pushed INT_MASK");
+    }
+
+    #[test]
+    fn test_irq_entry_is_its_own_step_and_masks_the_source() {
+        let mut cpu = Cpu::new(&image_from_words(&timer_program()), default_entry());
+        while cpu.debug_regs().pc != 0x70 {
+            assert_eq!(cpu.step_one(true), None);
+        }
+        assert_eq!(cpu.regs[2], 0, "entry executes no handler instruction");
+        assert_eq!(cpu.irq_state().mask, 0, "source masked while the handler runs");
+        assert_eq!(cpu.irq_state().pending, 0, "dispatch acknowledged the timer");
+    }
+
+    #[test]
+    fn test_single_step_never_takes_an_interrupt() {
+        let mut cpu = Cpu::new(&image_from_words(&timer_program()), default_entry());
+        while cpu.step_one(false).is_none() {}
+        assert_eq!(cpu.step_one(false), Some(StopReason::Halt));
+        assert_eq!(cpu.regs[2], 0, "handler never ran");
+        assert_eq!(cpu.regs[3], 0x55, "WAIT completed as if woken");
+        assert_eq!(cpu.irq_state().pending, 1, "the interrupt is left pending");
+    }
+
+    #[test]
+    fn test_wait_with_nothing_to_wake_it_stops() {
+        let mut cpu = Cpu::new(&image_from_words(&[WAIT, HALT]), default_entry());
+        assert_eq!(cpu.run(100, None).stop, StopReason::WaitForever(0x24));
+    }
+
+    #[test]
+    fn test_irq_controller_registers() {
+        let mut cpu = Cpu::new(&image_from_words(&[HALT]), default_entry());
+        cpu.mmio_write(0xF00F_0018, 0x1234);
+        cpu.mmio_write(0xF00F_0030, 500);
+        cpu.mmio_write(0xF00F_0000, 0xFF);
+        assert_eq!(cpu.mmio_read(0xF00F_0018), 0x1234);
+        assert_eq!(cpu.mmio_read(0xF00F_0030), 500);
+        assert_eq!(cpu.mmio_read(0xF00F_0000), 0xF, "4-bit mask");
+        cpu.tick(250_000);
+        assert_eq!(cpu.mmio_read(0xF00F_0040), 2, "millisecond clock");
+        assert_eq!(cpu.mmio_read(0xF00F_0008), 1, "timer pending after its period");
     }
 
     // ---- ISA v3 short 1-word forms (ISA_V3_PROPOSAL.md §3) ----------------

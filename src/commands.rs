@@ -696,7 +696,12 @@ pub(crate) fn run_emulate(
         result.instructions, result.stop
     );
     println!("--- Captured UART output ---");
-    print!("{}", result.uart);
+    {
+        use std::io::Write as _;
+        let mut out = std::io::stdout();
+        let _ = out.write_all(&emulate::uart_bytes(&result.uart));
+        let _ = out.flush();
+    }
     println!("--- end UART ---");
     Ok(())
 }
@@ -762,7 +767,12 @@ pub(crate) fn run_emulate_elf(
         result.instructions, result.stop
     );
     println!("--- Captured UART output ---");
-    print!("{}", result.uart);
+    {
+        use std::io::Write as _;
+        let mut out = std::io::stdout();
+        let _ = out.write_all(&emulate::uart_bytes(&result.uart));
+        let _ = out.flush();
+    }
     println!("--- end UART ---");
     Ok(())
 }
