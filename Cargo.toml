@@ -24,6 +24,7 @@ serde_json = {version = "1.0"}
 ctrlc = { version = "3.4" }
 crossterm = { version = "0.28" }
 object = { version = "0.36", default-features = false, features = ["read"] }
+gdbstub = "0.7"
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.31", features = ["term"] }

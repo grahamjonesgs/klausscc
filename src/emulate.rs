@@ -85,6 +85,41 @@ pub enum StopReason {
     PcOutOfRange(u32),
 }
 
+/// Data access a debugger watchpoint triggers on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatchKind {
+    /// Loads only.
+    Read,
+    /// Stores only.
+    Write,
+    /// Loads and stores.
+    Access,
+}
+
+/// A debugger watchpoint over `[addr, addr + len)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Watch {
+    /// First watched byte.
+    pub addr: u32,
+    /// Number of watched bytes.
+    pub len: u32,
+    /// Which accesses trigger it.
+    pub kind: WatchKind,
+}
+
+/// Architectural registers as seen by a debugger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct DebugRegs {
+    /// R0..R15.
+    pub r: [u64; 16],
+    /// Stack pointer.
+    pub sp: u32,
+    /// Program counter.
+    pub pc: u32,
+    /// Flags nibble: bit 3 = Z, bit 2 = S, bit 1 = C, bit 0 = V.
+    pub flags: u8,
+}
+
 /// Result of an emulation run.
 pub struct EmulateResult {
     /// Captured UART output: the byte stream written to the UART `TX_DATA` MMIO
@@ -133,6 +168,10 @@ pub struct Cpu {
     stop: Option<StopReason>,
     /// Pending memory write for trace annotation (addr, `byte_enable`, data).
     last_write: Option<(u32, u8, u64)>,
+    /// Debugger watchpoints checked on every data access.
+    watches: Vec<Watch>,
+    /// First watchpoint hit by the current instruction: (watch address, was a store).
+    watch_hit: Option<(u32, bool)>,
 }
 
 impl Cpu {
@@ -159,6 +198,8 @@ impl Cpu {
             halted: false,
             stop: None,
             last_write: None,
+            watches: Vec::new(),
+            watch_hit: None,
         }
     }
 
@@ -179,6 +220,7 @@ impl Cpu {
     /// mutates the UART FIFO.  Instruction/immediate fetch uses `read32` instead,
     /// so this never fires on a code fetch.
     fn read64(&mut self, addr: u32) -> u64 {
+        self.note_access(addr, 8, false);
         if is_mmio(addr) {
             return self.mmio_read(addr);
         }
@@ -193,6 +235,7 @@ impl Cpu {
 
     /// Read `n` bytes (1/2/4) zero-extended into a u64, little-endian.
     fn read_sub(&mut self, addr: u32, n: usize) -> u64 {
+        self.note_access(addr, n as u32, false);
         if is_mmio(addr) {
             // MMIO presents its value in the low bits; a sub-word load takes the
             // low `n` bytes (addr[2]==0 lands the value in [31:0]).
@@ -211,6 +254,7 @@ impl Cpu {
 
     /// Write a 64-bit doubleword, record the write for the trace.
     fn write64(&mut self, addr: u32, val: u64) {
+        self.note_access(addr, 8, true);
         if is_mmio(addr) {
             self.mmio_write(addr, val);
         } else {
@@ -226,6 +270,7 @@ impl Cpu {
     fn write_sub(&mut self, addr: u32, val: u64, n: usize) {
         // Byte-enable mask placed at the byte-lane within the doubleword, matching
         // the RTL's byte-enable semantics for the trace `be` field.
+        self.note_access(addr, n as u32, true);
         let lane = (addr & 7) as usize;
         let be_bits: u8 = ((1_u16 << n) - 1).rotate_left(lane as u32) as u8;
         if is_mmio(addr) {
@@ -239,7 +284,37 @@ impl Cpu {
                 self.mem[a + i] = (val >> (8 * i)) as u8;
             }
         }
-        self.last_write = Some((addr & !7, be_bits, self.read64(addr & !7)));
+        self.last_write = Some((addr & !7, be_bits, self.peek64(addr & !7)));
+    }
+
+    /// Side-effect-free 64-bit RAM read (trace annotation): no MMIO, no watchpoints.
+    fn peek64(&self, addr: u32) -> u64 {
+        let a = addr as usize;
+        if is_mmio(addr) || a + 8 > self.mem.len() {
+            return 0;
+        }
+        let mut b = [0_u8; 8];
+        b.copy_from_slice(&self.mem[a..a + 8]);
+        u64::from_le_bytes(b)
+    }
+
+    /// Record the first watchpoint the current instruction's data access hits.
+    fn note_access(&mut self, addr: u32, n: u32, is_store: bool) {
+        if self.watches.is_empty() || self.watch_hit.is_some() {
+            return;
+        }
+        let end = u64::from(addr) + u64::from(n);
+        for w in &self.watches {
+            let kind_matches = match w.kind {
+                WatchKind::Read => !is_store,
+                WatchKind::Write => is_store,
+                WatchKind::Access => true,
+            };
+            if kind_matches && u64::from(addr) < u64::from(w.addr) + u64::from(w.len) && u64::from(w.addr) < end {
+                self.watch_hit = Some((w.addr, is_store));
+                return;
+            }
+        }
     }
 
     // ---- memory-mapped I/O ---------------------------------------------------
@@ -276,6 +351,142 @@ impl Cpu {
     #[allow(dead_code, reason = "public golden-model API; exercised by tests and external drivers")]
     pub fn feed_uart_rx(&mut self, bytes: &[u8]) {
         self.uart_rx.extend(bytes.iter().copied());
+    }
+
+    // ---- debugger interface (klausscc --gdbserver) ----------------------------
+
+    /// Snapshot of the architectural registers.
+    #[must_use]
+    pub fn debug_regs(&self) -> DebugRegs {
+        DebugRegs {
+            r: self.regs,
+            sp: self.sp,
+            pc: self.pc,
+            flags: (u8::from(self.zero) << 3) | (u8::from(self.sign) << 2) | (u8::from(self.carry) << 1) | u8::from(self.overflow),
+        }
+    }
+
+    /// Overwrite the architectural registers.
+    pub fn set_debug_regs(&mut self, regs: &DebugRegs) {
+        self.regs = regs.r;
+        self.sp = regs.sp;
+        self.pc = regs.pc;
+        self.zero = regs.flags & 8 != 0;
+        self.sign = regs.flags & 4 != 0;
+        self.carry = regs.flags & 2 != 0;
+        self.overflow = regs.flags & 1 != 0;
+    }
+
+    /// Read RAM without side effects (MMIO is not touched).  Returns the
+    /// number of bytes read, which stops short at the end of RAM.
+    pub fn debug_read(&self, addr: u32, buf: &mut [u8]) -> usize {
+        let a = addr as usize;
+        if is_mmio(addr) || a >= self.mem.len() {
+            return 0;
+        }
+        let n = buf.len().min(self.mem.len() - a);
+        buf[..n].copy_from_slice(&self.mem[a..a + n]);
+        n
+    }
+
+    /// Write RAM (MMIO is not touched).  Returns false if any byte is outside RAM.
+    pub fn debug_write(&mut self, addr: u32, data: &[u8]) -> bool {
+        let a = addr as usize;
+        if is_mmio(addr) || a + data.len() > self.mem.len() {
+            return false;
+        }
+        self.mem[a..a + data.len()].copy_from_slice(data);
+        true
+    }
+
+    /// Read device registers for a debugger that asked for MMIO access:
+    /// each 8-byte register the range touches is read once, with the same
+    /// side effects as a CPU load (e.g. popping the UART RX FIFO).
+    pub fn debug_read_mmio(&mut self, addr: u32, buf: &mut [u8]) -> usize {
+        let mut done = 0;
+        while done < buf.len() {
+            let a = addr.wrapping_add(done as u32);
+            if !is_mmio(a) {
+                break;
+            }
+            let reg = self.mmio_read(a & !7).to_le_bytes();
+            let lane = (a & 7) as usize;
+            let n = (8 - lane).min(buf.len() - done);
+            buf[done..done + n].copy_from_slice(&reg[lane..lane + n]);
+            done += n;
+        }
+        done
+    }
+
+    /// Write device registers for a debugger: each aligned 8-byte register in
+    /// the range is written once with the bytes given (missing bytes are 0).
+    pub fn debug_write_mmio(&mut self, addr: u32, data: &[u8]) -> bool {
+        let mut done = 0;
+        while done < data.len() {
+            let a = addr.wrapping_add(done as u32);
+            if !is_mmio(a) {
+                return false;
+            }
+            let lane = (a & 7) as usize;
+            let n = (8 - lane).min(data.len() - done);
+            let mut reg = [0_u8; 8];
+            reg[lane..lane + n].copy_from_slice(&data[done..done + n]);
+            self.mmio_write(a & !7, u64::from_le_bytes(reg));
+            done += n;
+        }
+        true
+    }
+
+    /// The instruction word at `addr` (0 outside RAM).
+    #[must_use]
+    pub fn fetch_word(&self, addr: u32) -> u32 {
+        self.read32(addr)
+    }
+
+    /// Execute one instruction.  Returns why execution stopped, if it did
+    /// (HALT, TRAP, invalid opcode, PC out of range); `None` to keep going.
+    pub fn step_one(&mut self) -> Option<StopReason> {
+        if self.halted {
+            return Some(StopReason::Halt);
+        }
+        if let Some(stop) = &self.stop {
+            return Some(stop.clone());
+        }
+        let pc = self.pc;
+        if (pc as usize) + 4 > self.mem.len() {
+            self.stop = Some(StopReason::PcOutOfRange(pc));
+            return self.stop.clone();
+        }
+        let word = self.read32(pc);
+        self.last_write = None;
+        self.step(word);
+        if self.halted {
+            Some(StopReason::Halt)
+        } else {
+            self.stop.clone()
+        }
+    }
+
+    /// Forget a TRAP / fault stop so execution can resume (the debugger has
+    /// moved the PC or patched memory).  HALT stays final.
+    pub fn clear_stop(&mut self) {
+        self.stop = None;
+    }
+
+    /// Replace the watchpoint list.
+    pub fn set_watches(&mut self, watches: Vec<Watch>) {
+        self.watches = watches;
+    }
+
+    /// Take the watchpoint hit recorded by the last instruction, if any:
+    /// (watch address, was a store).
+    pub fn take_watch_hit(&mut self) -> Option<(u32, bool)> {
+        self.watch_hit.take()
+    }
+
+    /// Take the UART output produced since the last call.
+    pub fn take_uart(&mut self) -> String {
+        std::mem::take(&mut self.uart)
     }
 
     // ---- flag helpers --------------------------------------------------------
@@ -1535,6 +1746,89 @@ mod tests {
         let cpu = run_words(&words);
         assert_eq!(cpu.regs[0] as u32, 0x42);
         assert_eq!(cpu.sp, STACK_TOP, "RET must unwind the pushed return address");
+    }
+
+    // ---- debugger interface (--gdbserver) ------------------------------------
+
+    /// SETR A 0x200 ; SETR B 0x55 ; MEMSET64RR B A ; MEMREADRR C A ; HALT
+    const STORE_THEN_LOAD: [u32; 7] = [0x8BD0_0000, 0x200, 0x8BD0_0100, 0x55, 0x5F00_0100, 0x5B00_0200, HALT];
+
+    #[test]
+    fn test_debug_step_one_and_regs() {
+        let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
+        assert_eq!(cpu.step_one(), None);
+        assert_eq!(cpu.debug_regs().r[0], 0x200);
+        assert_eq!(cpu.debug_regs().pc, 0x28, "SETR is 2 words");
+        let mut regs = cpu.debug_regs();
+        regs.r[3] = 0x1234;
+        regs.flags = 0b1010; // Z and C
+        cpu.set_debug_regs(&regs);
+        assert_eq!(cpu.debug_regs(), regs);
+        while cpu.step_one().is_none() {}
+        assert_eq!(cpu.step_one(), Some(StopReason::Halt), "HALT stays final");
+    }
+
+    #[test]
+    fn test_debug_watchpoints_report_after_access() {
+        let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
+        cpu.set_watches(vec![Watch {
+            addr: 0x204,
+            len: 4,
+            kind: WatchKind::Write,
+        }]);
+        let mut hits = Vec::new();
+        while cpu.step_one().is_none() {
+            if let Some(hit) = cpu.take_watch_hit() {
+                hits.push((hit, cpu.debug_regs().pc));
+            }
+        }
+        // Only the 8-byte store overlaps [0x204, 0x208); the load does not
+        // trigger a write watch, and the store's trace read-back is silent.
+        assert_eq!(hits, vec![((0x204, true), 0x34)]);
+
+        let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
+        cpu.set_watches(vec![Watch {
+            addr: 0x200,
+            len: 1,
+            kind: WatchKind::Read,
+        }]);
+        let mut reads = 0;
+        while cpu.step_one().is_none() {
+            reads += usize::from(cpu.take_watch_hit().is_some());
+        }
+        assert_eq!(reads, 1, "only MEMREADRR reads 0x200");
+    }
+
+    #[test]
+    fn test_debug_memory_access_skips_mmio_side_effects() {
+        let mut cpu = Cpu::new(&image_from_words(&[HALT]), default_entry());
+        cpu.feed_uart_rx(b"xy");
+        let mut buf = [0_u8; 8];
+        assert_eq!(cpu.debug_read(0xF001_0008, &mut buf), 0, "plain debug reads refuse MMIO");
+        assert!(!cpu.debug_write(0xF001_0000, b"A"));
+        assert_eq!(cpu.debug_read_mmio(0xF001_0008, &mut buf), 8);
+        assert_eq!(buf[0], b'x', "an explicit MMIO read pops the RX FIFO");
+        assert!(cpu.debug_write(0x100, &[1, 2, 3]));
+        let mut back = [0_u8; 3];
+        assert_eq!(cpu.debug_read(0x100, &mut back), 3);
+        assert_eq!(back, [1, 2, 3]);
+        assert!(cpu.debug_write_mmio(0xF001_0000, b"Z"));
+        assert_eq!(cpu.take_uart(), "Z");
+    }
+
+    #[test]
+    fn test_debug_trap_stops_on_the_trap_and_clear_stop_resumes() {
+        // TRAP ; SETR A 7 ; HALT
+        let mut cpu = Cpu::new(&image_from_words(&[0x6C04_0000, 0x8BD0_0000, 7, HALT]), default_entry());
+        assert_eq!(cpu.step_one(), Some(StopReason::Trap));
+        assert_eq!(cpu.debug_regs().pc, 0x20, "PC stays on the TRAP");
+        assert_eq!(cpu.fetch_word(0x20), 0x6C04_0000);
+        let mut regs = cpu.debug_regs();
+        regs.pc += 4;
+        cpu.set_debug_regs(&regs);
+        cpu.clear_stop();
+        assert_eq!(cpu.step_one(), None);
+        assert_eq!(cpu.debug_regs().r[0], 7);
     }
 
     // ---- ISA v3 short 1-word forms (ISA_V3_PROPOSAL.md §3) ----------------

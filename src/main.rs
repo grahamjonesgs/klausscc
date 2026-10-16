@@ -8,6 +8,8 @@ mod commands;
 mod emulate;
 /// Module to manage file read and write.
 mod files;
+/// GDB remote-protocol server for the emulator (`--gdbserver`).
+mod gdbserver;
 /// Module of helper functions.
 mod helper;
 /// Module to manage labels.
@@ -25,7 +27,8 @@ mod serial;
 use chrono::{Local, NaiveTime};
 use cli::set_matches;
 use commands::{
-    run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_kbt_send, run_mem_out, run_netload, run_test_list, run_test_mode,
+    run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload, run_test_list,
+    run_test_mode,
 };
 use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
 use helper::{build_ddr_image, create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments, HEAP_HEADER_WORDS};
@@ -82,6 +85,7 @@ fn main() -> Result<(), i32> {
         .unwrap_or(10);
     let test_list_file: String = matches.get_one::<String>("test_list").unwrap_or(&String::default()).replace(' ', "");
     let emulate_flag = matches.get_flag("emulate");
+    let gdbserver_port: Option<u16> = matches.get_one::<u16>("gdbserver").copied();
     let trace_file: Option<String> = matches.get_one::<String>("trace").cloned();
     let emulate_test_file: Option<String> = matches.get_one::<String>("emulate_test").cloned();
     let max_instructions: u64 = matches
@@ -177,6 +181,9 @@ fn main() -> Result<(), i32> {
                 s.parse::<u32>().unwrap_or(0x20)
             }
         });
+        if let Some(port) = gdbserver_port {
+            return run_gdbserver(&input_file_name, entry_addr, port, &mut msg_list, start_time);
+        }
         if emulate_flag {
             return run_emulate_elf(
                 &input_file_name,

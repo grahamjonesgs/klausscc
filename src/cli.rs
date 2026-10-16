@@ -153,6 +153,14 @@ pub fn set_matches() -> Command {
                 .help("Assemble the input and run it on the built-in ISA emulator (golden model); prints captured UART output"),
         )
         .arg(
+            Arg::new("gdbserver")
+                .long("gdbserver")
+                .num_args(1)
+                .value_parser(clap::value_parser!(u16))
+                .value_name("PORT")
+                .help("Debug an ELF on the built-in emulator: serve the GDB remote protocol on 127.0.0.1:PORT for lldb (gdb-remote / lldb-dap). UART output goes to stdout, stdin feeds the UART"),
+        )
+        .arg(
             Arg::new("trace")
                 .long("trace")
                 .num_args(0..=1)

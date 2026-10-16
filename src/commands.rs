@@ -8,7 +8,7 @@ use crate::netload::net_load;
 use crate::opcodes::{Opcode, Pass2};
 use crate::serial::{monitor_serial_port, run_test_monitor, write_to_board_keep_port, AUTO_SERIAL};
 use crate::{assemble_file, assemble_to_image, build_flat_code, print_results, write_binary_file, write_to_device, ELF_MAGIC};
-use crate::{emulate, helper, macros};
+use crate::{emulate, gdbserver, helper, macros};
 use chrono::NaiveTime;
 use std::fmt::Write as _;
 use std::fs;
@@ -765,6 +765,61 @@ pub(crate) fn run_emulate_elf(
     print!("{}", result.uart);
     println!("--- end UART ---");
     Ok(())
+}
+
+/// Debug an ELF (or flat binary) on the emulator over the GDB remote protocol.
+///
+/// The image is laid out exactly as `--emulate` does (heap header, then the
+/// program at 0x20), so ELF addresses equal emulator addresses when the ELF is
+/// linked at 0x20 — the normal `klausscpu.ld` layout.
+#[cfg(not(tarpaulin_include))]
+pub(crate) fn run_gdbserver(
+    binary_path: &str,
+    entry_override: Option<u32>,
+    port: u16,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    let file_data = fs::read(binary_path).map_err(|e| {
+        msg_list.push(format!("Cannot read binary file {binary_path}: {e}"), None, None, MessageType::Error);
+        1
+    })?;
+    let (binary_data, entry_addr, elf) = flatten_input(file_data, entry_override).ok_or_else(|| {
+        msg_list.push(
+            format!("Failed to extract LOAD segments from ELF file {binary_path}"),
+            None,
+            None,
+            MessageType::Error,
+        );
+        1
+    })?;
+    let code_base = u64::from(HEAP_HEADER_WORDS) * 8;
+    if let Some(elf) = &elf {
+        if elf.base != code_base {
+            msg_list.push(
+                format!(
+                    "ELF {binary_path} is linked at 0x{:08X}, not 0x{code_base:08X}: debugger addresses will not match the emulator's",
+                    elf.base
+                ),
+                None,
+                None,
+                MessageType::Warning,
+            );
+        }
+    }
+    print_results(msg_list, start_time);
+
+    let cpu = emulate::Cpu::new(&build_ddr_image(&binary_data), entry_addr);
+    match gdbserver::serve(cpu, port) {
+        Ok(summary) => {
+            eprintln!("klausscc gdbserver: {summary}");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("klausscc gdbserver: {e}");
+            Err(1)
+        }
+    }
 }
 
 /// Batch-verify the emulator against `.kla` files with expected `// ` UART values.
