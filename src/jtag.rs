@@ -365,6 +365,7 @@ impl Drop for Jtag {
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, reason = "tests may unwrap")]
+    #![allow(clippy::unnested_or_patterns, reason = "the TAP table reads better flat")]
     use super::*;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
