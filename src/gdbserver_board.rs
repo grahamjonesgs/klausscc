@@ -436,12 +436,10 @@ impl BoardTarget {
             self.watches[slot] = None;
             self.write_wp(slot)?;
         }
-        if self.exited {
-            self.board.control(0)?;
-        } else {
-            self.board.control(CTL_RESUMEREQ)?;
-        }
-        Ok(())
+        // a program that executed HALT stays halted (resuming would run on
+        // past its end)
+        let at_halt = self.exited || (self.board.status()? >> 4) & 7 == CAUSE_HALT;
+        self.board.control(if at_halt { 0 } else { CTL_RESUMEREQ })
     }
 }
 
@@ -768,6 +766,13 @@ impl run_blocking::BlockingEventLoop for BoardEventLoop {
 /// set, and the core halts on the program's first instruction; otherwise the
 /// running program is halted where it is.
 pub fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> Result<(), String>>) -> JResult<u32> {
+    // start clean: a server that was killed leaves its slots armed
+    let clear: Vec<DmiReq> = (0..HW_BREAKPOINTS as u8)
+        .map(|i| DmiReq::Write(BP0 + i, 0))
+        .chain((0..HW_WATCHPOINTS as u8).map(|i| DmiReq::Write(WP0 + i, 0)))
+        .chain(std::iter::once(DmiReq::Write(DMSTATUS, 0)))
+        .collect();
+    board.batch(&clear)?;
     if let Some(load) = load {
         board.control(CTL_ATTACHED | CTL_HALT_ON_LOAD)?;
         board.status()?;
