@@ -10,8 +10,14 @@ mod emulate;
 mod files;
 /// GDB remote-protocol server for the emulator (`--gdbserver`).
 mod gdbserver;
+/// GDB remote-protocol server for the board (`--gdbserver --board`).
+#[cfg(feature = "board")]
+mod gdbserver_board;
 /// Module of helper functions.
 mod helper;
+/// JTAG over the board's FT2232H, and the debug module's DMI.
+#[cfg(feature = "board")]
+mod jtag;
 /// Module to manage labels.
 mod labels;
 /// Module to manage macros.
@@ -86,6 +92,8 @@ fn main() -> Result<(), i32> {
     let test_list_file: String = matches.get_one::<String>("test_list").unwrap_or(&String::default()).replace(' ', "");
     let emulate_flag = matches.get_flag("emulate");
     let gdbserver_port: Option<u16> = matches.get_one::<u16>("gdbserver").copied();
+    let board_flag = matches.get_flag("board");
+    let jtag_khz: u32 = matches.get_one::<u32>("jtag_khz").copied().unwrap_or(10_000);
     let trace_file: Option<String> = matches.get_one::<String>("trace").cloned();
     let emulate_test_file: Option<String> = matches.get_one::<String>("emulate_test").cloned();
     let max_instructions: u64 = matches
@@ -182,6 +190,19 @@ fn main() -> Result<(), i32> {
             }
         });
         if let Some(port) = gdbserver_port {
+            if board_flag {
+                return commands::run_gdbserver_board(
+                    &input_file_name,
+                    entry_addr,
+                    port,
+                    &output_serial_port,
+                    &binary_file_name,
+                    no_break_flag,
+                    jtag_khz,
+                    &mut msg_list,
+                    start_time,
+                );
+            }
             return run_gdbserver(&input_file_name, entry_addr, port, &mut msg_list, start_time);
         }
         if emulate_flag {

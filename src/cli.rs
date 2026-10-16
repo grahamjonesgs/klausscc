@@ -161,6 +161,21 @@ pub fn set_matches() -> Command {
                 .help("Debug an ELF on the built-in emulator: serve the GDB remote protocol on 127.0.0.1:PORT for lldb (gdb-remote / lldb-dap). UART output goes to stdout, stdin feeds the UART"),
         )
         .arg(
+            Arg::new("board")
+                .long("board")
+                .action(ArgAction::SetTrue)
+                .requires("gdbserver")
+                .help("With --gdbserver, debug the real board over its USB-JTAG (needs a DEBUG_EN=1 bitstream and a klausscc built with --features board). With -s, the ELF is first loaded over the UART and the core halts at its entry; without -s, the running program is halted where it is"),
+        )
+        .arg(
+            Arg::new("jtag_khz")
+                .long("jtag-khz")
+                .num_args(1)
+                .value_parser(clap::value_parser!(u32).range(100..=30_000))
+                .value_name("KHZ")
+                .help("JTAG clock for --board, in kHz (default 10000)"),
+        )
+        .arg(
             Arg::new("trace")
                 .long("trace")
                 .num_args(0..=1)

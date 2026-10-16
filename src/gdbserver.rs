@@ -56,13 +56,13 @@ use std::num::NonZeroUsize;
 use std::sync::mpsc;
 
 /// `TRAP` (v2 class B, OP 4): the debugger breakpoint instruction.
-const TRAP_WORD: u32 = 0x6C04_0000;
+pub(crate) const TRAP_WORD: u32 = 0x6C04_0000;
 /// Hardware breakpoint / watchpoint slots, matching the board's debug module.
-const HW_BREAKPOINTS: usize = 4;
-const HW_WATCHPOINTS: usize = 2;
+pub(crate) const HW_BREAKPOINTS: usize = 4;
+pub(crate) const HW_WATCHPOINTS: usize = 2;
 /// Instructions run between checks for debugger input (Ctrl-C) and UART I/O.
 const POLL_INTERVAL: u32 = 4096;
-const TRIPLE: &str = "klausscpu-unknown-elf";
+pub(crate) const TRIPLE: &str = "klausscpu-unknown-elf";
 
 const TARGET_XML: &str = r#"<?xml version="1.0"?>
 <!DOCTYPE target SYSTEM "gdb-target.dtd">
@@ -103,11 +103,11 @@ const TARGET_XML: &str = r#"<?xml version="1.0"?>
 /// The `KlaussCPU` register file in `g`-packet layout.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct KlaussRegs {
-    r: [u64; 16],
-    sp: u32,
-    pc: u32,
-    flags: u32,
-    int_mask: u32,
+    pub(crate) r: [u64; 16],
+    pub(crate) sp: u32,
+    pub(crate) pc: u32,
+    pub(crate) flags: u32,
+    pub(crate) int_mask: u32,
 }
 
 const REG_BYTES: usize = 16 * 8 + 4 * 4;
@@ -350,7 +350,7 @@ impl Target for EmuTarget {
 }
 
 /// True for the memory-mapped device window (`addr[31:28] == 0xF`).
-const fn is_mmio(addr: u32) -> bool {
+pub(crate) const fn is_mmio(addr: u32) -> bool {
     addr >> 28 == 0xF
 }
 
@@ -645,7 +645,7 @@ impl run_blocking::BlockingEventLoop for EmuEventLoop {
 }
 
 /// Start a stdin reader that forwards bytes for the emulated UART RX FIFO.
-fn spawn_stdin_reader() -> mpsc::Receiver<u8> {
+pub(crate) fn spawn_stdin_reader() -> mpsc::Receiver<u8> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut buf = [0_u8; 256];

@@ -832,6 +832,88 @@ pub(crate) fn run_gdbserver(
     }
 }
 
+/// Debug an ELF on the real board over JTAG (`--gdbserver PORT --board`).
+///
+/// With a serial port the ELF is loaded over the UART (as without
+/// `--board`) with the debug module's halt-on-load set, so the core halts on
+/// the program's first instruction; without one, the running program is
+/// halted where it is.  Then lldb is served as for the emulator.
+#[cfg(all(feature = "board", not(tarpaulin_include)))]
+#[allow(clippy::too_many_arguments, reason = "mirrors the CLI options")]
+pub(crate) fn run_gdbserver_board(
+    binary_path: &str,
+    entry_override: Option<u32>,
+    port: u16,
+    output_serial_port: &str,
+    kbt_file_name: &str,
+    no_break_flag: bool,
+    jtag_khz: u32,
+    msg_list: &mut MsgList,
+    start_time: NaiveTime,
+) -> Result<(), i32> {
+    use crate::gdbserver_board;
+
+    let fail = |e: String| {
+        eprintln!("klausscc gdbserver: {e}");
+        1
+    };
+    let (mut board, desc) = gdbserver_board::Board::open(jtag_khz).map_err(fail)?;
+    eprintln!("klausscc gdbserver: {desc}");
+
+    let pc = if output_serial_port.is_empty() {
+        gdbserver_board::attach(&mut board, None).map_err(fail)?
+    } else {
+        let mut load = || {
+            run_elf2serial(
+                binary_path,
+                entry_override,
+                output_serial_port,
+                kbt_file_name,
+                false,
+                false,
+                no_break_flag,
+                msg_list,
+                start_time,
+            )
+            .map_err(|code| format!("loading {binary_path} over {output_serial_port} failed ({code})"))
+        };
+        gdbserver_board::attach(&mut board, Some(&mut load)).map_err(fail)?
+    };
+    eprintln!("klausscc gdbserver: core 1 halted at 0x{pc:08X}");
+
+    match gdbserver_board::serve(board, port) {
+        Ok(summary) => {
+            eprintln!("klausscc gdbserver: {summary}");
+            Ok(())
+        }
+        Err(e) => Err(fail(e)),
+    }
+}
+
+/// `--board` without the `board` feature: explain how to get it.
+#[cfg(all(not(feature = "board"), not(tarpaulin_include)))]
+#[allow(clippy::too_many_arguments, clippy::unnecessary_wraps, reason = "same signature as the real one")]
+pub(crate) fn run_gdbserver_board(
+    _binary_path: &str,
+    _entry_override: Option<u32>,
+    _port: u16,
+    _output_serial_port: &str,
+    _kbt_file_name: &str,
+    _no_break_flag: bool,
+    _jtag_khz: u32,
+    msg_list: &mut MsgList,
+    _start_time: NaiveTime,
+) -> Result<(), i32> {
+    msg_list.push(
+        "--board needs a klausscc built with board support: cargo build --release --features board (needs libftdi1-dev)".to_owned(),
+        None,
+        None,
+        MessageType::Error,
+    );
+    print_messages(msg_list);
+    Err(1)
+}
+
 /// Batch-verify the emulator against `.kla` files with expected `// ` UART values.
 ///
 /// `test_path` may be a single `.kla` file, a directory (all `*.kla` inside),
