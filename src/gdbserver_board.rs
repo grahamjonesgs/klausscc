@@ -104,12 +104,15 @@ impl Board {
         }
         jtag.select_user3().map_err(jerr)?;
         let mut board = Self { jtag };
-        let st = board.status()?;
-        if (st >> 24) & 0xFF != 0x4B {
-            return Err(format!(
-                "IDCODE 0x{idcode:08X} but no KlaussCPU debug module on USER3 (DMSTATUS 0x{st:08X}): \
+        let no_dm = |what: String| {
+            format!(
+                "IDCODE 0x{idcode:08X} but no KlaussCPU debug module on USER3 ({what}): \
                  program a bitstream built with DEBUG_EN=1"
-            ));
+            )
+        };
+        let st = board.status().map_err(no_dm)?;
+        if (st >> 24) & 0xFF != 0x4B {
+            return Err(no_dm(format!("DMSTATUS 0x{st:08X}")));
         }
         Ok((
             board,
