@@ -81,7 +81,7 @@ pub fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32
             return Some(format!("{:08X}", int_value_signed as u32));
         }
         msg_list.push(
-            format!("Hex value out 0x{int_value:016X} of bounds"),
+            format!("Hex value 0x{int_value:016X} out of bounds"),
             Some(line_number),
             Some(filename),
             MessageType::Warning,
@@ -95,7 +95,7 @@ pub fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32
                 return Some(format!("{:08X}", n as u32));
             }
             msg_list.push(
-                format!("Decimal value out {n} of bounds"),
+                format!("Decimal value {n} out of bounds"),
                 Some(line_number),
                 Some(filename),
                 MessageType::Warning,
@@ -400,7 +400,7 @@ mod tests {
         assert_eq!(convert_argument("0x123456789", &mut msg_list, 4, "test".to_owned(), &mut labels), None);
         assert_eq!(
             msg_list.list.last().unwrap_or_default().text,
-            "Hex value out 0x0000000123456789 of bounds".to_owned()
+            "Hex value 0x0000000123456789 out of bounds".to_owned()
         );
 
         // Check for label not defined
@@ -414,7 +414,7 @@ mod tests {
         assert_eq!(convert_argument("4294967296", &mut msg_list, 14, "test".to_owned(), &mut labels), None);
         assert_eq!(
             msg_list.list.last().unwrap_or_default().text,
-            "Decimal value out 4294967296 of bounds".to_owned()
+            "Decimal value 4294967296 out of bounds".to_owned()
         );
 
         // Check for data not defined

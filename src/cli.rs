@@ -90,7 +90,7 @@ pub fn set_matches() -> Command {
                 .short('t')
                 .long("textmate")
                 .action(ArgAction::SetTrue)
-                .help("Set if JSON output of opcodes for use in Textmate of vscode language formatter is required"),
+                .help("Set if JSON output of opcodes for use in Textmate or vscode language formatter is required"),
         )
         .arg(
             Arg::new("serial")

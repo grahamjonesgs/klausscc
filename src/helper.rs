@@ -80,7 +80,7 @@ pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
 
     if !stripped.len().is_multiple_of(4) {
         msg_list.push(
-            format!("LE checksum string length not multiple of 4, length is {}", stripped.len()),
+            format!("LE checksum string length not a multiple of 4, length is {}", stripped.len()),
             None,
             None,
             MessageType::Error,

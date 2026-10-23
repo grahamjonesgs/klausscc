@@ -372,7 +372,7 @@ fn main() -> Result<(), i32> {
                 msg_list.push("Removed old binary file".to_owned(), None, None, MessageType::Warning);
             }
             msg_list.push(
-                "Not writing binary file due to assembly errors creating binary file".to_owned(),
+                "Not writing binary file due to assembly errors".to_owned(),
                 None,
                 None,
                 MessageType::Warning,

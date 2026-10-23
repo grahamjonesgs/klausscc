@@ -1804,7 +1804,7 @@ mod tests {
                 line_counter: 4,
             },
             InputData {
-                input: "16'h16??: t_pop_addr;    // POP push value to reg".to_owned(),
+                input: "16'h16??: t_pop_addr;    // POP pop value from reg".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 5,
             },
@@ -1839,7 +1839,7 @@ mod tests {
                     ops: Vec::new(),
                     registers: 2,
                     variables: 0,
-                    comment: "push value to reg".to_owned(),
+                    comment: "pop value from reg".to_owned(),
                     section: "Section 2".to_owned(),
                 }
             ]
