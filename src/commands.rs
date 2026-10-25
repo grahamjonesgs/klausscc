@@ -413,8 +413,7 @@ pub(crate) fn run_elf2serial(
     }
 
     // Patch heap_start: lo32 = heap_start value (encoded for LE board), hi32 = 0.
-    let heap_start_raw: u32 = ((out.len() - 1) / 2) as u32;
-    let heap_start: u32 = (heap_start_raw + 7) & !7_u32; // align to 8-byte boundary
+    let heap_start = helper::heap_start(((out.len() - 1) / 2) as u32);
     out.replace_range(
         heap_start_offset..heap_start_offset + 16,
         &format!("{}00000000", encode_word_kbt(heap_start)),

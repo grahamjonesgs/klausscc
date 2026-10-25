@@ -10,6 +10,18 @@ use std::fmt::Write as _;
 /// Byte 0x00: `heap_start` (written by assembler), Byte 0x04: `heap_end` (written by assembler),
 /// Byte 0x08: reserved, Byte 0x0C: reserved. Code begins at byte 0x10.
 pub const HEAP_HEADER_WORDS: u32 = 4;
+
+/// The `heap_start` value for a program image whose last byte ends at `end`.
+///
+/// `heap_start` is the first free byte after the program, rounded up to an
+/// 8-byte boundary.  All heap block headers are 3×8=24 bytes, so every data
+/// area is 8-byte aligned when `heap_start` is — required for MEMSET8→MEMGET64
+/// coherency.  The `.kbt` stream, the DDR image and the `.code` listing header
+/// all use this one rule.
+#[must_use]
+pub const fn heap_start(end: u32) -> u32 {
+    end.next_multiple_of(8)
+}
 /// Encode a 32-bit word for the kbt wire format (little-endian byte order).
 ///
 /// The board's serial loader stores bytes in the order they arrive, so a 32-bit
@@ -144,15 +156,11 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
         output_string.push_str(&encode_hex_kbt(&pass.opcode));
     }
 
-    // heap_start = first free byte after the program, rounded up to 8-byte alignment.
-    // All heap block headers are 3×8=24 bytes, so every data area is 8-byte aligned
-    // when heap_start itself is 8-byte aligned — required for MEMSET8→MEMGET64 coherency.
     // output_string is 'S' + hex_chars; hex_chars/2 = bytes (valid for both 32-bit opcodes
     // and 64-bit data words since both maintain a 2:1 hex-char to byte ratio)
-    let heap_start_raw: u32 = ((output_string.len() - 1) / 2) as u32;
-    let heap_start: u32 = (heap_start_raw + 7) & !7_u32; // align to 8-byte boundary
-                                                         // Emit heap_start as lo32 then hi32, each word encoded for LE board loading.
-                                                         // hi32 is always zero; encode_word_kbt(0) = "00000000" so only lo32 needs encoding.
+    let heap_start = heap_start(((output_string.len() - 1) / 2) as u32);
+    // Emit heap_start as lo32 then hi32, each word encoded for LE board loading.
+    // hi32 is always zero; encode_word_kbt(0) = "00000000" so only lo32 needs encoding.
     output_string.replace_range(
         heap_start_offset..heap_start_offset + 16,
         &format!("{}00000000", encode_word_kbt(heap_start)),
@@ -208,8 +216,7 @@ pub fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
     while !image.len().is_multiple_of(4) {
         image.push(0);
     }
-    // heap_start = first free byte after the program, rounded up to 8 bytes.
-    let heap_start = (image.len() as u32 + 7) & !7_u32;
+    let heap_start = heap_start(image.len() as u32);
     // Pad the image out to heap_start so it is itself 8-byte aligned.
     image.resize(heap_start as usize, 0);
     // Word 0 lo32 = heap_start (LE); hi32 stays zero.
@@ -665,6 +672,15 @@ mod tests {
             bin_string,
             Some("S28000000000000000000000000000000000000000000000000000000000000001234432101000000Z92550000X".to_owned())
         );
+    }
+
+    #[test]
+    // heap_start is the end of the program rounded up to 8 bytes
+    fn test_heap_start_rounds_up_to_8() {
+        assert_eq!(heap_start(0x20), 0x20);
+        assert_eq!(heap_start(0x21), 0x28);
+        assert_eq!(heap_start(0x24), 0x28);
+        assert_eq!(heap_start(0x28), 0x28);
     }
 
     #[test]

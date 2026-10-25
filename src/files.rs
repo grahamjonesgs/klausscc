@@ -1,3 +1,4 @@
+use crate::helper::{heap_start, HEAP_HEADER_WORDS};
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Opcode, Pass2};
@@ -517,14 +518,15 @@ pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &mut Vec
         None,
         MessageType::Information,
     );
-    // Compute heap_start = first free byte after the program
+    // Compute heap_start from the first byte after the program, as the .kbt does.
     // program_counter is already a byte address; opcode.len()/8 = words, *4 = bytes → /2 total
-    let heap_start: u32 = pass2
+    let program_end: u32 = pass2
         .iter()
         .filter(|p| p.line_type == LineType::Opcode || p.line_type == LineType::Data)
         .map(|p| p.program_counter.saturating_add(p.opcode.len() as u32 / 2))
         .max()
-        .unwrap_or(crate::helper::HEAP_HEADER_WORDS * 8);
+        .unwrap_or(HEAP_HEADER_WORDS * 8);
+    let heap_start = heap_start(program_end);
 
     // Emit the 4 reserved heap header words before the assembled code
     let heap_header = [
@@ -551,12 +553,13 @@ pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &mut Vec
                 pass.input_text_line
             );
         } else if pass.line_type == LineType::Data {
-            for n in 0..pass.opcode.len() / 16 {
+            // One row per 64-bit word; a final part word gets a row of its own.
+            for (chunk, n) in pass.opcode.as_bytes().chunks(16).zip(0_u32..) {
                 out_line.push_str(
                     format!(
                         "0x{:08X}: {:<32}  -- {}\n",
-                        pass.program_counter + n as u32 * 8,
-                        pass.opcode.get(n * 16..n * 16 + 16).unwrap_or("                "),
+                        pass.program_counter + n * 8,
+                        std::str::from_utf8(chunk).unwrap_or_default(),
                         pass.input_text_line
                     )
                     .as_str(),
@@ -1312,10 +1315,11 @@ mod test {
         result_write.unwrap();
 
         let buffer = fs::read_to_string(file_name1).unwrap();
-        // 4 header lines prepended; word 0 = heap_start in bytes (= 0x11 here)
+        // 4 header lines prepended; word 0 = heap_start in bytes (program ends at 0x11,
+        // rounded up to 8 like the .kbt → 0x18)
         // 64-bit mode: header offsets are i*8, values are 16-char hex; data words are 16 hex chars each
-        // opcode "12345678FFFFFFFFDDDDDDDD" (24 chars) yields 1 data line (24/16=1)
-        assert_eq!(buffer.lines().count(), 13);
-        assert_eq!(buffer, "0x00000000: 0000000000000011                  -- heap_start  (set by assembler)\n0x00000008: 0000000000000000                  -- heap_end    (reserved)\n0x00000010: 0000000000000000                  -- (reserved)\n0x00000018: 0000000000000000                  -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678FFFFFFFF                  -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
+        // opcode "12345678FFFFFFFFDDDDDDDD" (24 chars) yields 2 data lines, the second a half word
+        assert_eq!(buffer.lines().count(), 14);
+        assert_eq!(buffer, "0x00000000: 0000000000000018                  -- heap_start  (set by assembler)\n0x00000008: 0000000000000000                  -- heap_end    (reserved)\n0x00000010: 0000000000000000                  -- (reserved)\n0x00000018: 0000000000000000                  -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678FFFFFFFF                  -- #DATA1 \"HELLO\"\n0x0000000D: DDDDDDDD                          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
     }
 }
