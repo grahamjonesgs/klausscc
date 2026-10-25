@@ -228,7 +228,7 @@ impl Board {
         let last = access_last_addr(addr, data.len()).ok_or_else(|| past_top(addr, data.len()))?;
         let first = addr & !7;
         let mut reqs = vec![DmiReq::Write(MEM_ADDR, u64::from(first))];
-        for base in (first..=last & !7).step_by(8) {
+        for base in (first..=(last & !7)).step_by(8) {
             let mut bytes = [0_u8; 8];
             let mut be = 0_u64;
             for (lane, b) in bytes.iter_mut().enumerate() {
@@ -455,14 +455,9 @@ impl BoardTarget {
         if self.running {
             note(self.interrupt().map(drop));
         }
-        for (addr, orig) in std::mem::take(&mut self.sw_breakpoints) {
-            note(self.board.write_mem(addr, &orig.to_le_bytes()));
-        }
-        self.hw_breakpoints = [None; HW_BREAKPOINTS];
-        self.watches = [None; HW_WATCHPOINTS];
-        note(clear_slots(&mut self.board));
         // a program that executed HALT stays halted (resuming would run on
-        // past its end); if the status cannot be read, only clear "attached"
+        // past its end); if the status cannot be read, only clear "attached".
+        // Read the halt cause before clear_slots writes DMSTATUS.
         let resume = match self.board.status() {
             Ok(st) => !self.exited && (st >> 4) & 7 != CAUSE_HALT,
             Err(e) => {
@@ -470,6 +465,12 @@ impl BoardTarget {
                 false
             }
         };
+        for (addr, orig) in std::mem::take(&mut self.sw_breakpoints) {
+            note(self.board.write_mem(addr, &orig.to_le_bytes()));
+        }
+        self.hw_breakpoints = [None; HW_BREAKPOINTS];
+        self.watches = [None; HW_WATCHPOINTS];
+        note(clear_slots(&mut self.board));
         note(self.board.control(if resume { CTL_RESUMEREQ } else { 0 }));
         first_err.map_or(Ok(()), Err)
     }
