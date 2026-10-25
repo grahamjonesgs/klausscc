@@ -1,18 +1,18 @@
 //! Subcommand handlers — each `run_*` function drives one CLI mode end to end
 //! (net-load, mem-out, elf2serial, kbt send, emulate, and the test runners).
 
-use crate::asm::line::Pass2;
+use crate::asm::{assemble, Assembly};
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
-use crate::helper::{build_ddr_image, disassemble_flat_to_pass2, encode_word_kbt, human_bytes, parse_expected_uart_values};
-use crate::layout::{heap_start, CODE_BASE, HEAP_HEADER_WORDS};
+use crate::helper::{disassemble_flat_to_pass2, human_bytes, parse_expected_uart_values};
+use crate::image::{build_ddr_image, readmemh, Image};
+use crate::layout::CODE_BASE;
 use crate::messages::{print_messages, MessageType, MsgList};
 use crate::netload::net_load;
 use crate::opcodes::Opcode;
 use crate::serial::{monitor_serial_port, run_test_monitor, write_to_board_keep_port, AUTO_SERIAL};
-use crate::{assemble_file, assemble_to_image, build_flat_code, print_results, write_binary_file, write_to_device, ELF_MAGIC};
-use crate::{emulate, gdbserver, helper, macros};
-use std::fmt::Write as _;
+use crate::{emulate, gdbserver, macros};
+use crate::{print_results, write_binary_file, write_to_device, ELF_MAGIC};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -286,7 +286,7 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
     let file_data = read_input(binary_path, msg_list)?;
 
     // mem-out writes a $readmemh image and does not need an entry point.
-    let (mut binary_data, _entry, elf) = flatten_or_report(file_data, None, binary_path, msg_list)?;
+    let (binary_data, _entry, elf) = flatten_or_report(file_data, None, binary_path, msg_list)?;
     if let Some(elf) = elf {
         msg_list.push(
             format!(
@@ -303,19 +303,9 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
         msg_list.push("Detected flat binary (no ELF header)".to_owned(), None, None, MessageType::Information);
     }
 
-    while binary_data.len() % 4 != 0 {
-        binary_data.push(0);
-    }
     let image = build_ddr_image(&binary_data);
 
-    // One 64-bit little-endian doubleword per line. image is 8-byte aligned.
-    let mut out = String::with_capacity(image.len() / 8 * 17);
-    for chunk in image.chunks(8) {
-        let dw = u64::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3], chunk[4], chunk[5], chunk[6], chunk[7]]);
-        let _ = writeln!(out, "{dw:016X}");
-    }
-
-    if let Err(e) = fs::write(mem_file_name, &out) {
+    if let Err(e) = fs::write(mem_file_name, readmemh(&image)) {
         msg_list.push(
             format!("Failed to write boot ROM image {mem_file_name}: {e}"),
             None,
@@ -365,15 +355,13 @@ pub(crate) fn run_elf2serial(
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
-    use helper::calc_checksum;
-
     let file_data = read_input(binary_path, msg_list)?;
 
     // Convert ELF virtual address → board byte address inside flatten_input:
     // the flat buffer starts at ELF VMA `elf_base` but is loaded by the board
     // immediately after the heap header, so board_entry = (elf_entry - elf_base)
     // + HEAP_HEADER_WORDS * 8.
-    let (mut binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
+    let (binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
     if let Some(elf) = elf {
         msg_list.push(
             format!(
@@ -390,51 +378,18 @@ pub(crate) fn run_elf2serial(
         msg_list.push("Detected flat binary (no ELF header)".to_owned(), None, None, MessageType::Information);
     }
 
-    // Pad binary_data to 4-byte alignment so every word is complete.
-    while binary_data.len() % 4 != 0 {
-        binary_data.push(0);
-    }
+    // Pad to whole 32-bit words: the board loads words, and the .code
+    // listing below shows the last part word as a whole one.
+    let mut image = Image::new(binary_data, entry_addr);
+    image.pad_to_word();
+    let heap_start = image.heap_start();
 
-    let mut out = String::new();
-    out.push('S');
-
-    // Word 0: heap_start placeholder, patched below
-    let heap_start_offset = out.len();
-    out.push_str("0000000000000000");
-    // Words 1-3: reserved header words
-    for _ in 1..HEAP_HEADER_WORDS {
-        out.push_str("0000000000000000");
-    }
-
-    // Encode program words for the kbt wire format.
-    // The LLVM ELF stores instruction bytes in little-endian order, so read each
-    // 4-byte chunk as LE to reconstruct the 32-bit value, then encode it with the
-    // half-word byte-swap the board's serial loader expects.
-    for chunk in binary_data.chunks(4) {
-        let word = u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
-        out.push_str(&encode_word_kbt(word));
-    }
-
-    // Patch heap_start: lo32 = heap_start value (encoded for LE board), hi32 = 0.
-    let heap_start = heap_start(((out.len() - 1) / 2) as u32);
-    out.replace_range(
-        heap_start_offset..heap_start_offset + 16,
-        &format!("{}00000000", encode_word_kbt(heap_start)),
-    );
-
-    // Entry point — LE-encoded like all other 32-bit words per FPGA team spec.
-    out.push_str(&encode_word_kbt(entry_addr));
-
-    // Checksum computed before Z delimiter; returns 8-char LE 32-bit word.
     // The image was padded to whole words above, so this only fails on a bug,
     // but an image the board would reject is never written or sent.
-    let Some(checksum) = calc_checksum(&out, msg_list) else {
+    let Some(out) = image.to_kbt(msg_list) else {
         print_results(msg_list, start_time);
         return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
     };
-    out.push('Z');
-    out.push_str(&checksum);
-    out.push('X');
 
     msg_list.push(
         format!("elf2serial: {binary_path} → {kbt_file_name} (entry 0x{entry_addr:08X}, heap_start 0x{heap_start:08X})"),
@@ -459,7 +414,7 @@ pub(crate) fn run_elf2serial(
             let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
             format!("{stem}.code")
         };
-        let pass2 = disassemble_flat_to_pass2(&binary_data, CODE_BASE, &opcodes);
+        let pass2 = disassemble_flat_to_pass2(&image.bytes, CODE_BASE, &opcodes);
         if let Err(e) = write_code_output_file(&code_file_name, &pass2, msg_list) {
             msg_list.push(
                 format!("Failed to write disassembly file {code_file_name}: {e}"),
@@ -703,7 +658,7 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
 /// stdout).
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_emulate(
-    pass2: &[Pass2],
+    assembly: &Assembly,
     input_file_name: &str,
     trace_file: Option<&str>,
     max_instructions: u64,
@@ -715,7 +670,7 @@ pub(crate) fn run_emulate(
         print_results(msg_list, start_time);
         return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
     }
-    let Some((code, entry)) = build_flat_code(pass2) else {
+    let Some(Image { bytes: code, entry }) = assembly.image() else {
         msg_list.push("No _start address found - cannot emulate".to_owned(), None, None, MessageType::Error);
         print_results(msg_list, start_time);
         return Err(Error::Assembly(1));
@@ -1083,11 +1038,12 @@ pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macro
     }
 
     let mut test_msgs = MsgList::new();
-    let Some((image, entry)) = assemble_to_image(file, oplist, macro_list, &mut test_msgs) else {
+    let assembly = assemble(file, oplist, macro_list, &mut test_msgs);
+    let Some(image) = assembly.filter(|_| !test_msgs.has_errors()).and_then(|assembly| assembly.image()) else {
         return Err("assembly error".to_owned());
     };
 
-    let (result, _) = emulate::emulate_image(&image, entry, max_instructions, false);
+    let (result, _) = emulate::emulate_image(&image.to_ddr(), image.entry, max_instructions, false);
     let got: Vec<&str> = result
         .uart
         .lines()
@@ -1114,6 +1070,32 @@ pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macro
         matched: expected.len(),
         instructions: result.instructions,
     })
+}
+
+/// Assemble one file of a `-L` batch for the board.
+///
+/// Writes its `.code` listing next to it (also for a build with errors), and
+/// returns the `.kbt` wire string, or `None` when the file cannot be read, the
+/// listing cannot be written or the build has errors.
+#[cfg(not(tarpaulin_include))]
+fn assemble_to_kbt(input_file_name: &str, oplist: &[Opcode], macro_list: &[macros::Macro], msg_list: &mut MsgList) -> Option<String> {
+    let assembly = assemble(input_file_name, oplist, macro_list, msg_list)?;
+
+    let output_file_name = format!("{}.code", filename_stem(input_file_name));
+    if let Err(result_err) = write_code_output_file(&output_file_name, &assembly.lines, msg_list) {
+        msg_list.push(
+            format!("Unable to write to code file {output_file_name}, error {result_err}"),
+            None,
+            None,
+            MessageType::Error,
+        );
+        return None;
+    }
+
+    if msg_list.has_errors() {
+        return None;
+    }
+    assembly.to_kbt(msg_list)
 }
 
 /// Read a test list file and return the list of test file paths.
@@ -1209,7 +1191,7 @@ pub fn run_test_list(
         };
 
         // Assemble the test file
-        let Some(bin_string) = assemble_file(test_file, oplist, macro_list, &mut test_msg_list) else {
+        let Some(bin_string) = assemble_to_kbt(test_file, oplist, macro_list, &mut test_msg_list) else {
             println!("  SKIP: assembly failed");
             print_messages(&test_msg_list);
             results.push(BatchTestResult {

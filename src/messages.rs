@@ -52,6 +52,11 @@ impl MsgList {
         self.list.iter().filter(|x| x.level == msg_type).count()
     }
 
+    /// True if any error has been reported.
+    pub fn has_errors(&self) -> bool {
+        self.list.iter().any(|x| x.level == MessageType::Error)
+    }
+
     /// Push message to `MsgList`.  In live mode the message is also printed
     /// immediately so the user sees progress in real time.
     pub fn push(&mut self, name: String, line_number: Option<u32>, file_name: Option<String>, msg_type: MessageType) {
@@ -152,6 +157,18 @@ mod tests {
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
         msg_list.push("Test".to_owned(), None, None, MessageType::Error);
         assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
+    }
+
+    #[test]
+    // Test that has_errors only counts errors
+    fn test_has_errors() {
+        let mut msg_list = MsgList::new();
+        assert!(!msg_list.has_errors());
+        msg_list.push("Test".to_owned(), None, None, MessageType::Information);
+        msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
+        assert!(!msg_list.has_errors());
+        msg_list.push("Test".to_owned(), None, None, MessageType::Error);
+        assert!(msg_list.has_errors());
     }
 
     #[test]

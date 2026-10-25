@@ -48,10 +48,12 @@ pub struct Pass1 {
 /// Struct for Pass2.
 pub struct Pass2 {
     /// File name of input file.
+    #[allow(dead_code, reason = "where the line came from; no output reads it yet, only tests")]
     pub file_name: String,
     /// Line text.
     pub input_text_line: String,
     /// Line number of input file.
+    #[allow(dead_code, reason = "where the line came from; no output reads it yet, only tests")]
     pub line_counter: u32,
     /// Line type.
     pub line_type: LineType,
