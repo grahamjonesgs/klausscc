@@ -17,7 +17,7 @@ pub struct InputData {
 }
 
 /// One source-operand slot of a v2 instruction, describing how the operand
-/// token maps onto the instruction word (`ISA_ENCODING_V2.md` §1). The uniform
+/// token maps onto the instruction word (`doc/ISA_ENCODING_V2.md` §1). The uniform
 /// v2 layout is `word0 = template | rd<<8 | rs1<<4 | rs2` plus `N<<15` for the
 /// embedded shift/bit count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -288,7 +288,7 @@ fn return_opcode_struct<'a>(line: &str, opcodes: &'a [Opcode]) -> Option<&'a Opc
 /// Builds instruction word 0 (as an 8-hex string) from the opcode template and
 /// the register/count operands on the line.  For v2 opcodes (those carrying an
 /// [`Operand`] layout) the register fields are packed numerically per
-/// `ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place `rd==rs1`, embedded
+/// `doc/ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place `rd==rs1`, embedded
 /// `N<<15`).  Opcodes without a layout fall back to the legacy trailing-nibble
 /// scheme (used by `.vh`-parsed tables).
 #[allow(
@@ -846,7 +846,7 @@ fn op(name: &str, template: u32, ops: &[Operand]) -> Opcode {
     }
 }
 
-/// The built-in ISA-encoding-v2 opcode table (`ISA_ENCODING_V2.md` §3/§6).
+/// The built-in ISA-encoding-v2 opcode table (`doc/ISA_ENCODING_V2.md` §3/§6).
 ///
 /// This is the authoritative symbol → number map the assembler emits; it
 /// replaces the external `opcode_select.vh` file the toolchain used to read on

@@ -2,10 +2,10 @@
 //!
 //! This is Phase-0 of the FPGA pipelining effort: an architectural reference
 //! model that executes a flat DDR image and emits a per-retired-instruction
-//! trace.  Semantics follow `EMULATOR_ISA_SEMANTICS.md` (RTL-verified corner
+//! trace.  Semantics follow `doc/EMULATOR_ISA_SEMANTICS.md` (RTL-verified corner
 //! cases, which OVERRIDE `CPU_ARCHITECTURE.md`); the per-opcode *encodings* are
 //! the **ISA encoding v2** flag-day re-numbering documented in
-//! `ISA_ENCODING_V2.md`.  Execution semantics are identical to the v1 CPU (the
+//! `doc/ISA_ENCODING_V2.md`.  Execution semantics are identical to the v1 CPU (the
 //! "no benefit taken" checkpoint build) — only the instruction word layout has
 //! changed.
 //!
@@ -26,7 +26,7 @@
 //! architectural effects match.  Blitter / Ethernet interrupts (sources 1-2)
 //! are not modelled.
 //!
-//! ## v2 word-0 layout (`ISA_ENCODING_V2.md` §1)
+//! ## v2 word-0 layout (`doc/ISA_ENCODING_V2.md` §1)
 //!
 //! ```text
 //!  31 30 29    26 25              16 15  12 11  8 7   4 3   0
@@ -784,7 +784,7 @@ impl Cpu {
     /// Run until HALT / TRAP / cap / fault. Returns the result + trace (if any).
     ///
     /// When `trace` is `Some`, one line per retired instruction is written to the
-    /// sink in the `EMULATOR_ISA_SEMANTICS.md` "Trace format" layout.  The trace is
+    /// sink in the `doc/EMULATOR_ISA_SEMANTICS.md` "Trace format" layout.  The trace is
     /// streamed as the run proceeds rather than buffered, so a multi-million
     /// instruction run costs no extra memory.
     pub fn run(&mut self, max_instructions: u64, mut trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
@@ -846,7 +846,7 @@ impl Cpu {
 
     /// Decode + execute a single v2 instruction word, advancing PC.
     ///
-    /// The word is decoded straight from its bit fields (`ISA_ENCODING_V2.md` §1):
+    /// The word is decoded straight from its bit fields (`doc/ISA_ENCODING_V2.md` §1):
     /// LEN gives the instruction length, CLASS selects the handler, and each
     /// handler pulls its own attribute bits from `[25:16]`.
     fn step(&mut self, word: u32) {
@@ -901,7 +901,7 @@ impl Cpu {
         let _ = self.sub_flags(a, b, 0);
     }
 
-    /// Class 1 — ALU reg-reg: `rd = rs1 OP rs2` (`ISA_ENCODING_V2.md` §2).
+    /// Class 1 — ALU reg-reg: `rd = rs1 OP rs2` (`doc/ISA_ENCODING_V2.md` §2).
     fn v2_alu_rr(&mut self, word: u32, rd: usize, rs1: usize, rs2: usize, next: u32) {
         let op = (word >> 22) & 0xF;
         let a = self.regs[rs1];
@@ -1829,7 +1829,7 @@ mod tests {
         assert_eq!(cpu.eval_cond(5), Some(true), "signed-less (LT) must hold for A<B");
     }
 
-    // ---- flag-unification model (FLAG_UNIFICATION_CHANGES) -------------------
+    // ---- flag-unification model (doc/FLAG_UNIFICATION_CHANGES) ---------------
 
     #[test]
     fn test_cmp_sets_full_zscv() {
