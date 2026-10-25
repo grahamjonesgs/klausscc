@@ -35,6 +35,41 @@ impl Default for &Macro {
     }
 }
 
+/// A `%n` placeholder in a macro item that could not be substituted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum SubstError {
+    /// The placeholder is not `%` followed by a number of at least 1.
+    BadIndex(String),
+    /// The call has no argument `n`.
+    Missing(usize),
+}
+
+/// Replace each `%n` word in `item` with argument `n` of `call`.
+///
+/// `call` is the macro call split into words, so `call[0]` is the macro name
+/// and `call[n]` is argument `n`. Words that cannot be substituted are left
+/// out of the result and returned as errors, so the caller can report every
+/// one of them.
+fn substitute_args(item: &str, call: &[&str]) -> (String, Vec<SubstError>) {
+    let mut errors = Vec::new();
+    let mut words: Vec<&str> = Vec::new();
+    for word in item.split_whitespace() {
+        if !word.contains('%') {
+            words.push(word);
+            continue;
+        }
+        let number = word.trim_start_matches('%');
+        match number.parse::<usize>() {
+            Ok(index @ 1..) => match call.get(index) {
+                Some(argument) => words.push(argument),
+                None => errors.push(SubstError::Missing(index)),
+            },
+            _ => errors.push(SubstError::BadIndex(number.to_owned())),
+        }
+    }
+    (words.join(" "), errors)
+}
+
 /// Multi pass to resolve embedded macros.
 ///
 /// Takes Vector of macros, and embeds macros recursively, up to 10 passes.
@@ -52,99 +87,44 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
         for input_macro_line in input_macros.clone() {
             let mut output_items: Vec<String> = Vec::new();
             for item in input_macro_line.items {
-                if return_macro(&item, &mut input_macros).is_some() {
-                    let mut item_line_array: Vec<String> = Vec::new();
-                    let item_words = item.split_whitespace();
-                    for item_word in item_words {
-                        item_line_array.push(item_word.to_owned());
-                    }
-                    #[allow(clippy::unwrap_used, reason = "Unwrap is safe here due to prior check with is_some()")]
-                    if let Ok(variables_usize) = usize::try_from(return_macro(&item, &mut input_macros).unwrap().variables) {
-                        if variables_usize < item_line_array.len() - 1 {
-                            msg_list.push(
-                                format!("Too many variables in embedded macro \"{}\" in macro {}", item, input_macro_line.name),
-                                None,
-                                None,
-                                MessageType::Warning,
-                            );
-                        }
-                    } else {
-                        msg_list.push(
-                            format!(
-                                "Failed to convert macro variable count to usize for embedded macro \"{}\" in macro {}",
-                                item, input_macro_line.name,
-                            ),
-                            None,
-                            None,
-                            MessageType::Error,
-                        );
-                    }
-                    #[allow(clippy::unwrap_used, reason = "Unwrap is safe here due to prior check with is_some()")]
-                    for new_item in return_macro(&item, &mut input_macros).unwrap().items {
-                        if new_item.contains('%') {
-                            // Replace %n in new items with the nth value in item
-
-                            let new_item_words = new_item.split_whitespace();
-                            let mut build_line = String::default();
-                            for item_word in new_item_words {
-                                if item_word.contains('%') {
-                                    let without_prefix = item_word.trim_start_matches('%');
-                                    let int_value = without_prefix.parse::<u32>();
-                                    if int_value.is_err() || int_value.clone().unwrap_or(0) < 1 {
-                                        msg_list.push(
-                                            format!(
-                                                "Invalid macro argument number {}, in embedded macro \"{}\" in {}",
-                                                without_prefix, item, input_macro_line.name,
-                                            ),
-                                            None,
-                                            None,
-                                            MessageType::Error,
-                                        );
-                                    } else if let Ok(idx) = usize::try_from(int_value.clone().unwrap_or(0)) {
-                                        if idx > item_line_array.len() - 1 {
-                                            msg_list.push(
-                                                format!(
-                                                    "Missing argument {} for embedded macro \"{}\" in {}",
-                                                    int_value.unwrap_or(0),
-                                                    item,
-                                                    input_macro_line.name,
-                                                ),
-                                                None,
-                                                None,
-                                                MessageType::Error,
-                                            );
-                                        } else {
-                                            build_line.push(' ');
-                                            build_line.push_str(item_line_array.get(idx).unwrap_or(&String::new()));
-                                        }
-                                    } else {
-                                        msg_list.push(
-                                            format!(
-                                                "Failed to convert macro argument number {} to usize in embedded macro \"{}\" in {}",
-                                                int_value.unwrap_or(0),
-                                                item,
-                                                input_macro_line.name,
-                                            ),
-                                            None,
-                                            None,
-                                            MessageType::Error,
-                                        );
-                                    }
-                                } else {
-                                    build_line.push(' ');
-                                    build_line.push_str(item_word);
-                                }
-                            }
-                            output_items.push(build_line.strip_prefix(' ').unwrap().to_owned());
-                        } else {
-                            output_items.push(new_item);
-                        }
-                    }
-                    last_macro.clone_from(&input_macro_line.name);
-                    changed = true;
-                } else {
+                let Some(embedded) = return_macro(&item, &input_macros) else {
                     output_items.push(item);
+                    continue;
+                };
+                let call: Vec<&str> = item.split_whitespace().collect();
+                if usize::try_from(embedded.variables).is_ok_and(|variables| variables < call.len() - 1) {
+                    msg_list.push(
+                        format!("Too many variables in embedded macro \"{}\" in macro {}", item, input_macro_line.name),
+                        None,
+                        None,
+                        MessageType::Warning,
+                    );
                 }
+                for new_item in embedded.items {
+                    if !new_item.contains('%') {
+                        output_items.push(new_item);
+                        continue;
+                    }
+                    // Replace %n in new items with the nth value in item
+                    let (substituted, errors) = substitute_args(&new_item, &call);
+                    for error in errors {
+                        let text = match error {
+                            SubstError::BadIndex(number) => {
+                                format!(
+                                    "Invalid macro argument number {number}, in embedded macro \"{item}\" in {}",
+                                    input_macro_line.name
+                                )
+                            }
+                            SubstError::Missing(index) => {
+                                format!("Missing argument {index} for embedded macro \"{item}\" in {}", input_macro_line.name)
+                            }
+                        };
+                        msg_list.push(text, None, None, MessageType::Error);
+                    }
+                    output_items.push(substituted);
+                }
+                last_macro.clone_from(&input_macro_line.name);
+                changed = true;
             }
             output_macros.push(Macro {
                 name: input_macro_line.name,
@@ -165,27 +145,29 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
 
 /// Expands the input lines by expanding all macros.
 ///
-/// Takes the input list of all lines and macro vector and expands.
+/// Takes the input list of all lines and macro vector and expands. A trailing
+/// `//` comment on a macro call is not part of its arguments.
 pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<InputData>, macro_list: &mut [Macro]) -> Vec<Pass0> {
     let mut pass0: Vec<Pass0> = Vec::new();
     for code_line in input_list {
-        if macro_name_from_string(&code_line.input).is_some() {
-            let items = return_macro_items_replace(code_line.input.trim(), macro_list, code_line.line_counter, &code_line.file_name, msg_list);
+        if let Some(macro_name) = macro_name_from_string(&code_line.input) {
+            let call = strip_comments(&code_line.input);
+            let items = return_macro_items_replace(&call, macro_list, code_line.line_counter, &code_line.file_name, msg_list);
             if let Some(items_vec) = items {
-                //let macro_name = macro_name_from_string(&code_line.input).unwrap_or_default();
                 for item in items_vec {
                     pass0.push(Pass0 {
-                        input_text_line: format!(
-                            "{} // Macro expansion from {}",
-                            item,
-                            macro_name_from_string(&code_line.input).unwrap_or_default()
-                        ),
+                        input_text_line: format!("{item} // Macro expansion from {macro_name}"),
                         file_name: code_line.file_name.clone(),
                         line_counter: code_line.line_counter,
                     });
                 }
             } else {
-                msg_list.push(format!("Macro not found {}", code_line.input), None, None, MessageType::Error);
+                msg_list.push(
+                    format!("Macro not found {call}"),
+                    Some(code_line.line_counter),
+                    Some(code_line.file_name.clone()),
+                    MessageType::Error,
+                );
                 pass0.push(Pass0 {
                     file_name: code_line.file_name,
                     input_text_line: code_line.input,
@@ -386,7 +368,7 @@ pub fn macro_name_from_string(line: &str) -> Option<String> {
 /// Returns Macro from name.
 ///
 /// Return option macro if it exists, or none.
-pub fn return_macro(line: &str, macros: &mut [Macro]) -> Option<Macro> {
+pub fn return_macro(line: &str, macros: &[Macro]) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
 
@@ -430,36 +412,15 @@ pub fn return_macro_items_replace(
             }
 
             for item in &macro_line.items {
-                let item_words = item.split_whitespace();
-                let mut build_line = String::default();
-                for item_word in item_words {
-                    if item_word.contains('%') {
-                        let without_prefix = item_word.trim_start_matches('%');
-                        let int_value = without_prefix.parse::<u32>();
-                        if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
-                            msg_list.push(
-                                format!("Invalid macro argument number {}, in macro {}", without_prefix, macro_line.name),
-                                Some(input_line_number),
-                                Some(filename.to_owned()),
-                                MessageType::Error,
-                            );
-                        } else if int_value.clone().unwrap_or(0) > (input_line_array.len() - 1).try_into().unwrap_or_default() {
-                            msg_list.push(
-                                format!("Missing argument {} for macro {}", int_value.clone().unwrap_or(0), macro_line.name),
-                                Some(input_line_number),
-                                Some(filename.to_owned()),
-                                MessageType::Error,
-                            );
-                        } else {
-                            build_line.push(' ');
-                            build_line.push_str(input_line_array.get(int_value.clone().unwrap_or(0) as usize).unwrap_or(&""));
-                        }
-                    } else {
-                        build_line.push(' ');
-                        build_line.push_str(item_word);
-                    }
+                let (substituted, errors) = substitute_args(item, &input_line_array);
+                for error in errors {
+                    let text = match error {
+                        SubstError::BadIndex(number) => format!("Invalid macro argument number {number}, in macro {}", macro_line.name),
+                        SubstError::Missing(index) => format!("Missing argument {index} for macro {}", macro_line.name),
+                    };
+                    msg_list.push(text, Some(input_line_number), Some(filename.to_owned()), MessageType::Error);
                 }
-                return_items.push(build_line.trim_start().to_owned());
+                return_items.push(substituted);
             }
         }
     }
@@ -473,6 +434,93 @@ pub fn return_macro_items_replace(
 mod tests {
 
     use super::*;
+
+    /// One source line of `test.kla`.
+    fn source_line(input: &str, line_counter: u32) -> InputData {
+        InputData {
+            input: input.to_owned(),
+            file_name: "test.kla".to_owned(),
+            line_counter,
+        }
+    }
+
+    #[test]
+    // %n words are replaced by the matching call argument; bad ones are reported.
+    fn test_substitute_args() {
+        let call = ["$M", "A", "0x10"];
+        assert_eq!(substitute_args("SETR %1 %2", &call), ("SETR A 0x10".to_owned(), vec![]));
+        assert_eq!(substitute_args("NOP", &call), ("NOP".to_owned(), vec![]));
+        assert_eq!(substitute_args("COPY %2  %1", &call), ("COPY 0x10 A".to_owned(), vec![]));
+        assert_eq!(substitute_args("PUSH %3", &call), ("PUSH".to_owned(), vec![SubstError::Missing(3)]));
+        assert_eq!(
+            substitute_args("PUSH %0", &call),
+            ("PUSH".to_owned(), vec![SubstError::BadIndex("0".to_owned())])
+        );
+        assert_eq!(
+            substitute_args("PUSH %x", &call),
+            ("PUSH".to_owned(), vec![SubstError::BadIndex("x".to_owned())])
+        );
+        // Every word dropped: no panic on the empty result.
+        assert_eq!(substitute_args("%1", &["$A"]), (String::new(), vec![SubstError::Missing(1)]));
+    }
+
+    #[test]
+    // Regression: "!macro $A %1" then "!macro $B $A" panicked (strip_prefix(' ').unwrap()
+    // on an empty expansion). It is now an error.
+    fn test_embedded_macro_missing_argument_does_not_panic() {
+        let mut msg_list = MsgList::new();
+        let mut macro_list = Vec::new();
+        let input = vec![source_line("!macro $A %1", 1), source_line("!macro $B $A", 2)];
+        let output = apply_source_macros(input, &mut macro_list, &mut msg_list);
+        assert_eq!(output, vec![]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.list.first().unwrap().text, "Missing argument 1 for embedded macro \"$A\" in $B");
+        // The embedded call can still pass its own argument through.
+        let mut msg_list = MsgList::new();
+        let mut macro_list = Vec::new();
+        let input = vec![source_line("!macro $A PUSH %1", 1), source_line("!macro $B $A %1", 2)];
+        apply_source_macros(input, &mut macro_list, &mut msg_list);
+        assert_eq!(msg_list.list.len(), 0);
+        assert_eq!(return_macro("$B", &macro_list).unwrap().items, vec!["PUSH %1".to_owned()]);
+    }
+
+    #[test]
+    // Regression: a trailing comment on a macro call became extra arguments
+    // ("Too many variables" warning, and "//" substituted for %2).
+    fn test_macro_call_trailing_comment_is_not_arguments() {
+        let mut msg_list = MsgList::new();
+        let macros = &mut [Macro {
+            name: String::from("$WAIT"),
+            variables: 1,
+            items: vec![String::from("DELAYV %1")],
+            comment: String::default(),
+        }];
+        let pass0 = expand_macros(&mut msg_list, vec![source_line("$WAIT 5 // x", 3)], macros);
+        assert_eq!(msg_list.list.len(), 0, "{:?}", msg_list.list.first().map(|m| &m.text));
+        assert_eq!(pass0.first().unwrap().input_text_line, "DELAYV 5 // Macro expansion from $WAIT");
+
+        // A comment cannot supply a missing argument either.
+        let macros = &mut [Macro {
+            name: String::from("$TWO"),
+            variables: 2,
+            items: vec![String::from("COPY %1 %2")],
+            comment: String::default(),
+        }];
+        let pass0 = expand_macros(&mut msg_list, vec![source_line("$TWO A // B", 4)], macros);
+        assert_eq!(msg_list.list.first().unwrap().text, "Missing argument 2 for macro $TWO");
+        assert_eq!(pass0.first().unwrap().input_text_line, "COPY A // Macro expansion from $TWO");
+    }
+
+    #[test]
+    // "Macro not found" carries the line and file of the call.
+    fn test_macro_not_found_has_location() {
+        let mut msg_list = MsgList::new();
+        expand_macros(&mut msg_list, vec![source_line("$NOPE 1 // why", 7)], &mut []);
+        let msg = msg_list.list.first().unwrap();
+        assert_eq!(msg.level, MessageType::Error);
+        assert_eq!(msg.text, "Macro not found $NOPE 1");
+        assert_eq!((msg.line_number, msg.file_name.as_deref()), (Some(7), Some("test.kla")));
+    }
 
     #[test]
     // Test macro is returns if macro is found

@@ -139,3 +139,14 @@ fn undefined_label_fails_the_build() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("Label NOWHERE: not found"), "stderr: {stderr}");
 }
+
+#[test]
+fn embedded_macro_missing_argument_is_an_error_not_a_panic() {
+    // Used to panic in macro expansion (exit 101).
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("m.kla"), "!macro $A %1\n!macro $B $A\n_start\nHALT\n").unwrap();
+
+    let out = klausscc(dir.path(), &["-i", "m.kla"]);
+    assert_eq!(out.status.code(), Some(1), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("Missing argument 1 for embedded macro"));
+}

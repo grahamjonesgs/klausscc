@@ -1143,7 +1143,7 @@ pub fn parse_vh_file(input_list: Vec<InputData>, msg_list: &mut MsgList) -> (Opt
         match macro_from_string(&line.input, msg_list) {
             None => (),
             Some(found_macro) => {
-                if return_macro(&found_macro.name, &mut macros).is_some() {
+                if return_macro(&found_macro.name, &macros).is_some() {
                     msg_list.push(
                         format!("Duplicate Macro definition {} found", found_macro.name),
                         Some(line.line_counter),
