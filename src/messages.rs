@@ -47,10 +47,9 @@ impl MsgList {
         }
     }
 
-    /// Returns number of warnings in `MsgList`.
+    /// Returns the number of messages of type `msg_type` in `MsgList`.
     pub fn number_by_type(&self, msg_type: MessageType) -> usize {
-        let warnings = self.list.iter().filter(|x| x.level == msg_type).count();
-        warnings
+        self.list.iter().filter(|x| x.level == msg_type).count()
     }
 
     /// Push message to `MsgList`.  In live mode the message is also printed

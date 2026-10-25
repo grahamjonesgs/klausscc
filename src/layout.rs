@@ -6,9 +6,10 @@
 //! [`heap_start`].  Addresses with `addr[31:28] == 0xF` are device registers
 //! ([`is_mmio`]).  This module has no intra-crate dependencies.
 
-/// Number of reserved words at the start of memory for the heap header.
-/// Byte 0x00: `heap_start` (written by assembler), Byte 0x04: `heap_end` (written by assembler),
-/// Byte 0x08: reserved, Byte 0x0C: reserved. Code begins at byte 0x10.
+/// Number of 64-bit words reserved at the start of memory for the heap header.
+/// Word 0 (byte 0x00): `heap_start` (written by the assembler), word 1 (0x08):
+/// `heap_end` (reserved), words 2-3 (0x10, 0x18): reserved.  Code begins at
+/// byte 0x20 ([`CODE_BASE`]).
 pub const HEAP_HEADER_WORDS: u32 = 4;
 
 /// Heap-header byte size (4 doublewords): code starts here (0x20).
