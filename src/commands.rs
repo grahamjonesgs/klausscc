@@ -38,7 +38,8 @@ enum Outcome {
     Ran,
     /// Not run, for the given reason (no expected values, assembly or serial error).
     Skipped(String),
-    /// Not run, and counted as a failure (the file cannot be read).
+    /// Counted as a failure without counts: the file cannot be read, or the
+    /// serial port failed while the test was reading UART output.
     Failed(String),
 }
 
@@ -621,8 +622,12 @@ pub fn run_test_mode(
 
     print_results(msg_list, start_time);
 
-    // Run test verification
-    let result = run_test_monitor(port, &expected_values, test_timeout, msg_list);
+    // Run test verification.  A serial read error is a failure of its own
+    // (exit 1), not a timeout (exit 3); run_test_monitor has reported it.
+    let result = run_test_monitor(port, &expected_values, test_timeout, msg_list).map_err(|err| Error::SerialRead {
+        port: output_serial_port.to_owned(),
+        source: err,
+    })?;
 
     // Print summary
     println!(
@@ -1237,8 +1242,23 @@ pub fn run_test_list(
             }
         };
 
-        // Run test verification
-        let result = run_test_monitor(port, &expected_values, test_timeout, &mut test_msg_list);
+        // Run test verification.  A serial read error fails the test (it is not a timeout).
+        let result = match run_test_monitor(port, &expected_values, test_timeout, &mut test_msg_list) {
+            Ok(result) => result,
+            Err(err) => {
+                println!("  FAIL: serial read error \"{err}\"");
+                results.push(BatchTestResult {
+                    file_name: test_file.clone(),
+                    passed: 0,
+                    failed: 0,
+                    timed_out: false,
+                    total: expected_values.len(),
+                    outcome: Outcome::Failed(format!("serial read error: {err}")),
+                });
+                println!();
+                continue;
+            }
+        };
 
         println!(
             "  Result: {}/{} passed{}",
@@ -1264,8 +1284,9 @@ pub fn run_test_list(
 
 /// Print the summary of a `-L` batch run and decide its outcome.
 ///
-/// Any failed, timed-out or unreadable test fails the batch (exit 2, timeouts
-/// included); a batch in which no test was validated fails too (exit 1).
+/// Any failed, timed-out or unreadable test, or one whose serial read failed,
+/// fails the batch (exit 2, timeouts included); a batch in which no test was
+/// validated fails too (exit 1).
 fn report_batch(results: &[BatchTestResult], list_file: &str) -> Result<(), Error> {
     println!("=== Test Suite Summary ===");
     let mut total_failed: usize = 0;

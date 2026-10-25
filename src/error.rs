@@ -48,6 +48,13 @@ pub enum Error {
         /// The underlying I/O error.
         source: io::Error,
     },
+    /// Reading the board's UART output over its serial port failed during a test.
+    SerialRead {
+        /// The serial port name as given (or auto-detected).
+        port: String,
+        /// The underlying I/O error.
+        source: io::Error,
+    },
     /// Loading the board over the network failed.
     Netboot(NetbootError),
     /// Tests ran, and some of them failed or timed out.
@@ -96,6 +103,7 @@ impl fmt::Display for Error {
             Self::Write { path, source } => write!(f, "cannot write {}: {source}", path.display()),
             Self::Elf(path) => write!(f, "failed to extract LOAD segments from ELF file {}", path.display()),
             Self::Serial { port, source } => write!(f, "failed to write to serial port {port}: {source}"),
+            Self::SerialRead { port, source } => write!(f, "failed to read from serial port {port}: {source}"),
             Self::Netboot(err) => write!(f, "netboot failed: {err}"),
             Self::TestsFailed { failed, total, timed_out } => {
                 write!(f, "{failed} of {total} tests failed{}", if *timed_out { " (timed out)" } else { "" })
@@ -110,7 +118,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Read { source, .. } | Self::Write { source, .. } | Self::Serial { source, .. } => Some(source),
+            Self::Read { source, .. } | Self::Write { source, .. } | Self::Serial { source, .. } | Self::SerialRead { source, .. } => Some(source),
             Self::Netboot(err) => Some(err),
             _ => None,
         }
@@ -165,6 +173,10 @@ mod tests {
             Error::Serial {
                 port: "/dev/null".to_owned(),
                 source: io::Error::from(io::ErrorKind::TimedOut),
+            },
+            Error::SerialRead {
+                port: "/dev/null".to_owned(),
+                source: io::Error::from(io::ErrorKind::BrokenPipe),
             },
             Error::Netboot(NetbootError::Rejected(1)),
             Error::NoTests(PathBuf::from("tests")),

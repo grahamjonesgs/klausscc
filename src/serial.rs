@@ -522,6 +522,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
 }
 
 /// Result of a test verification run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TestResult {
     /// Number of expected values that matched.
     pub passed: usize,
@@ -551,18 +552,16 @@ fn extract_hex_value(line: &str) -> Option<String> {
 ///
 /// Reads UART output from the FPGA board and compares each hex line against the
 /// expected values in order. Stops when all expected values are matched or timeout.
+/// A serial read error (other than a read timeout) is reported and returned:
+/// it is not a test timeout.
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
-pub fn run_test_monitor(mut port: Box<dyn SerialPort>, expected_values: &[String], timeout_secs: u64, msg_list: &mut MsgList) -> TestResult {
-    let start = Instant::now();
-    let timeout = Duration::from_secs(timeout_secs);
-
+pub fn run_test_monitor(
+    mut port: Box<dyn SerialPort>,
+    expected_values: &[String],
+    timeout_secs: u64,
+    msg_list: &mut MsgList,
+) -> io::Result<TestResult> {
     port.set_timeout(Duration::from_millis(500)).unwrap_or(());
-
-    let mut buffer = [0_u8; 1024];
-    let mut line_buffer = String::new();
-    let mut expected_index: usize = 0;
-    let mut passed: usize = 0;
-    let mut failed: usize = 0;
 
     println!(
         "Test mode: expecting {} UART values (timeout {}s)...",
@@ -570,28 +569,51 @@ pub fn run_test_monitor(mut port: Box<dyn SerialPort>, expected_values: &[String
         timeout_secs
     );
 
-    while expected_index < expected_values.len() && start.elapsed() < timeout {
-        match port.read(&mut buffer[..]) {
+    let result = match_uart_values(&mut port, expected_values, Duration::from_secs(timeout_secs));
+    match &result {
+        Ok(result) if result.timed_out => {
+            let remaining = result.total - result.passed - result.failed;
+            msg_list.push(
+                format!("Test timed out after {timeout_secs}s: {remaining} expected values not received"),
+                None,
+                None,
+                MessageType::Warning,
+            );
+        }
+        Ok(_) => {}
+        Err(err) => {
+            msg_list.push(format!("Serial read error during test: \"{err}\""), None, None, MessageType::Error);
+        }
+    }
+    result
+}
+
+/// Compare the hex lines read from `reader` against `expected_values`, in order.
+///
+/// Prints a PASS/FAIL line per value.  Stops when every expected value has
+/// been checked or `timeout` has passed (`timed_out` is then set); a read
+/// error other than a read timeout stops it and is returned.
+fn match_uart_values<R: io::Read + ?Sized>(reader: &mut R, expected_values: &[String], timeout: Duration) -> io::Result<TestResult> {
+    let start = Instant::now();
+    let total = expected_values.len();
+    let mut buffer = [0_u8; 1024];
+    let mut line_buffer = String::new();
+    let mut expected_index: usize = 0;
+    let mut passed: usize = 0;
+    let mut failed: usize = 0;
+
+    while expected_index < total && start.elapsed() < timeout {
+        match reader.read(&mut buffer[..]) {
             Ok(bytes_read) => {
-                if bytes_read > 0 {
-                    let text = String::from_utf8_lossy(buffer.get(..bytes_read).unwrap_or(&[]));
-                    line_buffer.push_str(&text);
-                }
+                line_buffer.push_str(&String::from_utf8_lossy(buffer.get(..bytes_read).unwrap_or(&[])));
             }
-            Err(err) if err.kind() == io::ErrorKind::TimedOut => {
-                continue;
-            }
-            Err(err) => {
-                msg_list.push(format!("Serial read error during test: \"{err}\""), None, None, MessageType::Error);
-                break;
-            }
+            Err(err) if err.kind() == io::ErrorKind::TimedOut => continue,
+            Err(err) => return Err(err),
         }
 
         // Process complete lines from the buffer
         while let Some(newline_pos) = line_buffer.find('\n') {
-            let line: String = line_buffer.get(..newline_pos).unwrap_or("").to_owned();
-            line_buffer = line_buffer.get(newline_pos + 1..).unwrap_or("").to_owned();
-
+            let line: String = line_buffer.drain(..=newline_pos).collect();
             let trimmed = line.trim();
 
             // Skip blank lines and board acknowledgment messages
@@ -599,49 +621,29 @@ pub fn run_test_monitor(mut port: Box<dyn SerialPort>, expected_values: &[String
                 continue;
             }
 
-            if let Some(hex_value) = extract_hex_value(trimmed) {
-                if expected_index < expected_values.len() {
-                    let empty = String::new();
-                    let expected = expected_values.get(expected_index).unwrap_or(&empty).as_str();
-                    if hex_value == expected {
-                        println!("  PASS [{}/{}]: {} == {}", expected_index + 1, expected_values.len(), hex_value, expected);
-                        passed += 1;
-                    } else {
-                        println!(
-                            "  FAIL [{}/{}]: got {}, expected {}",
-                            expected_index + 1,
-                            expected_values.len(),
-                            hex_value,
-                            expected
-                        );
-                        failed += 1;
-                    }
-                    expected_index += 1;
-                }
+            let Some(hex_value) = extract_hex_value(trimmed) else {
+                continue;
+            };
+            let Some(expected) = expected_values.get(expected_index) else {
+                continue;
+            };
+            if hex_value == *expected {
+                println!("  PASS [{}/{total}]: {hex_value} == {expected}", expected_index + 1);
+                passed += 1;
+            } else {
+                println!("  FAIL [{}/{total}]: got {hex_value}, expected {expected}", expected_index + 1);
+                failed += 1;
             }
+            expected_index += 1;
         }
     }
 
-    let timed_out = expected_index < expected_values.len();
-
-    if timed_out {
-        let remaining = expected_values.len() - expected_index;
-        msg_list.push(
-            format!("Test timed out after {timeout_secs}s: {remaining} expected values not received"),
-            None,
-            None,
-            MessageType::Warning,
-        );
-    }
-
-    drop(port);
-
-    TestResult {
+    Ok(TestResult {
         passed,
         failed,
-        timed_out,
-        total: expected_values.len(),
-    }
+        timed_out: expected_index < total,
+        total,
+    })
 }
 
 #[cfg(test)]
@@ -716,5 +718,78 @@ mod tests {
         assert_eq!(ports_found_message(1, "A"), "only port A was found");
         assert_eq!(ports_found_message(2, "A,\nB"), "the following 2 ports were found:\nA,\nB");
         assert_eq!(ports_found_message(3, "A,\nB,\nC"), "the following 3 ports were found:\nA,\nB,\nC");
+    }
+
+    // ---- match_uart_values ---------------------------------------------------
+
+    /// A reader that returns scripted chunks, then read timeouts.
+    struct Script(std::collections::VecDeque<io::Result<Vec<u8>>>);
+
+    impl Script {
+        fn new(chunks: Vec<io::Result<&[u8]>>) -> Self {
+            Self(chunks.into_iter().map(|c| c.map(<[u8]>::to_vec)).collect())
+        }
+    }
+
+    impl io::Read for Script {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            match self.0.pop_front() {
+                Some(Ok(chunk)) => {
+                    buf[..chunk.len()].copy_from_slice(&chunk);
+                    Ok(chunk.len())
+                }
+                Some(Err(err)) => Err(err),
+                None => {
+                    thread::sleep(Duration::from_millis(1));
+                    Err(io::Error::from(io::ErrorKind::TimedOut))
+                }
+            }
+        }
+    }
+
+    fn expected(values: &[&str]) -> Vec<String> {
+        values.iter().map(|v| (*v).to_owned()).collect()
+    }
+
+    #[test]
+    fn uart_values_are_matched_across_chunks() {
+        let mut reader = Script::new(vec![
+            Ok(b"Load Complete\r\n0000"),
+            Err(io::Error::from(io::ErrorKind::TimedOut)),
+            Ok(b"0001\r\n\r\n"),
+            Ok(b"0000000B\n"),
+        ]);
+        let result = match_uart_values(&mut reader, &expected(&["00000001", "0000000A"]), Duration::from_secs(5)).unwrap();
+        assert_eq!(
+            result,
+            TestResult {
+                passed: 1,
+                failed: 1,
+                timed_out: false,
+                total: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn uart_values_missing_at_the_deadline_time_out() {
+        let mut reader = Script::new(vec![Ok(b"00000001\n")]);
+        let result = match_uart_values(&mut reader, &expected(&["00000001", "00000002"]), Duration::from_millis(20)).unwrap();
+        assert_eq!(
+            result,
+            TestResult {
+                passed: 1,
+                failed: 0,
+                timed_out: true,
+                total: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn a_serial_read_error_is_returned_not_reported_as_a_timeout() {
+        let mut reader = Script::new(vec![Ok(b"00000001\n"), Err(io::Error::from(io::ErrorKind::BrokenPipe))]);
+        let err = match_uart_values(&mut reader, &expected(&["00000001", "00000002"]), Duration::from_secs(5)).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
     }
 }

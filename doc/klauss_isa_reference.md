@@ -845,7 +845,7 @@ klausscc -c opcode_select.vh -i test_bits.kla -s --test --test-timeout 20
 
 **Exit codes:**
 - `0` -- all tests passed
-- `1` -- assembly error or no expected values found
+- `1` -- assembly error, no expected values found, or a serial port error (including a read error while waiting for UART output)
 - `2` -- one or more test values did not match
 - `3` -- timed out before all expected values were received
 
