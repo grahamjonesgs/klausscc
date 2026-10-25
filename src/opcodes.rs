@@ -221,8 +221,9 @@ pub fn add_arguments(
         }
     }
 
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
+    let mut words = 0_usize;
+    for (i, word) in line.split_whitespace().enumerate() {
+        words += 1;
         if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
             arguments.push_str(&{
                 let this = convert_argument(&word.to_uppercase(), msg_list, line_number, filename, labels);
@@ -236,14 +237,15 @@ pub fn add_arguments(
                 this.unwrap_or_else(|| "00000000".to_owned())
             });
         }
-        if i > num_registers as usize + num_arguments as usize {
-            msg_list.push(
-                format!("Too many arguments found - \"{line}\""),
-                Some(line_number),
-                Some((filename).to_owned()),
-                MessageType::Warning,
-            );
-        }
+    }
+    // One warning for the line, however many extra tokens it has.
+    if words > 1 + num_registers as usize + num_arguments as usize {
+        msg_list.push(
+            format!("Too many arguments found - \"{line}\""),
+            Some(line_number),
+            Some((filename).to_owned()),
+            MessageType::Warning,
+        );
     }
 
     // Can't be in tarpaulin as we can't test the error by passing wrong size
@@ -1527,6 +1529,22 @@ mod tests {
             msg_list.list.first().unwrap_or_default().text,
             "Too many arguments found - \"PUSH 1 0xF\""
         );
+    }
+
+    #[test]
+    // Regression: one "Too many arguments" warning was pushed per extra token.
+    fn test_add_arguments_extra_tokens_warn_once() {
+        let mut msg_list = MsgList::new();
+        let mut labels = Vec::<labels::Label>::new();
+        let opcodes = &mut v2_opcodes();
+        let output = add_arguments(opcodes, &"SETR A 1 2 3 4".to_owned(), &mut msg_list, 1, "test", &mut labels);
+        assert_eq!(output, String::from("00000001"));
+        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
+        assert_eq!(msg_list.list.len(), 1);
+
+        let mut msg_list = MsgList::new();
+        add_arguments(opcodes, &"SETR A 1".to_owned(), &mut msg_list, 1, "test", &mut labels);
+        assert_eq!(msg_list.list.len(), 0);
     }
 
     #[test]
