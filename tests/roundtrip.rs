@@ -5,7 +5,7 @@
 //! This proves the assembler and the emulator agree on the v2 encoding across
 //! ALU, immediates, memory (MMIO UART), the stack, and conditional branches.
 //! (The rest of the corpus, which prints through the `uart_stubs.kla` macros,
-//! is checked by `commands::tests::emulator_corpus_passes`.)
+//! is checked by `commands::emulate::tests::emulator_corpus_passes`.)
 
 use std::process::Command;
 
