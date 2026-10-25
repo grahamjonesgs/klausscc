@@ -36,7 +36,9 @@ use commands::{
     run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload, run_test_list,
     run_test_mode,
 };
-use files::{filename_stem, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType};
+use files::{
+    filename_stem, output_file_name, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType,
+};
 use helper::{build_ddr_image, create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments, HEAP_HEADER_WORDS};
 use labels::{find_duplicate_label, get_labels, Label};
 use macros::{apply_source_macros, expand_embedded_macros, expand_macros};
@@ -67,18 +69,10 @@ fn main() -> Result<(), i32> {
     let start_time: NaiveTime = Local::now().time();
 
     let matches = set_matches().get_matches();
-    let input_file_name: String = matches.get_one::<String>("input").unwrap_or(&String::default()).replace(' ', "");
-    let mut binary_file_name: String = matches
-        .get_one::<String>("bitcode")
-        .unwrap_or(&filename_stem(&input_file_name))
-        .replace(' ', "");
-    binary_file_name.push_str(".kbt");
-    let mut output_file_name: String = matches
-        .get_one::<String>("output")
-        .unwrap_or(&filename_stem(&input_file_name))
-        .replace(' ', "");
-    output_file_name.push_str(".code");
-    let output_serial_port: String = matches.get_one::<String>("serial").unwrap_or(&String::default()).replace(' ', "");
+    let input_file_name: String = matches.get_one::<String>("input").cloned().unwrap_or_default();
+    let binary_file_name = output_file_name(matches.get_one::<String>("bitcode").map(String::as_str), &input_file_name, "kbt");
+    let output_file_name = output_file_name(matches.get_one::<String>("output").map(String::as_str), &input_file_name, "code");
+    let output_serial_port: String = matches.get_one::<String>("serial").cloned().unwrap_or_default();
     let opcodes_flag = matches.get_flag("opcodes");
     let textmate_flag = matches.get_flag("textmate");
     let monitor_flag = matches.get_flag("monitor");
@@ -89,7 +83,7 @@ fn main() -> Result<(), i32> {
         .get_one::<String>("test_timeout")
         .and_then(|timeout_str| timeout_str.parse().ok())
         .unwrap_or(10);
-    let test_list_file: String = matches.get_one::<String>("test_list").unwrap_or(&String::default()).replace(' ', "");
+    let test_list_file: String = matches.get_one::<String>("test_list").cloned().unwrap_or_default();
     let emulate_flag = matches.get_flag("emulate");
     let gdbserver_port: Option<u16> = matches.get_one::<u16>("gdbserver").copied();
     let board_flag = matches.get_flag("board");
