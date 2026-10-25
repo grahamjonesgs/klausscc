@@ -896,6 +896,26 @@ mod tests {
     }
 
     #[test]
+    // Regression: an undefined label was a warning, so "JMP nowhere:" assembled
+    // to a jump to address 0 and the build succeeded.
+    fn test_undefined_label_is_error() {
+        let (_, msg_list) = assemble_text("_start\nJMP nowhere:\nHALT\n");
+        assert_eq!(
+            messages_of(&msg_list, &MessageType::Error),
+            vec![(Some(2), "Label NOWHERE: not found".to_owned())]
+        );
+
+        let (_, msg_list) = assemble_text("_start\nSETR A 12abc\nHALT\n");
+        assert_eq!(
+            messages_of(&msg_list, &MessageType::Error),
+            vec![(Some(2), "Decimal value 12ABC incorrect".to_owned())]
+        );
+
+        let (_, msg_list) = assemble_text("_start\nloop:\nJMP loop:\nJMP loop\n");
+        assert_eq!(messages_of(&msg_list, &MessageType::Error), vec![]);
+    }
+
+    #[test]
     // Regression: a bad .comm size was parsed with unwrap_or(0) and silently reserved nothing.
     fn test_comm_bad_size_is_error() {
         let (_, msg_list) = assemble_text("_start\nHALT\n.comm buf, 12abc, 4\n");

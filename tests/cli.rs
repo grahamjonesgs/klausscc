@@ -126,3 +126,16 @@ fn emulator_test_with_nothing_to_validate_fails() {
     let out = klausscc(dir.path(), &["--emulate-test", "plain.kla"]);
     assert_eq!(out.status.code(), Some(1), "stdout: {}", String::from_utf8_lossy(&out.stdout));
 }
+
+#[test]
+fn undefined_label_fails_the_build() {
+    // Used to be a warning that assembled to a jump to address 0 and exited 0.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("jmp.kla"), "_start\nJMP nowhere:\nHALT\n").unwrap();
+
+    let out = klausscc(dir.path(), &["-i", "jmp.kla"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!dir.path().join("jmp.kbt").exists(), "no binary for a failed build");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Label NOWHERE: not found"), "stderr: {stderr}");
+}

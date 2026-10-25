@@ -225,14 +225,14 @@ pub fn add_arguments(
     for (i, word) in words.enumerate() {
         if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
             arguments.push_str(&{
-                let this = convert_argument(&word.to_owned().to_uppercase(), msg_list, line_number, filename.to_owned(), labels);
+                let this = convert_argument(&word.to_uppercase(), msg_list, line_number, filename, labels);
                 //let default = "00000000".to_owned();
                 this.unwrap_or_else(|| "00000000".to_owned())
             });
         }
         if i == num_registers as usize + 2 && num_arguments == 2 {
             arguments.push_str(&{
-                let this = convert_argument(&word.to_owned().to_uppercase(), msg_list, line_number, filename.to_owned(), labels);
+                let this = convert_argument(&word.to_uppercase(), msg_list, line_number, filename, labels);
                 this.unwrap_or_else(|| "00000000".to_owned())
             });
         }
@@ -600,7 +600,7 @@ pub fn pc_relative_bits(
             _ => continue,
         };
         let Some(tok) = tokens.get(i + 1) else { return 0 };
-        let Some(hex) = convert_argument(tok, msg_list, line_number, filename.to_owned(), labels) else {
+        let Some(hex) = convert_argument(tok, msg_list, line_number, filename, labels) else {
             return 0;
         };
         let Ok(target) = u32::from_str_radix(&hex, 16) else { return 0 };

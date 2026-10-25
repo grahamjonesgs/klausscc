@@ -1,5 +1,6 @@
 use crate::helper::{data_name_from_string, strip_comments};
 use crate::messages::{MessageType, MsgList};
+use crate::num::{is_hex_literal, parse_bits64, parse_int, LiteralError};
 use crate::opcodes::Pass1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,91 +29,56 @@ impl Default for &Label {
 
 /// Gets address from label or absolute values.
 ///
-/// Converts argument to label value or converts to Hex.
-pub fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32, filename: String, labels: &mut Vec<Label>) -> Option<String> {
+/// Converts argument to label value or converts to Hex. An undefined label or
+/// a malformed or out-of-range literal is reported as an error at the line and
+/// returns `None`.
+pub fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32, filename: &str, labels: &mut Vec<Label>) -> Option<String> {
     let argument_trim = argument.trim();
-    if label_name_from_string(argument_trim).is_some() {
+    let mut error = |text: String| msg_list.push(text, Some(line_number), Some(filename.to_owned()), MessageType::Error);
+
+    if label_name_from_string(argument_trim).is_some() || data_name_from_string(argument_trim).is_some() {
         if let Some(n) = return_label_value(argument_trim, labels) {
             return Some(format!("{n:08X}"));
         }
-
-        msg_list.push(
-            format!("Label {argument} not found - line {line_number}"),
-            Some(line_number),
-            Some(filename),
-            MessageType::Warning,
-        );
+        error(format!("Label {argument} not found"));
         return None;
     }
 
-    if data_name_from_string(argument_trim).is_some() {
-        if let Some(n) = return_label_value(argument_trim, labels) {
-            return Some(format!("{n:08X}"));
+    if is_hex_literal(argument_trim) {
+        // Read as a 64-bit pattern so full-width literals (e.g. 0xFFFFFFFFFFFFFFFF)
+        // don't overflow, then reinterpret as i64 for the same bounds check as the
+        // decimal path. Values like 0xFFFFFFFFFFFFFFFF (-1) are in [i32::MIN, 0xFFFF_FFFF]
+        // and emit FFFFFFFF; the CPU sign-extends the 32-bit immediate to 64 bits,
+        // giving the correct 64-bit value.
+        match parse_bits64(argument_trim) {
+            Ok(bits) => {
+                let value = bits as i64;
+                if value >= i64::from(i32::MIN) && value <= 0xFFFF_FFFF_i64 {
+                    return Some(format!("{:08X}", value as u32));
+                }
+                error(format!("Hex value 0x{bits:016X} out of bounds"));
+            }
+            Err(LiteralError::Overflow) => error(format!("Hex value {argument} out of bounds")),
+            Err(_) => error(format!("Hex value {argument} incorrect")),
         }
-        msg_list.push(
-            format!("Label {argument} not found"),
-            Some(line_number),
-            Some(filename),
-            MessageType::Warning,
-        );
         return None;
     }
 
-    if argument_trim.len() >= 2 && (argument_trim.get(0..2).unwrap_or("  ") == "0x" || argument_trim.get(0..2).unwrap_or("  ") == "0X") {
-        let without_prefix1 = argument_trim.trim_start_matches("0x");
-        let without_prefix2 = without_prefix1.trim_start_matches("0X");
-        // Parse as u64 so full 64-bit hex literals (e.g. 0xFFFFFFFFFFFFFFFF) don't overflow.
-        // Then reinterpret as i64 for the same bounds check as the decimal path.
-        // Values like 0xFFFFFFFFFFFFFFFF (-1) are in [i32::MIN, 0xFFFF_FFFF] and emit FFFFFFFF;
-        // the CPU sign-extends the 32-bit immediate to 64 bits, giving the correct 64-bit value.
-        let int_value_result = u64::from_str_radix(&without_prefix2.replace('_', ""), 16);
-        if int_value_result.is_err() {
-            msg_list.push(
-                format!("Hex value {argument} incorrect"),
-                Some(line_number),
-                Some(filename),
-                MessageType::Warning,
-            );
-            return None;
-        }
-        let int_value = int_value_result.unwrap_or(0);
-        let int_value_signed = int_value as i64;
-        if int_value_signed >= i64::from(i32::MIN) && int_value_signed <= 0xFFFF_FFFF_i64 {
-            return Some(format!("{:08X}", int_value_signed as u32));
-        }
-        msg_list.push(
-            format!("Hex value 0x{int_value:016X} out of bounds"),
-            Some(line_number),
-            Some(filename),
-            MessageType::Warning,
-        );
-        return None;
-    }
-
-    match argument_trim.parse::<i64>() {
+    match parse_int(argument_trim) {
         Ok(n) => {
-            if n >= i64::from(i32::MIN) && n <= 0xFFFF_FFFF {
+            if n >= i128::from(i32::MIN) && n <= 0xFFFF_FFFF {
                 return Some(format!("{:08X}", n as u32));
             }
-            msg_list.push(
-                format!("Decimal value {n} out of bounds"),
-                Some(line_number),
-                Some(filename),
-                MessageType::Warning,
-            );
+            error(format!("Decimal value {n} out of bounds"));
         }
-        Err(_e) => {
+        Err(LiteralError::Overflow) => error(format!("Decimal value {argument} out of bounds")),
+        Err(_) => {
             // Try resolving as a label name without colon suffix
             let label_with_colon = format!("{argument_trim}:");
             if let Some(n) = return_label_value(&label_with_colon, labels) {
                 return Some(format!("{n:08X}"));
             }
-            msg_list.push(
-                format!("Decimal value {argument} incorrect"),
-                Some(line_number),
-                Some(filename),
-                MessageType::Warning,
-            );
+            error(format!("Decimal value {argument} incorrect"));
         }
     }
     None
@@ -332,33 +298,33 @@ mod tests {
         ];
         let mut msg_list = MsgList::new();
         assert_eq!(
-            convert_argument("0x1234", &mut msg_list, 3, "test".to_owned(), &mut labels),
+            convert_argument("0x1234", &mut msg_list, 3, "test", &mut labels),
             Some("00001234".to_owned())
         );
         assert_eq!(
-            convert_argument("1234", &mut msg_list, 5, "test".to_owned(), &mut labels),
+            convert_argument("1234", &mut msg_list, 5, "test", &mut labels),
             Some("000004D2".to_owned())
         );
         assert_eq!(
-            convert_argument("123456789", &mut msg_list, 6, "test".to_owned(), &mut labels),
+            convert_argument("123456789", &mut msg_list, 6, "test", &mut labels),
             Some("075BCD15".to_owned())
         );
         assert_eq!(
-            convert_argument("label1:", &mut msg_list, 7, "test".to_owned(), &mut labels),
+            convert_argument("label1:", &mut msg_list, 7, "test", &mut labels),
             Some("00000001".to_owned())
         );
         assert_eq!(
-            convert_argument("label1: ", &mut msg_list, 8, "test".to_owned(), &mut labels),
+            convert_argument("label1: ", &mut msg_list, 8, "test", &mut labels),
             Some("00000001".to_owned())
         );
 
         assert_eq!(
-            convert_argument("label2:", &mut msg_list, 14, "test".to_owned(), &mut labels),
+            convert_argument("label2:", &mut msg_list, 14, "test", &mut labels),
             Some("00000002".to_owned())
         );
 
         assert_eq!(
-            convert_argument("#data1", &mut msg_list, 14, "test".to_owned(), &mut labels),
+            convert_argument("#data1", &mut msg_list, 14, "test", &mut labels),
             Some("0000001E".to_owned())
         );
     }
@@ -384,45 +350,90 @@ mod tests {
 
         // Check for label reference without colon suffix
         assert_eq!(
-            convert_argument("label1", &mut msg_list, 0, "test".to_owned(), &mut labels),
+            convert_argument("label1", &mut msg_list, 0, "test", &mut labels),
             Some("00000001".to_owned())
         );
 
         // Check for unknown label text
-        assert_eq!(convert_argument("unknown", &mut msg_list, 0, "test".to_owned(), &mut labels), None);
+        assert_eq!(convert_argument("unknown", &mut msg_list, 0, "test", &mut labels), None);
         assert_eq!(
             msg_list.list.last().unwrap_or_default().text,
             "Decimal value unknown incorrect".to_owned()
         );
 
         // Check for hex value out of bounds
-        assert_eq!(convert_argument("0x123456789", &mut msg_list, 4, "test".to_owned(), &mut labels), None);
+        assert_eq!(convert_argument("0x123456789", &mut msg_list, 4, "test", &mut labels), None);
         assert_eq!(
             msg_list.list.last().unwrap_or_default().text,
             "Hex value 0x0000000123456789 out of bounds".to_owned()
         );
 
         // Check for label not defined
-        assert_eq!(convert_argument("label3:", &mut msg_list, 14, "test".to_owned(), &mut labels), None);
-        assert_eq!(
-            msg_list.list.last().unwrap_or_default().text,
-            "Label label3: not found - line 14".to_owned()
-        );
+        assert_eq!(convert_argument("label3:", &mut msg_list, 14, "test", &mut labels), None);
+        assert_eq!(msg_list.list.last().unwrap_or_default().text, "Label label3: not found".to_owned());
 
         // Check for invalid decimal value
-        assert_eq!(convert_argument("4294967296", &mut msg_list, 14, "test".to_owned(), &mut labels), None);
+        assert_eq!(convert_argument("4294967296", &mut msg_list, 14, "test", &mut labels), None);
         assert_eq!(
             msg_list.list.last().unwrap_or_default().text,
             "Decimal value 4294967296 out of bounds".to_owned()
         );
 
         // Check for data not defined
-        assert_eq!(convert_argument("#data2", &mut msg_list, 15, "test".to_owned(), &mut labels), None);
+        assert_eq!(convert_argument("#data2", &mut msg_list, 15, "test", &mut labels), None);
         assert_eq!(msg_list.list.last().unwrap_or_default().text, "Label #data2 not found".to_owned());
 
         // Check for invalid hex value
-        assert_eq!(convert_argument("0xGGG", &mut msg_list, 14, "test".to_owned(), &mut labels), None);
+        assert_eq!(convert_argument("0xGGG", &mut msg_list, 14, "test", &mut labels), None);
         assert_eq!(msg_list.list.last().unwrap_or_default().text, "Hex value 0xGGG incorrect".to_owned());
+    }
+
+    #[test]
+    // Regression: undefined labels and bad literals were warnings, so the line
+    // assembled as 00000000 and the build succeeded. They are now errors at the line.
+    fn test_convert_argument_failures_are_errors() {
+        let mut labels = vec![Label {
+            program_counter: 8,
+            name: "loop:".to_owned(),
+        }];
+        for bad in [
+            "nowhere:",
+            "#nodata",
+            "nowhere",
+            "0xGG",
+            "12abc",
+            "0x123456789",
+            "4294967296",
+            "99999999999999999999",
+        ] {
+            let mut msg_list = MsgList::new();
+            assert_eq!(convert_argument(bad, &mut msg_list, 9, "prog.kla", &mut labels), None, "{bad}");
+            assert_eq!(msg_list.number_by_type(&MessageType::Error), 1, "{bad}");
+            assert_eq!(msg_list.number_by_type(&MessageType::Warning), 0, "{bad}");
+            let msg = msg_list.list.first().unwrap();
+            assert_eq!((msg.line_number, msg.file_name.as_deref()), (Some(9), Some("prog.kla")), "{bad}");
+            assert!(
+                !msg.text.contains("- line"),
+                "location is attached, not repeated in the text: {}",
+                msg.text
+            );
+        }
+    }
+
+    #[test]
+    // Literal forms shared with the rest of the assembler (num::parse_int).
+    fn test_convert_argument_literal_forms() {
+        let mut labels = Vec::new();
+        let mut msg_list = MsgList::new();
+        let mut convert = |arg: &str| convert_argument(arg, &mut msg_list, 1, "t", &mut labels);
+        assert_eq!(convert("0x1_0"), Some("00000010".to_owned()));
+        assert_eq!(convert("0XFF"), Some("000000FF".to_owned()));
+        assert_eq!(convert("-1"), Some("FFFFFFFF".to_owned()));
+        assert_eq!(convert("-0x10"), Some("FFFFFFF0".to_owned()));
+        assert_eq!(convert("0xFFFFFFFFFFFFFFFF"), Some("FFFFFFFF".to_owned()));
+        assert_eq!(convert("-2147483648"), Some("80000000".to_owned()));
+        assert_eq!(convert("-2147483649"), None);
+        assert_eq!(msg_list.list.last().unwrap().text, "Decimal value -2147483649 out of bounds");
     }
 
     #[test]
