@@ -475,7 +475,6 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
 /// Returns pass1 from pass0.
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
-#[inline]
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = HEAP_HEADER_WORDS * 8; // Byte address: 4 header words × 8 bytes each (64-bit words)
@@ -616,7 +615,6 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
 /// Returns pass2 from pass1.
 ///
 /// Pass1 with program counters and returns vector of pass2, with final values.
-#[inline]
 pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opcode>, mut labels: Vec<Label>) -> Vec<Pass2> {
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
@@ -673,7 +671,6 @@ pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opco
 /// Prints results of assembly.
 ///
 /// Takes the message list and start time and prints the results to the users.
-#[inline]
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
 pub fn print_results(msg_list: &MsgList, start_time: Instant) {
     print_messages(msg_list);
@@ -692,7 +689,6 @@ pub fn print_results(msg_list: &MsgList, start_time: Instant) {
 ///
 /// Writes the `.kbt` wire-format string to `binary_file_name`, reporting (and
 /// returning) a failure.
-#[inline]
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) -> Result<(), Error> {
     msg_list.push(format!("Writing binary file to {binary_file_name}"), None, None, MessageType::Information);
@@ -714,7 +710,6 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
 ///
 /// Sends the resultant code on the serial device defined if no errors were found.
 /// Fails if errors were already reported or the send fails.
-#[inline]
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str, send_break: bool) -> Result<(), Error> {
     let error_count = msg_list.number_by_type(&MessageType::Error);
@@ -746,7 +741,6 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
 ///
 /// Runs the full assembly pipeline (pass0 → pass1 → pass2 → binary) for one file.
 /// Returns `Some(binary_string)` on success, `None` on assembly error.
-#[inline]
 #[cfg(not(tarpaulin_include))]
 pub fn assemble_file(input_file_name: &str, oplist: &[Opcode], macro_list: &[macros::Macro], msg_list: &mut MsgList) -> Option<String> {
     msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);

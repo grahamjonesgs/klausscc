@@ -304,7 +304,6 @@ pub enum DataError {
 }
 
 impl fmt::Display for DataError {
-    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Malformed => f.write_str("malformed data definition"),

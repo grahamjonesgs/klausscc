@@ -567,7 +567,6 @@ pub(crate) fn run_kbt_send(
 ///
 /// Sends program to board, reads UART output, and verifies against expected values
 /// parsed from the source file comments.
-#[inline]
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
 pub fn run_test_mode(
     msg_list: &mut MsgList,

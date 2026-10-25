@@ -25,7 +25,6 @@ pub enum LiteralError {
 }
 
 impl fmt::Display for LiteralError {
-    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => f.write_str("missing number"),
@@ -38,7 +37,6 @@ impl fmt::Display for LiteralError {
 impl std::error::Error for LiteralError {}
 
 /// Returns true when `token` is written as a hex literal (`0x…`, `-0x…`, `+0x…`).
-#[inline]
 pub fn is_hex_literal(token: &str) -> bool {
     let unsigned = token.strip_prefix(['-', '+']).unwrap_or(token);
     unsigned.get(..2).is_some_and(|prefix| prefix.eq_ignore_ascii_case("0x"))
@@ -48,7 +46,6 @@ pub fn is_hex_literal(token: &str) -> bool {
 ///
 /// Returns the mathematical value, so a hex literal is never negative unless
 /// it carries a `-` sign: `0xFFFF_FFFF_FFFF_FFFF` is `u64::MAX`, not `-1`.
-#[inline]
 pub fn parse_int(token: &str) -> Result<i128, LiteralError> {
     let (negative, unsigned) = match token.as_bytes().first() {
         Some(b'-') => (true, &token[1..]),
@@ -69,7 +66,6 @@ pub fn parse_int(token: &str) -> Result<i128, LiteralError> {
 ///
 /// Accepts any value in `i64::MIN ..= u64::MAX`; negative values are stored in
 /// two's complement, so `-1` and `0xFFFF_FFFF_FFFF_FFFF` give the same bits.
-#[inline]
 pub fn parse_bits64(token: &str) -> Result<u64, LiteralError> {
     let value = parse_int(token)?;
     if value < i128::from(i64::MIN) {
@@ -84,7 +80,6 @@ pub fn parse_bits64(token: &str) -> Result<u64, LiteralError> {
 /// A hex literal is read as a 64-bit pattern and reinterpreted as signed, so
 /// `0xFFFF_FFFF_FFFF_FFFF` is `-1`; a decimal literal keeps its value, so
 /// `18446744073709551615` stays `u64::MAX`.
-#[inline]
 pub fn parse_operand(token: &str) -> Result<i128, LiteralError> {
     if is_hex_literal(token) {
         parse_bits64(token).map(|bits| i128::from(bits as i64))
@@ -96,13 +91,11 @@ pub fn parse_operand(token: &str) -> Result<i128, LiteralError> {
 /// Returns true when an operand value fits a 32-bit immediate word.
 ///
 /// The CPU sign-extends the word, so `i32::MIN ..= 0xFFFF_FFFF` is accepted.
-#[inline]
 pub fn fits_imm32(value: i128) -> bool {
     (i128::from(i32::MIN)..=0xFFFF_FFFF).contains(&value)
 }
 
 /// Parse a literal that must fit in a `u32` (an address such as `--entry`).
-#[inline]
 pub fn parse_u32(token: &str) -> Result<u32, String> {
     let value = parse_int(token).map_err(|err| format!("{err} in \"{token}\""))?;
     u32::try_from(value).map_err(|_| format!("\"{token}\" is outside 0..=0xFFFFFFFF"))
