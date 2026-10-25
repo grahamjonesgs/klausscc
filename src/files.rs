@@ -395,52 +395,90 @@ pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList, opened_files:
     Some(lines)
 }
 
+/// Scanner state for `remove_block_comments`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CommentState {
+    /// Ordinary source text.
+    Code,
+    /// Source text, and the last character was a `/` that has not been output yet.
+    Slash,
+    /// Inside a `/* */` comment.
+    Comment,
+    /// Inside a comment, and the last character was a `*`.
+    Star,
+}
+
+/// Report a block comment that was still open at the end of a file.
+fn unterminated_comment(file_name: &str, line_number: u32, msg_list: &mut MsgList) {
+    msg_list.push(
+        format!("Comment not terminated in file {file_name}"),
+        Some(line_number),
+        Some(file_name.to_owned()),
+        MessageType::Error,
+    );
+}
+
 /// Remove comments from vector of strings.
 ///
-/// Checks for /* */ and removes them from the vector of strings.
+/// Checks for /* */ and removes them from the vector of strings. Comments do
+/// not nest, may span lines, but never span files: a comment still open at the
+/// end of a file is reported at the line where its `/*` was.
 pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> Vec<InputData> {
-    let mut in_comment = false;
+    let mut state = CommentState::Code;
+    // File and line of the `/*` that opened the current comment.
+    let mut opened_at: (String, u32) = (String::new(), 0);
     let mut new_lines: Vec<InputData> = Vec::new();
-    let mut old_file_name = String::default();
     for line in lines {
-        if old_file_name != line.file_name {
-            if in_comment {
-                msg_list.push(
-                    format!("Comment not terminated in file {old_file_name}"),
-                    Some(line.line_counter),
-                    Some(line.file_name.clone()),
-                    MessageType::Error,
-                );
-            }
-            in_comment = false;
+        let in_comment = matches!(state, CommentState::Comment | CommentState::Star);
+        if in_comment && opened_at.0 != line.file_name {
+            unterminated_comment(&opened_at.0, opened_at.1, msg_list);
+            state = CommentState::Code;
         }
 
-        old_file_name.clone_from(&line.file_name);
         let mut new_line = String::default();
-        let mut in_char = false; // If in normal last was / or if in comment last was *
         for char in line.input.chars() {
-            if in_comment {
-                if char == '/' && in_char {
-                    in_comment = false;
-                } else {
-                    in_char = char == '*';
-                } // Sets to true if c == '*'
-            } else if char == '*' && in_char {
-                in_comment = true;
-                new_line.pop();
-            } else if char == '/' {
-                in_char = true;
-                new_line.push(char);
-            } else {
-                in_char = false;
-                new_line.push(char);
-            }
+            state = match (state, char) {
+                (CommentState::Code, '/') => CommentState::Slash,
+                (CommentState::Code, _) => {
+                    new_line.push(char);
+                    CommentState::Code
+                }
+                (CommentState::Slash, '*') => {
+                    opened_at = (line.file_name.clone(), line.line_counter);
+                    CommentState::Comment
+                }
+                (CommentState::Slash, '/') => {
+                    new_line.push('/');
+                    CommentState::Slash
+                }
+                (CommentState::Slash, _) => {
+                    new_line.push('/');
+                    new_line.push(char);
+                    CommentState::Code
+                }
+                (CommentState::Comment | CommentState::Star, '*') => CommentState::Star,
+                (CommentState::Star, '/') => CommentState::Code,
+                (CommentState::Comment | CommentState::Star, _) => CommentState::Comment,
+            };
         }
+        // A pending `/` at the end of a line is ordinary text, and a `*` that
+        // ends a line cannot pair with a `/` on the next one.
+        state = match state {
+            CommentState::Slash => {
+                new_line.push('/');
+                CommentState::Code
+            }
+            CommentState::Star => CommentState::Comment,
+            other => other,
+        };
         new_lines.push(InputData {
             input: new_line,
             file_name: line.file_name,
             line_counter: line.line_counter,
         });
+    }
+    if state == CommentState::Comment {
+        unterminated_comment(&opened_at.0, opened_at.1, msg_list);
     }
     new_lines
 }
@@ -767,6 +805,77 @@ mod test {
             ]
         );
         assert_eq!(msg_list.list.first().unwrap_or_default().text, "Comment not terminated in file test1.kla");
+        // Reported where the comment opened, not at the first line of the next file.
+        assert_eq!(msg_list.list.first().unwrap_or_default().line_number, Some(1));
+        assert_eq!(msg_list.list.first().unwrap_or_default().file_name, Some("test1.kla".to_owned()));
+    }
+
+    /// Run `remove_block_comments` over `lines` (all in `test.kla`).
+    fn strip_block(lines: &[&str]) -> (Vec<String>, MsgList) {
+        let mut msg_list = MsgList::new();
+        let input = lines
+            .iter()
+            .zip(1..)
+            .map(|(line, n)| InputData {
+                input: (*line).to_owned(),
+                file_name: "test.kla".to_owned(),
+                line_counter: n,
+            })
+            .collect();
+        let output = remove_block_comments(input, &mut msg_list).into_iter().map(|l| l.input).collect();
+        (output, msg_list)
+    }
+
+    #[test]
+    // `/*/` opens a comment; the `/` after the `*` does not also close it
+    fn test_remove_block_comments_slash_star_slash() {
+        let (output, msg_list) = strip_block(&["abc/*/def"]);
+        assert_eq!(output, vec!["abc"]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+    }
+
+    #[test]
+    // A `*` after a comment closes is ordinary text
+    fn test_remove_block_comments_star_after_close() {
+        let (output, msg_list) = strip_block(&["a/* x */*b", "c"]);
+        assert_eq!(output, vec!["a*b", "c"]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+    }
+
+    #[test]
+    // Comments do not nest, and `**/` still closes one
+    fn test_remove_block_comments_nested_looking() {
+        let (output, msg_list) = strip_block(&["abc/* /* x */def", "g/* x */ */h", "i/* x **/j"]);
+        assert_eq!(output, vec!["abcdef", "g */h", "ij"]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+    }
+
+    #[test]
+    // Slashes that do not open a comment are kept
+    fn test_remove_block_comments_plain_slashes() {
+        let (output, msg_list) = strip_block(&["a/b", "c//d", "e/", "*/f"]);
+        assert_eq!(output, vec!["a/b", "c//d", "e/", "*/f"]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+    }
+
+    #[test]
+    // A `*` ending a line does not pair with a `/` starting the next
+    fn test_remove_block_comments_star_at_line_end() {
+        let (output, msg_list) = strip_block(&["a/* x *", "/b */c"]);
+        assert_eq!(output, vec!["a", "c"]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+    }
+
+    #[test]
+    // A comment still open at the end of the last file is reported where it opened
+    fn test_remove_block_comments_unterminated_last_file() {
+        let (output, msg_list) = strip_block(&["abc", "def /* open", "ghi"]);
+        assert_eq!(output, vec!["abc", "def ", ""]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        let msg = msg_list.list.first().unwrap_or_default();
+        assert_eq!(msg.text, "Comment not terminated in file test.kla");
+        assert_eq!(msg.line_number, Some(2));
+        assert_eq!(msg.file_name, Some("test.kla".to_owned()));
     }
 
     #[test]
