@@ -1280,12 +1280,8 @@ mod tests {
     /// built-in v2 opcode table, emulate the resulting image, and check the UART
     /// output. This proves the assembler and the golden-model emulator agree on
     /// the v2 encoding across ALU, immediates, memory (MMIO UART), the stack, and
-    /// conditional branches.
-    ///
-    /// (The legacy `src/klatest` corpus prints results with the v1 `TXR`/`NEWLINE`
-    /// opcodes, which are retired in v2 — UART is now memory-mapped — so those
-    /// files can no longer self-validate. These `v2_*.kla` fixtures replace that
-    /// self-test using MMIO UART stores.)
+    /// conditional branches. (The rest of the corpus, which prints through the
+    /// `uart_stubs.kla` macros, is checked by `commands::tests::emulator_corpus_passes`.)
     #[test]
     fn test_v2_roundtrip() {
         let mut msg_list = MsgList::new();

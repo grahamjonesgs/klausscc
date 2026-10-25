@@ -993,72 +993,24 @@ pub(crate) fn run_emulate_test(
     let mut failed_files: Vec<String> = Vec::new();
 
     for file in &files {
-        // Expected values from source comments.  A file that cannot be read is
-        // a failure, not a silently skipped file.
-        let raw_lines: Vec<String> = match fs::read_to_string(file) {
-            Ok(source) => source.lines().map(String::from).collect(),
-            Err(e) => {
+        match verify_emulated(file, oplist, macro_list, max_instructions) {
+            Ok(Verdict::NotValidatable) => {} // skip non-validatable files silently
+            Ok(Verdict::Pass { matched, instructions }) => {
                 total_files += 1;
-                println!("  FAIL {file}: cannot read: {e}");
-                failed_files.push(format!("{file} (cannot read: {e})"));
-                continue;
+                total_pass += 1;
+                println!("  PASS {}: {matched}/{matched} ({instructions} instrs)", filename_stem(file));
             }
-        };
-        let expected = parse_expected_uart_values(&raw_lines);
-        if expected.is_empty() {
-            continue; // skip non-validatable files silently
-        }
-        total_files += 1;
-
-        let mut test_msgs = MsgList::new();
-        let Some((image, entry)) = assemble_to_image(file, oplist, macro_list, &mut test_msgs) else {
-            println!("  FAIL {file}: assembly error");
-            failed_files.push(format!("{file} (assembly error)"));
-            continue;
-        };
-
-        let (result, _) = emulate::emulate_image(&image, entry, max_instructions, false);
-        // Extract 8-hex-digit tokens from each UART line (mirrors serial.rs).
-        let got: Vec<String> = result
-            .uart
-            .lines()
-            .filter_map(|l| {
-                let t = l.trim();
-                if t.len() >= 8 {
-                    let c = t.get(..8).unwrap_or("");
-                    if c.len() == 8 && c.chars().all(|ch| ch.is_ascii_hexdigit()) && c == c.to_ascii_uppercase() {
-                        return Some(c.to_owned());
-                    }
-                }
-                None
-            })
-            .collect();
-
-        // Compare in order; report first diff.
-        let mut matched = 0_usize;
-        let mut first_diff: Option<String> = None;
-        for (idx, exp) in expected.iter().enumerate() {
-            match got.get(idx) {
-                Some(g) if g == exp => matched += 1,
-                Some(g) => {
-                    first_diff = Some(format!("at #{}: expected {exp}, got {g}", idx + 1));
-                    break;
-                }
-                None => {
-                    first_diff = Some(format!("at #{}: expected {exp}, got <none> (stop={:?})", idx + 1, result.stop));
-                    break;
-                }
+            Ok(Verdict::Fail { matched, expected, diff }) => {
+                total_files += 1;
+                let stem = filename_stem(file);
+                println!("  FAIL {stem}: {matched}/{expected} — {diff}");
+                failed_files.push(format!("{stem}: {diff}"));
             }
-        }
-
-        let stem = filename_stem(&file.clone());
-        if matched == expected.len() {
-            total_pass += 1;
-            println!("  PASS {stem}: {matched}/{} ({} instrs)", expected.len(), result.instructions);
-        } else {
-            let diff = first_diff.unwrap_or_else(|| "unknown".to_owned());
-            println!("  FAIL {stem}: {matched}/{} — {diff}", expected.len());
-            failed_files.push(format!("{stem}: {diff}"));
+            Err(reason) => {
+                total_files += 1;
+                println!("  FAIL {file}: {reason}");
+                failed_files.push(format!("{file} ({reason})"));
+            }
         }
     }
 
@@ -1089,6 +1041,78 @@ pub(crate) fn run_emulate_test(
             timed_out: false,
         })
     }
+}
+
+/// Outcome of checking one `.kla` file against the emulator.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Verdict {
+    /// The file has no expected UART values, so there is nothing to check.
+    NotValidatable,
+    /// Every expected value was printed, in order.
+    Pass {
+        /// Number of expected values (all of them matched).
+        matched: usize,
+        /// Instructions the emulator executed.
+        instructions: u64,
+    },
+    /// The UART output diverged from the expected values.
+    Fail {
+        /// Number of expected values that matched before the first difference.
+        matched: usize,
+        /// Number of expected values.
+        expected: usize,
+        /// Description of the first difference.
+        diff: String,
+    },
+}
+
+/// Assemble `file`, run it on the emulator and compare its UART output with the
+/// expected values in its `// ` comments.
+///
+/// Each UART line contributes its leading 8 upper-case hex digits (mirroring the
+/// serial test runner), and the values are compared in order.  Returns `Err`
+/// with a short reason when the file cannot be read or does not assemble.
+pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macros::Macro], max_instructions: u64) -> Result<Verdict, String> {
+    // A file that cannot be read is a failure, not a silently skipped file.
+    let source = fs::read_to_string(file).map_err(|e| format!("cannot read: {e}"))?;
+    let raw_lines: Vec<String> = source.lines().map(String::from).collect();
+    let expected = parse_expected_uart_values(&raw_lines);
+    if expected.is_empty() {
+        return Ok(Verdict::NotValidatable);
+    }
+
+    let mut test_msgs = MsgList::new();
+    let Some((image, entry)) = assemble_to_image(file, oplist, macro_list, &mut test_msgs) else {
+        return Err("assembly error".to_owned());
+    };
+
+    let (result, _) = emulate::emulate_image(&image, entry, max_instructions, false);
+    let got: Vec<&str> = result
+        .uart
+        .lines()
+        .filter_map(|l| {
+            let c = l.trim().get(..8)?;
+            (c.chars().all(|ch| ch.is_ascii_hexdigit()) && c == c.to_ascii_uppercase()).then_some(c)
+        })
+        .collect();
+
+    // Compare in order; report the first difference.
+    for (idx, exp) in expected.iter().enumerate() {
+        let diff = match got.get(idx) {
+            Some(g) if g == exp => continue,
+            Some(g) => format!("at #{}: expected {exp}, got {g}", idx + 1),
+            None => format!("at #{}: expected {exp}, got <none> (stop={:?})", idx + 1, result.stop),
+        };
+        return Ok(Verdict::Fail {
+            matched: idx,
+            expected: expected.len(),
+            diff,
+        });
+    }
+    Ok(Verdict::Pass {
+        matched: expected.len(),
+        instructions: result.instructions,
+    })
 }
 
 /// Read a test list file and return the list of test file paths.
@@ -1491,5 +1515,101 @@ mod tests {
         let mut bad = ELF_MAGIC.to_vec();
         bad.extend_from_slice(&[0_u8; 64]);
         assert!(flatten_input(bad, None).is_none());
+    }
+
+    // ---- verify_emulated -----------------------------------------------------
+
+    /// Absolute path of the emulator fixture corpus.
+    fn fixture_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+    }
+
+    /// The built-in v2 opcode table and expanded macros, as the CLI loads them.
+    fn v2_tables() -> (Vec<Opcode>, Vec<macros::Macro>) {
+        let mut msg_list = MsgList::new();
+        let (oplist, macros_raw) = crate::opcodes::v2_opcodes_and_macros(&mut msg_list);
+        let macro_list = macros::expand_embedded_macros(macros_raw, &mut msg_list);
+        (oplist, macro_list)
+    }
+
+    /// The corpus `--emulate-test tests/fixtures` runs: every file with expected
+    /// UART values must assemble and print exactly those values on the emulator.
+    #[test]
+    fn emulator_corpus_passes() {
+        let (oplist, macro_list) = v2_tables();
+        let mut files: Vec<PathBuf> = fs::read_dir(fixture_dir())
+            .expect("read fixture dir")
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "kla"))
+            .collect();
+        files.sort();
+
+        let mut passed: Vec<String> = Vec::new();
+        let mut failures: Vec<String> = Vec::new();
+        for path in &files {
+            let file = path.to_string_lossy();
+            match verify_emulated(&file, &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS) {
+                Ok(Verdict::NotValidatable) => {}
+                Ok(Verdict::Pass { .. }) => passed.push(file.into_owned()),
+                other => failures.push(format!("{file}: {other:?}")),
+            }
+        }
+        assert!(failures.is_empty(), "emulator corpus failures: {failures:#?}");
+        // Guards against the corpus silently shrinking (e.g. a file that stops
+        // declaring its expected values).
+        assert!(passed.len() >= 22, "only {} validated files passed: {passed:#?}", passed.len());
+    }
+
+    #[test]
+    fn verify_reports_the_first_wrong_value() {
+        // test_regs with its first expected value changed: the program still
+        // prints 000000FF, so the check must fail at #1.
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::copy(fixture_dir().join("uart_stubs.kla"), dir.path().join("uart_stubs.kla")).expect("copy stubs");
+        let source = fs::read_to_string(fixture_dir().join("test_regs.kla")).expect("read test_regs");
+        let source = source.replacen("//   000000FF  (SETR A 0xFF)", "//   000000FE  (SETR A 0xFF)", 1);
+        let file = dir.path().join("wrong.kla");
+        fs::write(&file, source).expect("write fixture");
+
+        let (oplist, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS);
+        assert_eq!(
+            verdict,
+            Ok(Verdict::Fail {
+                matched: 0,
+                expected: 6,
+                diff: "at #1: expected 000000FE, got 000000FF".to_owned(),
+            })
+        );
+    }
+
+    #[test]
+    fn verify_skips_a_file_without_expected_values() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("plain.kla");
+        fs::write(&file, "// no expected values here\nHALT\n").expect("write fixture");
+        let (oplist, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS);
+        assert_eq!(verdict, Ok(Verdict::NotValidatable));
+    }
+
+    #[test]
+    fn verify_fails_an_unreadable_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("missing.kla");
+        let (oplist, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS);
+        assert!(matches!(&verdict, Err(reason) if reason.starts_with("cannot read: ")), "{verdict:?}");
+    }
+
+    #[test]
+    fn verify_fails_a_file_that_does_not_assemble() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("bad.kla");
+        fs::write(&file, "//   00000001  (never printed)\nNOTANOPCODE A\nHALT\n").expect("write fixture");
+        let (oplist, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS);
+        assert_eq!(verdict, Err("assembly error".to_owned()));
     }
 }
