@@ -34,6 +34,7 @@
 //! e.g. popping the UART RX FIFO, and debuggers read memory freely.
 
 use crate::emulate::{Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
+use crate::layout::is_mmio;
 use gdbstub::arch::{Arch, RegId, Registers};
 use gdbstub::common::{Endianness, Pid, Signal};
 use gdbstub::conn::ConnectionExt;
@@ -347,11 +348,6 @@ impl Target for EmuTarget {
     fn support_monitor_cmd(&mut self) -> Option<MonitorCmdOps<'_, Self>> {
         Some(self)
     }
-}
-
-/// True for the memory-mapped device window (`addr[31:28] == 0xF`).
-pub(crate) const fn is_mmio(addr: u32) -> bool {
-    addr >> 28 == 0xF
 }
 
 /// The last address a `len`-byte access at `addr` touches (`addr` itself for

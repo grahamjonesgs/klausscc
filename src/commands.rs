@@ -3,7 +3,8 @@
 
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
-use crate::helper::{build_ddr_image, disassemble_flat_to_pass2, encode_word_kbt, human_bytes, parse_expected_uart_values, HEAP_HEADER_WORDS};
+use crate::helper::{build_ddr_image, disassemble_flat_to_pass2, encode_word_kbt, human_bytes, parse_expected_uart_values};
+use crate::layout::{heap_start, CODE_BASE, HEAP_HEADER_WORDS};
 use crate::messages::{print_messages, MessageType, MsgList};
 use crate::netload::net_load;
 use crate::opcodes::{Opcode, Pass2};
@@ -149,7 +150,7 @@ struct ElfLayout {
 fn flatten_input(file_data: Vec<u8>, entry_override: Option<u32>) -> Option<(Vec<u8>, u32, Option<ElfLayout>)> {
     if file_data.starts_with(ELF_MAGIC) {
         let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data)?;
-        let board_entry = elf_entry.saturating_sub(elf_base) + u64::from(HEAP_HEADER_WORDS) * 8;
+        let board_entry = elf_entry.saturating_sub(elf_base) + u64::from(CODE_BASE);
         let entry = entry_override.unwrap_or(board_entry as u32);
         Some((
             flat,
@@ -414,7 +415,7 @@ pub(crate) fn run_elf2serial(
     }
 
     // Patch heap_start: lo32 = heap_start value (encoded for LE board), hi32 = 0.
-    let heap_start = helper::heap_start(((out.len() - 1) / 2) as u32);
+    let heap_start = heap_start(((out.len() - 1) / 2) as u32);
     out.replace_range(
         heap_start_offset..heap_start_offset + 16,
         &format!("{}00000000", encode_word_kbt(heap_start)),
@@ -457,7 +458,7 @@ pub(crate) fn run_elf2serial(
             let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
             format!("{stem}.code")
         };
-        let mut pass2 = disassemble_flat_to_pass2(&binary_data, HEAP_HEADER_WORDS * 8, &opcodes);
+        let mut pass2 = disassemble_flat_to_pass2(&binary_data, CODE_BASE, &opcodes);
         if let Err(e) = write_code_output_file(&code_file_name, &mut pass2, msg_list) {
             msg_list.push(
                 format!("Failed to write disassembly file {code_file_name}: {e}"),
@@ -828,7 +829,7 @@ pub(crate) fn run_gdbserver(
 ) -> Result<(), Error> {
     let file_data = read_input(binary_path, msg_list)?;
     let (binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
-    let code_base = u64::from(HEAP_HEADER_WORDS) * 8;
+    let code_base = u64::from(CODE_BASE);
     if let Some(elf) = &elf {
         if elf.base != code_base {
             msg_list.push(
@@ -1495,7 +1496,7 @@ mod tests {
         assert_eq!((meta.base, meta.entry), (base, elf_entry), "metadata mirrors parse output");
 
         // board entry = (elf_entry - elf_base) + heap-header bytes
-        let expected = (elf_entry.saturating_sub(base) + u64::from(HEAP_HEADER_WORDS) * 8) as u32;
+        let expected = (elf_entry.saturating_sub(base) + u64::from(CODE_BASE)) as u32;
         assert_eq!(entry, expected, "VMA-to-board entry translation");
         assert_eq!(entry, 0x20, "hello.elf loads at the start of the post-header image");
     }

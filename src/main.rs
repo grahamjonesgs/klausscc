@@ -23,6 +23,8 @@ mod helper;
 mod jtag;
 /// Module to manage labels.
 mod labels;
+/// The memory map: heap header, code base, heap start and the MMIO window.
+mod layout;
 /// Module to manage macros.
 mod macros;
 /// Module to manage messages.
@@ -44,8 +46,9 @@ use error::Error;
 use files::{
     filename_stem, output_file_name, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType,
 };
-use helper::{build_ddr_image, create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments, HEAP_HEADER_WORDS};
+use helper::{build_ddr_image, create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments};
 use labels::{find_duplicate_label, get_labels, Label};
+use layout::CODE_BASE;
 use macros::{apply_source_macros, expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
@@ -477,7 +480,7 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
 pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
-    let mut program_counter: u32 = HEAP_HEADER_WORDS * 8; // Byte address: 4 header words × 8 bytes each (64-bit words)
+    let mut program_counter: u32 = CODE_BASE; // Byte address: 4 header words × 8 bytes each (64-bit words)
     let mut data_pass0: Vec<Pass0> = Vec::new();
     let mut in_data_section = false;
 
@@ -784,7 +787,7 @@ pub fn assemble_file(input_file_name: &str, oplist: &[Opcode], macro_list: &[mac
 /// already in natural order and are emitted as 64-bit little-endian words.
 /// Returns `(code_bytes, entry_pc)` or `None` if there is no `_start`.
 pub(crate) fn build_flat_code(pass2: &[Pass2]) -> Option<(Vec<u8>, u32)> {
-    let code_base: u32 = HEAP_HEADER_WORDS * 8;
+    let code_base: u32 = CODE_BASE;
     let mut code: Vec<u8> = Vec::new();
     let mut entry: Option<u32> = None;
 

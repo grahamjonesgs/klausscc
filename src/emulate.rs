@@ -45,11 +45,9 @@
 //! the assembler's opcode table — so the emulator is a genuine second
 //! implementation, not a re-run of the assembler.
 
+use crate::layout::{is_mmio, CODE_BASE};
 use std::collections::VecDeque;
 
-/// Heap-header byte size (4 doublewords) — code starts here (0x20).
-#[allow(dead_code, reason = "used by default_entry() / tests; documents the code base")]
-const CODE_BASE: u32 = 32;
 /// Modelled `i_Clk` cycles per retired instruction (timer, millisecond clock and
 /// the cycle counter).  The emulator is not cycle-accurate; this only sets how
 /// fast time passes relative to the instruction stream.
@@ -87,11 +85,6 @@ const UART_STATUS: u32 = 0x0010;
 /// Modelled RX FIFO depth.  Only affects the `STATUS.RX_FULL` bit; the RTL depth is
 /// a parameter and the emulator has no external byte source that would fill it.
 const UART_RX_FIFO_DEPTH: usize = 16;
-
-/// True if `addr` decodes to the MMIO region (`addr[31:28] == 0xF`).
-const fn is_mmio(addr: u32) -> bool {
-    (addr >> 28) == 0xF
-}
 
 /// Reason the emulator stopped executing.
 #[derive(Debug, Clone, PartialEq, Eq)]

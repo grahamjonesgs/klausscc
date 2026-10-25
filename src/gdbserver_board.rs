@@ -20,8 +20,9 @@
 //! On detach the server removes its breakpoints, clears "attached" and lets
 //! the program run on.
 
-use crate::gdbserver::{access_last_addr, is_mmio, KlaussCpuArch, KlaussRegId, KlaussRegs, HW_BREAKPOINTS, HW_WATCHPOINTS, TRAP_WORD, TRIPLE};
+use crate::gdbserver::{access_last_addr, KlaussCpuArch, KlaussRegId, KlaussRegs, HW_BREAKPOINTS, HW_WATCHPOINTS, TRAP_WORD, TRIPLE};
 use crate::jtag::{DmiReq, Jtag};
+use crate::layout::is_mmio;
 use gdbstub::common::{Endianness, Pid, Signal};
 use gdbstub::conn::ConnectionExt;
 use gdbstub::stub::{run_blocking, DisconnectReason, GdbStub, SingleThreadStopReason};

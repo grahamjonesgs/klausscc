@@ -1,27 +1,11 @@
 use crate::files::LineType;
 use crate::labels::label_name_from_string;
+use crate::layout::{heap_start, CODE_BASE, HEAP_HEADER_WORDS};
 use crate::messages::{MessageType, MsgList};
 use crate::num::{parse_bits64, parse_int, LiteralError};
 use crate::opcodes::{disassemble_word, return_opcode, Opcode, Pass2};
 use std::fmt;
 use std::fmt::Write as _;
-
-/// Number of reserved words at the start of memory for the heap header.
-/// Byte 0x00: `heap_start` (written by assembler), Byte 0x04: `heap_end` (written by assembler),
-/// Byte 0x08: reserved, Byte 0x0C: reserved. Code begins at byte 0x10.
-pub const HEAP_HEADER_WORDS: u32 = 4;
-
-/// The `heap_start` value for a program image whose last byte ends at `end`.
-///
-/// `heap_start` is the first free byte after the program, rounded up to an
-/// 8-byte boundary.  All heap block headers are 3×8=24 bytes, so every data
-/// area is 8-byte aligned when `heap_start` is — required for MEMSET8→MEMGET64
-/// coherency.  The `.kbt` stream, the DDR image and the `.code` listing header
-/// all use this one rule.
-#[must_use]
-pub const fn heap_start(end: u32) -> u32 {
-    end.next_multiple_of(8)
-}
 
 /// Encode a 32-bit word for the kbt wire format (little-endian byte order).
 ///
@@ -204,7 +188,7 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
 /// separately in the netboot protocol header, not embedded here.
 #[must_use]
 pub fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
-    const HEADER_BYTES: usize = HEAP_HEADER_WORDS as usize * 8;
+    const HEADER_BYTES: usize = CODE_BASE as usize;
     let mut image = vec![0_u8; HEADER_BYTES];
     image.extend_from_slice(binary_data);
     // Pad to a 4-byte word boundary (matches the kbt path's word emission).
@@ -230,7 +214,7 @@ pub fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
 /// instruction's line, marked `(truncated)`.
 ///
 /// `base_addr` is the board byte address of the first byte in `binary` (normally
-/// `HEAP_HEADER_WORDS * 8 = 0x20`).
+/// [`CODE_BASE`] = 0x20).
 pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcode]) -> Vec<Pass2> {
     let mut result: Vec<Pass2> = Vec::new();
     let mut i: usize = 0;
@@ -742,15 +726,6 @@ mod tests {
         let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000]), 0x20, &opcodes);
         assert_eq!(pass2.len(), 1);
         assert!(pass2[0].input_text_line.ends_with(" (truncated)"), "{}", pass2[0].input_text_line);
-    }
-
-    #[test]
-    // heap_start is the end of the program rounded up to 8 bytes
-    fn test_heap_start_rounds_up_to_8() {
-        assert_eq!(heap_start(0x20), 0x20);
-        assert_eq!(heap_start(0x21), 0x28);
-        assert_eq!(heap_start(0x24), 0x28);
-        assert_eq!(heap_start(0x28), 0x28);
     }
 
     #[test]

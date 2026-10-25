@@ -1,4 +1,4 @@
-use crate::helper::{heap_start, HEAP_HEADER_WORDS};
+use crate::layout::{heap_start, CODE_BASE};
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Opcode, Pass2};
@@ -529,7 +529,7 @@ pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &mut Vec
         .filter(|p| p.line_type == LineType::Opcode || p.line_type == LineType::Data)
         .map(|p| p.program_counter.saturating_add(p.opcode.len() as u32 / 2))
         .max()
-        .unwrap_or(HEAP_HEADER_WORDS * 8);
+        .unwrap_or(CODE_BASE);
     let heap_start = heap_start(program_end);
 
     // Emit the 4 reserved heap header words before the assembled code
