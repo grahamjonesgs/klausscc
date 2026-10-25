@@ -1071,13 +1071,13 @@ mod tests {
         // Byte addressing: PC starts at 32 (4 header words × 8 bytes each in 64-bit).
         // Each instruction word = 4 bytes (opcode encoding unchanged).
         // Each 64-bit data word = 8 bytes (16 hex chars).
-        assert_eq!(pass1.first().unwrap_or_default().program_counter, 32); // MOV
-        assert_eq!(pass1.get(1).unwrap_or_default().program_counter, 44); // PUSH (MOV=3 words×4=12)
-        assert_eq!(pass1.get(2).unwrap_or_default().program_counter, 48); // RET  (+4)
-        assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 52); // #DATA1 0x2 inline (+4)
-        assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 68); // RET  (2 data words×8=16)
-        assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 72); // #DATA1 "HELLO" inline (+4)
-        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 88); // RET  (string=16 bytes: 2 × 64-bit words)
+        assert_eq!(pass1[0].program_counter, 32); // MOV
+        assert_eq!(pass1[1].program_counter, 44); // PUSH (MOV=3 words×4=12)
+        assert_eq!(pass1[2].program_counter, 48); // RET  (+4)
+        assert_eq!(pass1[3].program_counter, 52); // #DATA1 0x2 inline (+4)
+        assert_eq!(pass1[4].program_counter, 68); // RET  (2 data words×8=16)
+        assert_eq!(pass1[5].program_counter, 72); // #DATA1 "HELLO" inline (+4)
+        assert_eq!(pass1[6].program_counter, 88); // RET  (string=16 bytes: 2 × 64-bit words)
     }
 
     #[test]
@@ -1101,7 +1101,7 @@ mod tests {
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Error Test_not_code_line");
+        assert_eq!(msg_list.list[0].text, "Error Test_not_code_line");
     }
 
     #[test]
@@ -1236,15 +1236,15 @@ mod tests {
             opcodes.clone(),
             labels,
         );
-        assert_eq!(pass2.first().unwrap_or_default().opcode, "00000020EEEEEEEEFFFFFFFF");
-        assert_eq!(pass2.get(1).unwrap_or_default().opcode, "0000004000000007");
-        assert_eq!(pass2.get(2).unwrap_or_default().opcode, "00000010");
-        assert_eq!(pass2.get(3).unwrap_or_default().opcode, "00000030");
-        assert_eq!(pass2.get(4).unwrap_or_default().opcode, "00000030");
-        assert_eq!(pass2.get(5).unwrap_or_default().opcode, "000000720000AAAA");
-        assert_eq!(pass2.get(6).unwrap_or_default().opcode, "00000A340000000A0000000B");
-        assert_eq!(pass2.get(7).unwrap_or_default().opcode, "0000000248454C4C4F00000000000000"); // padded to 2 × 64-bit words
-        assert_eq!(pass2.get(8).unwrap_or_default().opcode, "");
+        assert_eq!(pass2[0].opcode, "00000020EEEEEEEEFFFFFFFF");
+        assert_eq!(pass2[1].opcode, "0000004000000007");
+        assert_eq!(pass2[2].opcode, "00000010");
+        assert_eq!(pass2[3].opcode, "00000030");
+        assert_eq!(pass2[4].opcode, "00000030");
+        assert_eq!(pass2[5].opcode, "000000720000AAAA");
+        assert_eq!(pass2[6].opcode, "00000A340000000A0000000B");
+        assert_eq!(pass2[7].opcode, "0000000248454C4C4F00000000000000"); // padded to 2 × 64-bit words
+        assert_eq!(pass2[8].opcode, "");
     }
 
     #[test]
@@ -1274,7 +1274,7 @@ mod tests {
             opcodes.clone(),
             labels,
         );
-        assert_eq!(pass2.first().unwrap_or_default().opcode, "ERR     ");
+        assert_eq!(pass2[0].opcode, "ERR     ");
     }
 
     /// End-to-end ISA-encoding-v2 round trip: assemble a `.kla` fixture with the

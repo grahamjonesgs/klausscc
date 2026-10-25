@@ -82,19 +82,6 @@ pub struct Opcode {
     pub ops: Vec<Operand>,
 }
 
-#[cfg(not(tarpaulin_include))]
-impl Default for &InputData {
-    #[inline]
-    fn default() -> &'static InputData {
-        static VALUE: InputData = InputData {
-            input: String::new(),
-            file_name: String::new(),
-            line_counter: 0,
-        };
-        &VALUE
-    }
-}
-
 #[derive(Debug)]
 /// Struct for Pass0.
 pub struct Pass0 {
@@ -104,19 +91,6 @@ pub struct Pass0 {
     pub input_text_line: String,
     /// Line number of input file.
     pub line_counter: u32,
-}
-
-#[cfg(not(tarpaulin_include))]
-impl Default for &Pass0 {
-    #[inline]
-    fn default() -> &'static Pass0 {
-        static VALUE: Pass0 = Pass0 {
-            input_text_line: String::new(),
-            file_name: String::new(),
-            line_counter: 0,
-        };
-        &VALUE
-    }
 }
 
 #[derive(Debug)]
@@ -134,21 +108,6 @@ pub struct Pass1 {
     pub program_counter: u32,
 }
 
-#[cfg(not(tarpaulin_include))]
-impl Default for &Pass1 {
-    #[inline]
-    fn default() -> &'static Pass1 {
-        static VALUE: Pass1 = Pass1 {
-            input_text_line: String::new(),
-            file_name: String::new(),
-            line_counter: 0,
-            program_counter: 0,
-            line_type: LineType::Blank,
-        };
-        &VALUE
-    }
-}
-
 #[derive(Debug, Clone)]
 /// Struct for Pass2.
 pub struct Pass2 {
@@ -164,22 +123,6 @@ pub struct Pass2 {
     pub opcode: String,
     /// Program counter.
     pub program_counter: u32,
-}
-
-#[cfg(not(tarpaulin_include))]
-impl Default for &Pass2 {
-    #[inline]
-    fn default() -> &'static Pass2 {
-        static VALUE: Pass2 = Pass2 {
-            input_text_line: String::new(),
-            file_name: String::new(),
-            line_counter: 0,
-            program_counter: 0,
-            line_type: LineType::Blank,
-            opcode: String::new(),
-        };
-        &VALUE
-    }
 }
 
 /// Parse a single token as a u64 immediate value.
@@ -1525,10 +1468,7 @@ mod tests {
         });
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
         assert_eq!(output, String::from("00000001"));
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Too many arguments found - \"PUSH 1 0xF\""
-        );
+        assert_eq!(msg_list.list[0].text, "Too many arguments found - \"PUSH 1 0xF\"");
     }
 
     #[test]
@@ -1774,10 +1714,10 @@ mod tests {
 
         let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Duplicate Macro definition $WAIT found");
-        assert_eq!(msg_list.list.first().unwrap_or_default().line_number, Some(3));
-        assert_eq!(msg_list.list.get(1).unwrap_or_default().text, "Duplicate Opcode CMPRR found");
-        assert_eq!(msg_list.list.get(1).unwrap_or_default().line_number, Some(4));
+        assert_eq!(msg_list.list[0].text, "Duplicate Macro definition $WAIT found");
+        assert_eq!(msg_list.list[0].line_number, Some(3));
+        assert_eq!(msg_list.list[1].text, "Duplicate Opcode CMPRR found");
+        assert_eq!(msg_list.list[1].line_number, Some(4));
     }
     #[test]
     // Test empty list

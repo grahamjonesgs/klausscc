@@ -12,21 +12,6 @@ pub struct Label {
     pub program_counter: u32,
 }
 
-#[cfg(not(tarpaulin_include))]
-/// Default for label.
-///
-/// Sets default as empty label.
-impl Default for &Label {
-    #[inline]
-    fn default() -> &'static Label {
-        static VALUE: Label = Label {
-            program_counter: 0,
-            name: String::new(),
-        };
-        &VALUE
-    }
-}
-
 /// Gets address from label or absolute values.
 ///
 /// Converts argument to label value or converts to Hex. An undefined label or
@@ -273,10 +258,7 @@ mod tests {
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
         assert_eq!(msg_list.number_by_type(&MessageType::Warning), 0);
 
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            "Duplicate label label1 found, with differing values"
-        );
+        assert_eq!(msg_list.list[0].text, "Duplicate label label1 found, with differing values");
     }
 
     #[test]
@@ -356,36 +338,30 @@ mod tests {
 
         // Check for unknown label text
         assert_eq!(convert_argument("unknown", &mut msg_list, 0, "test", &mut labels), None);
-        assert_eq!(
-            msg_list.list.last().unwrap_or_default().text,
-            "Decimal value unknown incorrect".to_owned()
-        );
+        assert_eq!(msg_list.list.last().unwrap().text, "Decimal value unknown incorrect".to_owned());
 
         // Check for hex value out of bounds
         assert_eq!(convert_argument("0x123456789", &mut msg_list, 4, "test", &mut labels), None);
         assert_eq!(
-            msg_list.list.last().unwrap_or_default().text,
+            msg_list.list.last().unwrap().text,
             "Hex value 0x0000000123456789 out of bounds".to_owned()
         );
 
         // Check for label not defined
         assert_eq!(convert_argument("label3:", &mut msg_list, 14, "test", &mut labels), None);
-        assert_eq!(msg_list.list.last().unwrap_or_default().text, "Label label3: not found".to_owned());
+        assert_eq!(msg_list.list.last().unwrap().text, "Label label3: not found".to_owned());
 
         // Check for invalid decimal value
         assert_eq!(convert_argument("4294967296", &mut msg_list, 14, "test", &mut labels), None);
-        assert_eq!(
-            msg_list.list.last().unwrap_or_default().text,
-            "Decimal value 4294967296 out of bounds".to_owned()
-        );
+        assert_eq!(msg_list.list.last().unwrap().text, "Decimal value 4294967296 out of bounds".to_owned());
 
         // Check for data not defined
         assert_eq!(convert_argument("#data2", &mut msg_list, 15, "test", &mut labels), None);
-        assert_eq!(msg_list.list.last().unwrap_or_default().text, "Label #data2 not found".to_owned());
+        assert_eq!(msg_list.list.last().unwrap().text, "Label #data2 not found".to_owned());
 
         // Check for invalid hex value
         assert_eq!(convert_argument("0xGGG", &mut msg_list, 14, "test", &mut labels), None);
-        assert_eq!(msg_list.list.last().unwrap_or_default().text, "Hex value 0xGGG incorrect".to_owned());
+        assert_eq!(msg_list.list.last().unwrap().text, "Hex value 0xGGG incorrect".to_owned());
     }
 
     #[test]
@@ -514,35 +490,35 @@ mod tests {
         ];
         let labels = get_labels(&pass1, msglist);
         assert_eq!(
-            *labels.first().unwrap_or_default(),
+            labels[0],
             Label {
                 program_counter: 0,
                 name: "label1:".to_owned(),
             }
         );
         assert_eq!(
-            *labels.get(1).unwrap_or_default(),
+            labels[1],
             Label {
                 program_counter: 4,
                 name: "label2:".to_owned(),
             }
         );
         assert_eq!(
-            *labels.get(2).unwrap_or_default(),
+            labels[2],
             Label {
                 program_counter: 6,
                 name: "label3:".to_owned(),
             }
         );
         assert_eq!(
-            *labels.get(3).unwrap_or_default(),
+            labels[3],
             Label {
                 program_counter: 7,
                 name: "#data321".to_owned(),
             }
         );
-        assert_eq!(msglist.list.first().unwrap_or_default().text, "Label label1: has extra text dummy");
-        assert_eq!(msglist.list.get(1).unwrap_or_default().text, "Data #data123 has extra text dummy2");
-        assert_eq!(msglist.list.get(2).unwrap_or_default().text, "Data #data3 has no string termination");
+        assert_eq!(msglist.list[0].text, "Label label1: has extra text dummy");
+        assert_eq!(msglist.list[1].text, "Data #data123 has extra text dummy2");
+        assert_eq!(msglist.list[2].text, "Data #data3 has no string termination");
     }
 }

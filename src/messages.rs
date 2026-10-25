@@ -26,21 +26,6 @@ pub enum MessageType {
     Warning,
 }
 
-#[cfg(not(tarpaulin_include))]
-impl Default for &Message {
-    #[inline]
-    fn default() -> &'static Message {
-        static VALUE: Message = Message {
-            text: String::new(),
-            file_name: None,
-            line_number: None,
-            level: MessageType::Information,
-            time: None,
-        };
-        &VALUE
-    }
-}
-
 #[derive(Debug, Default)]
 /// Struct for list of messages.
 pub struct MsgList {
@@ -153,10 +138,10 @@ mod tests {
         let mut msg_list = MsgList::new();
         msg_list.push("Test".to_owned(), None, Some("test".to_owned()), MessageType::Information);
         assert_eq!(msg_list.list.len(), 1);
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Test");
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Test");
-        assert_eq!(msg_list.list.first().unwrap_or_default().level, MessageType::Information);
-        assert_eq!(msg_list.list.first().unwrap_or_default().line_number, None);
+        assert_eq!(msg_list.list[0].text, "Test");
+        assert_eq!(msg_list.list[0].text, "Test");
+        assert_eq!(msg_list.list[0].level, MessageType::Information);
+        assert_eq!(msg_list.list[0].line_number, None);
     }
 
     #[test]

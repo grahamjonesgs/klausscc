@@ -700,7 +700,7 @@ mod tests {
         let mut msg_list = MsgList::new();
         assert_eq!(create_bin_string(&pass2, &mut msg_list), None);
         assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
+            msg_list.list[0].text,
             "Program image is not a whole number of 32-bit words, length is 78 hex characters"
         );
         assert_eq!(calc_checksum("S0000", &mut MsgList::new()), None);
@@ -786,7 +786,7 @@ mod tests {
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Multiple start addresses found");
+        assert_eq!(msg_list.list[0].text, "Multiple start addresses found");
     }
 
     #[test]
@@ -821,7 +821,7 @@ mod tests {
         let mut msg_list = MsgList::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "No start address found");
+        assert_eq!(msg_list.list[0].text, "No start address found");
     }
 
     #[test]
@@ -987,7 +987,7 @@ mod tests {
         let input = String::from("#TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
         assert_eq!(output, 0);
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Error in data definition for #TEST");
+        assert_eq!(msg_list.list[0].text, "Error in data definition for #TEST");
     }
 
     #[test]

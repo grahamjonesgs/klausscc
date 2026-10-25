@@ -806,10 +806,10 @@ mod test {
                 },
             ]
         );
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Comment not terminated in file test1.kla");
+        assert_eq!(msg_list.list[0].text, "Comment not terminated in file test1.kla");
         // Reported where the comment opened, not at the first line of the next file.
-        assert_eq!(msg_list.list.first().unwrap_or_default().line_number, Some(1));
-        assert_eq!(msg_list.list.first().unwrap_or_default().file_name, Some("test1.kla".to_owned()));
+        assert_eq!(msg_list.list[0].line_number, Some(1));
+        assert_eq!(msg_list.list[0].file_name, Some("test1.kla".to_owned()));
     }
 
     /// Run `remove_block_comments` over `lines` (all in `test.kla`).
@@ -874,7 +874,7 @@ mod test {
         let (output, msg_list) = strip_block(&["abc", "def /* open", "ghi"]);
         assert_eq!(output, vec!["abc", "def ", ""]);
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
-        let msg = msg_list.list.first().unwrap_or_default();
+        let msg = &msg_list.list[0];
         assert_eq!(msg.text, "Comment not terminated in file test.kla");
         assert_eq!(msg.line_number, Some(2));
         assert_eq!(msg.file_name, Some("test.kla".to_owned()));
@@ -953,7 +953,7 @@ mod test {
     fn test_read_file_to_vec1() {
         let mut msg_list = MsgList::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list);
-        assert_eq!(msg_list.list.first().unwrap_or_default().text, "Unable to open file ////xxxxxxx");
+        assert_eq!(msg_list.list[0].text, "Unable to open file ////xxxxxxx");
     }
 
     #[test]
@@ -973,7 +973,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(lines.clone().unwrap().first().unwrap_or_default().input, "Test line in file");
+        assert_eq!(lines.clone().unwrap()[0].input, "Test line in file");
         assert_eq!(lines.unwrap().len(), 4);
 
         drop(tmp_file1);
@@ -1004,18 +1004,9 @@ mod test {
         _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(
-            lines.clone().unwrap_or_default().first().unwrap_or_default().input,
-            "Test line in file 1 line 0"
-        );
-        assert_eq!(
-            lines.clone().unwrap_or_default().get(2).unwrap_or_default().input,
-            "Test line in file 2 line 1"
-        );
-        assert_eq!(
-            lines.clone().unwrap_or_default().get(6).unwrap_or_default().input,
-            "Test line in file 1 line 2"
-        );
+        assert_eq!(lines.clone().unwrap_or_default()[0].input, "Test line in file 1 line 0");
+        assert_eq!(lines.clone().unwrap_or_default()[2].input, "Test line in file 2 line 1");
+        assert_eq!(lines.clone().unwrap_or_default()[6].input, "Test line in file 1 line 2");
         assert_eq!(lines.unwrap().len(), 7);
 
         drop(tmp_file1);
@@ -1047,10 +1038,7 @@ mod test {
         _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         _ = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            format!("Recursive include of file {file_name1}")
-        );
+        assert_eq!(msg_list.list[0].text, format!("Recursive include of file {file_name1}"));
 
         drop(tmp_file1);
         drop(tmp_file2);
@@ -1076,14 +1064,8 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            format!("Unable to open file {file_name2}")
-        );
-        assert_eq!(
-            msg_list.list.get(1).unwrap_or_default().text,
-            format!("Unable to open include file {file_name2} in {file_name1}")
-        );
+        assert_eq!(msg_list.list[0].text, format!("Unable to open file {file_name2}"));
+        assert_eq!(msg_list.list[1].text, format!("Unable to open include file {file_name2} in {file_name1}"));
         assert_eq!(lines, Some(vec![]));
 
         drop(tmp_file1);
@@ -1105,10 +1087,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            format!("Missing include file name in {file_name1}")
-        );
+        assert_eq!(msg_list.list[0].text, format!("Missing include file name in {file_name1}"));
         assert_eq!(lines, None);
 
         drop(tmp_file1);
@@ -1145,14 +1124,8 @@ mod test {
         let file_name3: &str = binding3.to_str().unwrap();
 
         _ = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(
-            msg_list.list.first().unwrap_or_default().text,
-            format!("Unable to open file {file_name3}")
-        );
-        assert_eq!(
-            msg_list.list.get(1).unwrap_or_default().text,
-            format!("Unable to open include file {file_name3} in {file_name2}")
-        );
+        assert_eq!(msg_list.list[0].text, format!("Unable to open file {file_name3}"));
+        assert_eq!(msg_list.list[1].text, format!("Unable to open include file {file_name3} in {file_name2}"));
 
         drop(tmp_file1);
         drop(tmp_file2);
