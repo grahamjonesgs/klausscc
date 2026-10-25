@@ -7,7 +7,7 @@
 //! loss / retransmit that the kbt-over-UART path never needed and the earlier
 //! hand-rolled UDP design would have had to implement.
 
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::helper::human_bytes;
 use std::fmt;
 use std::io::{self, Read as _, Write as _};
@@ -128,7 +128,7 @@ fn resolve(ip: &str, port: u16) -> Result<SocketAddr, NetbootError> {
 pub(crate) fn net_load(ip: &str, port: u16, image: &[u8], entry_pc: u32, msg_list: &mut Diagnostics) -> Result<(), NetbootError> {
     let hdr = header(image.len(), entry_pc)?;
     let addr = resolve(ip, port)?;
-    msg_list.push(format!("netboot: connecting to {addr}"), None, None, MessageType::Information);
+    msg_list.info(format!("netboot: connecting to {addr}"));
 
     let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)?;
     let _ = stream.set_nodelay(true);
@@ -143,15 +143,10 @@ pub(crate) fn net_load(ip: &str, port: u16, image: &[u8], entry_pc: u32, msg_lis
     stream.read_exact(&mut ack)?;
     let checksum = check_ack(ack, image_checksum(image))?;
 
-    msg_list.push(
-        format!(
-            "netboot OK: {}, entry 0x{entry_pc:08X}, checksum 0x{checksum:08X}",
-            human_bytes(image.len())
-        ),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!(
+        "netboot OK: {}, entry 0x{entry_pc:08X}, checksum 0x{checksum:08X}",
+        human_bytes(image.len())
+    ));
     Ok(())
 }
 

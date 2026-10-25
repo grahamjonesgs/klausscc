@@ -36,7 +36,7 @@ use std::time::Instant;
 /// Report that the serial monitor stopped on an error, and make it the command's failure.
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn monitor_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics) -> Error {
-    msg_list.push(format!("Serial monitor stopped: \"{err}\""), None, None, MessageType::Warning);
+    msg_list.warning(format!("Serial monitor stopped: \"{err}\""));
     Error::Serial {
         port: port.to_owned(),
         source: err,
@@ -46,7 +46,7 @@ pub(crate) fn monitor_failed(port: &str, err: io::Error, msg_list: &mut Diagnost
 /// Report a failed send to the board's serial port, and make it the command's failure.
 #[cfg(not(tarpaulin_include))]
 fn send_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics, start_time: Instant) -> Error {
-    msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
+    msg_list.error(format!("Failed to write to serial port, error \"{err}\""));
     print_results(msg_list, start_time);
     Error::Serial {
         port: port.to_owned(),
@@ -79,7 +79,7 @@ pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnost
     if opts.monitor {
         return match write_to_board_keep_port(wire, opts.port, opts.send_break, true, msg_list) {
             Ok(port) => {
-                msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+                msg_list.info("Wrote to serial port");
                 print_results(msg_list, start_time);
                 monitor_serial_port(port, opts.debug, msg_list).map_err(|err| monitor_failed(opts.port, err, msg_list))
             }
@@ -87,23 +87,18 @@ pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnost
         };
     }
 
-    let error_count = msg_list.number_by_type(MessageType::Error);
+    let error_count = msg_list.count(MessageType::Error);
     if error_count > 0 {
-        msg_list.push(
-            "Not writing to serial port due to assembly errors".to_owned(),
-            None,
-            None,
-            MessageType::Warning,
-        );
+        msg_list.warning("Not writing to serial port due to assembly errors");
         return Err(Error::Assembly(error_count));
     }
     match write_to_board(wire, opts.port, opts.send_break, msg_list) {
         Ok(()) => {
-            msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+            msg_list.info("Wrote to serial port");
             Ok(())
         }
         Err(err) => {
-            msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
+            msg_list.error(format!("Failed to write to serial port, error \"{err}\""));
             Err(Error::Serial {
                 port: opts.port.to_owned(),
                 source: err,
@@ -118,14 +113,9 @@ pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnost
 /// returning) a failure.
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub(crate) fn write_binary_file(msg_list: &mut Diagnostics, binary_file_name: &str, bin_string: &str) -> Result<(), Error> {
-    msg_list.push(format!("Writing binary file to {binary_file_name}"), None, None, MessageType::Information);
+    msg_list.info(format!("Writing binary file to {binary_file_name}"));
     write_binary_output_file(&binary_file_name, bin_string).map_err(|result_err| {
-        msg_list.push(
-            format!("Unable to write to binary code file {binary_file_name:?}, error {result_err}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error(format!("Unable to write to binary code file {binary_file_name:?}, error {result_err}"));
         Error::Write {
             path: PathBuf::from(binary_file_name),
             source: result_err,

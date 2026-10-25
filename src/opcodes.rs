@@ -1,5 +1,5 @@
 use crate::asm::line::SourceLine;
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::labels::{convert_argument, Label};
 use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::num::{parse_bits64, parse_int};
@@ -129,23 +129,13 @@ pub(crate) fn add_arguments(
     }
     // One warning for the line, however many extra tokens it has.
     if words > 1 + num_registers as usize + num_arguments as usize {
-        msg_list.push(
-            format!("Too many arguments found - \"{line}\""),
-            Some(line_number),
-            Some((filename).to_owned()),
-            MessageType::Warning,
-        );
+        msg_list.warning_at(filename, line_number, format!("Too many arguments found - \"{line}\""));
     }
 
     // Can't be in tarpaulin as we can't test the error by passing wrong size
     if arguments.len() != 8 * num_arguments as usize {
         #[cfg(not(tarpaulin_include))]
-        msg_list.push(
-            format!("Incorrect argument definition - \"{line}\""),
-            Some(line_number),
-            Some(filename.to_owned()),
-            MessageType::Error,
-        );
+        msg_list.error_at(filename, line_number, format!("Incorrect argument definition - \"{line}\""));
     }
     arguments
 }
@@ -174,12 +164,7 @@ fn return_opcode_struct<'a>(line: &str, opcodes: &'a [Opcode]) -> Option<&'a Opc
 /// scheme (used by `.vh`-parsed tables).
 pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_list: &mut Diagnostics, line_number: u32) -> String {
     let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
-        msg_list.push(
-            format!("Opcode not found - \"{line}\""),
-            Some(line_number),
-            Some(filename.to_owned()),
-            MessageType::Error,
-        );
+        msg_list.error_at(filename, line_number, format!("Opcode not found - \"{line}\""));
         return "ERR     ".to_owned();
     };
 
@@ -189,12 +174,7 @@ pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_
     }
 
     let Ok(mut word0) = u32::from_str_radix(&opcode.hex_code, 16) else {
-        msg_list.push(
-            format!("Incorrect opcode template - \"{line}\""),
-            Some(line_number),
-            Some(filename.to_owned()),
-            MessageType::Error,
-        );
+        msg_list.error_at(filename, line_number, format!("Incorrect opcode template - \"{line}\""));
         return "ERR     ".to_owned();
     };
 
@@ -243,12 +223,7 @@ pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_
                 match tokens.get(token_idx).map(|t| (t, parse_count(t))) {
                     Some((_, Some(count @ 0..=63))) => word0 |= (count as u32) << 15,
                     Some((token, Some(_))) => {
-                        msg_list.push(
-                            format!("Count {token} out of range 0..=63 - \"{line}\""),
-                            Some(line_number),
-                            Some(filename.to_owned()),
-                            MessageType::Error,
-                        );
+                        msg_list.error_at(filename, line_number, format!("Count {token} out of range 0..=63 - \"{line}\""));
                         return "ERR     ".to_owned();
                     }
                     _ => ok = false,
@@ -273,12 +248,7 @@ pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_
     }
 
     if !ok {
-        msg_list.push(
-            format!("Incorrect register definition - \"{line}\""),
-            Some(line_number),
-            Some(filename.to_owned()),
-            MessageType::Error,
-        );
+        msg_list.error_at(filename, line_number, format!("Incorrect register definition - \"{line}\""));
         return "ERR     ".to_owned();
     }
     format!("{word0:08X}")
@@ -291,12 +261,7 @@ fn legacy_add_registers(opcode: &Opcode, line: &str, filename: &str, msg_list: &
     let mut opcode_found = opcode.hex_code.clone();
 
     if opcode_found.len() != 8 {
-        msg_list.push(
-            format!("Incorrect register definition - \"{line}\""),
-            Some(line_number),
-            Some(filename.to_owned()),
-            MessageType::Error,
-        );
+        msg_list.error_at(filename, line_number, format!("Incorrect register definition - \"{line}\""));
         return "ERR     ".to_owned();
     }
 
@@ -311,12 +276,7 @@ fn legacy_add_registers(opcode: &Opcode, line: &str, filename: &str, msg_list: &
     }
 
     if opcode_found.len() != 8 || opcode_found.contains('X') {
-        msg_list.push(
-            format!("Incorrect register definition - \"{line}\""),
-            Some(line_number),
-            Some(filename.to_owned()),
-            MessageType::Error,
-        );
+        msg_list.error_at(filename, line_number, format!("Incorrect register definition - \"{line}\""));
         return "ERR     ".to_owned();
     }
     opcode_found
@@ -508,11 +468,10 @@ pub(crate) fn pc_relative_bits(
         let words = delta / 4;
         let lim = 1_i64 << (bits - 1);
         if delta % 4 != 0 || words < -lim || words >= lim {
-            msg_list.push(
+            msg_list.error_at(
+                filename,
+                line_number,
                 format!("{what} target out of range ({delta:+} bytes) - \"{line}\""),
-                Some(line_number),
-                Some(filename.to_owned()),
-                MessageType::Error,
             );
             return 0;
         }
@@ -1021,12 +980,7 @@ pub(crate) fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut Diagnost
             None => (),
             Some(opcode) => {
                 if return_opcode(&opcode.text_name, &opcodes).is_some() {
-                    msg_list.push(
-                        format!("Duplicate Opcode {} found", opcode.text_name),
-                        Some(line.line_counter),
-                        Some(line.file_name.clone()),
-                        MessageType::Error,
-                    );
+                    msg_list.error_at(&line.file_name, line.line_counter, format!("Duplicate Opcode {} found", opcode.text_name));
                 }
                 //opcodes.push(a);
                 opcodes.push(Opcode {
@@ -1044,11 +998,10 @@ pub(crate) fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut Diagnost
             None => (),
             Some(found_macro) => {
                 if return_macro(&found_macro.name, &macros).is_some() {
-                    msg_list.push(
+                    msg_list.error_at(
+                        line.file_name,
+                        line.line_counter,
                         format!("Duplicate Macro definition {} found", found_macro.name),
-                        Some(line.line_counter),
-                        Some(line.file_name),
-                        MessageType::Error,
                     );
                 }
                 macros.push(found_macro);
@@ -1075,6 +1028,7 @@ pub(crate) fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diag::MessageType;
     use crate::labels;
 
     #[test]
@@ -1410,7 +1364,7 @@ mod tests {
         });
         let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
-        assert_eq!(msg_list.list[0].text, "Too many arguments found - \"PUSH 1 0xF\"");
+        assert_eq!(msg_list.messages()[0].text(), "Too many arguments found - \"PUSH 1 0xF\"");
     }
 
     #[test]
@@ -1421,12 +1375,12 @@ mod tests {
         let opcodes = &mut v2_opcodes();
         let output = add_arguments(opcodes, "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
-        assert_eq!(msg_list.number_by_type(MessageType::Warning), 1);
-        assert_eq!(msg_list.list.len(), 1);
+        assert_eq!(msg_list.count(MessageType::Warning), 1);
+        assert_eq!(msg_list.messages().len(), 1);
 
         let mut msg_list = Diagnostics::new();
         add_arguments(opcodes, "SETR A 1", &mut msg_list, 1, "test", &labels);
-        assert_eq!(msg_list.list.len(), 0);
+        assert_eq!(msg_list.messages().len(), 0);
     }
 
     #[test]
@@ -1656,10 +1610,10 @@ mod tests {
 
         let (_opt_oplist, _opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
-        assert_eq!(msg_list.list[0].text, "Duplicate Macro definition $WAIT found");
-        assert_eq!(msg_list.list[0].line_number, Some(3));
-        assert_eq!(msg_list.list[1].text, "Duplicate Opcode CMPRR found");
-        assert_eq!(msg_list.list[1].line_number, Some(4));
+        assert_eq!(msg_list.messages()[0].text(), "Duplicate Macro definition $WAIT found");
+        assert_eq!(msg_list.messages()[0].line_number(), Some(3));
+        assert_eq!(msg_list.messages()[1].text(), "Duplicate Opcode CMPRR found");
+        assert_eq!(msg_list.messages()[1].line_number(), Some(4));
     }
     #[test]
     // Test empty list
@@ -1865,17 +1819,17 @@ mod tests {
         assert_eq!(add_registers(opcodes, "SHLV A 0", "t", &mut msg_list, 1), "50204000");
         assert_eq!(add_registers(opcodes, "SHLV A 63", "t", &mut msg_list, 1), "503FC000");
         assert_eq!(add_registers(opcodes, "SHLV A 0x3F", "t", &mut msg_list, 1), "503FC000");
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
 
         assert_eq!(add_registers(opcodes, "SHLV A 64", "t", &mut msg_list, 5), "ERR     ");
-        let msg = msg_list.list.last().unwrap();
-        assert_eq!(msg.text, "Count 64 out of range 0..=63 - \"SHLV A 64\"");
-        assert_eq!((msg.level == MessageType::Error, msg.line_number), (true, Some(5)));
+        let msg = msg_list.messages().last().unwrap();
+        assert_eq!(msg.text(), "Count 64 out of range 0..=63 - \"SHLV A 64\"");
+        assert_eq!((msg.level() == MessageType::Error, msg.line_number()), (true, Some(5)));
 
         // Negative counts are out of range too, not a register error.
         assert_eq!(add_registers(opcodes, "SHLV A -1", "t", &mut msg_list, 6), "ERR     ");
-        assert_eq!(msg_list.list.last().unwrap().text, "Count -1 out of range 0..=63 - \"SHLV A -1\"");
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 2);
+        assert_eq!(msg_list.messages().last().unwrap().text(), "Count -1 out of range 0..=63 - \"SHLV A -1\"");
+        assert_eq!(msg_list.count(MessageType::Error), 2);
     }
 
     #[test]
@@ -1901,7 +1855,7 @@ mod tests {
             let got = add_registers(opcodes, src, "test", &mut msg_list, 1);
             assert_eq!(got, want, "{src}");
         }
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
         // Out-of-range / misaligned short immediates are rejected.
         for bad in ["SETR.S A 300", "LDIDX64A.S A B 12", "LDIDX64A.S A B 2048"] {
             let got = add_registers(opcodes, bad, "test", &mut msg_list, 1);
@@ -1935,11 +1889,11 @@ mod tests {
         // JMP.S LOOP: at 0x40 -> -6 words in [17:0].
         let rel = pc_relative_bits(opcodes, "JMP.S LOOP:", 0x40, &labels, &mut msg_list, 1, "t");
         assert_eq!(0x6100_0000 | rel, 0x6103_FFFA);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
         // A fused branch 256 KB away is out of simm13 range: reported, no bits.
         let rel = pc_relative_bits(opcodes, "BEQ A B FAR:", 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(rel, 0);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
+        assert_eq!(msg_list.count(MessageType::Error), 1);
         // ...but in range for a short branch.
         let rel = pc_relative_bits(opcodes, "CALL.S FAR:", 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(rel, (0x0004_0000 - 0x30) / 4);

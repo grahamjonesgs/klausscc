@@ -6,7 +6,7 @@
 //! binary-input mode uses (`--net-load`, `--mem-out`, elf2serial,
 //! `--emulate`, `--gdbserver`).
 
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::error::Error;
 use crate::helper::human_bytes;
 use crate::image::Image;
@@ -67,19 +67,14 @@ impl Loaded {
 pub(crate) fn load_flat(input: BinaryInput<'_>, msg_list: &mut Diagnostics) -> Result<Loaded, Error> {
     let path = input.path;
     let file_data = fs::read(path).map_err(|source| {
-        msg_list.push(format!("Cannot read binary file {path}: {source}"), None, None, MessageType::Error);
+        msg_list.error(format!("Cannot read binary file {path}: {source}"));
         Error::Read {
             path: PathBuf::from(path),
             source,
         }
     })?;
     let Some((bytes, entry, elf)) = flatten_input(file_data, input.entry) else {
-        msg_list.push(
-            format!("Failed to extract LOAD segments from ELF file {path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error(format!("Failed to extract LOAD segments from ELF file {path}"));
         return Err(Error::Elf(PathBuf::from(path)));
     };
     Ok(Loaded {

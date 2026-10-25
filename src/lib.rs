@@ -87,13 +87,12 @@ fn run_command() -> Result<(), Error> {
 
     use files::output_macros_opcodes_html;
 
-    let mut msg_list = Diagnostics::new();
     /* Stream messages as they happen rather than dumping them all at the end:
      * during a board load the transfer is otherwise silent and every status
      * line (plus the board's boot log behind it) appears in one burst once the
      * monitor starts.  print_messages() is then a no-op, so print_results()
      * prints only the final summary line. */
-    msg_list.live = true;
+    let mut msg_list = Diagnostics::streaming();
     let start_time = Instant::now();
 
     /* try_get_matches() rather than get_matches(): clap exits with status 2 on
@@ -253,7 +252,7 @@ fn run_command() -> Result<(), Error> {
         textmate_flag,
     );
     if let Err(result_err) = &html_result {
-        msg_list.push(format!("Error {result_err} writing opcode list to HTML"), None, None, MessageType::Error);
+        msg_list.error(format!("Error {result_err} writing opcode list to HTML"));
     }
 
     if textmate_flag || opcodes_flag {
@@ -282,7 +281,7 @@ fn run_command() -> Result<(), Error> {
     // .code listing below can show where they are.
     let Some(assembly) = asm::assemble(&input_file_name, &oplist, &macro_list, &mut msg_list) else {
         print_results(&msg_list, start_time);
-        return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error).max(1)));
+        return Err(Error::Assembly(msg_list.count(MessageType::Error).max(1)));
     };
 
     // Emulator mode: build the flat DDR image from the assembled program and run
@@ -300,12 +299,7 @@ fn run_command() -> Result<(), Error> {
 
     // The .code listing is written even when assembly failed: it shows where.
     if let Err(result_err) = write_code_output_file(&output_file_name, &assembly.lines, &mut msg_list) {
-        msg_list.push(
-            format!("Unable to write to code file {output_file_name}, error {result_err}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error(format!("Unable to write to code file {output_file_name}, error {result_err}"));
         print_results(&msg_list, start_time);
         return Err(Error::Write {
             path: PathBuf::from(output_file_name),
@@ -315,7 +309,7 @@ fn run_command() -> Result<(), Error> {
 
     // Failure from writing the .kbt or sending it; assembly errors are counted below.
     let mut outcome: Result<(), Error> = Ok(());
-    if msg_list.number_by_type(MessageType::Error) == 0 {
+    if msg_list.count(MessageType::Error) == 0 {
         if let Some(bin_string) = assembly.to_kbt(&mut msg_list) {
             outcome = write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
             if outcome.is_ok() && !output_serial_port.is_empty() {
@@ -339,32 +333,22 @@ fn run_command() -> Result<(), Error> {
             }
         } else {
             if remove_file(&binary_file_name).is_ok() {
-                msg_list.push("Removed old binary file".to_owned(), None, None, MessageType::Warning);
+                msg_list.warning("Removed old binary file");
             }
-            msg_list.push(
-                "Not writing binary file due to assembly errors".to_owned(),
-                None,
-                None,
-                MessageType::Warning,
-            );
+            msg_list.warning("Not writing binary file due to assembly errors");
         }
     } else {
         if remove_file(&binary_file_name).is_ok() {
-            msg_list.push("Removed old binary file".to_owned(), None, None, MessageType::Warning);
+            msg_list.warning("Removed old binary file");
         }
-        msg_list.push(
-            "Not writing new binary file due to assembly errors".to_owned(),
-            None,
-            None,
-            MessageType::Warning,
-        );
+        msg_list.warning("Not writing new binary file due to assembly errors");
     }
 
     print_results(&msg_list, start_time);
 
     // A failed build is a failure: don't go on to monitor a stale program.
     outcome?;
-    let error_count = msg_list.number_by_type(MessageType::Error);
+    let error_count = msg_list.count(MessageType::Error);
     if error_count > 0 {
         return Err(Error::Assembly(error_count));
     }
@@ -372,7 +356,7 @@ fn run_command() -> Result<(), Error> {
     // Monitor serial port after assembly and send if requested
     if monitor_flag {
         if output_serial_port.is_empty() {
-            msg_list.push("Monitor flag (-m) requires a serial port (-s)".to_owned(), None, None, MessageType::Error);
+            msg_list.error("Monitor flag (-m) requires a serial port (-s)");
             return Err(Error::Usage("monitor flag (-m) requires a serial port (-s)"));
         }
         monitor_serial(&output_serial_port, debug_flag, &mut msg_list).map_err(|err| monitor_failed(&output_serial_port, err, &mut msg_list))?;
@@ -380,7 +364,7 @@ fn run_command() -> Result<(), Error> {
 
     // Check test flag requires serial port
     if test_flag && output_serial_port.is_empty() {
-        msg_list.push("Test flag (-T) requires a serial port (-s)".to_owned(), None, None, MessageType::Error);
+        msg_list.error("Test flag (-T) requires a serial port (-s)");
         return Err(Error::Usage("test flag (-T) requires a serial port (-s)"));
     }
 

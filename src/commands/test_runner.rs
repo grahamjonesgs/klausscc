@@ -3,7 +3,7 @@
 
 use super::{send_failed, write_binary_file};
 use crate::asm::assemble;
-use crate::diag::{print_messages, print_results, Diagnostics, MessageType};
+use crate::diag::{print_messages, print_results, Diagnostics};
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::parse_expected_uart_values;
@@ -59,7 +59,7 @@ pub(crate) fn run_test_mode(
     let raw_lines: Vec<String> = match fs::read_to_string(input_file_name) {
         Ok(source) => source.lines().map(String::from).collect(),
         Err(e) => {
-            msg_list.push(format!("Cannot read {input_file_name}: {e}"), None, None, MessageType::Error);
+            msg_list.error(format!("Cannot read {input_file_name}: {e}"));
             print_results(msg_list, start_time);
             return Err(Error::Read {
                 path: PathBuf::from(input_file_name),
@@ -70,28 +70,18 @@ pub(crate) fn run_test_mode(
     let expected_values = parse_expected_uart_values(&raw_lines);
 
     if expected_values.is_empty() {
-        msg_list.push(
-            "No expected UART values found in source file comments".to_owned(),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error("No expected UART values found in source file comments");
         print_results(msg_list, start_time);
         return Err(Error::NoTests(PathBuf::from(input_file_name)));
     }
 
     let expected_count = expected_values.len();
-    msg_list.push(
-        format!("Found {expected_count} expected UART values in source comments"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!("Found {expected_count} expected UART values in source comments"));
 
     // Send to board and keep port open
     let port = match write_to_board_keep_port(bin_string, output_serial_port, send_break, false, msg_list) {
         Ok(port) => {
-            msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+            msg_list.info("Wrote to serial port");
             port
         }
         Err(err) => return Err(send_failed(output_serial_port, err, msg_list, start_time)),
@@ -138,12 +128,7 @@ fn assemble_to_kbt(input_file_name: &str, oplist: &[Opcode], macro_list: &[macro
 
     let output_file_name = format!("{}.code", filename_stem(input_file_name));
     if let Err(result_err) = write_code_output_file(&output_file_name, &assembly.lines, msg_list) {
-        msg_list.push(
-            format!("Unable to write to code file {output_file_name}, error {result_err}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error(format!("Unable to write to code file {output_file_name}, error {result_err}"));
         return None;
     }
 
@@ -165,12 +150,7 @@ pub(super) fn read_test_list(list_file: &str, msg_list: &mut Diagnostics) -> Vec
     let contents = match fs::read_to_string(list_file) {
         Ok(c) => c,
         Err(err) => {
-            msg_list.push(
-                format!("Error reading test list file {list_file}: \"{err}\""),
-                None,
-                None,
-                MessageType::Error,
-            );
+            msg_list.error(format!("Error reading test list file {list_file}: \"{err}\""));
             return Vec::new();
         }
     };
@@ -205,13 +185,13 @@ pub(crate) fn run_test_list(
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     if output_serial_port.is_empty() {
-        msg_list.push("Test list (-L) requires a serial port (-s)".to_owned(), None, None, MessageType::Error);
+        msg_list.error("Test list (-L) requires a serial port (-s)");
         return Err(Error::Usage("test list (-L) requires a serial port (-s)"));
     }
 
     let test_files = read_test_list(list_file, msg_list);
     if test_files.is_empty() {
-        msg_list.push("No test files found in test list".to_owned(), None, None, MessageType::Error);
+        msg_list.error("No test files found in test list");
         return Err(Error::NoTests(PathBuf::from(list_file)));
     }
 

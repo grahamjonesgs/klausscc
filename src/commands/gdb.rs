@@ -4,7 +4,7 @@
 use super::load::run_elf2serial;
 #[cfg(feature = "board")]
 use super::SendOpts;
-use crate::diag::{print_results, Diagnostics, MessageType};
+use crate::diag::{print_results, Diagnostics};
 use crate::error::Error;
 use crate::layout::CODE_BASE;
 use crate::loader::{load_flat, BinaryInput, Loaded};
@@ -23,15 +23,10 @@ pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Di
     let code_base = u64::from(CODE_BASE);
     if let Some(elf) = &elf {
         if elf.base != code_base {
-            msg_list.push(
-                format!(
-                    "ELF {binary_path} is linked at 0x{:08X}, not 0x{code_base:08X}: debugger addresses will not match the emulator's",
-                    elf.base
-                ),
-                None,
-                None,
-                MessageType::Warning,
-            );
+            msg_list.warning(format!(
+                "ELF {binary_path} is linked at 0x{:08X}, not 0x{code_base:08X}: debugger addresses will not match the emulator's",
+                elf.base
+            ));
         }
     }
     print_results(msg_list, start_time);
@@ -103,11 +98,6 @@ pub(crate) fn run_gdbserver_board(
 /// `--board` without the `board` feature: explain how to get it.
 #[cfg(all(not(feature = "board"), not(tarpaulin_include)))]
 pub(crate) fn board_unsupported(msg_list: &mut Diagnostics) -> Error {
-    msg_list.push(
-        "--board needs a klausscc built with board support: cargo build --release --features board (needs libftdi1-dev)".to_owned(),
-        None,
-        None,
-        MessageType::Error,
-    );
+    msg_list.error("--board needs a klausscc built with board support: cargo build --release --features board (needs libftdi1-dev)");
     Error::Usage("--board needs a klausscc built with board support")
 }

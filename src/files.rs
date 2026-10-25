@@ -1,5 +1,5 @@
 use crate::asm::line::{LineType, Pass2, SourceLine};
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::layout::{heap_start, CODE_BASE};
 use crate::macros::Macro;
 use crate::opcodes::Opcode;
@@ -106,17 +106,12 @@ pub(crate) fn output_macros_opcodes_html(
     html_filename.push_str(".html");
 
     if opcodes_flag {
-        msg_list.push(
-            format!("Outputting macros and opcodes to {html_filename}"),
-            None,
-            None,
-            MessageType::Information,
-        );
+        msg_list.info(format!("Outputting macros and opcodes to {html_filename}"));
 
         // Open the html file
         let html_output_file = File::create(html_filename.clone());
         if html_output_file.is_err() {
-            msg_list.push(format!("Error opening file {html_filename}"), None, None, MessageType::Warning);
+            msg_list.warning(format!("Error opening file {html_filename}"));
             return Err(html_output_file.err().unwrap_or_else(|| Error::other("Unknown error")));
         }
         let Ok(mut html_file) = html_output_file else {
@@ -218,24 +213,14 @@ pub(crate) fn output_macros_opcodes_json(
     let mut json_macro_filename = filename_stem;
     json_macro_filename.push_str("_macros.json");
 
-    msg_list.push(
-        format!("Writing JSON opcode file to {json_opcode_filename}"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!("Writing JSON opcode file to {json_opcode_filename}"));
 
-    msg_list.push(
-        format!("Writing JSON macro file to {json_macro_filename}"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!("Writing JSON macro file to {json_macro_filename}"));
 
     // Write out the JSON opcode file
     let json_opcode_output_file = File::create(json_opcode_filename.clone());
     if json_opcode_output_file.is_err() {
-        msg_list.push(format!("Error opening file {json_opcode_filename}"), None, None, MessageType::Warning);
+        msg_list.warning(format!("Error opening file {json_opcode_filename}"));
         return Err(json_opcode_output_file.err().unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_opcode_file) = json_opcode_output_file else {
@@ -246,7 +231,7 @@ pub(crate) fn output_macros_opcodes_json(
     // Write out the JSON macro file
     let json_macro_output_file = File::create(json_macro_filename.clone());
     if json_macro_output_file.is_err() {
-        msg_list.push(format!("Error opening file {json_macro_filename}"), None, None, MessageType::Warning);
+        msg_list.warning(format!("Error opening file {json_macro_filename}"));
         return Err(json_macro_output_file.err().unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_macro_file) = json_macro_output_file else {
@@ -263,16 +248,11 @@ pub(crate) fn output_macros_opcodes_json(
 fn output_opcodes_textmate(filename_stem: String, opcodes: &[Opcode], msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut textmate_opcode_filename = filename_stem;
     textmate_opcode_filename.push_str("_textmate.txt");
-    msg_list.push(
-        format!("Writing textmate opcode file to {textmate_opcode_filename}"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!("Writing textmate opcode file to {textmate_opcode_filename}"));
 
     let textmate_opcode_output_file = File::create(textmate_opcode_filename.clone());
     if textmate_opcode_output_file.is_err() {
-        msg_list.push(format!("Error opening file {textmate_opcode_filename}"), None, None, MessageType::Warning);
+        msg_list.warning(format!("Error opening file {textmate_opcode_filename}"));
         return Err(textmate_opcode_output_file.err().unwrap_or_else(|| Error::other("Unknown error")));
     }
     let Ok(mut json_opcode_file) = textmate_opcode_output_file else {
@@ -312,15 +292,15 @@ pub(crate) fn read_file_to_vector(filename: &str, msg_list: &mut Diagnostics) ->
 /// afterwards, however reading the file ends.
 fn read_source_file(filename: &str, msg_list: &mut Diagnostics, open_files: &mut HashSet<PathBuf>) -> Option<Vec<SourceLine>> {
     let Ok(canonical) = fs::canonicalize(filename) else {
-        msg_list.push(format!("Unable to open file {filename}"), None, None, MessageType::Error);
+        msg_list.error(format!("Unable to open file {filename}"));
         return None;
     };
     if open_files.contains(&canonical) {
-        msg_list.push(format!("Recursive include of file {filename}"), None, None, MessageType::Error);
+        msg_list.error(format!("Recursive include of file {filename}"));
         return None;
     }
     let Ok(file) = File::open(&canonical) else {
-        msg_list.push(format!("Unable to open file {filename}"), None, None, MessageType::Error);
+        msg_list.error(format!("Unable to open file {filename}"));
         return None;
     };
 
@@ -342,12 +322,7 @@ fn read_source_lines(file: File, filename: &str, msg_list: &mut Diagnostics, ope
                 line_number += 1;
                 if let Some(include_file) = include_target(&line_contents) {
                     if include_file.is_empty() {
-                        msg_list.push(
-                            format!("Missing include file name in {filename}"),
-                            Some(line_number),
-                            Some(filename.to_owned()),
-                            MessageType::Error,
-                        );
+                        msg_list.error_at(filename, line_number, format!("Missing include file name in {filename}"));
                         return None;
                     }
 
@@ -356,11 +331,10 @@ fn read_source_lines(file: File, filename: &str, msg_list: &mut Diagnostics, ope
                     let new_include_file = parent.join(include_file).to_string_lossy().into_owned();
 
                     let Some(include_lines) = read_source_file(&new_include_file, msg_list, open_files) else {
-                        msg_list.push(
+                        msg_list.error_at(
+                            filename,
+                            line_number,
                             format!("Unable to open include file {new_include_file} in {filename}"),
-                            Some(line_number),
-                            Some(filename.to_owned()),
-                            MessageType::Error,
                         );
                         return Some(lines);
                     };
@@ -376,12 +350,7 @@ fn read_source_lines(file: File, filename: &str, msg_list: &mut Diagnostics, ope
             // A read error usually repeats on every later read (a directory, say),
             // so stop reading the file rather than reporting it forever.
             Err(err) => {
-                msg_list.push(
-                    format!("Error reading source file {filename}: {err}"),
-                    Some(line_number),
-                    Some(filename.to_owned()),
-                    MessageType::Error,
-                );
+                msg_list.error_at(filename, line_number, format!("Error reading source file {filename}: {err}"));
                 return None;
             }
         }
@@ -404,12 +373,7 @@ enum CommentState {
 
 /// Report a block comment that was still open at the end of a file.
 fn unterminated_comment(file_name: &str, line_number: u32, msg_list: &mut Diagnostics) {
-    msg_list.push(
-        format!("Comment not terminated in file {file_name}"),
-        Some(line_number),
-        Some(file_name.to_owned()),
-        MessageType::Error,
-    );
+    msg_list.error_at(file_name, line_number, format!("Comment not terminated in file {file_name}"));
 }
 
 /// Remove comments from vector of strings.
@@ -510,12 +474,7 @@ pub(crate) fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &
     };
 
     let mut out_line = String::default();
-    msg_list.push(
-        format!("Writing code file to {}", filename.as_ref().display()),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!("Writing code file to {}", filename.as_ref().display()));
     // Compute heap_start from the first byte after the program, as the .kbt does.
     // program_counter is already a byte address; opcode.len()/8 = words, *4 = bytes → /2 total
     let program_end: u32 = pass2
@@ -585,6 +544,7 @@ mod test {
     use std::path::MAIN_SEPARATOR_STR;
 
     use super::*;
+    use crate::diag::MessageType;
     use tempfile::TempDir;
 
     #[test]
@@ -800,10 +760,10 @@ mod test {
                 },
             ]
         );
-        assert_eq!(msg_list.list[0].text, "Comment not terminated in file test1.kla");
+        assert_eq!(msg_list.messages()[0].text(), "Comment not terminated in file test1.kla");
         // Reported where the comment opened, not at the first line of the next file.
-        assert_eq!(msg_list.list[0].line_number, Some(1));
-        assert_eq!(msg_list.list[0].file_name, Some("test1.kla".to_owned()));
+        assert_eq!(msg_list.messages()[0].line_number(), Some(1));
+        assert_eq!(msg_list.messages()[0].file_name(), Some("test1.kla"));
     }
 
     /// Run `remove_block_comments` over `lines` (all in `test.kla`).
@@ -830,7 +790,7 @@ mod test {
     fn test_remove_block_comments_slash_star_slash() {
         let (output, msg_list) = strip_block(&["abc/*/def"]);
         assert_eq!(output, vec!["abc"]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
+        assert_eq!(msg_list.count(MessageType::Error), 1);
     }
 
     #[test]
@@ -838,7 +798,7 @@ mod test {
     fn test_remove_block_comments_star_after_close() {
         let (output, msg_list) = strip_block(&["a/* x */*b", "c"]);
         assert_eq!(output, vec!["a*b", "c"]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
     }
 
     #[test]
@@ -846,7 +806,7 @@ mod test {
     fn test_remove_block_comments_nested_looking() {
         let (output, msg_list) = strip_block(&["abc/* /* x */def", "g/* x */ */h", "i/* x **/j"]);
         assert_eq!(output, vec!["abcdef", "g */h", "ij"]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
     }
 
     #[test]
@@ -854,7 +814,7 @@ mod test {
     fn test_remove_block_comments_plain_slashes() {
         let (output, msg_list) = strip_block(&["a/b", "c//d", "e/", "*/f"]);
         assert_eq!(output, vec!["a/b", "c//d", "e/", "*/f"]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
     }
 
     #[test]
@@ -862,7 +822,7 @@ mod test {
     fn test_remove_block_comments_star_at_line_end() {
         let (output, msg_list) = strip_block(&["a/* x *", "/b */c"]);
         assert_eq!(output, vec!["a", "c"]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
     }
 
     #[test]
@@ -870,11 +830,11 @@ mod test {
     fn test_remove_block_comments_unterminated_last_file() {
         let (output, msg_list) = strip_block(&["abc", "def /* open", "ghi"]);
         assert_eq!(output, vec!["abc", "def ", ""]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
-        let msg = &msg_list.list[0];
-        assert_eq!(msg.text, "Comment not terminated in file test.kla");
-        assert_eq!(msg.line_number, Some(2));
-        assert_eq!(msg.file_name, Some("test.kla".to_owned()));
+        assert_eq!(msg_list.count(MessageType::Error), 1);
+        let msg = &msg_list.messages()[0];
+        assert_eq!(msg.text(), "Comment not terminated in file test.kla");
+        assert_eq!(msg.line_number(), Some(2));
+        assert_eq!(msg.file_name(), Some("test.kla"));
     }
 
     #[test]
@@ -950,7 +910,7 @@ mod test {
     fn test_read_file_to_vec1() {
         let mut msg_list = Diagnostics::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list);
-        assert_eq!(msg_list.list[0].text, "Unable to open file ////xxxxxxx");
+        assert_eq!(msg_list.messages()[0].text(), "Unable to open file ////xxxxxxx");
     }
 
     #[test]
@@ -1035,7 +995,7 @@ mod test {
         _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         _ = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(msg_list.list[0].text, format!("Recursive include of file {file_name1}"));
+        assert_eq!(msg_list.messages()[0].text(), format!("Recursive include of file {file_name1}"));
 
         drop(tmp_file1);
         drop(tmp_file2);
@@ -1061,8 +1021,11 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(msg_list.list[0].text, format!("Unable to open file {file_name2}"));
-        assert_eq!(msg_list.list[1].text, format!("Unable to open include file {file_name2} in {file_name1}"));
+        assert_eq!(msg_list.messages()[0].text(), format!("Unable to open file {file_name2}"));
+        assert_eq!(
+            msg_list.messages()[1].text(),
+            format!("Unable to open include file {file_name2} in {file_name1}")
+        );
         assert_eq!(lines, Some(vec![]));
 
         drop(tmp_file1);
@@ -1084,7 +1047,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(msg_list.list[0].text, format!("Missing include file name in {file_name1}"));
+        assert_eq!(msg_list.messages()[0].text(), format!("Missing include file name in {file_name1}"));
         assert_eq!(lines, None);
 
         drop(tmp_file1);
@@ -1121,8 +1084,11 @@ mod test {
         let file_name3: &str = binding3.to_str().unwrap();
 
         _ = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(msg_list.list[0].text, format!("Unable to open file {file_name3}"));
-        assert_eq!(msg_list.list[1].text, format!("Unable to open include file {file_name3} in {file_name2}"));
+        assert_eq!(msg_list.messages()[0].text(), format!("Unable to open file {file_name3}"));
+        assert_eq!(
+            msg_list.messages()[1].text(),
+            format!("Unable to open include file {file_name3} in {file_name2}")
+        );
 
         drop(tmp_file1);
         drop(tmp_file2);
@@ -1142,10 +1108,10 @@ mod test {
 
         let lines = read_file_to_vector(file_name1, &mut msg_list).unwrap();
         let recursive: Vec<&str> = msg_list
-            .list
+            .messages()
             .iter()
-            .filter(|m| m.text.starts_with("Recursive include"))
-            .map(|m| m.text.as_str())
+            .filter(|m| m.text().starts_with("Recursive include"))
+            .map(crate::diag::Message::text)
             .collect();
         assert_eq!(recursive.len(), 1);
         assert!(recursive[0].ends_with("a.kla"), "{recursive:?}");
@@ -1167,7 +1133,7 @@ mod test {
 
         _ = read_file_to_vector(file_path1.to_str().unwrap(), &mut msg_list);
         _ = read_file_to_vector(file_name_c.to_str().unwrap(), &mut msg_list);
-        assert!(msg_list.list.iter().all(|m| !m.text.starts_with("Recursive include")));
+        assert!(msg_list.messages().iter().all(|m| !m.text().starts_with("Recursive include")));
     }
 
     #[test]
@@ -1184,7 +1150,7 @@ mod test {
         let lines = read_file_to_vector(file_path1.to_str().unwrap(), &mut msg_list).unwrap();
         let text: Vec<&str> = lines.iter().map(|l| l.input_text_line.as_str()).collect();
         assert_eq!(text, vec!["b", "d", "c", "d"]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
     }
 
     #[test]
@@ -1202,7 +1168,7 @@ mod test {
 
         let lines = read_file_to_vector(file_path1.to_str().unwrap(), &mut msg_list).unwrap();
         assert_eq!(lines.len(), 1);
-        let errors: Vec<&str> = msg_list.list.iter().map(|m| m.text.as_str()).collect();
+        let errors: Vec<&str> = msg_list.messages().iter().map(crate::diag::Message::text).collect();
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert!(errors[0].starts_with(&format!("Error reading source file {dir_name}: ")), "{errors:?}");
         assert!(
@@ -1212,7 +1178,7 @@ mod test {
 
         let mut msg_list = Diagnostics::new();
         assert!(read_file_to_vector(dir_name, &mut msg_list).is_none());
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
+        assert_eq!(msg_list.count(MessageType::Error), 1);
     }
 
     #[test]

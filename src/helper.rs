@@ -1,6 +1,6 @@
 use crate::asm::lexer::{data_name_from_string, is_blank, is_comment, is_start, label_name_from_string};
 use crate::asm::line::{LineType, Pass2};
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::num::{parse_bits64, parse_int, LiteralError};
 use crate::opcodes::{disassemble_word, return_opcode, Opcode};
 use std::fmt;
@@ -284,7 +284,7 @@ pub(crate) fn num_data_bytes(line: &str, msg_list: &mut Diagnostics, line_number
             } else {
                 format!("Error in data definition for {line}: {err}")
             };
-            msg_list.push(text, Some(line_number), Some(filename.to_owned()), MessageType::Error);
+            msg_list.error_at(filename, line_number, text);
             0
         }
     }
@@ -332,6 +332,7 @@ pub(crate) fn trim_newline(input: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diag::MessageType;
     use crate::labels::{return_label_value, Label};
 
     #[test]
@@ -513,7 +514,7 @@ mod tests {
         let input = String::from("#TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test");
         assert_eq!(output, 0);
-        assert_eq!(msg_list.list[0].text, "Error in data definition for #TEST");
+        assert_eq!(msg_list.messages()[0].text(), "Error in data definition for #TEST");
     }
 
     #[test]
@@ -793,11 +794,11 @@ mod tests {
     fn test_num_data_bytes_reports_bad_value() {
         let mut msg_list = Diagnostics::new();
         assert_eq!(num_data_bytes(".word 12abc", &mut msg_list, 7, "prog.kla"), 0);
-        let msg = msg_list.list.first().unwrap();
-        assert_eq!(msg.level, MessageType::Error);
-        assert_eq!(msg.line_number, Some(7));
+        let msg = msg_list.messages().first().unwrap();
+        assert_eq!(msg.level(), MessageType::Error);
+        assert_eq!(msg.line_number(), Some(7));
         assert_eq!(
-            msg.text,
+            msg.text(),
             "Error in data definition for .word 12abc: invalid value \"12abc\" (invalid digit)"
         );
     }

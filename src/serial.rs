@@ -1,4 +1,4 @@
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::helper::{human_bytes, trim_newline};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
@@ -85,12 +85,7 @@ fn return_port(port_name: &str, msg_list: &mut Diagnostics) -> Result<Box<dyn Se
     let mut local_port_name = port_name.to_owned();
     if port_name == AUTO_SERIAL {
         if let Some(suggested_port) = find_possible_port() {
-            msg_list.push(
-                format!("No port name given, using automatic port {suggested_port}"),
-                None,
-                None,
-                MessageType::Information,
-            );
+            msg_list.info(format!("No port name given, using automatic port {suggested_port}"));
             local_port_name = suggested_port;
         }
     }
@@ -100,12 +95,7 @@ fn return_port(port_name: &str, msg_list: &mut Diagnostics) -> Result<Box<dyn Se
         .open();
     if let Err(err) = port_result {
         if local_port_name != AUTO_SERIAL {
-            msg_list.push(
-                format!("Error opening serial port {local_port_name}, error \"{err}\""),
-                None,
-                None,
-                MessageType::Error,
-            );
+            msg_list.error(format!("Error opening serial port {local_port_name}, error \"{err}\""));
         }
         let mut all_ports = String::default();
         let available_ports = serialport::available_ports();
@@ -113,7 +103,7 @@ fn return_port(port_name: &str, msg_list: &mut Diagnostics) -> Result<Box<dyn Se
 
         return match available_ports {
             Err(_) => {
-                msg_list.push("Error opening serial port, no ports found".to_owned(), None, None, MessageType::Error);
+                msg_list.error("Error opening serial port, no ports found");
                 Err(Error::other("No ports found"))
             }
             Ok(ports) => {
@@ -133,15 +123,10 @@ fn return_port(port_name: &str, msg_list: &mut Diagnostics) -> Result<Box<dyn Se
                 }
 
                 let ports_msg = ports_found_message(port_count, &all_ports);
-                msg_list.push(format!("Error opening serial port, {ports_msg}"), None, None, MessageType::Error);
+                msg_list.error(format!("Error opening serial port, {ports_msg}"));
 
                 if suggested_port.is_some() {
-                    msg_list.push(
-                        format!("Suggested port {}", suggested_port.unwrap_or_default()),
-                        None,
-                        None,
-                        MessageType::Information,
-                    );
+                    msg_list.info(format!("Suggested port {}", suggested_port.unwrap_or_default()));
                 }
 
                 Err(Error::other("Failed to open port"))
@@ -257,19 +242,14 @@ pub(crate) fn write_to_board_keep_port(
     let ret_msg_size = port.read(&mut read_buffer[..]).unwrap_or(0);
 
     if ret_msg_size == 0 {
-        msg_list.push("No message received from board".to_owned(), None, None, MessageType::Warning);
+        msg_list.warning("No message received from board");
         return Ok(port);
     }
 
     let ret_msg = String::from_utf8(read_buffer.get(..ret_msg_size).unwrap_or(b"").to_vec());
 
     if let Err(err) = ret_msg {
-        msg_list.push(
-            format!("Invalid message received from board, error \"{err}\""),
-            None,
-            None,
-            MessageType::Warning,
-        );
+        msg_list.warning(format!("Invalid message received from board, error \"{err}\""));
         return Ok(port);
     }
 
@@ -277,12 +257,7 @@ pub(crate) fn write_to_board_keep_port(
 
     trim_newline(&mut print_ret_msg); //Board can send CR/LF messages
 
-    msg_list.push(
-        format!("Message received from board is \"{print_ret_msg}\""),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!("Message received from board is \"{print_ret_msg}\""));
 
     Ok(port)
 }
@@ -368,7 +343,7 @@ impl RawMode {
         match crossterm::terminal::enable_raw_mode() {
             Ok(()) => Some(Self),
             Err(err) => {
-                msg_list.push(format!("Failed to enable raw terminal mode: \"{err}\""), None, None, MessageType::Warning);
+                msg_list.warning(format!("Failed to enable raw terminal mode: \"{err}\""));
                 None
             }
         }
@@ -463,12 +438,7 @@ pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, ms
     let write_port = match port.try_clone() {
         Ok(write_port) => Some(write_port),
         Err(err) => {
-            msg_list.push(
-                format!("Failed to clone serial port for input forwarding: \"{err}\""),
-                None,
-                None,
-                MessageType::Warning,
-            );
+            msg_list.warning(format!("Failed to clone serial port for input forwarding: \"{err}\""));
             None
         }
     };
@@ -503,7 +473,7 @@ pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, ms
             }
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
-                msg_list.push(format!("Serial monitor error: \"{err}\""), None, None, MessageType::Error);
+                msg_list.error(format!("Serial monitor error: \"{err}\""));
                 return Err(err);
             }
         }
@@ -573,16 +543,11 @@ pub(crate) fn run_test_monitor(
     match &result {
         Ok(result) if result.timed_out => {
             let remaining = result.total - result.passed - result.failed;
-            msg_list.push(
-                format!("Test timed out after {timeout_secs}s: {remaining} expected values not received"),
-                None,
-                None,
-                MessageType::Warning,
-            );
+            msg_list.warning(format!("Test timed out after {timeout_secs}s: {remaining} expected values not received"));
         }
         Ok(_) => {}
         Err(err) => {
-            msg_list.push(format!("Serial read error during test: \"{err}\""), None, None, MessageType::Error);
+            msg_list.error(format!("Serial read error during test: \"{err}\""));
         }
     }
     result

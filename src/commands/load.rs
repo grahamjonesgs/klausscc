@@ -30,16 +30,16 @@ pub(crate) fn run_netload(
     start_time: Instant,
 ) -> Result<(), Error> {
     if board_ip.is_empty() {
-        msg_list.push("net-load requires --ip <board address>".to_owned(), None, None, MessageType::Error);
+        msg_list.error("net-load requires --ip <board address>");
         print_results(msg_list, start_time);
         return Err(Error::Usage("net-load requires --ip <board address>"));
     }
 
     let loaded = load_flat(input, msg_list)?;
-    msg_list.push(loaded.detected_message(true), None, None, MessageType::Information);
+    msg_list.info(loaded.detected_message(true));
 
     if let Err(err) = net_load(board_ip, board_port, &loaded.image.to_ddr(), loaded.image.entry, msg_list) {
-        msg_list.push(format!("netboot failed: \"{err}\""), None, None, MessageType::Error);
+        msg_list.error(format!("netboot failed: \"{err}\""));
         print_results(msg_list, start_time);
         return Err(Error::Netboot(err));
     }
@@ -64,33 +64,23 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
         },
         msg_list,
     )?;
-    msg_list.push(loaded.detected_message(false), None, None, MessageType::Information);
+    msg_list.info(loaded.detected_message(false));
 
     let image = loaded.image.to_ddr();
 
     if let Err(e) = fs::write(mem_file_name, readmemh(&image)) {
-        msg_list.push(
-            format!("Failed to write boot ROM image {mem_file_name}: {e}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error(format!("Failed to write boot ROM image {mem_file_name}: {e}"));
         print_results(msg_list, start_time);
         return Err(Error::Write {
             path: PathBuf::from(mem_file_name),
             source: e,
         });
     }
-    msg_list.push(
-        format!(
-            "mem-out: {binary_path} → {mem_file_name} ({} doublewords, {} bytes)",
-            image.len() / 8,
-            image.len()
-        ),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!(
+        "mem-out: {binary_path} → {mem_file_name} ({} doublewords, {} bytes)",
+        image.len() / 8,
+        image.len()
+    ));
     print_results(msg_list, start_time);
     Ok(())
 }
@@ -119,7 +109,7 @@ pub(crate) fn run_elf2serial(
     // immediately after the heap header, so board_entry = (elf_entry - elf_base)
     // + HEAP_HEADER_WORDS * 8.
     let loaded = load_flat(input, msg_list)?;
-    msg_list.push(loaded.detected_message(true), None, None, MessageType::Information);
+    msg_list.info(loaded.detected_message(true));
 
     // Pad to whole 32-bit words: the board loads words, and the .code
     // listing below shows the last part word as a whole one.
@@ -132,15 +122,12 @@ pub(crate) fn run_elf2serial(
     // but an image the board would reject is never written or sent.
     let Some(out) = image.to_kbt(msg_list) else {
         print_results(msg_list, start_time);
-        return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
+        return Err(Error::Assembly(msg_list.count(MessageType::Error)));
     };
 
-    msg_list.push(
-        format!("elf2serial: {binary_path} → {kbt_file_name} (entry 0x{entry_addr:08X}, heap_start 0x{heap_start:08X})"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!(
+        "elf2serial: {binary_path} → {kbt_file_name} (entry 0x{entry_addr:08X}, heap_start 0x{heap_start:08X})"
+    ));
 
     /* Skip the on-disk .kbt / .code when streaming to the board over serial:
      * the image is sent straight from memory (`out`), so writing these (large)
@@ -160,17 +147,12 @@ pub(crate) fn run_elf2serial(
         };
         let pass2 = disassemble_flat_to_pass2(&image.bytes, CODE_BASE, &opcodes);
         if let Err(e) = write_code_output_file(&code_file_name, &pass2, msg_list) {
-            msg_list.push(
-                format!("Failed to write disassembly file {code_file_name}: {e}"),
-                None,
-                None,
-                MessageType::Warning,
-            );
+            msg_list.warning(format!("Failed to write disassembly file {code_file_name}: {e}"));
         }
     }
 
     // A bad image (e.g. a checksum error) is never sent to the board.
-    let error_count = msg_list.number_by_type(MessageType::Error);
+    let error_count = msg_list.count(MessageType::Error);
     if error_count > 0 {
         print_results(msg_list, start_time);
         return outcome.and(Err(Error::Assembly(error_count)));
@@ -198,7 +180,7 @@ pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Di
     let wire = match fs::read_to_string(kbt_path) {
         Ok(contents) => contents,
         Err(e) => {
-            msg_list.push(format!("Cannot read kbt file {kbt_path}: {e}"), None, None, MessageType::Error);
+            msg_list.error(format!("Cannot read kbt file {kbt_path}: {e}"));
             print_results(msg_list, start_time);
             return Err(Error::Read {
                 path: PathBuf::from(kbt_path),
@@ -216,22 +198,12 @@ pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Di
     };
 
     if send.port.is_empty() {
-        msg_list.push(
-            "Nothing to do: a .kbt input needs a serial port (-s) to send or -m to monitor".to_owned(),
-            None,
-            None,
-            MessageType::Warning,
-        );
+        msg_list.warning("Nothing to do: a .kbt input needs a serial port (-s) to send or -m to monitor");
         print_results(msg_list, start_time);
         return Ok(());
     }
 
-    msg_list.push(
-        format!("Sending pre-built image {kbt_path} to board"),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!("Sending pre-built image {kbt_path} to board"));
 
     let outcome = send_image(wire_trimmed, send, msg_list, start_time);
     if send.monitor {

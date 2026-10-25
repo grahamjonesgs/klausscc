@@ -1,6 +1,6 @@
 use crate::asm::lexer::{return_comments, strip_comments};
 use crate::asm::line::SourceLine;
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
@@ -77,12 +77,10 @@ pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnost
                 };
                 let call: Vec<&str> = item.split_whitespace().collect();
                 if usize::try_from(embedded.variables).is_ok_and(|variables| variables < call.len() - 1) {
-                    msg_list.push(
-                        format!("Too many variables in embedded macro \"{}\" in macro {}", item, input_macro_line.name),
-                        None,
-                        None,
-                        MessageType::Warning,
-                    );
+                    msg_list.warning(format!(
+                        "Too many variables in embedded macro \"{}\" in macro {}",
+                        item, input_macro_line.name
+                    ));
                 }
                 for new_item in embedded.items {
                     if !new_item.contains('%') {
@@ -103,7 +101,7 @@ pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnost
                                 format!("Missing argument {index} for embedded macro \"{item}\" in {}", input_macro_line.name)
                             }
                         };
-                        msg_list.push(text, None, None, MessageType::Error);
+                        msg_list.error(text);
                     }
                     output_items.push(substituted);
                 }
@@ -122,7 +120,7 @@ pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnost
         input_macros.clone_from(&output_macros);
     }
     if changed {
-        msg_list.push(format!("Too many macro passes, check {last_macro}"), None, None, MessageType::Error);
+        msg_list.error(format!("Too many macro passes, check {last_macro}"));
     }
     input_macros
 }
@@ -146,12 +144,7 @@ pub(crate) fn expand_macros(msg_list: &mut Diagnostics, input_list: Vec<SourceLi
                     });
                 }
             } else {
-                msg_list.push(
-                    format!("Macro not found {call}"),
-                    Some(code_line.line_counter),
-                    Some(code_line.file_name.clone()),
-                    MessageType::Error,
-                );
+                msg_list.error_at(&code_line.file_name, code_line.line_counter, format!("Macro not found {call}"));
                 pass0.push(code_line);
             }
         } else {
@@ -189,11 +182,10 @@ pub(crate) fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut 
                 // External file of one macro definition per line.
                 let file_arg = stripped.split_whitespace().nth(1).unwrap_or("");
                 if file_arg.is_empty() {
-                    msg_list.push(
+                    msg_list.error_at(
+                        &line.file_name,
+                        line.line_counter,
                         format!("Missing file name for !macros in {}", line.file_name),
-                        Some(line.line_counter),
-                        Some(line.file_name.clone()),
-                        MessageType::Error,
                     );
                     continue;
                 }
@@ -206,11 +198,10 @@ pub(crate) fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut 
                             added |= add_macro_definition(definition, macro_list, file_line, &macros_path, msg_list);
                         }
                     }
-                    Err(err) => msg_list.push(
+                    Err(err) => msg_list.error_at(
+                        &line.file_name,
+                        line.line_counter,
                         format!("Unable to open macros file {macros_path} in {}: {err}", line.file_name),
-                        Some(line.line_counter),
-                        Some(line.file_name.clone()),
-                        MessageType::Error,
                     ),
                 }
             }
@@ -235,12 +226,7 @@ fn add_macro_definition(definition: &str, macro_list: &mut Vec<Macro>, line_numb
         return false;
     };
     if return_macro(&new_macro.name, macro_list).is_some() {
-        msg_list.push(
-            format!("Duplicate macro definition {} found", new_macro.name),
-            Some(line_number),
-            Some(filename.to_owned()),
-            MessageType::Error,
-        );
+        msg_list.error_at(filename, line_number, format!("Duplicate macro definition {} found", new_macro.name));
         return false;
     }
     macro_list.push(new_macro);
@@ -313,12 +299,7 @@ pub(crate) fn macro_from_string(input_line_full: &str, msg_list: &mut Diagnostic
             write!(missing, "%{i}").ok();
         }
 
-        msg_list.push(
-            format!("Error in macro variable definition for macro {name}, missing {missing:?}"),
-            None,
-            None,
-            MessageType::Warning,
-        );
+        msg_list.warning(format!("Error in macro variable definition for macro {name}, missing {missing:?}"));
     }
 
     Some(Macro {
@@ -379,12 +360,7 @@ pub(crate) fn return_macro_items_replace(
             found = true;
 
             if input_line_array.len() > (macro_line.variables + 1_u32).try_into().unwrap_or_default() {
-                msg_list.push(
-                    format!("Too many variables for macro {}", macro_line.name),
-                    Some(input_line_number),
-                    Some(filename.to_owned()),
-                    MessageType::Warning,
-                );
+                msg_list.warning_at(filename, input_line_number, format!("Too many variables for macro {}", macro_line.name));
             }
 
             for item in &macro_line.items {
@@ -394,7 +370,7 @@ pub(crate) fn return_macro_items_replace(
                         SubstError::BadIndex(number) => format!("Invalid macro argument number {number}, in macro {}", macro_line.name),
                         SubstError::Missing(index) => format!("Missing argument {index} for macro {}", macro_line.name),
                     };
-                    msg_list.push(text, Some(input_line_number), Some(filename.to_owned()), MessageType::Error);
+                    msg_list.error_at(filename, input_line_number, text);
                 }
                 return_items.push(substituted);
             }
@@ -410,6 +386,7 @@ pub(crate) fn return_macro_items_replace(
 mod tests {
 
     use super::*;
+    use crate::diag::MessageType;
 
     /// One source line of `test.kla`.
     fn source_line(input: &str, line_counter: u32) -> SourceLine {
@@ -449,14 +426,17 @@ mod tests {
         let input = vec![source_line("!macro $A %1", 1), source_line("!macro $B $A", 2)];
         let output = apply_source_macros(input, &mut macro_list, &mut msg_list);
         assert_eq!(output, vec![]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
-        assert_eq!(msg_list.list.first().unwrap().text, "Missing argument 1 for embedded macro \"$A\" in $B");
+        assert_eq!(msg_list.count(MessageType::Error), 1);
+        assert_eq!(
+            msg_list.messages().first().unwrap().text(),
+            "Missing argument 1 for embedded macro \"$A\" in $B"
+        );
         // The embedded call can still pass its own argument through.
         let mut msg_list = Diagnostics::new();
         let mut macro_list = Vec::new();
         let input = vec![source_line("!macro $A PUSH %1", 1), source_line("!macro $B $A %1", 2)];
         apply_source_macros(input, &mut macro_list, &mut msg_list);
-        assert_eq!(msg_list.list.len(), 0);
+        assert_eq!(msg_list.messages().len(), 0);
         assert_eq!(return_macro("$B", &macro_list).unwrap().items, vec!["PUSH %1".to_owned()]);
     }
 
@@ -472,7 +452,12 @@ mod tests {
             comment: String::default(),
         }];
         let pass0 = expand_macros(&mut msg_list, vec![source_line("$WAIT 5 // x", 3)], macros);
-        assert_eq!(msg_list.list.len(), 0, "{:?}", msg_list.list.first().map(|m| &m.text));
+        assert_eq!(
+            msg_list.messages().len(),
+            0,
+            "{:?}",
+            msg_list.messages().first().map(crate::diag::Message::text)
+        );
         assert_eq!(pass0.first().unwrap().input_text_line, "DELAYV 5 // Macro expansion from $WAIT");
 
         // A comment cannot supply a missing argument either.
@@ -483,7 +468,7 @@ mod tests {
             comment: String::default(),
         }];
         let pass0 = expand_macros(&mut msg_list, vec![source_line("$TWO A // B", 4)], macros);
-        assert_eq!(msg_list.list.first().unwrap().text, "Missing argument 2 for macro $TWO");
+        assert_eq!(msg_list.messages().first().unwrap().text(), "Missing argument 2 for macro $TWO");
         assert_eq!(pass0.first().unwrap().input_text_line, "COPY A // Macro expansion from $TWO");
     }
 
@@ -492,10 +477,10 @@ mod tests {
     fn test_macro_not_found_has_location() {
         let mut msg_list = Diagnostics::new();
         expand_macros(&mut msg_list, vec![source_line("$NOPE 1 // why", 7)], &mut []);
-        let msg = msg_list.list.first().unwrap();
-        assert_eq!(msg.level, MessageType::Error);
-        assert_eq!(msg.text, "Macro not found $NOPE 1");
-        assert_eq!((msg.line_number, msg.file_name.as_deref()), (Some(7), Some("test.kla")));
+        let msg = msg_list.messages().first().unwrap();
+        assert_eq!(msg.level(), MessageType::Error);
+        assert_eq!(msg.text(), "Macro not found $NOPE 1");
+        assert_eq!((msg.line_number(), msg.file_name()), (Some(7), Some("test.kla")));
     }
 
     #[test]
@@ -632,7 +617,7 @@ mod tests {
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C ARG_D ARG_E");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
-        assert_eq!(msg_list.list[0].text, "Too many variables for macro $DELAY1".to_owned());
+        assert_eq!(msg_list.messages()[0].text(), "Too many variables for macro $DELAY1".to_owned());
     }
 
     #[test]
@@ -648,7 +633,10 @@ mod tests {
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
-        assert_eq!(msg_list.list[0].text, "Invalid macro argument number xyz, in macro $DELAY1".to_owned());
+        assert_eq!(
+            msg_list.messages()[0].text(),
+            "Invalid macro argument number xyz, in macro $DELAY1".to_owned()
+        );
     }
 
     #[test]
@@ -664,7 +652,7 @@ mod tests {
         });
         let input = String::from("$DELAY1  ARG_A");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
-        assert_eq!(msg_list.list[0].text, "Missing argument 2 for macro $DELAY1".to_owned());
+        assert_eq!(msg_list.messages()[0].text(), "Missing argument 2 for macro $DELAY1".to_owned());
     }
 
     #[test]
@@ -717,7 +705,7 @@ mod tests {
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
 
-        assert_eq!(msg_list.list[0].text, "Too many macro passes, check $MACRO1");
+        assert_eq!(msg_list.messages()[0].text(), "Too many macro passes, check $MACRO1");
     }
 
     #[test]
@@ -741,7 +729,7 @@ mod tests {
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.messages()[0].text(),
             "Too many variables in embedded macro \"$MACRO1 %2 %1\" in macro $MACRO2"
         );
     }
@@ -767,7 +755,7 @@ mod tests {
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.messages()[0].text(),
             "Invalid macro argument number y, in embedded macro \"$MACRO1 %2 %1\" in $MACRO2"
         );
     }
@@ -792,7 +780,10 @@ mod tests {
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
-        assert_eq!(msg_list.list[0].text, "Missing argument 2 for embedded macro \"$MACRO1 %2\" in $MACRO2");
+        assert_eq!(
+            msg_list.messages()[0].text(),
+            "Missing argument 2 for embedded macro \"$MACRO1 %2\" in $MACRO2"
+        );
     }
 
     #[test]
@@ -910,8 +901,8 @@ mod tests {
         assert_eq!(strip_comments(&pass0[1].input_text_line.clone()), "RET B");
         assert_eq!(strip_comments(&pass0[2].input_text_line.clone()), "PUSH");
         assert_eq!(strip_comments(&pass0[3].input_text_line.clone()), "POP C");
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
-        assert_eq!(msg_list.list[0].text, "Missing argument 2 for macro $MACRO2");
+        assert_eq!(msg_list.count(MessageType::Error), 1);
+        assert_eq!(msg_list.messages()[0].text(), "Missing argument 2 for macro $MACRO2");
     }
 
     #[test]
@@ -950,8 +941,8 @@ mod tests {
         assert_eq!(strip_comments(&pass0[0].input_text_line.clone()), "MOV A");
         assert_eq!(strip_comments(&pass0[1].input_text_line.clone()), "RET B");
         assert_eq!(strip_comments(&pass0[2].input_text_line.clone()), "PUSH D");
-        assert_eq!(msg_list.number_by_type(MessageType::Warning), 1);
-        assert_eq!(msg_list.list[0].text, "Too many variables for macro $MACRO2");
+        assert_eq!(msg_list.count(MessageType::Warning), 1);
+        assert_eq!(msg_list.messages()[0].text(), "Too many variables for macro $MACRO2");
     }
 
     #[test]
@@ -987,7 +978,7 @@ mod tests {
         ];
 
         let _pass0 = expand_macros(&mut msg_list, input, macros);
-        assert_eq!(msg_list.list[0].text, "Macro not found $MACRO7 A B");
+        assert_eq!(msg_list.messages()[0].text(), "Macro not found $MACRO7 A B");
     }
 
     #[test]
@@ -1047,7 +1038,7 @@ mod tests {
         assert_eq!(macros.len(), 1);
         assert_eq!(macros.first().unwrap().name, "$INC3");
         assert_eq!(macros.first().unwrap().items, vec![String::from("ADDV %1 3")]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
     }
 
     #[test]
@@ -1068,8 +1059,8 @@ mod tests {
         let output = apply_source_macros(input, macros, &mut msg_list);
         assert_eq!(output, Vec::<SourceLine>::new()); // directive consumed
         assert_eq!(macros.len(), 1); // no duplicate added
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
-        assert_eq!(msg_list.list.first().unwrap().text, "Duplicate macro definition $FOO found");
+        assert_eq!(msg_list.count(MessageType::Error), 1);
+        assert_eq!(msg_list.messages().first().unwrap().text(), "Duplicate macro definition $FOO found");
     }
 
     #[test]
@@ -1092,7 +1083,7 @@ mod tests {
         let _output = apply_source_macros(input, macros, &mut msg_list);
         let wrap = macros.iter().find(|m| m.name == "$WRAP").unwrap();
         assert_eq!(wrap.items, vec![String::from("NOP"), String::from("NOP"), String::from("HALT")]);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
     }
 
     #[test]
@@ -1107,8 +1098,8 @@ mod tests {
         }];
         let output = apply_source_macros(input, macros, &mut msg_list);
         assert_eq!(output, Vec::<SourceLine>::new());
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
-        assert_eq!(msg_list.list.first().unwrap().text, "Missing file name for !macros in F");
+        assert_eq!(msg_list.count(MessageType::Error), 1);
+        assert_eq!(msg_list.messages().first().unwrap().text(), "Missing file name for !macros in F");
     }
 
     #[test]
@@ -1178,7 +1169,7 @@ mod tests {
             })
         );
         assert_eq!(
-            msglist.list[0].text,
+            msglist.messages()[0].text(),
             "Error in macro variable definition for macro $POPALL, missing \"%1\""
         );
     }
@@ -1209,7 +1200,7 @@ mod tests {
         let _macro_result = macro_from_string(&input_line, &mut msglist);
         //assert_eq!(macro_result, None);
         assert_eq!(
-            msglist.list[0].text,
+            msglist.messages()[0].text(),
             "Error in macro variable definition for macro $POPALL, missing \"%1 %2 %4\"",
         );
     }

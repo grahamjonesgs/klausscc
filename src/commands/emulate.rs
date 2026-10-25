@@ -32,7 +32,7 @@ fn open_trace_writer(trace_file: Option<&str>, msg_list: &mut Diagnostics) -> Re
         Some(path) => match std::fs::File::create(path) {
             Ok(f) => Ok(Some(Box::new(BufWriter::new(f)))),
             Err(e) => {
-                msg_list.push(format!("Failed to create trace file {path}: {e}"), None, None, MessageType::Error);
+                msg_list.error(format!("Failed to create trace file {path}: {e}"));
                 Err(Error::Write {
                     path: PathBuf::from(path),
                     source: e,
@@ -51,12 +51,7 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
     }
     if let Some(path) = trace_file {
         if path != "-" {
-            msg_list.push(
-                format!("Wrote {instructions} instruction trace lines to {path}"),
-                None,
-                None,
-                MessageType::Information,
-            );
+            msg_list.info(format!("Wrote {instructions} instruction trace lines to {path}"));
         }
     }
 }
@@ -115,25 +110,20 @@ pub(crate) fn run_emulate(
     start_time: Instant,
 ) -> Result<(), Error> {
     if msg_list.has_errors() {
-        msg_list.push("Not emulating due to assembly errors".to_owned(), None, None, MessageType::Error);
+        msg_list.error("Not emulating due to assembly errors");
         print_results(msg_list, start_time);
-        return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
+        return Err(Error::Assembly(msg_list.count(MessageType::Error)));
     }
     let Some(image) = assembly.image() else {
-        msg_list.push("No _start address found - cannot emulate".to_owned(), None, None, MessageType::Error);
+        msg_list.error("No _start address found - cannot emulate");
         print_results(msg_list, start_time);
         return Err(Error::Assembly(1));
     };
-    msg_list.push(
-        format!(
-            "Emulating {input_file_name}: {} code bytes, entry 0x{:08X}",
-            image.bytes.len(),
-            image.entry
-        ),
-        None,
-        None,
-        MessageType::Information,
-    );
+    msg_list.info(format!(
+        "Emulating {input_file_name}: {} code bytes, entry 0x{:08X}",
+        image.bytes.len(),
+        image.entry
+    ));
     emulate_and_report(&image, trace_file, max_instructions, msg_list, start_time)
 }
 
@@ -153,19 +143,14 @@ pub(crate) fn run_emulate_elf(
     let binary_path = input.path;
     let Loaded { image, elf } = load_flat(input, msg_list)?;
     if let Some(elf) = elf {
-        msg_list.push(
-            format!(
-                "Emulating ELF {binary_path}: {}, ELF base 0x{:08X}, board entry 0x{:08X}",
-                human_bytes(image.bytes.len()),
-                elf.base,
-                image.entry
-            ),
-            None,
-            None,
-            MessageType::Information,
-        );
+        msg_list.info(format!(
+            "Emulating ELF {binary_path}: {}, ELF base 0x{:08X}, board entry 0x{:08X}",
+            human_bytes(image.bytes.len()),
+            elf.base,
+            image.entry
+        ));
     } else {
-        msg_list.push(format!("Emulating flat binary {binary_path}"), None, None, MessageType::Information);
+        msg_list.info(format!("Emulating flat binary {binary_path}"));
     }
 
     emulate_and_report(&image, trace_file, max_instructions, msg_list, start_time)
@@ -208,12 +193,7 @@ pub(crate) fn run_emulate_test(
     }
 
     if files.is_empty() {
-        msg_list.push(
-            format!("No .kla files found for emulate-test at {test_path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error(format!("No .kla files found for emulate-test at {test_path}"));
         print_results(msg_list, start_time);
         return Err(Error::NoTests(PathBuf::from(test_path)));
     }
@@ -253,12 +233,7 @@ pub(crate) fn run_emulate_test(
         }
     }
     if total_files == 0 {
-        msg_list.push(
-            format!("No files with expected UART values found for emulate-test at {test_path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error(format!("No files with expected UART values found for emulate-test at {test_path}"));
         print_results(msg_list, start_time);
         return Err(Error::NoTests(PathBuf::from(test_path)));
     }

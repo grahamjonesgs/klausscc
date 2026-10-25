@@ -1,6 +1,6 @@
 use crate::asm::lexer::{data_name_from_string, label_name_from_string, strip_comments};
 use crate::asm::line::Pass1;
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::num::{fits_imm32, is_hex_literal, parse_bits64, parse_int, LiteralError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub(crate) struct Label {
 /// returns `None`.
 pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_number: u32, filename: &str, labels: &[Label]) -> Option<String> {
     let argument_trim = argument.trim();
-    let mut error = |text: String| msg_list.push(text, Some(line_number), Some(filename.to_owned()), MessageType::Error);
+    let mut error = |text: String| msg_list.error_at(filename, line_number, text);
 
     if label_name_from_string(argument_trim).is_some() || data_name_from_string(argument_trim).is_some() {
         if let Some(n) = return_label_value(argument_trim, labels) {
@@ -76,12 +76,7 @@ pub(crate) fn find_duplicate_label(labels: &[Label], msg_list: &mut Diagnostics)
     for label in labels {
         let opt_found_line = return_label_value(&label.name, labels);
         if opt_found_line.unwrap_or(0) != label.program_counter {
-            msg_list.push(
-                format!("Duplicate label {} found, with differing values", label.name),
-                None,
-                None,
-                MessageType::Error,
-            );
+            msg_list.error(format!("Duplicate label {} found, with differing values", label.name));
         }
     }
 }
@@ -110,11 +105,10 @@ pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut Diagnostics) -> Vec<Lab
             let first_word = words.next().unwrap_or("");
             let second_word = words.next();
             if second_word.is_some() {
-                msg_list.push(
+                msg_list.warning_at(
+                    &line.file_name,
+                    line.line_counter,
                     format!("Label {first_word} has extra text {}", second_word.unwrap_or_default()),
-                    Some(line.line_counter),
-                    Some(line.file_name.clone()),
-                    MessageType::Warning,
                 );
             }
         }
@@ -128,20 +122,14 @@ pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut Diagnostics) -> Vec<Lab
             let second_word = words.next();
             let third_word = words.next();
             if third_word.is_some() && !second_word.unwrap_or_default().starts_with('\"') {
-                msg_list.push(
+                msg_list.warning_at(
+                    &line.file_name,
+                    line.line_counter,
                     format!("Data {first_word} has extra text {}", third_word.unwrap_or_default()),
-                    Some(line.line_counter),
-                    Some(line.file_name.clone()),
-                    MessageType::Warning,
                 );
             }
             if remaining_line.starts_with('\"') && !remaining_line.ends_with('\"') {
-                msg_list.push(
-                    format!("Data {first_word} has no string termination"),
-                    Some(line.line_counter),
-                    Some(line.file_name.clone()),
-                    MessageType::Warning,
-                );
+                msg_list.warning_at(&line.file_name, line.line_counter, format!("Data {first_word} has no string termination"));
             }
         }
     }
@@ -166,6 +154,7 @@ pub(crate) fn return_label_value(line: &str, labels: &[Label]) -> Option<u32> {
 mod tests {
     use super::*;
     use crate::asm::line::LineType;
+    use crate::diag::MessageType;
 
     #[test]
     // Check that labels are correctly extracted from strings test for data
@@ -219,10 +208,10 @@ mod tests {
         ];
         let mut msg_list = Diagnostics::new();
         find_duplicate_label(&labels, &mut msg_list);
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
-        assert_eq!(msg_list.number_by_type(MessageType::Warning), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 1);
+        assert_eq!(msg_list.count(MessageType::Warning), 0);
 
-        assert_eq!(msg_list.list[0].text, "Duplicate label label1 found, with differing values");
+        assert_eq!(msg_list.messages()[0].text(), "Duplicate label label1 found, with differing values");
     }
 
     #[test]
@@ -293,30 +282,33 @@ mod tests {
 
         // Check for unknown label text
         assert_eq!(convert_argument("unknown", &mut msg_list, 0, "test", &labels), None);
-        assert_eq!(msg_list.list.last().unwrap().text, "Decimal value unknown incorrect".to_owned());
+        assert_eq!(msg_list.messages().last().unwrap().text(), "Decimal value unknown incorrect".to_owned());
 
         // Check for hex value out of bounds
         assert_eq!(convert_argument("0x123456789", &mut msg_list, 4, "test", &labels), None);
         assert_eq!(
-            msg_list.list.last().unwrap().text,
+            msg_list.messages().last().unwrap().text(),
             "Hex value 0x0000000123456789 out of bounds".to_owned()
         );
 
         // Check for label not defined
         assert_eq!(convert_argument("label3:", &mut msg_list, 14, "test", &labels), None);
-        assert_eq!(msg_list.list.last().unwrap().text, "Label label3: not found".to_owned());
+        assert_eq!(msg_list.messages().last().unwrap().text(), "Label label3: not found".to_owned());
 
         // Check for invalid decimal value
         assert_eq!(convert_argument("4294967296", &mut msg_list, 14, "test", &labels), None);
-        assert_eq!(msg_list.list.last().unwrap().text, "Decimal value 4294967296 out of bounds".to_owned());
+        assert_eq!(
+            msg_list.messages().last().unwrap().text(),
+            "Decimal value 4294967296 out of bounds".to_owned()
+        );
 
         // Check for data not defined
         assert_eq!(convert_argument("#data2", &mut msg_list, 15, "test", &labels), None);
-        assert_eq!(msg_list.list.last().unwrap().text, "Label #data2 not found".to_owned());
+        assert_eq!(msg_list.messages().last().unwrap().text(), "Label #data2 not found".to_owned());
 
         // Check for invalid hex value
         assert_eq!(convert_argument("0xGGG", &mut msg_list, 14, "test", &labels), None);
-        assert_eq!(msg_list.list.last().unwrap().text, "Hex value 0xGGG incorrect".to_owned());
+        assert_eq!(msg_list.messages().last().unwrap().text(), "Hex value 0xGGG incorrect".to_owned());
     }
 
     #[test]
@@ -339,14 +331,14 @@ mod tests {
         ] {
             let mut msg_list = Diagnostics::new();
             assert_eq!(convert_argument(bad, &mut msg_list, 9, "prog.kla", &labels), None, "{bad}");
-            assert_eq!(msg_list.number_by_type(MessageType::Error), 1, "{bad}");
-            assert_eq!(msg_list.number_by_type(MessageType::Warning), 0, "{bad}");
-            let msg = msg_list.list.first().unwrap();
-            assert_eq!((msg.line_number, msg.file_name.as_deref()), (Some(9), Some("prog.kla")), "{bad}");
+            assert_eq!(msg_list.count(MessageType::Error), 1, "{bad}");
+            assert_eq!(msg_list.count(MessageType::Warning), 0, "{bad}");
+            let msg = msg_list.messages().first().unwrap();
+            assert_eq!((msg.line_number(), msg.file_name()), (Some(9), Some("prog.kla")), "{bad}");
             assert!(
-                !msg.text.contains("- line"),
+                !msg.text().contains("- line"),
                 "location is attached, not repeated in the text: {}",
-                msg.text
+                msg.text()
             );
         }
     }
@@ -364,7 +356,7 @@ mod tests {
         assert_eq!(convert("0xFFFFFFFFFFFFFFFF"), Some("FFFFFFFF".to_owned()));
         assert_eq!(convert("-2147483648"), Some("80000000".to_owned()));
         assert_eq!(convert("-2147483649"), None);
-        assert_eq!(msg_list.list.last().unwrap().text, "Decimal value -2147483649 out of bounds");
+        assert_eq!(msg_list.messages().last().unwrap().text(), "Decimal value -2147483649 out of bounds");
     }
 
     #[test]
@@ -472,8 +464,8 @@ mod tests {
                 name: "#data321".to_owned(),
             }
         );
-        assert_eq!(msglist.list[0].text, "Label label1: has extra text dummy");
-        assert_eq!(msglist.list[1].text, "Data #data123 has extra text dummy2");
-        assert_eq!(msglist.list[2].text, "Data #data3 has no string termination");
+        assert_eq!(msglist.messages()[0].text(), "Label label1: has extra text dummy");
+        assert_eq!(msglist.messages()[1].text(), "Data #data123 has extra text dummy2");
+        assert_eq!(msglist.messages()[2].text(), "Data #data3 has no string termination");
     }
 }

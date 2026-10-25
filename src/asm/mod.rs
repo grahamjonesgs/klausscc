@@ -19,7 +19,7 @@ pub(crate) mod line;
 mod pass1;
 mod pass2;
 
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::files::{read_file_to_vector, remove_block_comments};
 use crate::image::{create_bin_string, Image};
 use crate::labels::{find_duplicate_label, get_labels};
@@ -55,7 +55,7 @@ impl Assembly {
 /// which is reported.  Otherwise the assembly is returned even when it has
 /// errors; see the [module documentation](self).
 pub(crate) fn assemble(input_file_name: &str, oplist: &[Opcode], macro_list: &[Macro], msg_list: &mut Diagnostics) -> Option<Assembly> {
-    msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
+    msg_list.info(format!("Input file is {input_file_name}"));
     let input_list = read_file_to_vector(input_file_name, msg_list)?;
     Some(assemble_lines(input_list, oplist, macro_list, msg_list))
 }
@@ -85,6 +85,7 @@ pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, oplist: &[Opcode], mac
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diag::MessageType;
     use crate::macros::expand_embedded_macros;
     use crate::opcodes::v2_opcodes_and_macros;
 
@@ -109,10 +110,10 @@ mod tests {
     /// The `(line, text)` of every message of `level`.
     fn messages_of(msg_list: &Diagnostics, level: MessageType) -> Vec<(Option<u32>, String)> {
         msg_list
-            .list
+            .messages()
             .iter()
-            .filter(|m| m.level == level)
-            .map(|m| (m.line_number, m.text.clone()))
+            .filter(|m| m.level() == level)
+            .map(|m| (m.line_number(), m.text().to_owned()))
             .collect()
     }
 
@@ -122,7 +123,7 @@ mod tests {
     // the last word of the string.
     fn test_data_after_string_stays_8_byte_aligned() {
         let (pass2, msg_list) = assemble_text("_start\nHALT\n.data\n#S \"Hello\"\n#T \"ABCDEFGHIJKL\"\n#V 1\n.text\n");
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
         for name in ["#S", "#T", "#V"] {
             let line = pass2.iter().find(|p| p.input_text_line.starts_with(name)).unwrap();
             assert!(line.program_counter.is_multiple_of(8), "{name} at 0x{:X}", line.program_counter);
@@ -142,7 +143,7 @@ mod tests {
             )]
         );
         let (pass2, mut msg_list) = assemble_text("_start\nHALT\n.zeropad 4\n");
-        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
+        assert_eq!(msg_list.count(MessageType::Error), 0);
         assert!(create_bin_string(&pass2, &mut msg_list).is_some());
     }
 
@@ -220,7 +221,7 @@ mod tests {
         let assembly = assemble(&file.to_string_lossy(), &oplist, &macros, &mut msg_list).unwrap();
         assert!(msg_list.has_errors());
         assert_eq!(assembly.lines.len(), 3);
-        assert_eq!(msg_list.list[0].text, format!("Input file is {}", file.to_string_lossy()));
+        assert_eq!(msg_list.messages()[0].text(), format!("Input file is {}", file.to_string_lossy()));
     }
 
     #[test]

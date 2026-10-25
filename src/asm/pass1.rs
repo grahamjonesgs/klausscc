@@ -6,7 +6,7 @@
 
 use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, SourceLine};
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::helper::{is_valid_line, line_type, num_data_bytes};
 use crate::layout::CODE_BASE;
 use crate::num::{fits_imm32, parse_bits64, parse_int, parse_operand};
@@ -80,11 +80,10 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
                 let size = match parse_int(size_str) {
                     Ok(size) if size >= 0 => size,
                     _ => {
-                        msg_list.push(
+                        msg_list.error_at(
+                            &pass.file_name,
+                            pass.line_counter,
                             format!("Invalid size {size_str} for {first_word} {name}"),
-                            Some(pass.line_counter),
-                            Some(pass.file_name.clone()),
-                            MessageType::Error,
                         );
                         0
                     }
@@ -123,12 +122,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
             line_type: lt,
         });
         if !is_valid_line(oplist, &strip_comments(&upgraded_line)) {
-            msg_list.push(
-                format!("Error {upgraded_line}"),
-                Some(pass.line_counter),
-                Some(pass.file_name.clone()),
-                MessageType::Error,
-            );
+            msg_list.error_at(&pass.file_name, pass.line_counter, format!("Error {upgraded_line}"));
         }
         if lt == LineType::Opcode {
             let num_args = num_arguments(oplist, &strip_comments(&upgraded_line));
@@ -314,6 +308,6 @@ mod tests {
             line_counter: 1,
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes);
-        assert_eq!(msg_list.list[0].text, "Error Test_not_code_line");
+        assert_eq!(msg_list.messages()[0].text(), "Error Test_not_code_line");
     }
 }

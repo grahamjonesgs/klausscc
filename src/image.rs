@@ -9,7 +9,7 @@
 //! boot, the boot ROM ([`readmemh`]) and the emulator.
 
 use crate::asm::line::{LineType, Pass2};
-use crate::diag::{Diagnostics, MessageType};
+use crate::diag::Diagnostics;
 use crate::layout::{heap_start, CODE_BASE, HEAP_HEADER_WORDS};
 use std::fmt::Write as _;
 
@@ -174,15 +174,10 @@ fn calc_checksum(input_string: &str, msg_list: &mut Diagnostics) -> Option<Strin
     let stripped: String = input_string.chars().filter(|&c| c != 'S').collect();
 
     if !stripped.len().is_multiple_of(8) {
-        msg_list.push(
-            format!(
-                "Program image is not a whole number of 32-bit words, length is {} hex characters",
-                stripped.len()
-            ),
-            None,
-            None,
-            MessageType::Error,
-        );
+        msg_list.error(format!(
+            "Program image is not a whole number of 32-bit words, length is {} hex characters",
+            stripped.len()
+        ));
         return None;
     }
 
@@ -217,11 +212,11 @@ pub(crate) fn create_bin_string(pass2: &[Pass2], msg_list: &mut Diagnostics) -> 
     let entry = match (starts.next(), starts.next()) {
         (Some(start), None) => start.program_counter,
         (None, _) => {
-            msg_list.push("No start address found".to_owned(), None, None, MessageType::Error);
+            msg_list.error("No start address found");
             return None;
         }
         (Some(_), Some(_)) => {
-            msg_list.push("Multiple start addresses found".to_owned(), None, None, MessageType::Error);
+            msg_list.error("Multiple start addresses found");
             return None;
         }
     };
@@ -323,7 +318,7 @@ mod tests {
         // sum: 0x28 + (0x6C01 + 0x0000) + 0x20 = 0x6C49; count = 2 × 10 words = 20.
         let checksum = encode_word_kbt(0x6C49 + 20);
         assert_eq!(kbt, format!("S{header}{body}{entry}Z{checksum}X"));
-        assert!(msg_list.list.is_empty());
+        assert!(msg_list.messages().is_empty());
     }
 
     #[test]
@@ -337,7 +332,7 @@ mod tests {
         let mut msg_list = Diagnostics::new();
         let image = Image::from_lines(&lines).unwrap();
         assert_eq!(image.to_kbt(&mut msg_list), create_bin_string(&lines, &mut msg_list));
-        assert!(msg_list.list.is_empty());
+        assert!(msg_list.messages().is_empty());
     }
 
     #[test]
@@ -345,7 +340,7 @@ mod tests {
         let mut msg_list = Diagnostics::new();
         assert_eq!(Image::new(vec![1, 2, 3], 0x20).to_kbt(&mut msg_list), None);
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.messages()[0].text(),
             "Program image is not a whole number of 32-bit words, length is 78 hex characters"
         );
 
@@ -455,7 +450,7 @@ mod tests {
         let mut msg_list = Diagnostics::new();
         assert_eq!(create_bin_string(&pass2, &mut msg_list), None);
         assert_eq!(
-            msg_list.list[0].text,
+            msg_list.messages()[0].text(),
             "Program image is not a whole number of 32-bit words, length is 78 hex characters"
         );
         assert_eq!(calc_checksum("S0000", &mut Diagnostics::new()), None);
@@ -493,7 +488,7 @@ mod tests {
         let mut msg_list = Diagnostics::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list[0].text, "Multiple start addresses found");
+        assert_eq!(msg_list.messages()[0].text(), "Multiple start addresses found");
     }
 
     #[test]
@@ -528,6 +523,6 @@ mod tests {
         let mut msg_list = Diagnostics::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
-        assert_eq!(msg_list.list[0].text, "No start address found");
+        assert_eq!(msg_list.messages()[0].text(), "No start address found");
     }
 }
