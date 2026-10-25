@@ -220,11 +220,13 @@ pub fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
 
 /// Disassemble a flat byte slice into a `Vec<Pass2>` for use with `write_code_output_file`.
 ///
-/// Each 4-byte chunk is read as a big-endian 32-bit word (matching the `KlaussCPU` LLVM ELF
+/// Each 4-byte chunk is read as a little-endian 32-bit word (matching the `KlaussCPU` LLVM ELF
 /// byte order) and matched against `opcodes`.  When a match is found, register operands are
 /// extracted and any argument words that follow (determined by `opcode.variables`) are consumed
 /// and appended to the same entry's `opcode` hex string so `write_code_output_file` formats them
-/// correctly.  Unrecognised words produce a `???` fallback line.
+/// correctly.  Unrecognised words produce a `???` fallback line.  When the binary ends before
+/// all of an instruction's argument words, the words that are there are shown once, on that
+/// instruction's line, marked `(truncated)`.
 ///
 /// `base_addr` is the board byte address of the first byte in `binary` (normally
 /// `HEAP_HEADER_WORDS * 8 = 0x20`).
@@ -245,33 +247,27 @@ pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcod
         // vars == 1 → one 32-bit immediate at PC+4.
         // vars == 2 → two 32-bit words at PC+4 (lo32) and PC+8 (hi32), forming a 64-bit value.
         let arg_word_count = vars.min(2) as usize;
-        let mut arg_ok = true;
-        for arg_idx in 0..arg_word_count {
-            let off = i + 4 + arg_idx * 4;
-            if off + 4 <= binary.len() {
-                let av = u32::from_le_bytes([binary[off], binary[off + 1], binary[off + 2], binary[off + 3]]);
-                let _ = write!(opcode_hex, "{av:08X}");
-                if arg_idx == 0 && arg_word_count == 1 {
-                    let _ = write!(display_text, " 0x{av:X}");
-                } else if arg_idx == 0 {
-                    // 64-bit: lo32 stored first — stash it, combine after reading hi32
-                    let _ = write!(display_text, " 0x{av:08X}");
-                } else {
-                    // arg_idx == 1: hi32 — replace the lo32 placeholder with combined value
-                    // The display_text already ends with " 0x{lo32:08X}"; replace with 64-bit
-                    let lo_str_len = " 0x".len() + 8; // " 0x" + 8 hex chars
-                    let lo = u64::from_str_radix(display_text.get(display_text.len() - 8..).unwrap_or("0"), 16).unwrap_or(0);
-                    display_text.truncate(display_text.len() - lo_str_len);
-                    let val64 = (u64::from(av) << 32) | lo;
-                    let _ = write!(display_text, " 0x{val64:X}");
-                }
-            } else {
-                arg_ok = false;
-                break;
-            }
+        let args: Vec<u32> = (0..arg_word_count)
+            .map_while(|n| {
+                let off = i + 4 + n * 4;
+                binary.get(off..off + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)
+            })
+            .collect();
+        for av in &args {
+            let _ = write!(opcode_hex, "{av:08X}");
+        }
+        match *args.as_slice() {
+            [av] if arg_word_count == 1 => _ = write!(display_text, " 0x{av:X}"),
+            [lo, hi] => _ = write!(display_text, " 0x{:X}", (u64::from(hi) << 32) | u64::from(lo)),
+            [lo] => _ = write!(display_text, " 0x{lo:08X}"),
+            _ => {}
+        }
+        if args.len() < arg_word_count {
+            display_text.push_str(" (truncated)");
         }
 
-        let words_consumed = if arg_ok { 1 + arg_word_count } else { 1 };
+        // Consume exactly the words shown, so none is shown twice.
+        let words_consumed = 1 + args.len();
 
         result.push(Pass2 {
             file_name: String::new(),
@@ -707,6 +703,45 @@ mod tests {
             "Program image is not a whole number of 32-bit words, length is 78 hex characters"
         );
         assert_eq!(calc_checksum("S0000", &mut MsgList::new()), None);
+    }
+
+    /// Little-endian bytes of `words`, as an ELF or flat binary holds them.
+    fn le_bytes(words: &[u32]) -> Vec<u8> {
+        words.iter().flat_map(|w| w.to_le_bytes()).collect()
+    }
+
+    #[test]
+    // Words are read little-endian; a 64-bit argument is shown as one value
+    fn test_disassemble_flat_to_pass2_le_and_64bit() {
+        let opcodes = crate::opcodes::v2_opcodes();
+        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000, 5, 0xCBC0_0000, 0x5566_7788, 0x1122_3344]), 0x20, &opcodes);
+        assert_eq!(pass2.len(), 2);
+        assert_eq!(pass2[0].program_counter, 0x20);
+        assert_eq!(pass2[0].opcode, "8BD0000000000005");
+        assert!(pass2[0].input_text_line.starts_with("SETR "), "{}", pass2[0].input_text_line);
+        assert!(pass2[0].input_text_line.ends_with(" 0x5"), "{}", pass2[0].input_text_line);
+        assert_eq!(pass2[1].program_counter, 0x28);
+        assert_eq!(pass2[1].opcode, "CBC000005566778811223344");
+        assert!(pass2[1].input_text_line.ends_with(" 0x1122334455667788"), "{}", pass2[1].input_text_line);
+    }
+
+    #[test]
+    // Regression: a 64-bit argument cut off by the end of the binary showed its
+    // lo32 word on the instruction's line and then again as the next line.
+    fn test_disassemble_flat_to_pass2_truncated_argument() {
+        let opcodes = crate::opcodes::v2_opcodes();
+        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0xCBC0_0000, 0x5566_7788]), 0x20, &opcodes);
+        assert_eq!(pass2.len(), 1);
+        assert_eq!(pass2[0].opcode, "CBC0000055667788");
+        assert!(
+            pass2[0].input_text_line.ends_with(" 0x55667788 (truncated)"),
+            "{}",
+            pass2[0].input_text_line
+        );
+
+        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000]), 0x20, &opcodes);
+        assert_eq!(pass2.len(), 1);
+        assert!(pass2[0].input_text_line.ends_with(" (truncated)"), "{}", pass2[0].input_text_line);
     }
 
     #[test]
