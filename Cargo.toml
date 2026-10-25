@@ -2,13 +2,16 @@
 name = "klausscc"
 version = "0.1.2"
 edition = "2021"
+# as_chunks (gdbserver.rs) needs 1.88; is_multiple_of needs 1.87.
+rust-version = "1.88"
 authors = ["Graham Jones"]
 description = "Assembler for Klauss micro controller defined in FPGA"
 repository = "https://github.com/grahamjonesgs/klausscc.git"
-readme = "README.md"
 license = "MIT"
 keywords = ["assembler"]
 categories = ["development-tools"]
+# Ship sources, docs and the lockfile only; editor/CI config and top-level files stay out.
+include = ["src/**", "doc/**", "Cargo.toml", "Cargo.lock", "LICENSE*", "rustfmt.toml", "clippy.toml"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -18,13 +21,14 @@ chrono = { version = "0.4" }
 colored = { version = "3.1.1"}
 itertools = { version = "0.15.0"}
 serialport = { version = "4.10", default-features = false}
-tempfile = "3.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = {version = "1.0"}
-ctrlc = { version = "3.5.2" }
 crossterm = { version = "0.29" }
 object = { version = "0.40.0", default-features = false, features = ["read"] }
 gdbstub = "0.7"
+
+[dev-dependencies]
+tempfile = "3.2"
 
 [features]
 # `--gdbserver PORT --board`: debug the real board over its USB-JTAG.
