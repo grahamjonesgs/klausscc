@@ -684,7 +684,6 @@ pub fn serve(cpu: Cpu, port: u16) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, reason = "tests may unwrap")]
     use super::*;
 
     #[test]

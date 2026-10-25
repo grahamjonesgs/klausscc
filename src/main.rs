@@ -818,9 +818,7 @@ pub(crate) fn assemble_to_image(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
-    use crate::helper::parse_expected_uart_values;
 
     #[test]
     // Test get_pass1 for correct vector returned, with correct program counters

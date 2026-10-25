@@ -145,7 +145,6 @@ pub fn print_messages(msg_list: &MsgList) {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
 
     #[test]

@@ -558,7 +558,6 @@ pub fn run_test_monitor(mut port: Box<dyn SerialPort>, expected_values: &[String
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
 
     #[test]

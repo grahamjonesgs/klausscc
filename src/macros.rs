@@ -62,7 +62,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
                     if let Ok(variables_usize) = usize::try_from(return_macro(&item, &mut input_macros).unwrap().variables) {
                         if variables_usize < item_line_array.len() - 1 {
                             msg_list.push(
-                                format!("Too many variables in embedded macro \"{}\" in macro {}", item, input_macro_line.name,),
+                                format!("Too many variables in embedded macro \"{}\" in macro {}", item, input_macro_line.name),
                                 None,
                                 None,
                                 MessageType::Warning,
@@ -356,7 +356,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
         }
 
         msg_list.push(
-            format!("Error in macro variable definition for macro {name}, missing {missing:?}",),
+            format!("Error in macro variable definition for macro {name}, missing {missing:?}"),
             None,
             None,
             MessageType::Warning,
@@ -471,7 +471,6 @@ pub fn return_macro_items_replace(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
 
     use super::*;
 
@@ -1055,7 +1054,7 @@ mod tests {
             line_counter: 1,
         }];
         let output = apply_source_macros(input, macros, &mut msg_list);
-        assert!(output.is_empty()); // directive consumed
+        assert_eq!(output, Vec::<InputData>::new()); // directive consumed
         assert_eq!(macros.len(), 1); // no duplicate added
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
         assert_eq!(msg_list.list.first().unwrap().text, "Duplicate macro definition $FOO found");
@@ -1095,7 +1094,7 @@ mod tests {
             line_counter: 1,
         }];
         let output = apply_source_macros(input, macros, &mut msg_list);
-        assert!(output.is_empty());
+        assert_eq!(output, Vec::<InputData>::new());
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
         assert_eq!(msg_list.list.first().unwrap().text, "Missing file name for !macros in F");
     }

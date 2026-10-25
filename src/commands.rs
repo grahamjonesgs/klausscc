@@ -1246,7 +1246,6 @@ pub fn run_test_list(
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
 
     /// Read a git-tracked ELF fixture from the klatest corpus (path is absolute

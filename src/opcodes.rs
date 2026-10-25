@@ -695,7 +695,8 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
         // Build 8-char hex code by removing the underscore separator at offset 4
         let raw = input_line.get(pos..pos + 9)?;
         format!("{}{}", raw.get(..4)?, raw.get(5..9)?)
-    } else if let Some(location) = input_line.find("16'h") {
+    } else {
+        let location = input_line.find("16'h")?;
         // Legacy format: check if commented out
         if let Some(comment_loc) = input_line.find("//") {
             if comment_loc < location {
@@ -708,8 +709,6 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
             return None;
         }
         format!("0000{}", input_line.get(pos..pos + 4)?)
-    } else {
-        return None;
     };
 
     // Define number of registers from trailing '?' nibbles in the 8-char hex code.
@@ -738,10 +737,7 @@ pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
 
     // Look for comment as first word is opcode name
     let pos_name: usize = match input_line.find("// ") {
-        None => match input_line.find("//") {
-            None => return None,
-            Some(location) => location + 2,
-        },
+        None => input_line.find("//")? + 2,
         Some(location) => location + 3, // Assumes one space after the // before the name of the opcode
     };
 
@@ -1191,7 +1187,6 @@ pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
     use crate::labels;
 
@@ -1686,8 +1681,8 @@ mod tests {
 
         let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
 
-        assert!(opt_oplist.unwrap_or_default().is_empty());
-        assert!(opt_macro_list.unwrap_or_default().is_empty());
+        assert_eq!(opt_oplist.unwrap_or_default(), Vec::<Opcode>::new());
+        assert_eq!(opt_macro_list.unwrap_or_default(), Vec::<Macro>::new());
     }
 
     #[test]

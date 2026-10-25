@@ -1667,7 +1667,6 @@ pub const fn default_entry() -> u32 {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
     use crate::helper::build_ddr_image;
 
@@ -2228,12 +2227,12 @@ mod tests {
         let cpu = run_words(&[0x4BD0_3000, 0x57C8_0000, bne, HALT]);
         assert_eq!(cpu.regs[0], 0);
         // Signed LT on registers (not taken): A=-1, B=-2: BR.LT A, B, +2 falls through.
-        let blt = 0x7400_0000 | (1 << 23) | (2 << 8) | 0x01;
-        let cpu = run_words(&[0x4BDF_F000, 0x4BDF_E100, blt, 0x4BD0_7200, HALT]);
+        let signed_lt = 0x7400_0000 | (1 << 23) | (2 << 8) | 0x01;
+        let cpu = run_words(&[0x4BDF_F000, 0x4BDF_E100, signed_lt, 0x4BD0_7200, HALT]);
         assert_eq!(cpu.regs[2], 7, "not taken -> fall through executes SETR C,7");
         // ULT on registers (taken): A=1 <u B=-2 -> skip SETR.
-        let bult = 0x7400_0000 | (3 << 23) | (2 << 8) | 0x01;
-        let cpu = run_words(&[0x4BD0_1000, 0x4BDF_E100, bult, 0x4BD0_7200, HALT]);
+        let unsigned_lt = 0x7400_0000 | (3 << 23) | (2 << 8) | 0x01;
+        let cpu = run_words(&[0x4BD0_1000, 0x4BDF_E100, unsigned_lt, 0x4BD0_7200, HALT]);
         assert_eq!(cpu.regs[2], 0, "taken -> SETR C,7 skipped");
         assert!(!cpu.zero && !cpu.carry, "fused branch leaves the flags alone");
     }

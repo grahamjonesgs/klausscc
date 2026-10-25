@@ -15,7 +15,7 @@ pub const HEAP_HEADER_WORDS: u32 = 4;
 /// e.g. instruction 0x400F0000 → "00000F40", entry 0x20 → "20000000".
 #[must_use]
 pub fn encode_word_kbt(w: u32) -> String {
-    format!("{:02X}{:02X}{:02X}{:02X}", w & 0xFF, (w >> 8) & 0xFF, (w >> 16) & 0xFF, (w >> 24) & 0xFF,)
+    format!("{:02X}{:02X}{:02X}{:02X}", w & 0xFF, (w >> 8) & 0xFF, (w >> 16) & 0xFF, (w >> 24) & 0xFF)
 }
 
 /// Format a byte count as a human-readable size (B / KiB / MiB / GiB), e.g.
@@ -233,7 +233,7 @@ pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcod
         let word = u32::from_le_bytes([binary[i], binary[i + 1], binary[i + 2], binary[i + 3]]);
         let pc = base_addr.saturating_add(i as u32);
 
-        let (base_text, vars) = disassemble_word(word, opcodes).map_or_else(|| (format!("??? (0x{word:08X})"), 0_u32), |(t, v)| (t, v));
+        let (base_text, vars) = disassemble_word(word, opcodes).unwrap_or_else(|| (format!("??? (0x{word:08X})"), 0_u32));
 
         let mut opcode_hex = format!("{word:08X}");
         let mut display_text = base_text;
@@ -588,7 +588,6 @@ pub fn trim_newline(input: &mut String) {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
     use crate::labels::{return_label_value, Label};
 
@@ -1044,7 +1043,7 @@ mod tests {
     fn test_parse_expected_uart_values2() {
         let lines = vec!["// This is a comment".to_owned(), "// No hex values here".to_owned(), "_start".to_owned()];
         let result = parse_expected_uart_values(&lines);
-        assert!(result.is_empty());
+        assert_eq!(result, Vec::<String>::new());
     }
 
     #[test]
@@ -1066,7 +1065,7 @@ mod tests {
     fn test_parse_expected_uart_values4() {
         let lines: Vec<String> = Vec::new();
         let result = parse_expected_uart_values(&lines);
-        assert!(result.is_empty());
+        assert_eq!(result, Vec::<String>::new());
     }
 
     #[test]

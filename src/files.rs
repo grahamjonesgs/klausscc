@@ -115,7 +115,7 @@ pub fn output_macros_opcodes_html(
 
     if opcodes_flag {
         msg_list.push(
-            format!("Outputting macros and opcodes to {html_filename}",),
+            format!("Outputting macros and opcodes to {html_filename}"),
             None,
             None,
             MessageType::Information,
@@ -509,7 +509,7 @@ pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &mut Vec
                     format!(
                         "0x{:08X}: {:<32}  -- {}\n",
                         pass.program_counter + n as u32 * 8,
-                        &mut pass.opcode.get(n * 16..n * 16 + 16).unwrap_or("                "),
+                        pass.opcode.get(n * 16..n * 16 + 16).unwrap_or("                "),
                         pass.input_text_line
                     )
                     .as_str(),
@@ -533,7 +533,6 @@ pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &mut Vec
 
 #[cfg(test)]
 mod test {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use std::fs;
     use std::path::MAIN_SEPARATOR_STR;
 

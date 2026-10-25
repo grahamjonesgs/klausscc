@@ -226,7 +226,6 @@ pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unwrap_used, clippy::expect_used, reason = "tests may unwrap/expect")]
     use super::*;
     use crate::files::LineType;
 
