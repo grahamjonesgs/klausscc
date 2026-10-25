@@ -82,3 +82,25 @@ fn failing_emulator_test_exits_2() {
     let out = klausscc(dir.path(), &["--emulate-test", "silent.kla"]);
     assert_eq!(out.status.code(), Some(2), "stdout: {}", String::from_utf8_lossy(&out.stdout));
 }
+
+#[test]
+fn emulator_test_list_with_unreadable_file_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("list.txt"), "missing.kla\n").unwrap();
+
+    let out = klausscc(dir.path(), &["--emulate-test", "list.txt"]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert_eq!(out.status.code(), Some(2), "stdout: {stdout}");
+    assert!(stdout.contains("FAIL missing.kla: cannot read"), "stdout: {stdout}");
+    assert!(stdout.contains("0/1 files passed"), "stdout: {stdout}");
+}
+
+#[test]
+fn emulator_test_with_nothing_to_validate_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    // Assembles and runs, but has no expected UART values to check.
+    std::fs::write(dir.path().join("plain.kla"), GOOD_PROGRAM).unwrap();
+
+    let out = klausscc(dir.path(), &["--emulate-test", "plain.kla"]);
+    assert_eq!(out.status.code(), Some(1), "stdout: {}", String::from_utf8_lossy(&out.stdout));
+}

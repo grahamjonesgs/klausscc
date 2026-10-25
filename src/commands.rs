@@ -28,10 +28,18 @@ struct BatchTestResult {
     timed_out: bool,
     /// Total number of expected values.
     total: usize,
-    /// True if the test could not be assembled or had no expected values.
-    skipped: bool,
-    /// Reason for skipping, if applicable.
-    skip_reason: String,
+    /// Whether the test ran, and if not, why.
+    outcome: Outcome,
+}
+
+/// Whether a test in a batch ran.
+enum Outcome {
+    /// The program ran on the board; the counts say how it went.
+    Ran,
+    /// Not run, for the given reason (no expected values, assembly or serial error).
+    Skipped(String),
+    /// Not run, and counted as a failure (the file cannot be read).
+    Failed(String),
 }
 
 /// Parse an ELF file and extract its LOAD segments as a contiguous flat buffer.
@@ -976,8 +984,17 @@ pub(crate) fn run_emulate_test(
     let mut failed_files: Vec<String> = Vec::new();
 
     for file in &files {
-        // Expected values from source comments.
-        let raw_lines: Vec<String> = fs::read_to_string(file).unwrap_or_default().lines().map(String::from).collect();
+        // Expected values from source comments.  A file that cannot be read is
+        // a failure, not a silently skipped file.
+        let raw_lines: Vec<String> = match fs::read_to_string(file) {
+            Ok(source) => source.lines().map(String::from).collect(),
+            Err(e) => {
+                total_files += 1;
+                println!("  FAIL {file}: cannot read: {e}");
+                failed_files.push(format!("{file} (cannot read: {e})"));
+                continue;
+            }
+        };
         let expected = parse_expected_uart_values(&raw_lines);
         if expected.is_empty() {
             continue; // skip non-validatable files silently
@@ -1042,6 +1059,16 @@ pub(crate) fn run_emulate_test(
         for f in &failed_files {
             println!("  {f}");
         }
+    }
+    if total_files == 0 {
+        msg_list.push(
+            format!("No files with expected UART values found for emulate-test at {test_path}"),
+            None,
+            None,
+            MessageType::Error,
+        );
+        print_results(msg_list, start_time);
+        return Err(Error::NoTests(PathBuf::from(test_path)));
     }
     print_results(msg_list, start_time);
     if total_pass == total_files {
@@ -1129,6 +1156,24 @@ pub fn run_test_list(
         // Fresh message list for each test to avoid error accumulation
         let mut test_msg_list = MsgList::new();
 
+        // A listed file that cannot be read is a failure, not a skip.
+        let source = match fs::read_to_string(test_file) {
+            Ok(source) => source,
+            Err(err) => {
+                println!("  FAIL: cannot read: {err}");
+                results.push(BatchTestResult {
+                    file_name: test_file.clone(),
+                    passed: 0,
+                    failed: 0,
+                    timed_out: false,
+                    total: 0,
+                    outcome: Outcome::Failed(format!("cannot read: {err}")),
+                });
+                println!();
+                continue;
+            }
+        };
+
         // Assemble the test file
         let Some(bin_string) = assemble_file(test_file, oplist, macro_list, &mut test_msg_list) else {
             println!("  SKIP: assembly failed");
@@ -1139,8 +1184,7 @@ pub fn run_test_list(
                 failed: 0,
                 timed_out: false,
                 total: 0,
-                skipped: true,
-                skip_reason: "assembly error".to_owned(),
+                outcome: Outcome::Skipped("assembly error".to_owned()),
             });
             println!();
             continue;
@@ -1154,7 +1198,7 @@ pub fn run_test_list(
         }
 
         // Parse expected values
-        let raw_lines: Vec<String> = fs::read_to_string(test_file).unwrap_or_default().lines().map(String::from).collect();
+        let raw_lines: Vec<String> = source.lines().map(String::from).collect();
         let expected_values = parse_expected_uart_values(&raw_lines);
 
         if expected_values.is_empty() {
@@ -1165,8 +1209,7 @@ pub fn run_test_list(
                 failed: 0,
                 timed_out: false,
                 total: 0,
-                skipped: true,
-                skip_reason: "no expected values".to_owned(),
+                outcome: Outcome::Skipped("no expected values".to_owned()),
             });
             println!();
             continue;
@@ -1183,8 +1226,7 @@ pub fn run_test_list(
                     failed: 0,
                     timed_out: false,
                     total: 0,
-                    skipped: true,
-                    skip_reason: format!("serial error: {err}"),
+                    outcome: Outcome::Skipped(format!("serial error: {err}")),
                 });
                 println!();
                 continue;
@@ -1207,24 +1249,33 @@ pub fn run_test_list(
             failed: result.failed,
             timed_out: result.timed_out,
             total: result.total,
-            skipped: false,
-            skip_reason: String::new(),
+            outcome: Outcome::Ran,
         });
 
         println!();
     }
 
-    // Print aggregate summary
+    report_batch(&results, list_file)
+}
+
+/// Print the summary of a `-L` batch run and decide its outcome.
+///
+/// Any failed, timed-out or unreadable test fails the batch (exit 2, timeouts
+/// included); a batch in which no test was validated fails too (exit 1).
+fn report_batch(results: &[BatchTestResult], list_file: &str) -> Result<(), Error> {
     println!("=== Test Suite Summary ===");
     let mut total_failed: usize = 0;
     let mut total_skipped: usize = 0;
     let mut total_timed_out: usize = 0;
     let mut files_all_pass: usize = 0;
 
-    for r in &results {
-        if r.skipped {
+    for r in results {
+        if let Outcome::Skipped(reason) = &r.outcome {
             total_skipped += 1;
-            println!("  SKIP  {} ({})", r.file_name, r.skip_reason);
+            println!("  SKIP  {} ({reason})", r.file_name);
+        } else if let Outcome::Failed(reason) = &r.outcome {
+            total_failed += 1;
+            println!("  FAIL  {} ({reason})", r.file_name);
         } else if r.failed > 0 || r.timed_out {
             total_failed += 1;
             if r.timed_out {
@@ -1260,6 +1311,9 @@ pub fn run_test_list(
             total: total_files,
             timed_out: false,
         })
+    } else if files_all_pass == 0 {
+        println!("No test was validated");
+        Err(Error::NoTests(PathBuf::from(list_file)))
     } else {
         Ok(())
     }
@@ -1268,6 +1322,57 @@ pub fn run_test_list(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A batch entry with the given counts and outcome.
+    fn batch_result(passed: usize, failed: usize, timed_out: bool, outcome: Outcome) -> BatchTestResult {
+        BatchTestResult {
+            file_name: "t.kla".to_owned(),
+            passed,
+            failed,
+            timed_out,
+            total: passed + failed,
+            outcome,
+        }
+    }
+
+    // ---- report_batch --------------------------------------------------------
+
+    #[test]
+    fn batch_with_all_tests_passing_succeeds() {
+        let results = [
+            batch_result(3, 0, false, Outcome::Ran),
+            batch_result(0, 0, false, Outcome::Skipped("x".to_owned())),
+        ];
+        assert!(report_batch(&results, "list.txt").is_ok());
+    }
+
+    #[test]
+    fn batch_with_a_failed_or_timed_out_test_exits_2() {
+        for failing in [batch_result(1, 1, false, Outcome::Ran), batch_result(1, 0, true, Outcome::Ran)] {
+            let results = [batch_result(3, 0, false, Outcome::Ran), failing];
+            let err = report_batch(&results, "list.txt").unwrap_err();
+            assert!(matches!(err, Error::TestsFailed { failed: 1, total: 2, .. }), "{err:?}");
+            assert_eq!(err.code(), 2);
+        }
+    }
+
+    #[test]
+    fn batch_with_an_unreadable_file_fails() {
+        let results = [
+            batch_result(3, 0, false, Outcome::Ran),
+            batch_result(0, 0, false, Outcome::Failed("cannot read".to_owned())),
+        ];
+        let err = report_batch(&results, "list.txt").unwrap_err();
+        assert_eq!(err.code(), 2);
+    }
+
+    #[test]
+    fn batch_with_nothing_validated_fails() {
+        let results = [batch_result(0, 0, false, Outcome::Skipped("no expected values".to_owned()))];
+        let err = report_batch(&results, "list.txt").unwrap_err();
+        assert!(matches!(err, Error::NoTests(_)), "{err:?}");
+        assert_eq!(err.code(), 1);
+    }
 
     /// Read a git-tracked ELF fixture from the klatest corpus (path is absolute
     /// via `CARGO_MANIFEST_DIR`, so the test is independent of the working dir).
