@@ -1,6 +1,7 @@
 //! Subcommand handlers — each `run_*` function drives one CLI mode end to end
 //! (net-load, mem-out, elf2serial, kbt send, emulate, and the test runners).
 
+use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::{build_ddr_image, disassemble_flat_to_pass2, encode_word_kbt, human_bytes, parse_expected_uart_values, HEAP_HEADER_WORDS};
 use crate::messages::{print_messages, MessageType, MsgList};
@@ -9,9 +10,11 @@ use crate::opcodes::{Opcode, Pass2};
 use crate::serial::{monitor_serial_port, run_test_monitor, write_to_board_keep_port, AUTO_SERIAL};
 use crate::{assemble_file, assemble_to_image, build_flat_code, print_results, write_binary_file, write_to_device, ELF_MAGIC};
 use crate::{emulate, gdbserver, helper, macros};
-use chrono::NaiveTime;
 use std::fmt::Write as _;
 use std::fs;
+use std::io;
+use std::path::PathBuf;
+use std::time::Instant;
 
 /// Result of a single test in a batch run.
 struct BatchTestResult {
@@ -152,6 +155,58 @@ fn flatten_input(file_data: Vec<u8>, entry_override: Option<u32>) -> Option<(Vec
     }
 }
 
+/// Read an input file, reporting a failure.
+#[cfg(not(tarpaulin_include))]
+fn read_input(path: &str, msg_list: &mut MsgList) -> Result<Vec<u8>, Error> {
+    fs::read(path).map_err(|source| {
+        msg_list.push(format!("Cannot read binary file {path}: {source}"), None, None, MessageType::Error);
+        Error::Read {
+            path: PathBuf::from(path),
+            source,
+        }
+    })
+}
+
+/// [`flatten_input`], reporting an unparsable ELF.
+#[cfg(not(tarpaulin_include))]
+fn flatten_or_report(
+    file_data: Vec<u8>,
+    entry_override: Option<u32>,
+    path: &str,
+    msg_list: &mut MsgList,
+) -> Result<(Vec<u8>, u32, Option<ElfLayout>), Error> {
+    flatten_input(file_data, entry_override).ok_or_else(|| {
+        msg_list.push(
+            format!("Failed to extract LOAD segments from ELF file {path}"),
+            None,
+            None,
+            MessageType::Error,
+        );
+        Error::Elf(PathBuf::from(path))
+    })
+}
+
+/// Report that the serial monitor stopped on an error, and make it the command's failure.
+#[cfg(not(tarpaulin_include))]
+pub(crate) fn monitor_failed(port: &str, err: io::Error, msg_list: &mut MsgList) -> Error {
+    msg_list.push(format!("Serial monitor stopped: \"{err}\""), None, None, MessageType::Warning);
+    Error::Serial {
+        port: port.to_owned(),
+        source: err,
+    }
+}
+
+/// Report a failed send to the board's serial port, and make it the command's failure.
+#[cfg(not(tarpaulin_include))]
+fn send_failed(port: &str, err: io::Error, msg_list: &mut MsgList, start_time: Instant) -> Error {
+    msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
+    print_results(msg_list, start_time);
+    Error::Serial {
+        port: port.to_owned(),
+        source: err,
+    }
+}
+
 /// Flatten an ELF (or take a flat binary) and stream it to the board over TCP.
 ///
 /// Detects ELF magic automatically: ELF LOAD segments are extracted and the
@@ -165,28 +220,17 @@ pub(crate) fn run_netload(
     board_ip: &str,
     board_port: u16,
     msg_list: &mut MsgList,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
+    start_time: Instant,
+) -> Result<(), Error> {
     if board_ip.is_empty() {
         msg_list.push("net-load requires --ip <board address>".to_owned(), None, None, MessageType::Error);
         print_results(msg_list, start_time);
-        return Err(1);
+        return Err(Error::Usage("net-load requires --ip <board address>"));
     }
 
-    let file_data = fs::read(binary_path).map_err(|e| {
-        msg_list.push(format!("Cannot read binary file {binary_path}: {e}"), None, None, MessageType::Error);
-        1
-    })?;
+    let file_data = read_input(binary_path, msg_list)?;
 
-    let (mut binary_data, entry_addr, elf) = flatten_input(file_data, entry_override).ok_or_else(|| {
-        msg_list.push(
-            format!("Failed to extract LOAD segments from ELF file {binary_path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        1
-    })?;
+    let (mut binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
     if let Some(elf) = elf {
         msg_list.push(
             format!(
@@ -213,7 +257,7 @@ pub(crate) fn run_netload(
     if let Err(err) = net_load(board_ip, board_port, &image, entry_addr, msg_list) {
         msg_list.push(format!("netboot failed: \"{err}\""), None, None, MessageType::Error);
         print_results(msg_list, start_time);
-        return Err(1);
+        return Err(Error::Netboot(err));
     }
 
     print_results(msg_list, start_time);
@@ -227,22 +271,11 @@ pub(crate) fn run_netload(
 /// `boot_rom.v` (`DEPTH_DW` × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
 /// word 0 (`heap_start` = image byte length) to know how much to copy to DDR.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut MsgList, start_time: NaiveTime) -> Result<(), i32> {
-    let file_data = fs::read(binary_path).map_err(|e| {
-        msg_list.push(format!("Cannot read binary file {binary_path}: {e}"), None, None, MessageType::Error);
-        1
-    })?;
+pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
+    let file_data = read_input(binary_path, msg_list)?;
 
     // mem-out writes a $readmemh image and does not need an entry point.
-    let (mut binary_data, _entry, elf) = flatten_input(file_data, None).ok_or_else(|| {
-        msg_list.push(
-            format!("Failed to extract LOAD segments from ELF file {binary_path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        1
-    })?;
+    let (mut binary_data, _entry, elf) = flatten_or_report(file_data, None, binary_path, msg_list)?;
     if let Some(elf) = elf {
         msg_list.push(
             format!(
@@ -279,7 +312,10 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
             MessageType::Error,
         );
         print_results(msg_list, start_time);
-        return Err(1);
+        return Err(Error::Write {
+            path: PathBuf::from(mem_file_name),
+            source: e,
+        });
     }
     msg_list.push(
         format!(
@@ -316,28 +352,17 @@ pub(crate) fn run_elf2serial(
     debug_flag: bool,
     no_break_flag: bool,
     msg_list: &mut MsgList,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
+    start_time: Instant,
+) -> Result<(), Error> {
     use helper::calc_checksum;
 
-    let file_data = fs::read(binary_path).map_err(|e| {
-        msg_list.push(format!("Cannot read binary file {binary_path}: {e}"), None, None, MessageType::Error);
-        1
-    })?;
+    let file_data = read_input(binary_path, msg_list)?;
 
     // Convert ELF virtual address → board byte address inside flatten_input:
     // the flat buffer starts at ELF VMA `elf_base` but is loaded by the board
     // immediately after the heap header, so board_entry = (elf_entry - elf_base)
     // + HEAP_HEADER_WORDS * 8.
-    let (mut binary_data, entry_addr, elf) = flatten_input(file_data, entry_override).ok_or_else(|| {
-        msg_list.push(
-            format!("Failed to extract LOAD segments from ELF file {binary_path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        1
-    })?;
+    let (mut binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
     if let Some(elf) = elf {
         msg_list.push(
             format!(
@@ -406,8 +431,9 @@ pub(crate) fn run_elf2serial(
     /* Skip the on-disk .kbt / .code when streaming to the board over serial:
      * the image is sent straight from memory (`out`), so writing these (large)
      * files just adds several seconds for no benefit. */
+    let mut outcome: Result<(), Error> = Ok(());
     if output_serial_port.is_empty() {
-        write_binary_file(msg_list, kbt_file_name, &out);
+        outcome = write_binary_file(msg_list, kbt_file_name, &out);
     }
 
     // Optionally produce a .code disassembly listing alongside the .kbt, using
@@ -429,29 +455,29 @@ pub(crate) fn run_elf2serial(
         }
     }
 
+    // A bad image (e.g. a checksum error) is never sent to the board.
+    let error_count = msg_list.number_by_type(&MessageType::Error);
+    if error_count > 0 {
+        print_results(msg_list, start_time);
+        return outcome.and(Err(Error::Assembly(error_count)));
+    }
+
     if !output_serial_port.is_empty() {
         if monitor_flag {
-            match write_to_board_keep_port(&out, output_serial_port, !no_break_flag, true, msg_list) {
+            return match write_to_board_keep_port(&out, output_serial_port, !no_break_flag, true, msg_list) {
                 Ok(port) => {
                     msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
                     print_results(msg_list, start_time);
-                    if let Err(err) = monitor_serial_port(port, debug_flag, msg_list) {
-                        msg_list.push(format!("Serial monitor stopped: \"{err}\""), None, None, MessageType::Warning);
-                    }
-                    return Ok(());
+                    monitor_serial_port(port, debug_flag, msg_list).map_err(|err| monitor_failed(output_serial_port, err, msg_list))
                 }
-                Err(err) => {
-                    msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
-                    print_results(msg_list, start_time);
-                    return Err(1);
-                }
-            }
+                Err(err) => Err(send_failed(output_serial_port, err, msg_list, start_time)),
+            };
         }
-        write_to_device(msg_list, &out, output_serial_port, !no_break_flag);
+        outcome = write_to_device(msg_list, &out, output_serial_port, !no_break_flag);
     }
 
     print_results(msg_list, start_time);
-    Ok(())
+    outcome
 }
 
 /// Send a pre-built `.kbt` board wire-format image to the board and/or monitor it.
@@ -468,14 +494,17 @@ pub(crate) fn run_kbt_send(
     debug_flag: bool,
     no_break_flag: bool,
     msg_list: &mut MsgList,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
+    start_time: Instant,
+) -> Result<(), Error> {
     let wire = match fs::read_to_string(kbt_path) {
         Ok(contents) => contents,
         Err(e) => {
             msg_list.push(format!("Cannot read kbt file {kbt_path}: {e}"), None, None, MessageType::Error);
             print_results(msg_list, start_time);
-            return Err(1);
+            return Err(Error::Read {
+                path: PathBuf::from(kbt_path),
+                source: e,
+            });
         }
     };
     let wire_trimmed = wire.trim();
@@ -506,26 +535,19 @@ pub(crate) fn run_kbt_send(
     );
 
     if monitor_flag {
-        match write_to_board_keep_port(wire_trimmed, serial_port, !no_break_flag, true, msg_list) {
+        return match write_to_board_keep_port(wire_trimmed, serial_port, !no_break_flag, true, msg_list) {
             Ok(port) => {
                 msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
                 print_results(msg_list, start_time);
-                if let Err(err) = monitor_serial_port(port, debug_flag, msg_list) {
-                    msg_list.push(format!("Serial monitor stopped: \"{err}\""), None, None, MessageType::Warning);
-                }
-                return Ok(());
+                monitor_serial_port(port, debug_flag, msg_list).map_err(|err| monitor_failed(serial_port, err, msg_list))
             }
-            Err(err) => {
-                msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
-                print_results(msg_list, start_time);
-                return Err(1);
-            }
-        }
+            Err(err) => Err(send_failed(serial_port, err, msg_list, start_time)),
+        };
     }
 
-    write_to_device(msg_list, wire_trimmed, serial_port, !no_break_flag);
+    let outcome = write_to_device(msg_list, wire_trimmed, serial_port, !no_break_flag);
     print_results(msg_list, start_time);
-    Ok(())
+    outcome
 }
 
 /// Run test verification mode.
@@ -541,14 +563,20 @@ pub fn run_test_mode(
     input_file_name: &str,
     test_timeout: u64,
     send_break: bool,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
+    start_time: Instant,
+) -> Result<(), Error> {
     // Parse expected values from the raw source file
-    let raw_lines: Vec<String> = fs::read_to_string(input_file_name)
-        .unwrap_or_default()
-        .lines()
-        .map(String::from)
-        .collect();
+    let raw_lines: Vec<String> = match fs::read_to_string(input_file_name) {
+        Ok(source) => source.lines().map(String::from).collect(),
+        Err(e) => {
+            msg_list.push(format!("Cannot read {input_file_name}: {e}"), None, None, MessageType::Error);
+            print_results(msg_list, start_time);
+            return Err(Error::Read {
+                path: PathBuf::from(input_file_name),
+                source: e,
+            });
+        }
+    };
     let expected_values = parse_expected_uart_values(&raw_lines);
 
     if expected_values.is_empty() {
@@ -559,7 +587,7 @@ pub fn run_test_mode(
             MessageType::Error,
         );
         print_results(msg_list, start_time);
-        return Err(1);
+        return Err(Error::NoTests(PathBuf::from(input_file_name)));
     }
 
     let expected_count = expected_values.len();
@@ -576,11 +604,7 @@ pub fn run_test_mode(
             msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
             port
         }
-        Err(err) => {
-            msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
-            print_results(msg_list, start_time);
-            return Err(1);
-        }
+        Err(err) => return Err(send_failed(output_serial_port, err, msg_list, start_time)),
     };
 
     print_results(msg_list, start_time);
@@ -599,7 +623,11 @@ pub fn run_test_mode(
     );
 
     if result.failed > 0 || result.timed_out {
-        Err(if result.timed_out { 3 } else { 2 })
+        Err(Error::TestsFailed {
+            failed: result.failed,
+            total: result.total,
+            timed_out: result.timed_out,
+        })
     } else {
         Ok(())
     }
@@ -609,11 +637,11 @@ pub fn run_test_mode(
 ///
 /// Follows the `--trace` convention: `None` → no trace, `Some("-")` → stdout,
 /// `Some(path)` → that file.  Returns `Ok(None)` when no trace was requested,
-/// `Ok(Some(writer))` otherwise, or `Err(1)` if the file cannot be created (the
+/// `Ok(Some(writer))` otherwise, or an error if the file cannot be created (the
 /// error is already reported to `msg_list`).  The writer is line-buffered so the
 /// trace streams during the run instead of being held in memory.
 #[cfg(not(tarpaulin_include))]
-fn open_trace_writer(trace_file: Option<&str>, msg_list: &mut MsgList) -> Result<Option<Box<dyn std::io::Write>>, i32> {
+fn open_trace_writer(trace_file: Option<&str>, msg_list: &mut MsgList) -> Result<Option<Box<dyn std::io::Write>>, Error> {
     use std::io::BufWriter;
     match trace_file {
         None => Ok(None),
@@ -622,7 +650,10 @@ fn open_trace_writer(trace_file: Option<&str>, msg_list: &mut MsgList) -> Result
             Ok(f) => Ok(Some(Box::new(BufWriter::new(f)))),
             Err(e) => {
                 msg_list.push(format!("Failed to create trace file {path}: {e}"), None, None, MessageType::Error);
-                Err(1)
+                Err(Error::Write {
+                    path: PathBuf::from(path),
+                    source: e,
+                })
             }
         },
     }
@@ -659,17 +690,17 @@ pub(crate) fn run_emulate(
     trace_file: Option<&str>,
     max_instructions: u64,
     msg_list: &mut MsgList,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
+    start_time: Instant,
+) -> Result<(), Error> {
     if msg_list.number_by_type(&MessageType::Error) > 0 {
         msg_list.push("Not emulating due to assembly errors".to_owned(), None, None, MessageType::Error);
         print_results(msg_list, start_time);
-        return Err(1);
+        return Err(Error::Assembly(msg_list.number_by_type(&MessageType::Error)));
     }
     let Some((code, entry)) = build_flat_code(pass2) else {
         msg_list.push("No _start address found - cannot emulate".to_owned(), None, None, MessageType::Error);
         print_results(msg_list, start_time);
-        return Err(1);
+        return Err(Error::Assembly(1));
     };
     let image = build_ddr_image(&code);
     msg_list.push(
@@ -718,22 +749,11 @@ pub(crate) fn run_emulate_elf(
     trace_file: Option<&str>,
     max_instructions: u64,
     msg_list: &mut MsgList,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
-    let file_data = fs::read(binary_path).map_err(|e| {
-        msg_list.push(format!("Cannot read binary file {binary_path}: {e}"), None, None, MessageType::Error);
-        1
-    })?;
+    start_time: Instant,
+) -> Result<(), Error> {
+    let file_data = read_input(binary_path, msg_list)?;
 
-    let (binary_data, entry_addr, elf) = flatten_input(file_data, entry_override).ok_or_else(|| {
-        msg_list.push(
-            format!("Failed to extract LOAD segments from ELF file {binary_path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        1
-    })?;
+    let (binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
     if let Some(elf) = elf {
         msg_list.push(
             format!(
@@ -788,21 +808,10 @@ pub(crate) fn run_gdbserver(
     entry_override: Option<u32>,
     port: u16,
     msg_list: &mut MsgList,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
-    let file_data = fs::read(binary_path).map_err(|e| {
-        msg_list.push(format!("Cannot read binary file {binary_path}: {e}"), None, None, MessageType::Error);
-        1
-    })?;
-    let (binary_data, entry_addr, elf) = flatten_input(file_data, entry_override).ok_or_else(|| {
-        msg_list.push(
-            format!("Failed to extract LOAD segments from ELF file {binary_path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        1
-    })?;
+    start_time: Instant,
+) -> Result<(), Error> {
+    let file_data = read_input(binary_path, msg_list)?;
+    let (binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
     let code_base = u64::from(HEAP_HEADER_WORDS) * 8;
     if let Some(elf) = &elf {
         if elf.base != code_base {
@@ -827,7 +836,7 @@ pub(crate) fn run_gdbserver(
         }
         Err(e) => {
             eprintln!("klausscc gdbserver: {e}");
-            Err(1)
+            Err(Error::Other(e))
         }
     }
 }
@@ -849,13 +858,13 @@ pub(crate) fn run_gdbserver_board(
     no_break_flag: bool,
     jtag_khz: u32,
     msg_list: &mut MsgList,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
+    start_time: Instant,
+) -> Result<(), Error> {
     use crate::gdbserver_board;
 
     let fail = |e: String| {
         eprintln!("klausscc gdbserver: {e}");
-        1
+        Error::Other(e)
     };
     let (mut board, desc) = gdbserver_board::Board::open(jtag_khz).map_err(fail)?;
     eprintln!("klausscc gdbserver: {desc}");
@@ -875,7 +884,7 @@ pub(crate) fn run_gdbserver_board(
                 msg_list,
                 start_time,
             )
-            .map_err(|code| format!("loading {binary_path} over {output_serial_port} failed ({code})"))
+            .map_err(|err| format!("loading {binary_path} over {output_serial_port} failed ({err})"))
         };
         gdbserver_board::attach(&mut board, Some(&mut load)).map_err(fail)?
     };
@@ -902,8 +911,8 @@ pub(crate) fn run_gdbserver_board(
     _no_break_flag: bool,
     _jtag_khz: u32,
     msg_list: &mut MsgList,
-    _start_time: NaiveTime,
-) -> Result<(), i32> {
+    _start_time: Instant,
+) -> Result<(), Error> {
     msg_list.push(
         "--board needs a klausscc built with board support: cargo build --release --features board (needs libftdi1-dev)".to_owned(),
         None,
@@ -911,7 +920,7 @@ pub(crate) fn run_gdbserver_board(
         MessageType::Error,
     );
     print_messages(msg_list);
-    Err(1)
+    Err(Error::Usage("--board needs a klausscc built with board support"))
 }
 
 /// Batch-verify the emulator against `.kla` files with expected `// ` UART values.
@@ -926,8 +935,8 @@ pub(crate) fn run_emulate_test(
     test_path: &str,
     max_instructions: u64,
     msg_list: &mut MsgList,
-    start_time: NaiveTime,
-) -> Result<(), i32> {
+    start_time: Instant,
+) -> Result<(), Error> {
     use std::path::Path;
 
     // Resolve the list of .kla files to test.
@@ -958,7 +967,7 @@ pub(crate) fn run_emulate_test(
             MessageType::Error,
         );
         print_results(msg_list, start_time);
-        return Err(1);
+        return Err(Error::NoTests(PathBuf::from(test_path)));
     }
 
     println!("Emulator verification over {} file(s):\n", files.len());
@@ -1038,7 +1047,11 @@ pub(crate) fn run_emulate_test(
     if total_pass == total_files {
         Ok(())
     } else {
-        Err(2)
+        Err(Error::TestsFailed {
+            failed: total_files - total_pass,
+            total: total_files,
+            timed_out: false,
+        })
     }
 }
 
@@ -1092,18 +1105,18 @@ pub fn run_test_list(
     test_timeout: u64,
     send_break: bool,
     msg_list: &mut MsgList,
-) -> Result<(), i32> {
+) -> Result<(), Error> {
     if output_serial_port.is_empty() {
         msg_list.push("Test list (-L) requires a serial port (-s)".to_owned(), None, None, MessageType::Error);
         print_messages(msg_list);
-        return Err(1);
+        return Err(Error::Usage("test list (-L) requires a serial port (-s)"));
     }
 
     let test_files = read_test_list(list_file, msg_list);
     if test_files.is_empty() {
         msg_list.push("No test files found in test list".to_owned(), None, None, MessageType::Error);
         print_messages(msg_list);
-        return Err(1);
+        return Err(Error::NoTests(PathBuf::from(list_file)));
     }
 
     println!("Running {} tests from {list_file}...\n", test_files.len());
@@ -1133,9 +1146,12 @@ pub fn run_test_list(
             continue;
         };
 
-        // Write binary file
+        // Write binary file.  It is only a by-product here (the image is sent
+        // from memory), so a failed write is shown but does not fail the test.
         let binary_file_name = format!("{}.kbt", filename_stem(test_file));
-        write_binary_file(&mut test_msg_list, &binary_file_name, &bin_string);
+        if let Err(err) = write_binary_file(&mut test_msg_list, &binary_file_name, &bin_string) {
+            println!("  WARNING: {err}");
+        }
 
         // Parse expected values
         let raw_lines: Vec<String> = fs::read_to_string(test_file).unwrap_or_default().lines().map(String::from).collect();
@@ -1237,8 +1253,13 @@ pub fn run_test_list(
         },
     );
 
+    // A batch exits 2 for any failure, timeouts included (the summary lists them).
     if total_failed > 0 || total_timed_out > 0 {
-        Err(2)
+        Err(Error::TestsFailed {
+            failed: total_failed,
+            total: total_files,
+            timed_out: false,
+        })
     } else {
         Ok(())
     }

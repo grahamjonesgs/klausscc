@@ -43,3 +43,42 @@ fn explicit_output_names_keep_their_extension() {
     assert!(!dir.path().join("out.kbt.kbt").exists());
     assert!(!dir.path().join("out.code.code").exists());
 }
+
+#[test]
+fn assembly_errors_exit_1_but_still_write_the_listing() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("bad.kla"), "_start\nNOTANOP A\nHALT\n").unwrap();
+
+    let out = klausscc(dir.path(), &["-i", "bad.kla"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(dir.path().join("bad.code").is_file(), "the .code listing shows where the errors are");
+    assert!(!dir.path().join("bad.kbt").exists(), "no binary for a failed build");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Completed with 1 error"), "stderr: {stderr}");
+    assert!(!stderr.contains("Error: "), "no stray Debug print of the error: {stderr}");
+}
+
+#[test]
+fn missing_input_exits_1() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = klausscc(dir.path(), &["-i", "nothere.kla"]);
+    assert_eq!(out.status.code(), Some(1));
+}
+
+#[test]
+fn passing_emulator_test_exits_0() {
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/src/klatest/test_strings.kla");
+    let dir = tempfile::tempdir().unwrap();
+    let out = klausscc(dir.path(), &["--emulate-test", fixture]);
+    assert!(out.status.success(), "stdout: {}", String::from_utf8_lossy(&out.stdout));
+}
+
+#[test]
+fn failing_emulator_test_exits_2() {
+    let dir = tempfile::tempdir().unwrap();
+    // Expects one UART value but prints nothing.
+    std::fs::write(dir.path().join("silent.kla"), "// 00000001\n_start\nHALT\n").unwrap();
+
+    let out = klausscc(dir.path(), &["--emulate-test", "silent.kla"]);
+    assert_eq!(out.status.code(), Some(2), "stdout: {}", String::from_utf8_lossy(&out.stdout));
+}
