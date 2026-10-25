@@ -1406,7 +1406,7 @@ mod tests {
         let opcodes = &mut v2_opcodes();
         let output = add_arguments(opcodes, "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
-        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Warning), 1);
         assert_eq!(msg_list.list.len(), 1);
 
         let mut msg_list = MsgList::new();
@@ -1850,7 +1850,7 @@ mod tests {
         assert_eq!(add_registers(opcodes, "SHLV A 0", "t", &mut msg_list, 1), "50204000");
         assert_eq!(add_registers(opcodes, "SHLV A 63", "t", &mut msg_list, 1), "503FC000");
         assert_eq!(add_registers(opcodes, "SHLV A 0x3F", "t", &mut msg_list, 1), "503FC000");
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
 
         assert_eq!(add_registers(opcodes, "SHLV A 64", "t", &mut msg_list, 5), "ERR     ");
         let msg = msg_list.list.last().unwrap();
@@ -1860,7 +1860,7 @@ mod tests {
         // Negative counts are out of range too, not a register error.
         assert_eq!(add_registers(opcodes, "SHLV A -1", "t", &mut msg_list, 6), "ERR     ");
         assert_eq!(msg_list.list.last().unwrap().text, "Count -1 out of range 0..=63 - \"SHLV A -1\"");
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 2);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 2);
     }
 
     #[test]
@@ -1886,7 +1886,7 @@ mod tests {
             let got = add_registers(opcodes, src, "test", &mut msg_list, 1);
             assert_eq!(got, want, "{src}");
         }
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
         // Out-of-range / misaligned short immediates are rejected.
         for bad in ["SETR.S A 300", "LDIDX64A.S A B 12", "LDIDX64A.S A B 2048"] {
             let got = add_registers(opcodes, bad, "test", &mut msg_list, 1);
@@ -1920,11 +1920,11 @@ mod tests {
         // JMP.S LOOP: at 0x40 -> -6 words in [17:0].
         let rel = pc_relative_bits(opcodes, "JMP.S LOOP:", 0x40, &labels, &mut msg_list, 1, "t");
         assert_eq!(0x6100_0000 | rel, 0x6103_FFFA);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
         // A fused branch 256 KB away is out of simm13 range: reported, no bits.
         let rel = pc_relative_bits(opcodes, "BEQ A B FAR:", 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(rel, 0);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
         // ...but in range for a short branch.
         let rel = pc_relative_bits(opcodes, "CALL.S FAR:", 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(rel, (0x0004_0000 - 0x30) / 4);

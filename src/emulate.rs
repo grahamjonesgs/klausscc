@@ -87,7 +87,7 @@ const UART_STATUS: u32 = 0x0010;
 const UART_RX_FIFO_DEPTH: usize = 16;
 
 /// Reason the emulator stopped executing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StopReason {
     /// HALT instruction reached.
     Halt,
@@ -675,14 +675,14 @@ impl Cpu {
         if self.halted {
             return Some(StopReason::Halt);
         }
-        if let Some(stop) = &self.stop {
-            return Some(stop.clone());
+        if let Some(stop) = self.stop {
+            return Some(stop);
         }
         self.advance(allow_irq);
         if self.halted {
             Some(StopReason::Halt)
         } else {
-            self.stop.clone()
+            self.stop
         }
     }
 
@@ -795,7 +795,6 @@ impl Cpu {
         }
         let stop = self
             .stop
-            .clone()
             .unwrap_or(if self.halted { StopReason::Halt } else { StopReason::InstructionCap });
         EmulateResult {
             uart: std::mem::take(&mut self.uart),

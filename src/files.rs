@@ -825,7 +825,7 @@ mod test {
     fn test_remove_block_comments_slash_star_slash() {
         let (output, msg_list) = strip_block(&["abc/*/def"]);
         assert_eq!(output, vec!["abc"]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
     }
 
     #[test]
@@ -833,7 +833,7 @@ mod test {
     fn test_remove_block_comments_star_after_close() {
         let (output, msg_list) = strip_block(&["a/* x */*b", "c"]);
         assert_eq!(output, vec!["a*b", "c"]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
     }
 
     #[test]
@@ -841,7 +841,7 @@ mod test {
     fn test_remove_block_comments_nested_looking() {
         let (output, msg_list) = strip_block(&["abc/* /* x */def", "g/* x */ */h", "i/* x **/j"]);
         assert_eq!(output, vec!["abcdef", "g */h", "ij"]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
     }
 
     #[test]
@@ -849,7 +849,7 @@ mod test {
     fn test_remove_block_comments_plain_slashes() {
         let (output, msg_list) = strip_block(&["a/b", "c//d", "e/", "*/f"]);
         assert_eq!(output, vec!["a/b", "c//d", "e/", "*/f"]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
     }
 
     #[test]
@@ -857,7 +857,7 @@ mod test {
     fn test_remove_block_comments_star_at_line_end() {
         let (output, msg_list) = strip_block(&["a/* x *", "/b */c"]);
         assert_eq!(output, vec!["a", "c"]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
     }
 
     #[test]
@@ -865,7 +865,7 @@ mod test {
     fn test_remove_block_comments_unterminated_last_file() {
         let (output, msg_list) = strip_block(&["abc", "def /* open", "ghi"]);
         assert_eq!(output, vec!["abc", "def ", ""]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
         let msg = &msg_list.list[0];
         assert_eq!(msg.text, "Comment not terminated in file test.kla");
         assert_eq!(msg.line_number, Some(2));
@@ -1179,7 +1179,7 @@ mod test {
         let lines = read_file_to_vector(file_path1.to_str().unwrap(), &mut msg_list).unwrap();
         let text: Vec<&str> = lines.iter().map(|l| l.input_text_line.as_str()).collect();
         assert_eq!(text, vec!["b", "d", "c", "d"]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
     }
 
     #[test]
@@ -1207,7 +1207,7 @@ mod test {
 
         let mut msg_list = MsgList::new();
         assert!(read_file_to_vector(dir_name, &mut msg_list).is_none());
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
     }
 
     #[test]

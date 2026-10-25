@@ -302,7 +302,7 @@ fn run() -> Result<(), Error> {
     msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
     let Some(input_list) = read_file_to_vector(&input_file_name, &mut msg_list) else {
         print_results(&msg_list, start_time);
-        return Err(Error::Assembly(msg_list.number_by_type(&MessageType::Error).max(1)));
+        return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error).max(1)));
     };
 
     let input_list = remove_block_comments(input_list, &mut msg_list);
@@ -351,7 +351,7 @@ fn run() -> Result<(), Error> {
 
     // Failure from writing the .kbt or sending it; assembly errors are counted below.
     let mut outcome: Result<(), Error> = Ok(());
-    if msg_list.number_by_type(&MessageType::Error) == 0 {
+    if msg_list.number_by_type(MessageType::Error) == 0 {
         if let Some(bin_string) = create_bin_string(&pass2, &mut msg_list) {
             outcome = write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
             if outcome.is_ok() && !output_serial_port.is_empty() {
@@ -417,7 +417,7 @@ fn run() -> Result<(), Error> {
 
     // A failed build is a failure: don't go on to monitor a stale program.
     outcome?;
-    let error_count = msg_list.number_by_type(&MessageType::Error);
+    let error_count = msg_list.number_by_type(MessageType::Error);
     if error_count > 0 {
         return Err(Error::Assembly(error_count));
     }
@@ -553,7 +553,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, oplist: &[Opcod
             file_name: pass.file_name.clone(),
             line_counter: pass.line_counter,
             program_counter,
-            line_type: lt.clone(),
+            line_type: lt,
         });
         if !is_valid_line(oplist, &strip_comments(&upgraded_line)) {
             msg_list.push(
@@ -607,7 +607,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, oplist: &[Opcod
             file_name: data_pass.file_name.clone(),
             line_counter: data_pass.line_counter,
             program_counter,
-            line_type: lt.clone(),
+            line_type: lt,
         });
 
         if lt == LineType::Data {
@@ -662,10 +662,10 @@ pub fn print_results(msg_list: &MsgList, start_time: Instant) {
     let time_taken: f64 = start_time.elapsed().as_secs_f64();
     eprintln!(
         "Completed with {} error{} and {} warning{} in {:.3} seconds",
-        msg_list.number_by_type(&MessageType::Error),
-        if msg_list.number_by_type(&MessageType::Error) == 1 { "" } else { "s" },
-        msg_list.number_by_type(&MessageType::Warning),
-        if msg_list.number_by_type(&MessageType::Warning) == 1 { "" } else { "s" },
+        msg_list.number_by_type(MessageType::Error),
+        if msg_list.number_by_type(MessageType::Error) == 1 { "" } else { "s" },
+        msg_list.number_by_type(MessageType::Warning),
+        if msg_list.number_by_type(MessageType::Warning) == 1 { "" } else { "s" },
         time_taken,
     );
 }
@@ -697,7 +697,7 @@ pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_str
 /// Fails if errors were already reported or the send fails.
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
 pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str, send_break: bool) -> Result<(), Error> {
-    let error_count = msg_list.number_by_type(&MessageType::Error);
+    let error_count = msg_list.number_by_type(MessageType::Error);
     if error_count > 0 {
         msg_list.push(
             "Not writing to serial port due to assembly errors".to_owned(),
@@ -753,7 +753,7 @@ pub fn assemble_file(input_file_name: &str, oplist: &[Opcode], macro_list: &[mac
         return None;
     }
 
-    if msg_list.number_by_type(&MessageType::Error) > 0 {
+    if msg_list.number_by_type(MessageType::Error) > 0 {
         return None;
     }
 
@@ -831,7 +831,7 @@ pub(crate) fn assemble_to_image(
     let labels = get_labels(&pass1, msg_list);
     find_duplicate_label(&labels, msg_list);
     let pass2 = get_pass2(msg_list, pass1, oplist, &labels);
-    if msg_list.number_by_type(&MessageType::Error) > 0 {
+    if msg_list.number_by_type(MessageType::Error) > 0 {
         return None;
     }
     let (code, entry) = build_flat_code(&pass2)?;
@@ -866,11 +866,11 @@ mod tests {
     }
 
     /// The `(line, text)` of every message of `level`.
-    fn messages_of(msg_list: &MsgList, level: &MessageType) -> Vec<(Option<u32>, String)> {
+    fn messages_of(msg_list: &MsgList, level: MessageType) -> Vec<(Option<u32>, String)> {
         msg_list
             .list
             .iter()
-            .filter(|m| m.level == *level)
+            .filter(|m| m.level == level)
             .map(|m| (m.line_number, m.text.clone()))
             .collect()
     }
@@ -881,7 +881,7 @@ mod tests {
     // the last word of the string.
     fn test_data_after_string_stays_8_byte_aligned() {
         let (pass2, msg_list) = assemble_text("_start\nHALT\n.data\n#S \"Hello\"\n#T \"ABCDEFGHIJKL\"\n#V 1\n.text\n");
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
         for name in ["#S", "#T", "#V"] {
             let line = pass2.iter().find(|p| p.input_text_line.starts_with(name)).unwrap();
             assert!(line.program_counter.is_multiple_of(8), "{name} at 0x{:X}", line.program_counter);
@@ -894,14 +894,14 @@ mod tests {
     fn test_part_word_zeropad_is_error() {
         let (_, msg_list) = assemble_text("_start\nHALT\n.zeropad 3\n");
         assert_eq!(
-            messages_of(&msg_list, &MessageType::Error),
+            messages_of(&msg_list, MessageType::Error),
             vec![(
                 Some(3),
                 "Error in data definition for .zeropad 3: size \"3\" must be a multiple of 4 bytes".to_owned()
             )]
         );
         let (pass2, mut msg_list) = assemble_text("_start\nHALT\n.zeropad 4\n");
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
         assert!(create_bin_string(&pass2, &mut msg_list).is_some());
     }
 
@@ -911,18 +911,18 @@ mod tests {
     fn test_undefined_label_is_error() {
         let (_, msg_list) = assemble_text("_start\nJMP nowhere:\nHALT\n");
         assert_eq!(
-            messages_of(&msg_list, &MessageType::Error),
+            messages_of(&msg_list, MessageType::Error),
             vec![(Some(2), "Label NOWHERE: not found".to_owned())]
         );
 
         let (_, msg_list) = assemble_text("_start\nSETR A 12abc\nHALT\n");
         assert_eq!(
-            messages_of(&msg_list, &MessageType::Error),
+            messages_of(&msg_list, MessageType::Error),
             vec![(Some(2), "Decimal value 12ABC incorrect".to_owned())]
         );
 
         let (_, msg_list) = assemble_text("_start\nloop:\nJMP loop:\nJMP loop\n");
-        assert_eq!(messages_of(&msg_list, &MessageType::Error), vec![]);
+        assert_eq!(messages_of(&msg_list, MessageType::Error), vec![]);
     }
 
     #[test]
@@ -947,7 +947,7 @@ mod tests {
         }
 
         let (pass2, msg_list) = assemble_text("_start\nSETR A 18446744073709551615\nHALT\n");
-        assert_eq!(messages_of(&msg_list, &MessageType::Error), vec![]);
+        assert_eq!(messages_of(&msg_list, MessageType::Error), vec![]);
         let setr = pass2.iter().find(|p| p.line_counter == 2).unwrap();
         assert!(setr.opcode.ends_with("FFFFFFFFFFFFFFFF"), "{}", setr.opcode);
     }
@@ -957,19 +957,19 @@ mod tests {
     fn test_comm_bad_size_is_error() {
         let (_, msg_list) = assemble_text("_start\nHALT\n.comm buf, 12abc, 4\n");
         assert_eq!(
-            messages_of(&msg_list, &MessageType::Error),
+            messages_of(&msg_list, MessageType::Error),
             vec![(Some(3), "Invalid size 12abc for .comm buf".to_owned())]
         );
 
         let (_, msg_list) = assemble_text("_start\nHALT\n.comm buf, 0x10, 4\n");
-        assert_eq!(messages_of(&msg_list, &MessageType::Error), vec![]);
+        assert_eq!(messages_of(&msg_list, MessageType::Error), vec![]);
     }
 
     #[test]
     // Regression: data values that do not parse are errors at their line.
     fn test_bad_data_values_are_errors() {
         let (_, msg_list) = assemble_text("_start\nHALT\n.word 12abc\n#BUF -5\n");
-        let errors = messages_of(&msg_list, &MessageType::Error);
+        let errors = messages_of(&msg_list, MessageType::Error);
         assert_eq!(errors.len(), 2, "{errors:?}");
         assert_eq!(errors[0].0, Some(3));
         assert_eq!(errors[1].0, Some(4));

@@ -5,7 +5,7 @@
 //! ([`Pass1`]) and pass 2 the encoded opcode ([`Pass2`]).  This module has no
 //! intra-crate dependencies.
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Defines the type of line.
 pub enum LineType {
     Blank,

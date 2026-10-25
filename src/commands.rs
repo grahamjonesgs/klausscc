@@ -430,7 +430,7 @@ pub(crate) fn run_elf2serial(
     // but an image the board would reject is never written or sent.
     let Some(checksum) = calc_checksum(&out, msg_list) else {
         print_results(msg_list, start_time);
-        return Err(Error::Assembly(msg_list.number_by_type(&MessageType::Error)));
+        return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
     };
     out.push('Z');
     out.push_str(&checksum);
@@ -471,7 +471,7 @@ pub(crate) fn run_elf2serial(
     }
 
     // A bad image (e.g. a checksum error) is never sent to the board.
-    let error_count = msg_list.number_by_type(&MessageType::Error);
+    let error_count = msg_list.number_by_type(MessageType::Error);
     if error_count > 0 {
         print_results(msg_list, start_time);
         return outcome.and(Err(Error::Assembly(error_count)));
@@ -710,10 +710,10 @@ pub(crate) fn run_emulate(
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
-    if msg_list.number_by_type(&MessageType::Error) > 0 {
+    if msg_list.number_by_type(MessageType::Error) > 0 {
         msg_list.push("Not emulating due to assembly errors".to_owned(), None, None, MessageType::Error);
         print_results(msg_list, start_time);
-        return Err(Error::Assembly(msg_list.number_by_type(&MessageType::Error)));
+        return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
     }
     let Some((code, entry)) = build_flat_code(pass2) else {
         msg_list.push("No _start address found - cannot emulate".to_owned(), None, None, MessageType::Error);

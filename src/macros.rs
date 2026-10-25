@@ -449,7 +449,7 @@ mod tests {
         let input = vec![source_line("!macro $A %1", 1), source_line("!macro $B $A", 2)];
         let output = apply_source_macros(input, &mut macro_list, &mut msg_list);
         assert_eq!(output, vec![]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
         assert_eq!(msg_list.list.first().unwrap().text, "Missing argument 1 for embedded macro \"$A\" in $B");
         // The embedded call can still pass its own argument through.
         let mut msg_list = MsgList::new();
@@ -910,7 +910,7 @@ mod tests {
         assert_eq!(strip_comments(&pass0[1].input_text_line.clone()), "RET B");
         assert_eq!(strip_comments(&pass0[2].input_text_line.clone()), "PUSH");
         assert_eq!(strip_comments(&pass0[3].input_text_line.clone()), "POP C");
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
         assert_eq!(msg_list.list[0].text, "Missing argument 2 for macro $MACRO2");
     }
 
@@ -950,7 +950,7 @@ mod tests {
         assert_eq!(strip_comments(&pass0[0].input_text_line.clone()), "MOV A");
         assert_eq!(strip_comments(&pass0[1].input_text_line.clone()), "RET B");
         assert_eq!(strip_comments(&pass0[2].input_text_line.clone()), "PUSH D");
-        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Warning), 1);
         assert_eq!(msg_list.list[0].text, "Too many variables for macro $MACRO2");
     }
 
@@ -1047,7 +1047,7 @@ mod tests {
         assert_eq!(macros.len(), 1);
         assert_eq!(macros.first().unwrap().name, "$INC3");
         assert_eq!(macros.first().unwrap().items, vec![String::from("ADDV %1 3")]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
     }
 
     #[test]
@@ -1068,7 +1068,7 @@ mod tests {
         let output = apply_source_macros(input, macros, &mut msg_list);
         assert_eq!(output, Vec::<SourceLine>::new()); // directive consumed
         assert_eq!(macros.len(), 1); // no duplicate added
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
         assert_eq!(msg_list.list.first().unwrap().text, "Duplicate macro definition $FOO found");
     }
 
@@ -1092,7 +1092,7 @@ mod tests {
         let _output = apply_source_macros(input, macros, &mut msg_list);
         let wrap = macros.iter().find(|m| m.name == "$WRAP").unwrap();
         assert_eq!(wrap.items, vec![String::from("NOP"), String::from("NOP"), String::from("HALT")]);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
     }
 
     #[test]
@@ -1107,7 +1107,7 @@ mod tests {
         }];
         let output = apply_source_macros(input, macros, &mut msg_list);
         assert_eq!(output, Vec::<SourceLine>::new());
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
         assert_eq!(msg_list.list.first().unwrap().text, "Missing file name for !macros in F");
     }
 

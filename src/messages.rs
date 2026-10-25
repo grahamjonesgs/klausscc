@@ -15,7 +15,7 @@ pub struct Message {
     /// Time of message.
     pub time: Option<NaiveTime>,
 }
-#[derive(PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Enum for message type.
 pub enum MessageType {
     /// Error message.
@@ -48,8 +48,8 @@ impl MsgList {
     }
 
     /// Returns number of warnings in `MsgList`.
-    pub fn number_by_type(&self, msg_type: &MessageType) -> usize {
-        let warnings = self.list.iter().filter(|x| x.level == *msg_type).count();
+    pub fn number_by_type(&self, msg_type: MessageType) -> usize {
+        let warnings = self.list.iter().filter(|x| x.level == msg_type).count();
         warnings
     }
 
@@ -148,21 +148,21 @@ mod tests {
     // Test that the number of errors is correct
     fn test_number_errors() {
         let mut msg_list = MsgList::new();
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
         msg_list.push("Test".to_owned(), None, None, MessageType::Error);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
     }
 
     #[test]
     // Test number of warnings
     fn test_number_warnings() {
         let mut msg_list = MsgList::new();
-        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Warning), 0);
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
         msg_list.push("Test".to_owned(), None, None, MessageType::Error);
-        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Warning), 1);
     }
 }

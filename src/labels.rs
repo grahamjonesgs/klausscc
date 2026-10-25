@@ -219,8 +219,8 @@ mod tests {
         ];
         let mut msg_list = MsgList::new();
         find_duplicate_label(&labels, &mut msg_list);
-        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
-        assert_eq!(msg_list.number_by_type(&MessageType::Warning), 0);
+        assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
+        assert_eq!(msg_list.number_by_type(MessageType::Warning), 0);
 
         assert_eq!(msg_list.list[0].text, "Duplicate label label1 found, with differing values");
     }
@@ -339,8 +339,8 @@ mod tests {
         ] {
             let mut msg_list = MsgList::new();
             assert_eq!(convert_argument(bad, &mut msg_list, 9, "prog.kla", &labels), None, "{bad}");
-            assert_eq!(msg_list.number_by_type(&MessageType::Error), 1, "{bad}");
-            assert_eq!(msg_list.number_by_type(&MessageType::Warning), 0, "{bad}");
+            assert_eq!(msg_list.number_by_type(MessageType::Error), 1, "{bad}");
+            assert_eq!(msg_list.number_by_type(MessageType::Warning), 0, "{bad}");
             let msg = msg_list.list.first().unwrap();
             assert_eq!((msg.line_number, msg.file_name.as_deref()), (Some(9), Some("prog.kla")), "{bad}");
             assert!(
