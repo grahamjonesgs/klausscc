@@ -22,6 +22,7 @@ pub const HEAP_HEADER_WORDS: u32 = 4;
 pub const fn heap_start(end: u32) -> u32 {
     end.next_multiple_of(8)
 }
+
 /// Encode a 32-bit word for the kbt wire format (little-endian byte order).
 ///
 /// The board's serial loader stores bytes in the order they arrive, so a 32-bit

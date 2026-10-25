@@ -379,13 +379,17 @@ fn read_source_lines(file: File, filename: &str, msg_list: &mut MsgList, open_fi
                     });
                 }
             }
-            #[cfg(not(tarpaulin_include))] // Cannot test error reading file line in tarpaulin
-            Err(err) => msg_list.push(
-                format!("Error reading source file {filename}: {err}"),
-                Some(line_number),
-                Some(filename.to_owned()),
-                MessageType::Error,
-            ),
+            // A read error usually repeats on every later read (a directory, say),
+            // so stop reading the file rather than reporting it forever.
+            Err(err) => {
+                msg_list.push(
+                    format!("Error reading source file {filename}: {err}"),
+                    Some(line_number),
+                    Some(filename.to_owned()),
+                    MessageType::Error,
+                );
+                return None;
+            }
         }
     }
     Some(lines)
@@ -1211,6 +1215,34 @@ mod test {
         let text: Vec<&str> = lines.iter().map(|l| l.input.as_str()).collect();
         assert_eq!(text, vec!["b", "d", "c", "d"]);
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+    }
+
+    #[test]
+    #[cfg(unix)] // Opening a directory only fails at the first read on Unix
+                 // Regression: a read error (here, including a directory) repeats on every
+                 // read, and the reader reported it forever instead of stopping.
+    fn test_read_file_include_directory() {
+        let mut msg_list = MsgList::new();
+        let tmp_dir = TempDir::new().unwrap();
+        fs::create_dir(tmp_dir.path().join("dir")).unwrap();
+        let file_path1 = tmp_dir.path().join("a.kla");
+        fs::write(&file_path1, "line 1\n!include dir\nline 3\n").unwrap();
+        let dir_name = tmp_dir.path().join("dir");
+        let dir_name = dir_name.to_str().unwrap();
+
+        let lines = read_file_to_vector(file_path1.to_str().unwrap(), &mut msg_list).unwrap();
+        assert_eq!(lines.len(), 1);
+        let errors: Vec<&str> = msg_list.list.iter().map(|m| m.text.as_str()).collect();
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert!(errors[0].starts_with(&format!("Error reading source file {dir_name}: ")), "{errors:?}");
+        assert!(
+            errors[1].starts_with(&format!("Unable to open include file {dir_name} in ")),
+            "{errors:?}"
+        );
+
+        let mut msg_list = MsgList::new();
+        assert!(read_file_to_vector(dir_name, &mut msg_list).is_none());
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
     }
 
     #[test]
