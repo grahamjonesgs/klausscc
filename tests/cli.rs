@@ -150,3 +150,45 @@ fn embedded_macro_missing_argument_is_an_error_not_a_panic() {
     assert_eq!(out.status.code(), Some(1), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     assert!(String::from_utf8_lossy(&out.stderr).contains("Missing argument 1 for embedded macro"));
 }
+
+/// The number of run-summary lines in `stderr`.
+fn summaries(stderr: &[u8]) -> usize {
+    String::from_utf8_lossy(stderr).matches("Completed with ").count()
+}
+
+#[test]
+fn the_summary_is_printed_once() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("prog.kla"), GOOD_PROGRAM).unwrap();
+    std::fs::write(dir.path().join("bad.kla"), "_start\nNOTANOP A\nHALT\n").unwrap();
+    std::fs::write(dir.path().join("plain.kla"), GOOD_PROGRAM).unwrap();
+
+    for args in [
+        &["-i", "prog.kla"][..],
+        &["-i", "bad.kla"],
+        &["-i", "prog.kla", "--emulate"],
+        &["-i", "nothere.elf", "--emulate"],
+        &["--emulate-test", "plain.kla"],
+        &["--emulate-test", "nothere"],
+    ] {
+        let out = klausscc(dir.path(), args);
+        assert_eq!(summaries(&out.stderr), 1, "{args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    }
+}
+
+#[test]
+fn an_unreadable_binary_input_is_reported_and_exits_1() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = klausscc(dir.path(), &["-i", "nothere.elf", "--emulate"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("Cannot read binary file nothere.elf"), "stderr: {stderr}");
+    assert!(stderr.contains("Completed with 1 error and 0 warnings"), "stderr: {stderr}");
+}
+
+#[test]
+fn help_prints_no_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = klausscc(dir.path(), &["--help"]);
+    assert_eq!(summaries(&out.stderr), 0);
+}

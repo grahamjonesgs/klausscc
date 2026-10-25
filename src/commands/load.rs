@@ -2,7 +2,7 @@
 //! elf2serial and sending a pre-built `.kbt`.
 
 use super::{send_image, write_binary_file, SendOpts};
-use crate::diag::{print_results, Diagnostics, MessageType};
+use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::write_code_output_file;
 use crate::helper::disassemble_flat_to_pass2;
@@ -13,7 +13,6 @@ use crate::netload::net_load;
 use crate::serial::AUTO_SERIAL;
 use std::fs;
 use std::path::PathBuf;
-use std::time::Instant;
 
 /// Flatten an ELF (or take a flat binary) and stream it to the board over TCP.
 ///
@@ -22,16 +21,9 @@ use std::time::Instant;
 /// is used verbatim with entry defaulting to `0x20`.  The flat image is wrapped
 /// in the heap-header DDR layout (`build_ddr_image`) and sent via `net_load`.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_netload(
-    input: BinaryInput<'_>,
-    board_ip: &str,
-    board_port: u16,
-    msg_list: &mut Diagnostics,
-    start_time: Instant,
-) -> Result<(), Error> {
+pub(crate) fn run_netload(input: BinaryInput<'_>, board_ip: &str, board_port: u16, msg_list: &mut Diagnostics) -> Result<(), Error> {
     if board_ip.is_empty() {
         msg_list.error("net-load requires --ip <board address>");
-        print_results(msg_list, start_time);
         return Err(Error::Usage("net-load requires --ip <board address>"));
     }
 
@@ -40,11 +32,9 @@ pub(crate) fn run_netload(
 
     if let Err(err) = net_load(board_ip, board_port, &loaded.image.to_ddr(), loaded.image.entry, msg_list) {
         msg_list.error(format!("netboot failed: \"{err}\""));
-        print_results(msg_list, start_time);
         return Err(Error::Netboot(err));
     }
 
-    print_results(msg_list, start_time);
     Ok(())
 }
 
@@ -55,7 +45,7 @@ pub(crate) fn run_netload(
 /// `boot_rom.v` (`DEPTH_DW` × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
 /// word 0 (`heap_start` = image byte length) to know how much to copy to DDR.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut Diagnostics, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut Diagnostics) -> Result<(), Error> {
     // mem-out writes a $readmemh image and does not need an entry point.
     let loaded = load_flat(
         BinaryInput {
@@ -70,7 +60,6 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
 
     if let Err(e) = fs::write(mem_file_name, readmemh(&image)) {
         msg_list.error(format!("Failed to write boot ROM image {mem_file_name}: {e}"));
-        print_results(msg_list, start_time);
         return Err(Error::Write {
             path: PathBuf::from(mem_file_name),
             source: e,
@@ -81,7 +70,6 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
         image.len() / 8,
         image.len()
     ));
-    print_results(msg_list, start_time);
     Ok(())
 }
 
@@ -96,13 +84,7 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
 /// The resulting wire string is written to a `.kbt` file or, when `send` names a
 /// serial port, sent to the board exactly like the normal assembly path.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_elf2serial(
-    input: BinaryInput<'_>,
-    kbt_file_name: &str,
-    send: SendOpts<'_>,
-    msg_list: &mut Diagnostics,
-    start_time: Instant,
-) -> Result<(), Error> {
+pub(crate) fn run_elf2serial(input: BinaryInput<'_>, kbt_file_name: &str, send: SendOpts<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let binary_path = input.path;
     // load_flat converts the ELF entry point to a board byte address: the
     // flat buffer starts at ELF VMA `elf_base` but is loaded by the board
@@ -121,7 +103,6 @@ pub(crate) fn run_elf2serial(
     // The image was padded to whole words above, so this only fails on a bug,
     // but an image the board would reject is never written or sent.
     let Some(out) = image.to_kbt(msg_list) else {
-        print_results(msg_list, start_time);
         return Err(Error::Assembly(msg_list.count(MessageType::Error)));
     };
 
@@ -154,18 +135,12 @@ pub(crate) fn run_elf2serial(
     // A bad image (e.g. a checksum error) is never sent to the board.
     let error_count = msg_list.count(MessageType::Error);
     if error_count > 0 {
-        print_results(msg_list, start_time);
         return outcome.and(Err(Error::Assembly(error_count)));
     }
 
     if !send.port.is_empty() {
-        outcome = send_image(&out, send, msg_list, start_time);
-        if send.monitor {
-            return outcome;
-        }
+        outcome = send_image(&out, send, msg_list);
     }
-
-    print_results(msg_list, start_time);
     outcome
 }
 
@@ -176,12 +151,11 @@ pub(crate) fn run_elf2serial(
 /// file and no re-encoding.  With `-m` and no `-s`, the serial port is
 /// auto-detected so a bare `-m` can both send and monitor.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Diagnostics, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let wire = match fs::read_to_string(kbt_path) {
         Ok(contents) => contents,
         Err(e) => {
             msg_list.error(format!("Cannot read kbt file {kbt_path}: {e}"));
-            print_results(msg_list, start_time);
             return Err(Error::Read {
                 path: PathBuf::from(kbt_path),
                 source: e,
@@ -199,16 +173,10 @@ pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Di
 
     if send.port.is_empty() {
         msg_list.warning("Nothing to do: a .kbt input needs a serial port (-s) to send or -m to monitor");
-        print_results(msg_list, start_time);
         return Ok(());
     }
 
     msg_list.info(format!("Sending pre-built image {kbt_path} to board"));
 
-    let outcome = send_image(wire_trimmed, send, msg_list, start_time);
-    if send.monitor {
-        return outcome;
-    }
-    print_results(msg_list, start_time);
-    outcome
+    send_image(wire_trimmed, send, msg_list)
 }

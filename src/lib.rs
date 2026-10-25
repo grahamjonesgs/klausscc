@@ -48,53 +48,32 @@ mod num;
 mod opcodes;
 /// Module to write to serial and read response.
 mod serial;
+use clap::ArgMatches;
 use cli::set_matches;
 use commands::{
-    monitor_failed, run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload,
-    run_test_list, run_test_mode, send_image, write_binary_file, SendOpts,
+    monitor, run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload, run_test_list,
+    run_test_mode, send_image, write_binary_file, SendOpts,
 };
-use diag::{print_results, Diagnostics, MessageType};
+use diag::{Diagnostics, MessageType};
 use error::Error;
 use files::{filename_stem, output_file_name, write_code_output_file};
 use loader::BinaryInput;
 use macros::expand_embedded_macros;
 use netload::NETBOOT_DEFAULT_PORT;
 use opcodes::v2_opcodes_and_macros;
-use serial::{monitor_serial, AUTO_SERIAL};
+use serial::AUTO_SERIAL;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Instant;
 
 /// Run the `klausscc` command with the process's command line.
 ///
-/// Runs the command and turns its outcome into the process exit status: `0` on
-/// success, `2` when tests failed, `3` when a test timed out, `1` otherwise.
-/// Failures are reported to the user where they happen, so nothing more is
-/// printed here.
+/// Runs the command, prints the run summary (the error and warning counts) once
+/// and turns the outcome into the process exit status: `0` on success, `2`
+/// when tests failed, `3` when a test timed out, `1` otherwise.  Failures are
+/// reported to the user where they happen, so nothing more is printed here.
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 #[must_use]
 pub fn run() -> ExitCode {
-    match run_command() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(err) => err.exit_code(),
-    }
-}
-
-/// Read the CLI and call the handler for the selected mode.
-#[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
-fn run_command() -> Result<(), Error> {
-    use std::fs::remove_file;
-
-    use files::output_macros_opcodes_html;
-
-    /* Stream messages as they happen rather than dumping them all at the end:
-     * during a board load the transfer is otherwise silent and every status
-     * line (plus the board's boot log behind it) appears in one burst once the
-     * monitor starts.  print_messages() is then a no-op, so print_results()
-     * prints only the final summary line. */
-    let mut msg_list = Diagnostics::streaming();
-    let start_time = Instant::now();
-
     /* try_get_matches() rather than get_matches(): clap exits with status 2 on
      * a bad command line, which would read as "tests failed". */
     let matches = match set_matches().try_get_matches() {
@@ -103,12 +82,34 @@ fn run_command() -> Result<(), Error> {
             // --help and --version go to stdout and succeed; anything else is a usage error.
             let _ = err.print();
             return if err.use_stderr() {
-                Err(Error::Usage("invalid command line"))
+                Error::Usage("invalid command line").exit_code()
             } else {
-                Ok(())
+                ExitCode::SUCCESS
             };
         }
     };
+
+    /* Stream messages as they happen rather than dumping them all at the end:
+     * during a board load the transfer is otherwise silent and every status
+     * line (plus the board's boot log behind it) appears in one burst once the
+     * monitor starts.  The summary is then just the final counts line. */
+    let mut msg_list = Diagnostics::streaming();
+    let outcome = run_command(&matches, &mut msg_list);
+    // A no-op if the command printed it before handing over the terminal.
+    msg_list.print_summary();
+    match outcome {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => err.exit_code(),
+    }
+}
+
+/// Call the handler for the mode the command line selects.
+#[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
+fn run_command(matches: &ArgMatches, msg_list: &mut Diagnostics) -> Result<(), Error> {
+    use std::fs::remove_file;
+
+    use files::output_macros_opcodes_html;
+
     let input_file_name: String = matches.get_one::<String>("input").cloned().unwrap_or_default();
     let binary_file_name = output_file_name(matches.get_one::<String>("bitcode").map(String::as_str), &input_file_name, "kbt");
     let output_file_name = output_file_name(matches.get_one::<String>("output").map(String::as_str), &input_file_name, "code");
@@ -167,7 +168,7 @@ fn run_command() -> Result<(), Error> {
         } else {
             output_serial_port.as_str()
         };
-        return monitor_serial(monitor_port, debug_flag, &mut msg_list).map_err(|err| monitor_failed(monitor_port, err, &mut msg_list));
+        return monitor(monitor_port, debug_flag, msg_list);
     }
 
     // net-load mode: flatten an ELF (or take a flat binary) and stream it to the
@@ -182,19 +183,22 @@ fn run_command() -> Result<(), Error> {
             .get_one::<String>("port")
             .and_then(|p| p.parse().ok())
             .unwrap_or(NETBOOT_DEFAULT_PORT);
-        run_netload(input, &board_ip, board_port, &mut msg_list, start_time)?;
+        run_netload(input, &board_ip, board_port, msg_list)?;
 
         /* After a successful net-load, optionally monitor the board's UART (and
          * forward keystrokes), exactly like -s -m.  The load itself is over TCP,
          * so the monitor needs its own serial port: honour -s if given, otherwise
-         * auto-detect the first USB serial port (same as -s with no value). */
+         * auto-detect the first USB serial port (same as -s with no value).
+         * The load's summary comes first, as the monitor runs until the user
+         * quits. */
         if monitor_flag {
             let monitor_port = if output_serial_port.is_empty() {
                 AUTO_SERIAL
             } else {
                 output_serial_port.as_str()
             };
-            monitor_serial(monitor_port, debug_flag, &mut msg_list).map_err(|err| monitor_failed(monitor_port, err, &mut msg_list))?;
+            msg_list.print_summary();
+            monitor(monitor_port, debug_flag, msg_list)?;
         }
         return Ok(());
     }
@@ -207,7 +211,7 @@ fn run_command() -> Result<(), Error> {
             .get_one::<String>("mem_file")
             .cloned()
             .unwrap_or_else(|| format!("{mem_stem}.mem"));
-        return run_mem_out(mem_binary_path, &mem_file_name, &mut msg_list, start_time);
+        return run_mem_out(mem_binary_path, &mem_file_name, msg_list);
     }
 
     // ELF / flat binary input: convert directly to the board wire format and
@@ -221,33 +225,33 @@ fn run_command() -> Result<(), Error> {
         if let Some(port) = gdbserver_port {
             if board_flag {
                 #[cfg(feature = "board")]
-                return commands::run_gdbserver_board(input, port, jtag_khz, &binary_file_name, send_opts, &mut msg_list, start_time);
+                return commands::run_gdbserver_board(input, port, jtag_khz, &binary_file_name, send_opts, msg_list);
                 #[cfg(not(feature = "board"))]
-                return Err(commands::board_unsupported(&mut msg_list));
+                return Err(commands::board_unsupported(msg_list));
             }
-            return run_gdbserver(input, port, &mut msg_list, start_time);
+            return run_gdbserver(input, port, msg_list);
         }
         if emulate_flag {
-            return run_emulate_elf(input, trace_file.as_deref(), max_instructions, &mut msg_list, start_time);
+            return run_emulate_elf(input, trace_file.as_deref(), max_instructions, msg_list);
         }
-        return run_elf2serial(input, &binary_file_name, send_opts, &mut msg_list, start_time);
+        return run_elf2serial(input, &binary_file_name, send_opts, msg_list);
     }
 
     // .kbt input: already in board wire format — send and/or monitor verbatim.
     if is_kbt_input {
-        return run_kbt_send(&input_file_name, send_opts, &mut msg_list, start_time);
+        return run_kbt_send(&input_file_name, send_opts, msg_list);
     }
 
     // The opcode table is built in to the assembler (ISA encoding v2) — the old
     // external opcode_select.vh file is gone. Build the opcode + macro lists in code.
-    let (oplist, macro_list_raw) = v2_opcodes_and_macros(&mut msg_list);
-    let macro_list = expand_embedded_macros(macro_list_raw, &mut msg_list);
+    let (oplist, macro_list_raw) = v2_opcodes_and_macros(msg_list);
+    let macro_list = expand_embedded_macros(macro_list_raw, msg_list);
 
     let html_result = output_macros_opcodes_html(
         "klausscc_opcodes_v2".to_owned(),
         &oplist,
         macro_list.clone(),
-        &mut msg_list,
+        msg_list,
         opcodes_flag,
         textmate_flag,
     );
@@ -261,7 +265,7 @@ fn run_command() -> Result<(), Error> {
 
     // Emulator batch-verify mode: assemble + emulate each .kla and check UART.
     if let Some(test_path) = emulate_test_file {
-        return run_emulate_test(&oplist, &macro_list, &test_path, max_instructions, &mut msg_list, start_time);
+        return run_emulate_test(&oplist, &macro_list, &test_path, max_instructions, msg_list);
     }
 
     // Batch test list mode
@@ -273,34 +277,25 @@ fn run_command() -> Result<(), Error> {
             &output_serial_port,
             test_timeout,
             !no_break_flag,
-            &mut msg_list,
+            msg_list,
         );
     }
 
     // Assemble the input file.  A build with errors still comes back, so the
     // .code listing below can show where they are.
-    let Some(assembly) = asm::assemble(&input_file_name, &oplist, &macro_list, &mut msg_list) else {
-        print_results(&msg_list, start_time);
+    let Some(assembly) = asm::assemble(&input_file_name, &oplist, &macro_list, msg_list) else {
         return Err(Error::Assembly(msg_list.count(MessageType::Error).max(1)));
     };
 
     // Emulator mode: build the flat DDR image from the assembled program and run
     // the golden-model. Additive — returns early, leaving normal modes untouched.
     if emulate_flag {
-        return run_emulate(
-            &assembly,
-            &input_file_name,
-            trace_file.as_deref(),
-            max_instructions,
-            &mut msg_list,
-            start_time,
-        );
+        return run_emulate(&assembly, &input_file_name, trace_file.as_deref(), max_instructions, msg_list);
     }
 
     // The .code listing is written even when assembly failed: it shows where.
-    if let Err(result_err) = write_code_output_file(&output_file_name, &assembly.lines, &mut msg_list) {
+    if let Err(result_err) = write_code_output_file(&output_file_name, &assembly.lines, msg_list) {
         msg_list.error(format!("Unable to write to code file {output_file_name}, error {result_err}"));
-        print_results(&msg_list, start_time);
         return Err(Error::Write {
             path: PathBuf::from(output_file_name),
             source: result_err,
@@ -310,22 +305,14 @@ fn run_command() -> Result<(), Error> {
     // Failure from writing the .kbt or sending it; assembly errors are counted below.
     let mut outcome: Result<(), Error> = Ok(());
     if msg_list.count(MessageType::Error) == 0 {
-        if let Some(bin_string) = assembly.to_kbt(&mut msg_list) {
-            outcome = write_binary_file(&mut msg_list, &binary_file_name, &bin_string);
+        if let Some(bin_string) = assembly.to_kbt(msg_list) {
+            outcome = write_binary_file(msg_list, &binary_file_name, &bin_string);
             if outcome.is_ok() && !output_serial_port.is_empty() {
                 if test_flag {
                     // Test mode: send to board, keep port open, then verify UART output
-                    return run_test_mode(
-                        &mut msg_list,
-                        &bin_string,
-                        &output_serial_port,
-                        &input_file_name,
-                        test_timeout,
-                        !no_break_flag,
-                        start_time,
-                    );
+                    return run_test_mode(msg_list, &bin_string, &output_serial_port, &input_file_name, test_timeout, !no_break_flag);
                 }
-                outcome = send_image(&bin_string, send_opts, &mut msg_list, start_time);
+                outcome = send_image(&bin_string, send_opts, msg_list);
                 if monitor_flag {
                     // Monitor mode: the board's UART was monitored after the send.
                     return outcome;
@@ -344,8 +331,6 @@ fn run_command() -> Result<(), Error> {
         msg_list.warning("Not writing new binary file due to assembly errors");
     }
 
-    print_results(&msg_list, start_time);
-
     // A failed build is a failure: don't go on to monitor a stale program.
     outcome?;
     let error_count = msg_list.count(MessageType::Error);
@@ -359,7 +344,8 @@ fn run_command() -> Result<(), Error> {
             msg_list.error("Monitor flag (-m) requires a serial port (-s)");
             return Err(Error::Usage("monitor flag (-m) requires a serial port (-s)"));
         }
-        monitor_serial(&output_serial_port, debug_flag, &mut msg_list).map_err(|err| monitor_failed(&output_serial_port, err, &mut msg_list))?;
+        msg_list.print_summary();
+        monitor(&output_serial_port, debug_flag, msg_list)?;
     }
 
     // Check test flag requires serial port

@@ -82,7 +82,7 @@ pub(crate) enum MessageType {
     Warning,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 /// The messages reported so far.
 pub(crate) struct Diagnostics {
     /// The messages, in the order they were reported.
@@ -91,23 +91,32 @@ pub(crate) struct Diagnostics {
     /// than collected and dumped later by `print_messages`.  Lets the user see
     /// load progress in real time instead of one burst after a silent transfer.
     live: bool,
+    /// When the run started, for the summary's elapsed time.
+    started: Instant,
+    /// The summary has been printed (it is printed at most once).
+    summary_printed: bool,
+}
+
+impl Default for Diagnostics {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Diagnostics {
     /// An empty list that collects its messages for [`print_messages`].
-    pub(crate) const fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             list: Vec::new(),
             live: false,
+            started: Instant::now(),
+            summary_printed: false,
         }
     }
 
     /// An empty list that prints each message (on stderr) as it is reported.
-    pub(crate) const fn streaming() -> Self {
-        Self {
-            list: Vec::new(),
-            live: true,
-        }
+    pub(crate) fn streaming() -> Self {
+        Self { live: true, ..Self::new() }
     }
 
     /// The messages reported so far, oldest first.
@@ -169,6 +178,35 @@ impl Diagnostics {
         }
         self.list.push(msg);
     }
+
+    /// Print the run summary: the error and warning counts and the time since
+    /// the list was made (after the collected messages, for a list that is not
+    /// streaming).
+    ///
+    /// Only the first call prints.  `run` prints the summary when the command
+    /// is done; a command that then hands the terminal to something that runs
+    /// until the user stops it (the serial monitor, a debugger session) or
+    /// prints a report of its own prints it before that.
+    #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
+    pub(crate) fn print_summary(&mut self) {
+        if std::mem::replace(&mut self.summary_printed, true) {
+            return;
+        }
+        print_messages(self);
+        eprintln!("{}", self.summary());
+    }
+
+    /// The summary line [`print_summary`](Self::print_summary) prints.
+    fn summary(&self) -> String {
+        let errors = self.count(MessageType::Error);
+        let warnings = self.count(MessageType::Warning);
+        format!(
+            "Completed with {errors} error{} and {warnings} warning{} in {:.3} seconds",
+            if errors == 1 { "" } else { "s" },
+            if warnings == 1 { "" } else { "s" },
+            self.started.elapsed().as_secs_f64(),
+        )
+    }
 }
 
 /// Print out all messages.
@@ -184,22 +222,6 @@ pub(crate) fn print_messages(msg_list: &Diagnostics) {
     for msg in &msg_list.list {
         println!("{msg}");
     }
-}
-
-/// Prints results of assembly.
-///
-/// Takes the message list and start time and prints the results to the users.
-#[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
-pub(crate) fn print_results(msg_list: &Diagnostics, start_time: Instant) {
-    print_messages(msg_list);
-    let time_taken: f64 = start_time.elapsed().as_secs_f64();
-    let errors = msg_list.count(MessageType::Error);
-    let warnings = msg_list.count(MessageType::Warning);
-    eprintln!(
-        "Completed with {errors} error{} and {warnings} warning{} in {time_taken:.3} seconds",
-        if errors == 1 { "" } else { "s" },
-        if warnings == 1 { "" } else { "s" },
-    );
 }
 
 #[cfg(test)]
@@ -244,6 +266,21 @@ mod tests {
         assert_eq!(msg_list.count(MessageType::Warning), 2);
         assert_eq!(msg_list.count(MessageType::Error), 2);
         assert_eq!(msg_list.count(MessageType::Information), 1);
+    }
+
+    #[test]
+    fn summary_counts_errors_and_warnings() {
+        let mut msg_list = Diagnostics::new();
+        let summary = msg_list.summary();
+        assert!(summary.starts_with("Completed with 0 errors and 0 warnings in "), "{summary}");
+        assert!(summary.ends_with(" seconds"), "{summary}");
+        msg_list.error("e");
+        msg_list.warning("w");
+        assert!(msg_list.summary().starts_with("Completed with 1 error and 1 warning in "));
+        msg_list.error("e");
+        msg_list.warning("w");
+        msg_list.info("i");
+        assert!(msg_list.summary().starts_with("Completed with 2 errors and 2 warnings in "));
     }
 
     /// A message at 12:34:56.789 with the given location.

@@ -4,12 +4,11 @@
 use super::load::run_elf2serial;
 #[cfg(feature = "board")]
 use super::SendOpts;
-use crate::diag::{print_results, Diagnostics};
+use crate::diag::Diagnostics;
 use crate::error::Error;
 use crate::layout::CODE_BASE;
 use crate::loader::{load_flat, BinaryInput, Loaded};
 use crate::{emulate, gdbserver};
-use std::time::Instant;
 
 /// Debug an ELF (or flat binary) on the emulator over the GDB remote protocol.
 ///
@@ -17,7 +16,7 @@ use std::time::Instant;
 /// program at 0x20), so ELF addresses equal emulator addresses when the ELF is
 /// linked at 0x20 — the normal `klausscpu.ld` layout.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Diagnostics, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let binary_path = input.path;
     let Loaded { image, elf } = load_flat(input, msg_list)?;
     let code_base = u64::from(CODE_BASE);
@@ -29,7 +28,7 @@ pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Di
             ));
         }
     }
-    print_results(msg_list, start_time);
+    msg_list.print_summary();
 
     let cpu = emulate::Cpu::new(&image.to_ddr(), image.entry);
     match gdbserver::serve(cpu, port) {
@@ -58,7 +57,6 @@ pub(crate) fn run_gdbserver_board(
     kbt_file_name: &str,
     send: SendOpts<'_>,
     msg_list: &mut Diagnostics,
-    start_time: Instant,
 ) -> Result<(), Error> {
     use crate::gdbserver_board;
 
@@ -79,12 +77,14 @@ pub(crate) fn run_gdbserver_board(
             ..send
         };
         let mut load = || {
-            run_elf2serial(input, kbt_file_name, send, msg_list, start_time)
-                .map_err(|err| format!("loading {} over {} failed ({err})", input.path, send.port))
+            let loaded = run_elf2serial(input, kbt_file_name, send, msg_list);
+            msg_list.print_summary();
+            loaded.map_err(|err| format!("loading {} over {} failed ({err})", input.path, send.port))
         };
         gdbserver_board::attach(&mut board, Some(&mut load)).map_err(fail)?
     };
     eprintln!("klausscc gdbserver: core 1 halted at 0x{pc:08X}");
+    msg_list.print_summary();
 
     match gdbserver_board::serve(board, port) {
         Ok(summary) => {

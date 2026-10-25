@@ -4,7 +4,7 @@
 
 use super::test_runner::read_test_list;
 use crate::asm::{assemble, Assembly};
-use crate::diag::{print_results, Diagnostics, MessageType};
+use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::filename_stem;
 use crate::helper::{human_bytes, parse_expected_uart_values};
@@ -14,7 +14,6 @@ use crate::opcodes::Opcode;
 use crate::{emulate, macros};
 use std::fs;
 use std::path::PathBuf;
-use std::time::Instant;
 
 /// Open the destination for the emulator's per-instruction trace.
 ///
@@ -62,16 +61,8 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
 /// prints the summary, then the instruction count, the stop reason and the
 /// captured UART output on stdout.
 #[cfg(not(tarpaulin_include))]
-fn emulate_and_report(
-    image: &Image,
-    trace_file: Option<&str>,
-    max_instructions: u64,
-    msg_list: &mut Diagnostics,
-    start_time: Instant,
-) -> Result<(), Error> {
-    let mut trace_writer = open_trace_writer(trace_file, msg_list).inspect_err(|_| {
-        print_results(msg_list, start_time);
-    })?;
+fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions: u64, msg_list: &mut Diagnostics) -> Result<(), Error> {
+    let mut trace_writer = open_trace_writer(trace_file, msg_list)?;
     let result = emulate::emulate_image_to_writer(
         &image.to_ddr(),
         image.entry,
@@ -80,7 +71,7 @@ fn emulate_and_report(
     );
     finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
 
-    print_results(msg_list, start_time);
+    msg_list.print_summary();
     println!(
         "--- Emulator finished: {} instructions, stop = {:?} ---",
         result.instructions, result.stop
@@ -107,16 +98,13 @@ pub(crate) fn run_emulate(
     trace_file: Option<&str>,
     max_instructions: u64,
     msg_list: &mut Diagnostics,
-    start_time: Instant,
 ) -> Result<(), Error> {
     if msg_list.has_errors() {
         msg_list.error("Not emulating due to assembly errors");
-        print_results(msg_list, start_time);
         return Err(Error::Assembly(msg_list.count(MessageType::Error)));
     }
     let Some(image) = assembly.image() else {
         msg_list.error("No _start address found - cannot emulate");
-        print_results(msg_list, start_time);
         return Err(Error::Assembly(1));
     };
     msg_list.info(format!(
@@ -124,7 +112,7 @@ pub(crate) fn run_emulate(
         image.bytes.len(),
         image.entry
     ));
-    emulate_and_report(&image, trace_file, max_instructions, msg_list, start_time)
+    emulate_and_report(&image, trace_file, max_instructions, msg_list)
 }
 
 /// Run the emulator on an ELF or flat binary input (`--emulate` with binary input).
@@ -138,7 +126,6 @@ pub(crate) fn run_emulate_elf(
     trace_file: Option<&str>,
     max_instructions: u64,
     msg_list: &mut Diagnostics,
-    start_time: Instant,
 ) -> Result<(), Error> {
     let binary_path = input.path;
     let Loaded { image, elf } = load_flat(input, msg_list)?;
@@ -153,7 +140,7 @@ pub(crate) fn run_emulate_elf(
         msg_list.info(format!("Emulating flat binary {binary_path}"));
     }
 
-    emulate_and_report(&image, trace_file, max_instructions, msg_list, start_time)
+    emulate_and_report(&image, trace_file, max_instructions, msg_list)
 }
 
 /// Batch-verify the emulator against `.kla` files with expected `// ` UART values.
@@ -168,7 +155,6 @@ pub(crate) fn run_emulate_test(
     test_path: &str,
     max_instructions: u64,
     msg_list: &mut Diagnostics,
-    start_time: Instant,
 ) -> Result<(), Error> {
     use std::path::Path;
 
@@ -194,7 +180,6 @@ pub(crate) fn run_emulate_test(
 
     if files.is_empty() {
         msg_list.error(format!("No .kla files found for emulate-test at {test_path}"));
-        print_results(msg_list, start_time);
         return Err(Error::NoTests(PathBuf::from(test_path)));
     }
 
@@ -234,10 +219,8 @@ pub(crate) fn run_emulate_test(
     }
     if total_files == 0 {
         msg_list.error(format!("No files with expected UART values found for emulate-test at {test_path}"));
-        print_results(msg_list, start_time);
         return Err(Error::NoTests(PathBuf::from(test_path)));
     }
-    print_results(msg_list, start_time);
     if total_pass == total_files {
         Ok(())
     } else {

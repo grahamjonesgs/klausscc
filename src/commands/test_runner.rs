@@ -3,7 +3,7 @@
 
 use super::{send_failed, write_binary_file};
 use crate::asm::assemble;
-use crate::diag::{print_messages, print_results, Diagnostics};
+use crate::diag::{print_messages, Diagnostics};
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::parse_expected_uart_values;
@@ -12,7 +12,6 @@ use crate::opcodes::Opcode;
 use crate::serial::{run_test_monitor, write_to_board_keep_port};
 use std::fs;
 use std::path::PathBuf;
-use std::time::Instant;
 
 /// Result of a single test in a batch run.
 struct BatchTestResult {
@@ -53,14 +52,12 @@ pub(crate) fn run_test_mode(
     input_file_name: &str,
     test_timeout: u64,
     send_break: bool,
-    start_time: Instant,
 ) -> Result<(), Error> {
     // Parse expected values from the raw source file
     let raw_lines: Vec<String> = match fs::read_to_string(input_file_name) {
         Ok(source) => source.lines().map(String::from).collect(),
         Err(e) => {
             msg_list.error(format!("Cannot read {input_file_name}: {e}"));
-            print_results(msg_list, start_time);
             return Err(Error::Read {
                 path: PathBuf::from(input_file_name),
                 source: e,
@@ -71,7 +68,6 @@ pub(crate) fn run_test_mode(
 
     if expected_values.is_empty() {
         msg_list.error("No expected UART values found in source file comments");
-        print_results(msg_list, start_time);
         return Err(Error::NoTests(PathBuf::from(input_file_name)));
     }
 
@@ -84,10 +80,10 @@ pub(crate) fn run_test_mode(
             msg_list.info("Wrote to serial port");
             port
         }
-        Err(err) => return Err(send_failed(output_serial_port, err, msg_list, start_time)),
+        Err(err) => return Err(send_failed(output_serial_port, err, msg_list)),
     };
 
-    print_results(msg_list, start_time);
+    msg_list.print_summary();
 
     // Run test verification.  A serial read error is a failure of its own
     // (exit 1), not a timeout (exit 3); run_test_monitor has reported it.

@@ -25,17 +25,24 @@ pub(crate) use gdb::run_gdbserver_board;
 pub(crate) use load::{run_elf2serial, run_kbt_send, run_mem_out, run_netload};
 pub(crate) use test_runner::{run_test_list, run_test_mode};
 
-use crate::diag::{print_results, Diagnostics, MessageType};
+use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::write_binary_output_file;
-use crate::serial::{monitor_serial_port, write_to_board, write_to_board_keep_port};
+use crate::serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port};
 use std::io;
 use std::path::PathBuf;
-use std::time::Instant;
+
+/// Monitor the board's UART on `port` (and forward keystrokes) until the user quits.
+///
+/// A monitor that stops on an error is reported and returned as [`Error::Serial`].
+#[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
+pub(crate) fn monitor(port: &str, debug: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
+    monitor_serial(port, debug, msg_list).map_err(|err| monitor_failed(port, err, msg_list))
+}
 
 /// Report that the serial monitor stopped on an error, and make it the command's failure.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn monitor_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics) -> Error {
+fn monitor_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics) -> Error {
     msg_list.warning(format!("Serial monitor stopped: \"{err}\""));
     Error::Serial {
         port: port.to_owned(),
@@ -45,9 +52,8 @@ pub(crate) fn monitor_failed(port: &str, err: io::Error, msg_list: &mut Diagnost
 
 /// Report a failed send to the board's serial port, and make it the command's failure.
 #[cfg(not(tarpaulin_include))]
-fn send_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics, start_time: Instant) -> Error {
+fn send_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics) -> Error {
     msg_list.error(format!("Failed to write to serial port, error \"{err}\""));
-    print_results(msg_list, start_time);
     Error::Serial {
         port: port.to_owned(),
         source: err,
@@ -69,21 +75,21 @@ pub(crate) struct SendOpts<'a> {
 
 /// Send the `.kbt` wire string `wire` to the board over `opts.port`.
 ///
-/// With `opts.monitor` the port stays open: once the image is sent the summary
-/// is printed and the board's UART is monitored until the user quits, and the
-/// monitor's outcome is returned.  Otherwise this returns as soon as the image
-/// is sent, and the caller prints the summary.  A failed send is reported and
-/// returned as [`Error::Serial`].
+/// With `opts.monitor` the port stays open: once the image is sent the run
+/// summary is printed and the board's UART is monitored until the user quits,
+/// and the monitor's outcome is returned.  Otherwise this returns as soon as
+/// the image is sent.  A failed send is reported and returned as
+/// [`Error::Serial`].
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnostics, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
     if opts.monitor {
         return match write_to_board_keep_port(wire, opts.port, opts.send_break, true, msg_list) {
             Ok(port) => {
                 msg_list.info("Wrote to serial port");
-                print_results(msg_list, start_time);
+                msg_list.print_summary();
                 monitor_serial_port(port, opts.debug, msg_list).map_err(|err| monitor_failed(opts.port, err, msg_list))
             }
-            Err(err) => Err(send_failed(opts.port, err, msg_list, start_time)),
+            Err(err) => Err(send_failed(opts.port, err, msg_list)),
         };
     }
 
@@ -97,13 +103,7 @@ pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnost
             msg_list.info("Wrote to serial port");
             Ok(())
         }
-        Err(err) => {
-            msg_list.error(format!("Failed to write to serial port, error \"{err}\""));
-            Err(Error::Serial {
-                port: opts.port.to_owned(),
-                source: err,
-            })
-        }
+        Err(err) => Err(send_failed(opts.port, err, msg_list)),
     }
 }
 
