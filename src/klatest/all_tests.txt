@@ -1,5 +1,5 @@
 // Klauss CPU test suite
-// Run with: klausscc -c opcode_select.vh -L all_tests.txt -s
+// Run with: klausscc -L all_tests.txt -s
 
 // Register and arithmetic
 test_regs.kla

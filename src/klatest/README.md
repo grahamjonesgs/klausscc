@@ -22,16 +22,16 @@ picocom /dev/ttyUSB0 -b 115200
 
 ## Running Tests
 
-Assemble and upload each test individually:
+Assemble and upload each test individually (the ISA v2 opcode table is built in, so no opcode file is needed):
 
 ```sh
-klausscc -c ../klacode/opcode_select.vh -i test_regs.kla -s /dev/ttyUSB0
+klausscc -i test_regs.kla -s /dev/ttyUSB0
 ```
 
 Or assemble without uploading to check for assembly errors:
 
 ```sh
-klausscc -c ../klacode/opcode_select.vh -i test_regs.kla
+klausscc -i test_regs.kla
 ```
 
 ## Test List
