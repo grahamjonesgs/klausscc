@@ -20,7 +20,9 @@
 //! On detach the server removes its breakpoints, clears "attached" and lets
 //! the program run on.
 
-use crate::gdbserver::{access_last_addr, KlaussCpuArch, KlaussRegId, KlaussRegs, HW_BREAKPOINTS, HW_WATCHPOINTS, TRAP_WORD, TRIPLE};
+use crate::gdbserver::{
+    accept, access_last_addr, GdbError, KlaussCpuArch, KlaussRegId, KlaussRegs, HW_BREAKPOINTS, HW_WATCHPOINTS, TRAP_WORD, TRIPLE,
+};
 use crate::jtag::{DmiReq, Jtag};
 use crate::layout::is_mmio;
 use gdbstub::common::{Endianness, Pid, Signal};
@@ -39,7 +41,6 @@ use gdbstub::target::ext::monitor_cmd::{outputln, ConsoleOutput, MonitorCmd, Mon
 use gdbstub::target::ext::process_info::{ProcessInfo, ProcessInfoOps, ProcessInfoResponse};
 use gdbstub::target::{Target, TargetError, TargetResult};
 use std::collections::BTreeMap;
-use std::net::TcpListener;
 use std::time::{Duration, Instant};
 
 // ---- debug module registers (debug_module.sv) ------------------------------
@@ -821,13 +822,8 @@ pub(crate) fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> Result<
 }
 
 /// Serve one debugging session for the halted `board` on `127.0.0.1:port`.
-pub(crate) fn serve(board: Board, port: u16) -> Result<String, String> {
-    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("cannot listen on port {port}: {e}"))?;
-    eprintln!("klausscc gdbserver: waiting for a debugger on 127.0.0.1:{port}");
-    let (stream, peer) = listener.accept().map_err(|e| format!("accept failed: {e}"))?;
-    eprintln!("klausscc gdbserver: debugger connected from {peer}");
-    let _ = stream.set_nodelay(true);
-    let conn: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(stream);
+pub(crate) fn serve(board: Board, port: u16) -> Result<String, GdbError> {
+    let conn: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(accept(port)?);
 
     let mut target = BoardTarget::new(board);
     let result = GdbStub::new(conn).run_blocking::<BoardEventLoop>(&mut target);
@@ -836,7 +832,7 @@ pub(crate) fn serve(board: Board, port: u16) -> Result<String, String> {
         Ok(DisconnectReason::TargetExited(code)) => Ok(format!("program halted (exit status {code})")),
         Ok(DisconnectReason::TargetTerminated(sig)) => Ok(format!("program terminated with {sig}")),
         Ok(DisconnectReason::Kill) => Ok("debugger killed the session".to_owned()),
-        Err(e) => Err(format!("gdbstub error: {e}")),
+        Err(e) => Err(GdbError::Session(e.to_string())),
     };
     if let Err(e) = target.detach() {
         eprintln!("klausscc gdbserver: detach: {e}");

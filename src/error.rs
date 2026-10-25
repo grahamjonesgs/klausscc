@@ -8,6 +8,7 @@
 //! [`run`](crate::run) only prints the run summary and turns the error into an
 //! exit code.
 
+use crate::gdbserver::GdbError;
 use crate::netload::NetbootError;
 use std::fmt;
 use std::io;
@@ -58,6 +59,10 @@ pub(crate) enum Error {
     },
     /// Loading the board over the network failed.
     Netboot(NetbootError),
+    /// Serving a debugger failed.
+    Gdb(GdbError),
+    /// The opcode and macro list (`-O`, `-t`) could not be written.
+    OpcodeList(io::Error),
     /// Tests ran, and some of them failed or timed out.
     TestsFailed {
         /// Number of failed tests (or failed expected values, for a single test).
@@ -71,7 +76,8 @@ pub(crate) enum Error {
     NoTests(PathBuf),
     /// The command line asks for something that cannot be done.
     Usage(&'static str),
-    /// Any other failure, already described in the message.
+    /// A board debugging failure, already described in the message.
+    #[cfg(feature = "board")]
     Other(String),
 }
 
@@ -106,11 +112,14 @@ impl fmt::Display for Error {
             Self::Serial { port, source } => write!(f, "failed to write to serial port {port}: {source}"),
             Self::SerialRead { port, source } => write!(f, "failed to read from serial port {port}: {source}"),
             Self::Netboot(err) => write!(f, "netboot failed: {err}"),
+            Self::Gdb(err) => write!(f, "gdbserver: {err}"),
+            Self::OpcodeList(err) => write!(f, "writing opcode list: {err}"),
             Self::TestsFailed { failed, total, timed_out } => {
                 write!(f, "{failed} of {total} tests failed{}", if *timed_out { " (timed out)" } else { "" })
             }
             Self::NoTests(path) => write!(f, "no tests with expected UART values found at {}", path.display()),
             Self::Usage(text) => f.write_str(text),
+            #[cfg(feature = "board")]
             Self::Other(text) => f.write_str(text),
         }
     }
@@ -119,10 +128,21 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Read { source, .. } | Self::Write { source, .. } | Self::Serial { source, .. } | Self::SerialRead { source, .. } => Some(source),
+            Self::Read { source, .. }
+            | Self::Write { source, .. }
+            | Self::Serial { source, .. }
+            | Self::SerialRead { source, .. }
+            | Self::OpcodeList(source) => Some(source),
             Self::Netboot(err) => Some(err),
+            Self::Gdb(err) => Some(err),
             _ => None,
         }
+    }
+}
+
+impl From<GdbError> for Error {
+    fn from(err: GdbError) -> Self {
+        Self::Gdb(err)
     }
 }
 
@@ -180,9 +200,10 @@ mod tests {
                 source: io::Error::from(io::ErrorKind::BrokenPipe),
             },
             Error::Netboot(NetbootError::Rejected(1)),
+            Error::Gdb(GdbError::Accept(io::Error::from(io::ErrorKind::ConnectionAborted))),
+            Error::OpcodeList(io::Error::from(io::ErrorKind::PermissionDenied)),
             Error::NoTests(PathBuf::from("tests")),
             Error::Usage("needs -s"),
-            Error::Other("gdbserver failed".to_owned()),
         ];
         for err in &errors {
             assert_eq!(err.code(), 1, "{err}");

@@ -260,7 +260,7 @@ fn run_command(matches: &ArgMatches, msg_list: &mut Diagnostics) -> Result<(), E
     }
 
     if textmate_flag || opcodes_flag {
-        return html_result.map_err(|err| Error::Other(format!("writing opcode list: {err}")));
+        return html_result.map_err(Error::OpcodeList);
     }
 
     // Emulator batch-verify mode: assemble + emulate each .kla and check UART.

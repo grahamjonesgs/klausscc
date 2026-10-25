@@ -51,8 +51,9 @@ use gdbstub::target::ext::host_info::{HostInfo, HostInfoOps, HostInfoResponse};
 use gdbstub::target::ext::monitor_cmd::{outputln, ConsoleOutput, MonitorCmd, MonitorCmdOps};
 use gdbstub::target::ext::process_info::{ProcessInfo, ProcessInfoOps, ProcessInfoResponse};
 use gdbstub::target::{Target, TargetError, TargetResult};
-use std::io::{Read as _, Write as _};
-use std::net::TcpListener;
+use std::fmt;
+use std::io::{self, Read as _, Write as _};
+use std::net::{TcpListener, TcpStream};
 use std::num::NonZeroUsize;
 use std::sync::mpsc;
 
@@ -663,16 +664,56 @@ pub(crate) fn spawn_stdin_reader() -> mpsc::Receiver<u8> {
     rx
 }
 
+/// Why a debugging session could not be served.
+#[derive(Debug)]
+pub(crate) enum GdbError {
+    /// The server could not listen on its port.
+    Listen {
+        /// The TCP port asked for.
+        port: u16,
+        /// The underlying I/O error.
+        source: io::Error,
+    },
+    /// Waiting for the debugger to connect failed.
+    Accept(io::Error),
+    /// The session ended on an error: the protocol, the connection or the target.
+    Session(String),
+}
+
+impl fmt::Display for GdbError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Listen { port, source } => write!(f, "cannot listen on port {port}: {source}"),
+            Self::Accept(source) => write!(f, "accept failed: {source}"),
+            Self::Session(text) => write!(f, "gdbstub error: {text}"),
+        }
+    }
+}
+
+impl std::error::Error for GdbError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Listen { source, .. } | Self::Accept(source) => Some(source),
+            Self::Session(_) => None,
+        }
+    }
+}
+
+/// Listen on `127.0.0.1:port` and wait for one debugger to connect.
+pub(crate) fn accept(port: u16) -> Result<TcpStream, GdbError> {
+    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|source| GdbError::Listen { port, source })?;
+    eprintln!("klausscc gdbserver: waiting for a debugger on 127.0.0.1:{port}");
+    let (stream, peer) = listener.accept().map_err(GdbError::Accept)?;
+    eprintln!("klausscc gdbserver: debugger connected from {peer}");
+    let _ = stream.set_nodelay(true);
+    Ok(stream)
+}
+
 /// Serve one debugging session for `cpu` on `127.0.0.1:port`.
 ///
 /// Returns a one-line description of how the session ended.
-pub(crate) fn serve(cpu: Cpu, port: u16) -> Result<String, String> {
-    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("cannot listen on port {port}: {e}"))?;
-    eprintln!("klausscc gdbserver: waiting for a debugger on 127.0.0.1:{port}");
-    let (stream, peer) = listener.accept().map_err(|e| format!("accept failed: {e}"))?;
-    eprintln!("klausscc gdbserver: debugger connected from {peer}");
-    let _ = stream.set_nodelay(true);
-    let conn: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(stream);
+pub(crate) fn serve(cpu: Cpu, port: u16) -> Result<String, GdbError> {
+    let conn: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(accept(port)?);
 
     let mut target = EmuTarget::new(cpu, spawn_stdin_reader());
     let result = GdbStub::new(conn).run_blocking::<EmuEventLoop>(&mut target);
@@ -682,13 +723,25 @@ pub(crate) fn serve(cpu: Cpu, port: u16) -> Result<String, String> {
         Ok(DisconnectReason::TargetExited(code)) => Ok(format!("program halted (exit status {code})")),
         Ok(DisconnectReason::TargetTerminated(sig)) => Ok(format!("program terminated with {sig}")),
         Ok(DisconnectReason::Kill) => Ok("debugger killed the program".to_owned()),
-        Err(e) => Err(format!("gdbstub error: {e}")),
+        Err(e) => Err(GdbError::Session(e.to_string())),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gdb_errors_name_the_problem() {
+        use std::error::Error as _;
+        let listen = GdbError::Listen {
+            port: 1234,
+            source: io::Error::from(io::ErrorKind::AddrInUse),
+        };
+        assert!(listen.to_string().starts_with("cannot listen on port 1234: "), "{listen}");
+        assert!(listen.source().is_some());
+        assert_eq!(GdbError::Session("bad packet".to_owned()).to_string(), "gdbstub error: bad packet");
+    }
 
     #[test]
     fn access_last_addr_rejects_ranges_past_the_top() {

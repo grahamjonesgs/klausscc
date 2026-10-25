@@ -38,7 +38,7 @@ pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Di
         }
         Err(e) => {
             eprintln!("klausscc gdbserver: {e}");
-            Err(Error::Other(e))
+            Err(Error::Gdb(e))
         }
     }
 }
@@ -91,7 +91,10 @@ pub(crate) fn run_gdbserver_board(
             eprintln!("klausscc gdbserver: {summary}");
             Ok(())
         }
-        Err(e) => Err(fail(e)),
+        Err(e) => {
+            eprintln!("klausscc gdbserver: {e}");
+            Err(Error::Gdb(e))
+        }
     }
 }
 
