@@ -4,7 +4,7 @@ use std::time::Instant;
 
 #[derive(Debug)]
 /// Struct for message.
-pub struct Message {
+pub(crate) struct Message {
     /// File name of file causing message if exists.
     pub file_name: Option<String>,
     /// Message type.
@@ -18,7 +18,7 @@ pub struct Message {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Enum for message type.
-pub enum MessageType {
+pub(crate) enum MessageType {
     /// Error message.
     Error,
     /// Information message.
@@ -29,7 +29,7 @@ pub enum MessageType {
 
 #[derive(Debug, Default)]
 /// Struct for list of messages.
-pub struct MsgList {
+pub(crate) struct MsgList {
     /// Vector of messages.
     pub list: Vec<Message>,
     /// When true, each pushed message is printed immediately (streamed) rather
@@ -41,7 +41,7 @@ pub struct MsgList {
 /// Implementation of `MsgList`.
 impl MsgList {
     /// Create new `MsgList`.
-    pub const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
         Self {
             list: Vec::new(),
             live: false,
@@ -49,18 +49,18 @@ impl MsgList {
     }
 
     /// Returns the number of messages of type `msg_type` in `MsgList`.
-    pub fn number_by_type(&self, msg_type: MessageType) -> usize {
+    pub(crate) fn number_by_type(&self, msg_type: MessageType) -> usize {
         self.list.iter().filter(|x| x.level == msg_type).count()
     }
 
     /// True if any error has been reported.
-    pub fn has_errors(&self) -> bool {
+    pub(crate) fn has_errors(&self) -> bool {
         self.list.iter().any(|x| x.level == MessageType::Error)
     }
 
     /// Push message to `MsgList`.  In live mode the message is also printed
     /// immediately so the user sees progress in real time.
-    pub fn push(&mut self, name: String, line_number: Option<u32>, file_name: Option<String>, msg_type: MessageType) {
+    pub(crate) fn push(&mut self, name: String, line_number: Option<u32>, file_name: Option<String>, msg_type: MessageType) {
         self.list.push(Message {
             text: name,
             line_number,
@@ -122,7 +122,7 @@ fn format_message(msg: &Message) -> String {
 ///
 /// Prints all the message in passed `MsgList` vector to terminal with coloured messages.
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
-pub fn print_messages(msg_list: &MsgList) {
+pub(crate) fn print_messages(msg_list: &MsgList) {
     /* In live mode every message was already printed as it was pushed, so
      * printing them again here would duplicate the whole log. */
     if msg_list.live {
@@ -137,7 +137,7 @@ pub fn print_messages(msg_list: &MsgList) {
 ///
 /// Takes the message list and start time and prints the results to the users.
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
-pub fn print_results(msg_list: &MsgList, start_time: Instant) {
+pub(crate) fn print_results(msg_list: &MsgList, start_time: Instant) {
     print_messages(msg_list);
     let time_taken: f64 = start_time.elapsed().as_secs_f64();
     eprintln!(

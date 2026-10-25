@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 /// v2 layout is `word0 = template | rd<<8 | rs1<<4 | rs2` plus `N<<15` for the
 /// embedded shift/bit count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Operand {
+pub(crate) enum Operand {
     /// Destination register → word0[11:8].
     Rd,
     /// First source / base register → word0[7:4].
@@ -53,7 +53,7 @@ fn parse_simm(token: &str) -> Option<i128> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Struct for opcode.
-pub struct Opcode {
+pub(crate) struct Opcode {
     /// Comment from opcode definition file.
     pub comment: String,
     /// Hexadecimal opcode template (word 0, register/count fields = 0).
@@ -83,7 +83,7 @@ fn parse_imm64(token: &str) -> Option<u64> {
 ///
 /// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values.
 /// Converts label names to hex addresses.
-pub fn add_arguments(opcodes: &[Opcode], line: &str, msg_list: &mut MsgList, line_number: u32, filename: &str, labels: &[Label]) -> String {
+pub(crate) fn add_arguments(opcodes: &[Opcode], line: &str, msg_list: &mut MsgList, line_number: u32, filename: &str, labels: &[Label]) -> String {
     let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
     let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
     let mut arguments = String::default();
@@ -165,7 +165,7 @@ fn return_opcode_struct<'a>(line: &str, opcodes: &'a [Opcode]) -> Option<&'a Opc
 /// `doc/ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place `rd==rs1`, embedded
 /// `N<<15`).  Opcodes without a layout fall back to the legacy trailing-nibble
 /// scheme (used by `.vh`-parsed tables).
-pub fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_list: &mut MsgList, line_number: u32) -> String {
+pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_list: &mut MsgList, line_number: u32) -> String {
     let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
         msg_list.push(
             format!("Opcode not found - \"{line}\""),
@@ -369,7 +369,7 @@ fn hex_nibble_to_reg(nibble: u32) -> &'static str {
 /// Returns `(mnemonic_with_registers, variables_count)` or `None` if no match.
 /// Register operands are extracted from the low nibbles of `word` in the same
 /// order they appear in source (reg1 at the highest of the occupied nibbles).
-pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> {
+pub(crate) fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> {
     for opcode in opcodes {
         if opcode.ops.is_empty() {
             // Legacy path: '?' in hex_code marks a wildcard nibble.
@@ -473,7 +473,15 @@ pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> 
 /// The target token is a label (`name:`) or an absolute address. Out-of-range
 /// or misaligned targets are reported as errors and yield 0.
 #[allow(clippy::too_many_arguments, reason = "mirrors add_arguments' reporting context")]
-pub fn pc_relative_bits(opcodes: &[Opcode], line: &str, pc: u32, labels: &[Label], msg_list: &mut MsgList, line_number: u32, filename: &str) -> u32 {
+pub(crate) fn pc_relative_bits(
+    opcodes: &[Opcode],
+    line: &str,
+    pc: u32,
+    labels: &[Label],
+    msg_list: &mut MsgList,
+    line_number: u32,
+    filename: &str,
+) -> u32 {
     let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
         return 0;
     };
@@ -509,7 +517,7 @@ pub fn pc_relative_bits(opcodes: &[Opcode], line: &str, pc: u32, labels: &[Label
 /// Returns number of args for opcode.
 ///
 /// From opcode name, option of number of arguments for opcode, or None.
-pub fn num_arguments(opcodes: &[Opcode], line: &str) -> Option<u32> {
+pub(crate) fn num_arguments(opcodes: &[Opcode], line: &str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -545,7 +553,7 @@ fn num_registers(opcodes: &[Opcode], line: &str) -> Option<u32> {
     dead_code,
     reason = "legacy `.vh` opcode-format parser; the v2 table is built in code but this is kept for backward compatibility and is exercised by unit tests"
 )]
-pub fn opcode_from_string(input_line: &str) -> Option<Opcode> {
+pub(crate) fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     let pos_comment: usize;
     let pos_end_comment: usize;
 
@@ -726,7 +734,7 @@ fn op(name: &str, template: u32, ops: &[Operand]) -> Opcode {
 /// (`rd[11:8]`, `rs1[7:4]`, `rs2[3:0]`); [`Operand::RdRs1`] reproduces v1's
 /// in-place forms and [`Operand::Count`] carries the embedded shift/bit count.
 #[must_use]
-pub fn v2_opcodes() -> Vec<Opcode> {
+pub(crate) fn v2_opcodes() -> Vec<Opcode> {
     vec![
         op("ADDR", 0x4420_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
         op("SUBR", 0x4460_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
@@ -976,7 +984,7 @@ pub fn v2_opcodes() -> Vec<Opcode> {
 /// The built-in v2 opcode table plus the standard macro definitions — the
 /// in-code replacement for parsing an `opcode_select.vh` file.
 #[must_use]
-pub fn v2_opcodes_and_macros(msg_list: &mut MsgList) -> (Vec<Opcode>, Vec<Macro>) {
+pub(crate) fn v2_opcodes_and_macros(msg_list: &mut MsgList) -> (Vec<Opcode>, Vec<Macro>) {
     let macros = V2_MACROS.iter().filter_map(|line| macro_from_string(line, msg_list)).collect();
     (v2_opcodes(), macros)
 }
@@ -988,7 +996,7 @@ pub fn v2_opcodes_and_macros(msg_list: &mut MsgList) -> (Vec<Opcode>, Vec<Macro>
     dead_code,
     reason = "legacy `.vh` opcode-file parser; superseded by the built-in v2 table but retained for backward compatibility and unit tests"
 )]
-pub fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut MsgList) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+pub(crate) fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut MsgList) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     if input_list.is_empty() {
         return (None, None);
     }
@@ -1046,7 +1054,7 @@ pub fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut MsgList) -> (Op
 /// Returns hex opcode from name.
 ///
 /// Checks if first word is opcode and if so returns opcode hex value.
-pub fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
+pub(crate) fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");

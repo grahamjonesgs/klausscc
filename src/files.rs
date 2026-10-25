@@ -16,7 +16,7 @@ use std::{
 /// Return the stem of given filename.
 ///
 /// Looks for first dot in the string, and returns the slice before the dot.
-pub fn filename_stem(full_name: &str) -> String {
+pub(crate) fn filename_stem(full_name: &str) -> String {
     let path = Path::new(full_name);
     let stem = path.file_stem();
     let parent = path
@@ -32,7 +32,7 @@ pub fn filename_stem(full_name: &str) -> String {
 /// An explicit name (from `-o` / `-b`) is used as given, with the extension
 /// appended unless it already ends with it (so `-b out.kbt` stays `out.kbt`).
 /// Without one, the extension replaces the input file's.
-pub fn output_file_name(explicit: Option<&str>, input_file_name: &str, extension: &str) -> String {
+pub(crate) fn output_file_name(explicit: Option<&str>, input_file_name: &str, extension: &str) -> String {
     let suffix = format!(".{extension}");
     match explicit {
         Some(name) if name.to_ascii_lowercase().ends_with(&suffix.to_ascii_lowercase()) => name.to_owned(),
@@ -44,7 +44,7 @@ pub fn output_file_name(explicit: Option<&str>, input_file_name: &str, extension
 /// Format a given string, adding spaces between groups of 4.
 ///
 /// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string.
-pub fn format_opcodes(input: &str) -> String {
+pub(crate) fn format_opcodes(input: &str) -> String {
     if input.len() == 4 {
         return format!("{input}              ");
     }
@@ -82,7 +82,7 @@ pub fn format_opcodes(input: &str) -> String {
 /// `None` if the line is not an `!include` (the first non-blank text must be
 /// `!include`); otherwise the first word after it, before any `//` comment,
 /// which is empty when the name is missing.
-pub fn include_target(input_line: &str) -> Option<&str> {
+pub(crate) fn include_target(input_line: &str) -> Option<&str> {
     let rest = input_line.trim_start().strip_prefix("!include")?;
     let rest = rest.find("//").map_or(rest, |comment| &rest[..comment]);
     Some(rest.split_whitespace().next().unwrap_or(""))
@@ -92,7 +92,7 @@ pub fn include_target(input_line: &str) -> Option<&str> {
 ///
 /// Writes all data of opcodes and macros to html as tables.
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-pub fn output_macros_opcodes_html(
+pub(crate) fn output_macros_opcodes_html(
     filename_stem: String,
     opcodes: &[Opcode],
     macros: Vec<Macro>,
@@ -207,7 +207,7 @@ pub fn output_macros_opcodes_html(
 ///
 /// Writes all macros and opcodes to JSON files.
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-pub fn output_macros_opcodes_json(filename_stem: String, opcodes: &[Opcode], macros: &[Macro], msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn output_macros_opcodes_json(filename_stem: String, opcodes: &[Opcode], macros: &[Macro], msg_list: &mut MsgList) -> Result<(), Error> {
     let mut json_opcode_filename = filename_stem.clone();
     json_opcode_filename.push_str("_opcodes.json");
     let mut json_macro_filename = filename_stem;
@@ -295,7 +295,7 @@ fn output_opcodes_textmate(filename_stem: String, opcodes: &[Opcode], msg_list: 
 /// Open text file and return as vector of strings.
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList) -> Option<Vec<SourceLine>> {
+pub(crate) fn read_file_to_vector(filename: &str, msg_list: &mut MsgList) -> Option<Vec<SourceLine>> {
     read_source_file(filename, msg_list, &mut HashSet::new())
 }
 
@@ -412,7 +412,7 @@ fn unterminated_comment(file_name: &str, line_number: u32, msg_list: &mut MsgLis
 /// Checks for /* */ and removes them from the vector of strings. Comments do
 /// not nest, may span lines, but never span files: a comment still open at the
 /// end of a file is reported at the line where its `/*` was.
-pub fn remove_block_comments(lines: Vec<SourceLine>, msg_list: &mut MsgList) -> Vec<SourceLine> {
+pub(crate) fn remove_block_comments(lines: Vec<SourceLine>, msg_list: &mut MsgList) -> Vec<SourceLine> {
     let mut state = CommentState::Code;
     // File and line of the `/*` that opened the current comment.
     let mut opened_at: (String, u32) = (String::new(), 0);
@@ -475,7 +475,7 @@ pub fn remove_block_comments(lines: Vec<SourceLine>, msg_list: &mut MsgList) -> 
 /// Output the bitcode to given file.
 ///
 /// Based on the bitcode string outputs to file.
-pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str) -> Result<(), Error> {
+pub(crate) fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str) -> Result<(), Error> {
     match File::create(filename) {
         Ok(mut file) => {
             match file.write_all(output_string.as_bytes()) {
@@ -497,7 +497,7 @@ pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str
 /// Output the code details file to given filename.
 ///
 /// Writes all data to the detailed code file.
-pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &[Pass2], msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &[Pass2], msg_list: &mut MsgList) -> Result<(), Error> {
     let mut file = match File::create(filename) {
         Ok(file) => file,
         #[cfg(not(tarpaulin_include))] // Can't test error creating file

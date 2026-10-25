@@ -14,8 +14,8 @@
 //! are leaves: they import nothing else from the crate, so every other
 //! assembler module can depend on them without forming a cycle.
 
-pub mod lexer;
-pub mod line;
+pub(crate) mod lexer;
+pub(crate) mod line;
 mod pass1;
 mod pass2;
 

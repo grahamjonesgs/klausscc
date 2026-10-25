@@ -20,13 +20,13 @@ mod ftdi;
 mod mpsse;
 
 #[cfg(feature = "board")]
-pub use ftdi::Jtag;
+pub(crate) use ftdi::Jtag;
 #[cfg(feature = "board")]
-pub use mpsse::DmiReq;
+pub(crate) use mpsse::DmiReq;
 
 /// A JTAG / DMI error.
 #[derive(Debug)]
-pub struct JtagError(pub String);
+pub(crate) struct JtagError(pub(crate) String);
 
 impl fmt::Display for JtagError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -35,4 +35,4 @@ impl fmt::Display for JtagError {
 }
 
 /// JTAG result.
-pub type Result<T> = std::result::Result<T, JtagError>;
+pub(crate) type Result<T> = std::result::Result<T, JtagError>;

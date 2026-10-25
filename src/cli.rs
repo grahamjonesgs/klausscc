@@ -6,7 +6,7 @@ use clap::{Arg, ArgAction, Command};
 
 /// Builds the clap `Command` describing every CLI argument and subcommand mode.
 #[must_use]
-pub fn set_matches() -> Command {
+pub(crate) fn set_matches() -> Command {
     Command::new("Klauss Assembler")
         .version(env!("CARGO_PKG_VERSION"))
         .author("Graham Jones")

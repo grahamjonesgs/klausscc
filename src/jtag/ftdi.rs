@@ -46,7 +46,7 @@ const DIGILENT_HIGH: (u8, u8) = (0x00, 0x60);
 ///
 /// Holds a raw libftdi context, so it is neither `Send` nor `Sync`: the
 /// gdbserver drives it from the thread that opened it.
-pub struct Jtag {
+pub(crate) struct Jtag {
     /// A live context from `ftdi_new`, freed in `Drop`; never null.
     ctx: *mut ftdi_context,
     /// Run-Test/Idle clocks after every scan (lets the DMI request cross).
@@ -56,7 +56,7 @@ pub struct Jtag {
 impl Jtag {
     /// Open the first FT2232H (0403:6010) channel A and configure MPSSE JTAG
     /// at `khz` kHz (60 MHz / (2 * (divisor + 1))).
-    pub fn open(khz: u32) -> Result<Self> {
+    pub(crate) fn open(khz: u32) -> Result<Self> {
         // SAFETY: ftdi_new has no preconditions; a null result is checked below.
         let ctx = unsafe { ftdi_new() };
         if ctx.is_null() {
@@ -155,7 +155,7 @@ impl Jtag {
     }
 
     /// Test-Logic-Reset, then Run-Test/Idle.
-    pub fn reset(&mut self) -> Result<()> {
+    pub(crate) fn reset(&mut self) -> Result<()> {
         // 5 x TMS=1, then TMS=0
         self.write(&[MPSSE_TMS, 5, 0x1F, MPSSE_TMS, 0, 0x00])
     }
@@ -174,14 +174,14 @@ impl Jtag {
     }
 
     /// Read the device's 32-bit IDCODE.
-    pub fn idcode(&mut self) -> Result<u32> {
+    pub(crate) fn idcode(&mut self) -> Result<u32> {
         self.ir(IR_IDCODE)?;
         let out = self.scan(false, &[0; 4], 32)?;
         Ok(u32::from_le_bytes([out[0], out[1], out[2], out[3]]))
     }
 
     /// Select the debug module's DR (USER3).
-    pub fn select_user3(&mut self) -> Result<()> {
+    pub(crate) fn select_user3(&mut self) -> Result<()> {
         self.ir(IR_USER3)
     }
 
@@ -192,7 +192,7 @@ impl Jtag {
     /// data (reads; writes give 0).  The idle clocks after each scan give
     /// the DM time to answer, memory commands included; a busy status means
     /// they did not, and fails the batch (the request after it was dropped).
-    pub fn dmi_batch(&mut self, reqs: &[DmiReq]) -> Result<Vec<u64>> {
+    pub(crate) fn dmi_batch(&mut self, reqs: &[DmiReq]) -> Result<Vec<u64>> {
         let mut answers = Vec::with_capacity(reqs.len());
         // keep each transfer's response well inside the FT2232H's 4 KiB buffer
         for chunk in reqs.chunks(200) {
@@ -218,12 +218,12 @@ impl Jtag {
     }
 
     /// DMI register read.
-    pub fn dmi_read(&mut self, addr: u8) -> Result<u64> {
+    pub(crate) fn dmi_read(&mut self, addr: u8) -> Result<u64> {
         Ok(self.dmi_batch(&[DmiReq::Read(addr)])?[0])
     }
 
     /// DMI register write.
-    pub fn dmi_write(&mut self, addr: u8, data: u64) -> Result<()> {
+    pub(crate) fn dmi_write(&mut self, addr: u8, data: u64) -> Result<()> {
         self.dmi_batch(&[DmiReq::Write(addr, data)]).map(|_| ())
     }
 }

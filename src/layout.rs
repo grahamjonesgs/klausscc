@@ -10,10 +10,10 @@
 /// Word 0 (byte 0x00): `heap_start` (written by the assembler), word 1 (0x08):
 /// `heap_end` (reserved), words 2-3 (0x10, 0x18): reserved.  Code begins at
 /// byte 0x20 ([`CODE_BASE`]).
-pub const HEAP_HEADER_WORDS: u32 = 4;
+pub(crate) const HEAP_HEADER_WORDS: u32 = 4;
 
 /// Heap-header byte size (4 doublewords): code starts here (0x20).
-pub const CODE_BASE: u32 = HEAP_HEADER_WORDS * 8;
+pub(crate) const CODE_BASE: u32 = HEAP_HEADER_WORDS * 8;
 
 /// The `heap_start` value for a program image whose last byte ends at `end`.
 ///
@@ -23,7 +23,7 @@ pub const CODE_BASE: u32 = HEAP_HEADER_WORDS * 8;
 /// coherency.  The `.kbt` stream, the DDR image and the `.code` listing header
 /// all use this one rule.
 #[must_use]
-pub const fn heap_start(end: u32) -> u32 {
+pub(crate) const fn heap_start(end: u32) -> u32 {
     end.next_multiple_of(8)
 }
 
@@ -31,7 +31,7 @@ pub const fn heap_start(end: u32) -> u32 {
 ///
 /// The RTL `bus_splitter` routes this range to the MMIO space instead of DDR.
 #[must_use]
-pub const fn is_mmio(addr: u32) -> bool {
+pub(crate) const fn is_mmio(addr: u32) -> bool {
     addr >> 28 == 0xF
 }
 

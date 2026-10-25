@@ -14,15 +14,15 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 /// Exit status for any failure other than a failed or timed-out test.
-pub const EXIT_FAILURE: u8 = 1;
+pub(crate) const EXIT_FAILURE: u8 = 1;
 /// Exit status when one or more tests produced the wrong UART output.
-pub const EXIT_TESTS_FAILED: u8 = 2;
+pub(crate) const EXIT_TESTS_FAILED: u8 = 2;
 /// Exit status when a test timed out waiting for UART output.
-pub const EXIT_TEST_TIMEOUT: u8 = 3;
+pub(crate) const EXIT_TEST_TIMEOUT: u8 = 3;
 
 /// Why a command failed.
 #[derive(Debug)]
-pub enum Error {
+pub(crate) enum Error {
     /// Assembly (or building the board image) reported this many errors.
     Assembly(usize),
     /// A file could not be read.
@@ -80,7 +80,7 @@ impl Error {
     /// `2` means tests failed and `3` means a test timed out; every other
     /// failure is `1`.
     #[must_use]
-    pub const fn code(&self) -> u8 {
+    pub(crate) const fn code(&self) -> u8 {
         match self {
             Self::TestsFailed { timed_out: true, .. } => EXIT_TEST_TIMEOUT,
             Self::TestsFailed { .. } => EXIT_TESTS_FAILED,
@@ -90,7 +90,7 @@ impl Error {
 
     /// The process exit status for this error.
     #[must_use]
-    pub fn exit_code(&self) -> ExitCode {
+    pub(crate) fn exit_code(&self) -> ExitCode {
         ExitCode::from(self.code())
     }
 }

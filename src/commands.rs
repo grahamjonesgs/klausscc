@@ -370,7 +370,7 @@ pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Ms
 /// Sends program to board, reads UART output, and verifies against expected values
 /// parsed from the source file comments.
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
-pub fn run_test_mode(
+pub(crate) fn run_test_mode(
     msg_list: &mut MsgList,
     bin_string: &str,
     output_serial_port: &str,
@@ -951,7 +951,7 @@ fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
 /// For each test file: assembles, sends to board, verifies UART output,
 /// and prints per-test and aggregate results.
 #[cfg(not(tarpaulin_include))]
-pub fn run_test_list(
+pub(crate) fn run_test_list(
     oplist: &[Opcode],
     macro_list: &[macros::Macro],
     list_file: &str,

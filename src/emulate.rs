@@ -569,7 +569,6 @@ impl Cpu {
     }
 
     /// Feed bytes into the UART RX FIFO (for tests / an external input source).
-    #[allow(dead_code, reason = "public golden-model API; exercised by tests and external drivers")]
     pub fn feed_uart_rx(&mut self, bytes: &[u8]) {
         self.uart_rx.extend(bytes.iter().copied());
     }
@@ -1651,6 +1650,7 @@ pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, want_trace
 /// Unlike [`emulate_image`], nothing is buffered: each retired instruction's line
 /// is written straight to the sink, so a multi-million instruction run uses no
 /// extra memory regardless of trace length.
+#[must_use]
 pub fn emulate_image_to_writer(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
     cpu.run(max_instructions, trace)
@@ -1658,7 +1658,6 @@ pub fn emulate_image_to_writer(image: &[u8], entry: u32, max_instructions: u64, 
 
 /// The default entry point for an assembled `.kla` program (code base 0x20).
 #[must_use]
-#[allow(dead_code, reason = "public golden-model API; used by tests and external callers")]
 pub const fn default_entry() -> u32 {
     CODE_BASE
 }

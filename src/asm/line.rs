@@ -7,7 +7,7 @@
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Defines the type of line.
-pub enum LineType {
+pub(crate) enum LineType {
     Blank,
     Comment,
     Data,
@@ -20,7 +20,7 @@ pub enum LineType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// One line of assembler source: as read from a file, or as produced by
 /// macro expansion.
-pub struct SourceLine {
+pub(crate) struct SourceLine {
     /// File name of input file.
     pub file_name: String,
     /// Line text.
@@ -31,7 +31,7 @@ pub struct SourceLine {
 
 #[derive(Debug)]
 /// Struct for Pass1.
-pub struct Pass1 {
+pub(crate) struct Pass1 {
     /// File name of input file.
     pub file_name: String,
     /// Line text.
@@ -46,7 +46,7 @@ pub struct Pass1 {
 
 #[derive(Debug, Clone)]
 /// Struct for Pass2.
-pub struct Pass2 {
+pub(crate) struct Pass2 {
     /// File name of input file.
     #[allow(dead_code, reason = "where the line came from; no output reads it yet, only tests")]
     pub file_name: String,

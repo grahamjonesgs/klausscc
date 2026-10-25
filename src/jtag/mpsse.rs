@@ -99,7 +99,7 @@ pub(super) fn parse_scan(raw: &[u8], len: u32) -> Vec<u8> {
 
 /// One DMI request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DmiReq {
+pub(crate) enum DmiReq {
     /// Read a DMI register.
     Read(u8),
     /// Write a DMI register.

@@ -8,7 +8,7 @@
 /// Strip trailing comments.
 ///
 /// Removes comments and starting and training whitespace.
-pub fn strip_comments(input: &str) -> String {
+pub(crate) fn strip_comments(input: &str) -> String {
     input.find("//").map_or_else(
         || input.trim().to_owned(),
         |location| input.get(0..location).unwrap_or("").trim().to_owned(),
@@ -18,7 +18,7 @@ pub fn strip_comments(input: &str) -> String {
 /// Returns trailing comments.
 ///
 /// Removes comments and starting and training whitespace.
-pub fn return_comments(input: &str) -> String {
+pub(crate) fn return_comments(input: &str) -> String {
     input
         .find("//")
         .map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
@@ -27,7 +27,7 @@ pub fn return_comments(input: &str) -> String {
 /// Check if line is blank.
 ///
 /// Returns true if line if just whitespace.
-pub fn is_blank(line: &str) -> bool {
+pub(crate) fn is_blank(line: &str) -> bool {
     let words = line.split_whitespace();
 
     for word in words {
@@ -41,7 +41,7 @@ pub fn is_blank(line: &str) -> bool {
 /// Check if line is comment.
 ///
 /// Returns true if line if just comment.
-pub fn is_comment(line: &str) -> bool {
+pub(crate) fn is_comment(line: &str) -> bool {
     let word = line.trim();
     if word.len() < 2 {
         return false;
@@ -64,7 +64,7 @@ pub fn is_comment(line: &str) -> bool {
 /// Check if line is start.
 ///
 /// Returns true if line is start.
-pub fn is_start(line: &str) -> bool {
+pub(crate) fn is_start(line: &str) -> bool {
     let words = line.split_whitespace();
     for (i, word) in words.enumerate() {
         if i == 0 && word.to_uppercase() == "_START" {
@@ -77,7 +77,7 @@ pub fn is_start(line: &str) -> bool {
 /// Extracts data name from string.
 ///
 /// Checks if start of first word is hash if so return data name as option string.
-pub fn data_name_from_string(line: &str) -> Option<String> {
+pub(crate) fn data_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.starts_with('#') {
@@ -89,7 +89,7 @@ pub fn data_name_from_string(line: &str) -> Option<String> {
 /// Extracts label from string.
 ///
 /// Checks if end of first word is colon if so return label as option string.
-pub fn label_name_from_string(line: &str) -> Option<String> {
+pub(crate) fn label_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.ends_with(':') {

@@ -41,6 +41,8 @@ nix = { version = "0.31", features = ["term"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
+# Crate-internal items are pub(crate); pub is only the library's API.
+unreachable_pub = "warn"
 
 [lints.clippy]
 all      = { level = "warn", priority = -1 }

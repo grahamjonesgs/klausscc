@@ -103,7 +103,7 @@ const TARGET_XML: &str = r#"<?xml version="1.0"?>
 
 /// The `KlaussCPU` register file in `g`-packet layout.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct KlaussRegs {
+pub(crate) struct KlaussRegs {
     pub(crate) r: [u64; 16],
     pub(crate) sp: u32,
     pub(crate) pc: u32,
@@ -152,7 +152,7 @@ impl Registers for KlaussRegs {
 
 /// A register addressed by its `regnum` (single-register `p`/`P` packets).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum KlaussRegId {
+pub(crate) enum KlaussRegId {
     /// R0..R15.
     Gpr(u8),
     /// Stack pointer.
@@ -180,7 +180,7 @@ impl RegId for KlaussRegId {
 }
 
 /// `gdbstub` architecture description for `KlaussCPU`.
-pub enum KlaussCpuArch {}
+pub(crate) enum KlaussCpuArch {}
 
 impl Arch for KlaussCpuArch {
     type Usize = u32;
@@ -208,7 +208,7 @@ enum RunEvent {
 }
 
 /// The emulator plus the debugger's view of it.
-pub struct EmuTarget {
+pub(crate) struct EmuTarget {
     cpu: Cpu,
     exec: ExecMode,
     sw_breakpoints: Vec<u32>,
@@ -666,7 +666,7 @@ pub(crate) fn spawn_stdin_reader() -> mpsc::Receiver<u8> {
 /// Serve one debugging session for `cpu` on `127.0.0.1:port`.
 ///
 /// Returns a one-line description of how the session ended.
-pub fn serve(cpu: Cpu, port: u16) -> Result<String, String> {
+pub(crate) fn serve(cpu: Cpu, port: u16) -> Result<String, String> {
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("cannot listen on port {port}: {e}"))?;
     eprintln!("klausscc gdbserver: waiting for a debugger on 127.0.0.1:{port}");
     let (stream, peer) = listener.accept().map_err(|e| format!("accept failed: {e}"))?;

@@ -19,7 +19,7 @@ use std::time::Duration;
 const NETBOOT_MAGIC: u32 = 0x5445_4E4B;
 
 /// Default TCP port the board's netboot server listens on.
-pub const NETBOOT_DEFAULT_PORT: u16 = 5000;
+pub(crate) const NETBOOT_DEFAULT_PORT: u16 = 5000;
 
 /// How long to wait for the board to accept the TCP connection.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -29,7 +29,7 @@ const IO_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Why a network load failed.
 #[derive(Debug)]
-pub enum NetbootError {
+pub(crate) enum NetbootError {
     /// Resolving, connecting or talking to the board failed.
     Io(io::Error),
     /// The board answered with a non-zero status.
@@ -125,7 +125,7 @@ fn resolve(ip: &str, port: u16) -> Result<SocketAddr, NetbootError> {
 /// Fails if the board cannot be reached, rejects the image, or reports a
 /// different checksum.
 #[cfg(not(tarpaulin_include))] // Cannot test live TCP in tarpaulin
-pub fn net_load(ip: &str, port: u16, image: &[u8], entry_pc: u32, msg_list: &mut MsgList) -> Result<(), NetbootError> {
+pub(crate) fn net_load(ip: &str, port: u16, image: &[u8], entry_pc: u32, msg_list: &mut MsgList) -> Result<(), NetbootError> {
     let hdr = header(image.len(), entry_pc)?;
     let addr = resolve(ip, port)?;
     msg_list.push(format!("netboot: connecting to {addr}"), None, None, MessageType::Information);

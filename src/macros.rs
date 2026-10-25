@@ -8,7 +8,7 @@ use std::path::Path;
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 /// Holds instance of macro from opcode definition file.
-pub struct Macro {
+pub(crate) struct Macro {
     /// Comment from definition.
     pub comment: String,
     /// Items in macro as vector of strings.
@@ -58,7 +58,7 @@ fn substitute_args(item: &str, call: &[&str]) -> (String, Vec<SubstError>) {
 ///
 /// Takes Vector of macros, and embeds macros recursively, up to 10 passes.
 /// Will create errors message for more than 10 passes.
-pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
+pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed = true;
     let mut last_macro = String::default();
@@ -131,7 +131,7 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
 ///
 /// Takes the input list of all lines and macro vector and expands. A trailing
 /// `//` comment on a macro call is not part of its arguments.
-pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<SourceLine>, macro_list: &mut [Macro]) -> Vec<SourceLine> {
+pub(crate) fn expand_macros(msg_list: &mut MsgList, input_list: Vec<SourceLine>, macro_list: &mut [Macro]) -> Vec<SourceLine> {
     let mut pass0: Vec<SourceLine> = Vec::new();
     for code_line in input_list {
         if let Some(macro_name) = macro_name_from_string(&code_line.input_text_line) {
@@ -172,7 +172,7 @@ pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<SourceLine>, macro_
 ///
 /// `!macros` files are resolved relative to the directory of the file that
 /// contains the directive, matching `!include`.
-pub fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut Vec<Macro>, msg_list: &mut MsgList) -> Vec<SourceLine> {
+pub(crate) fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut Vec<Macro>, msg_list: &mut MsgList) -> Vec<SourceLine> {
     let mut output: Vec<SourceLine> = Vec::new();
     let mut added = false;
 
@@ -250,7 +250,7 @@ fn add_macro_definition(definition: &str, macro_list: &mut Vec<Macro>, line_numb
 /// Parse opcode definition line to macro.
 ///
 /// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None.
-pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Option<Macro> {
+pub(crate) fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Option<Macro> {
     // Find the macro if it exists
     if input_line_full.trim().find('$').unwrap_or(usize::MAX) != 0 {
         return None;
@@ -332,7 +332,7 @@ pub fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Optio
 /// Extracts macro from string.
 ///
 /// Checks if end of first word is colon if so return macro name as option string.
-pub fn macro_name_from_string(line: &str) -> Option<String> {
+pub(crate) fn macro_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.starts_with('$') {
@@ -344,7 +344,7 @@ pub fn macro_name_from_string(line: &str) -> Option<String> {
 /// Returns Macro from name.
 ///
 /// Return option macro if it exists, or none.
-pub fn return_macro(line: &str, macros: &[Macro]) -> Option<Macro> {
+pub(crate) fn return_macro(line: &str, macros: &[Macro]) -> Option<Macro> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
 
@@ -359,7 +359,7 @@ pub fn return_macro(line: &str, macros: &[Macro]) -> Option<Macro> {
 /// Update variables in a macro.
 ///
 /// Return option all vec string replacing %x with correct value.
-pub fn return_macro_items_replace(
+pub(crate) fn return_macro_items_replace(
     line: &str,
     macros: &mut [Macro],
     input_line_number: u32,

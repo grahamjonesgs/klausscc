@@ -90,14 +90,14 @@ fn jerr(e: crate::jtag::JtagError) -> String {
 }
 
 /// The debug module, over JTAG.
-pub struct Board {
+pub(crate) struct Board {
     jtag: Jtag,
 }
 
 impl Board {
     /// Open the JTAG cable at `khz`, select the debug module and check it is
     /// there.  Returns the board and a one-line description.
-    pub fn open(khz: u32) -> JResult<(Self, String)> {
+    pub(crate) fn open(khz: u32) -> JResult<(Self, String)> {
         let mut jtag = Jtag::open(khz).map_err(jerr)?;
         let idcode = jtag.idcode().map_err(jerr)?;
         if idcode == 0 || idcode == u32::MAX {
@@ -131,17 +131,17 @@ impl Board {
     }
 
     /// DMSTATUS (reading clears the "halted since" bit).
-    pub fn status(&mut self) -> JResult<u64> {
+    pub(crate) fn status(&mut self) -> JResult<u64> {
         self.jtag.dmi_read(DMSTATUS).map_err(jerr)
     }
 
     /// Write DMCONTROL.
-    pub fn control(&mut self, v: u64) -> JResult<()> {
+    pub(crate) fn control(&mut self, v: u64) -> JResult<()> {
         self.jtag.dmi_write(DMCONTROL, v).map_err(jerr)
     }
 
     /// Wait up to `timeout` for the core to be halted.
-    pub fn wait_halted(&mut self, timeout: Duration) -> JResult<u64> {
+    pub(crate) fn wait_halted(&mut self, timeout: Duration) -> JResult<u64> {
         let t0 = Instant::now();
         loop {
             let st = self.status()?;
@@ -193,7 +193,7 @@ impl Board {
     }
 
     /// Read bytes (any alignment).
-    pub fn read_mem(&mut self, addr: u32, buf: &mut [u8]) -> JResult<()> {
+    pub(crate) fn read_mem(&mut self, addr: u32, buf: &mut [u8]) -> JResult<()> {
         if buf.is_empty() {
             return Ok(());
         }
@@ -222,7 +222,7 @@ impl Board {
     }
 
     /// Write bytes (any alignment): byte-enabled doubleword writes.
-    pub fn write_mem(&mut self, addr: u32, data: &[u8]) -> JResult<()> {
+    pub(crate) fn write_mem(&mut self, addr: u32, data: &[u8]) -> JResult<()> {
         if data.is_empty() {
             return Ok(());
         }
@@ -282,7 +282,7 @@ struct Wp {
 
 /// The board plus the debugger's view of it.
 #[allow(clippy::struct_excessive_bools, reason = "independent session flags")]
-pub struct BoardTarget {
+pub(crate) struct BoardTarget {
     board: Board,
     hw_breakpoints: [Option<u32>; HW_BREAKPOINTS],
     watches: [Option<Wp>; HW_WATCHPOINTS],
@@ -795,7 +795,7 @@ impl run_blocking::BlockingEventLoop for BoardEventLoop {
 /// With `load`, `load()` sends the program over the UART with halt-on-load
 /// set, and the core halts on the program's first instruction; otherwise the
 /// running program is halted where it is.
-pub fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> Result<(), String>>) -> JResult<u32> {
+pub(crate) fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> Result<(), String>>) -> JResult<u32> {
     // start clean: a server that was killed leaves its slots armed
     clear_slots(board)?;
     if let Some(load) = load {
@@ -821,7 +821,7 @@ pub fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> Result<(), Str
 }
 
 /// Serve one debugging session for the halted `board` on `127.0.0.1:port`.
-pub fn serve(board: Board, port: u16) -> Result<String, String> {
+pub(crate) fn serve(board: Board, port: u16) -> Result<String, String> {
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("cannot listen on port {port}: {e}"))?;
     eprintln!("klausscc gdbserver: waiting for a debugger on 127.0.0.1:{port}");
     let (stream, peer) = listener.accept().map_err(|e| format!("accept failed: {e}"))?;

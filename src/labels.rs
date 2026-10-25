@@ -5,7 +5,7 @@ use crate::num::{fits_imm32, is_hex_literal, parse_bits64, parse_int, LiteralErr
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Label struct.
-pub struct Label {
+pub(crate) struct Label {
     /// Label name as text without colon.
     pub name: String,
     /// Program counter derived from Pass1.
@@ -17,7 +17,7 @@ pub struct Label {
 /// Converts argument to label value or converts to Hex. An undefined label or
 /// a malformed or out-of-range literal is reported as an error at the line and
 /// returns `None`.
-pub fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32, filename: &str, labels: &[Label]) -> Option<String> {
+pub(crate) fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32, filename: &str, labels: &[Label]) -> Option<String> {
     let argument_trim = argument.trim();
     let mut error = |text: String| msg_list.push(text, Some(line_number), Some(filename.to_owned()), MessageType::Error);
 
@@ -72,7 +72,7 @@ pub fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32
 /// Check if label is duplicate.
 ///
 /// Check if label is duplicate, and output message if duplicate is found.
-pub fn find_duplicate_label(labels: &[Label], msg_list: &mut MsgList) {
+pub(crate) fn find_duplicate_label(labels: &[Label], msg_list: &mut MsgList) {
     for label in labels {
         let opt_found_line = return_label_value(&label.name, labels);
         if opt_found_line.unwrap_or(0) != label.program_counter {
@@ -89,7 +89,7 @@ pub fn find_duplicate_label(labels: &[Label], msg_list: &mut MsgList) {
 /// Create the vector of labels.
 ///
 /// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels.
-pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
+pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     let labels: Vec<Label> = pass1
         .iter()
         .filter(|n| label_name_from_string(&n.input_text_line).is_some() || data_name_from_string(&n.input_text_line).is_some())
@@ -152,7 +152,7 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
 /// Return program counter for label.
 ///
 /// Return option of program counter for label if it exists, or None.
-pub fn return_label_value(line: &str, labels: &[Label]) -> Option<u32> {
+pub(crate) fn return_label_value(line: &str, labels: &[Label]) -> Option<u32> {
     let line_upper = line.to_uppercase();
     for label in labels {
         if label.name.to_uppercase() == line_upper {

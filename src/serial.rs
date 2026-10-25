@@ -10,7 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// Used to define if a port request was not defined so is for auto.
-pub const AUTO_SERIAL: &str = "auto_serial_requested";
+pub(crate) const AUTO_SERIAL: &str = "auto_serial_requested";
 
 /// Return bool if port is possibly correct FDTI port.
 ///
@@ -55,7 +55,7 @@ fn extra_usb_info(info: &UsbPortInfo) -> String {
 ///
 /// Lists all ports, checks if ISB and possible and returns some last one or none.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub fn find_possible_port() -> Option<String> {
+pub(crate) fn find_possible_port() -> Option<String> {
     let available_ports = serialport::available_ports();
     match available_ports {
         Err(_) => None,
@@ -170,7 +170,7 @@ fn ports_found_message(count: usize, all_ports: &str) -> String {
 ///
 /// Will send the program to the serial port, wait for the response, and return the open port.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub fn write_to_board_keep_port(
+pub(crate) fn write_to_board_keep_port(
     binary_output: &str,
     port_name: &str,
     send_break: bool,
@@ -291,7 +291,7 @@ pub fn write_to_board_keep_port(
 ///
 /// Will send the program to the serial port, and wait for the response.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub fn write_to_board(binary_output: &str, port_name: &str, send_break: bool, msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn write_to_board(binary_output: &str, port_name: &str, send_break: bool, msg_list: &mut MsgList) -> Result<(), Error> {
     let _port = write_to_board_keep_port(binary_output, port_name, send_break, false, msg_list)?;
     Ok(())
 }
@@ -316,7 +316,7 @@ fn print_bytes(data: &[u8], debug: bool) {
 /// Continuously reads from the serial port and prints received data to stdout.
 /// Runs until the user presses Ctrl+C, then closes the port cleanly.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
     let port = return_port(port_name, msg_list)?;
     monitor_serial_port(port, debug, msg_list)
 }
@@ -454,7 +454,7 @@ fn flush_stdin() {
 /// Used after `write_to_board_keep_port` to continue reading from the same port
 /// that was used to upload the program, ensuring no UART output is missed.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
     port.set_timeout(Duration::from_millis(500))?;
 
     let running = Arc::new(AtomicBool::new(true));
@@ -523,7 +523,7 @@ pub fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list:
 
 /// Result of a test verification run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct TestResult {
+pub(crate) struct TestResult {
     /// Number of expected values that matched.
     pub passed: usize,
     /// Number of expected values that did not match.
@@ -555,7 +555,7 @@ fn extract_hex_value(line: &str) -> Option<String> {
 /// A serial read error (other than a read timeout) is reported and returned:
 /// it is not a test timeout.
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
-pub fn run_test_monitor(
+pub(crate) fn run_test_monitor(
     mut port: Box<dyn SerialPort>,
     expected_values: &[String],
     timeout_secs: u64,

@@ -9,7 +9,7 @@ use std::fmt::Write as _;
 /// Format a byte count as a human-readable size (B / KiB / MiB / GiB), e.g.
 /// `9223315` -> `"8.80 MiB"`.  Used for progress/size display.
 #[must_use]
-pub fn human_bytes(n: usize) -> String {
+pub(crate) fn human_bytes(n: usize) -> String {
     const KIB: f64 = 1024.0;
     const MIB: f64 = 1_048_576.0;
     const GIB: f64 = 1_073_741_824.0;
@@ -37,7 +37,7 @@ pub fn human_bytes(n: usize) -> String {
 ///
 /// `base_addr` is the board byte address of the first byte in `binary` (normally
 /// [`CODE_BASE`] = 0x20).
-pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcode]) -> Vec<Pass2> {
+pub(crate) fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcode]) -> Vec<Pass2> {
     let mut result: Vec<Pass2> = Vec::new();
     let mut i: usize = 0;
 
@@ -96,7 +96,7 @@ const MAX_DATA_BYTES: i128 = 128 * 1024 * 1024;
 
 /// Why a data line could not be turned into bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DataError {
+pub(crate) enum DataError {
     /// The line is not a complete data definition (missing value, bad string, ...).
     Malformed,
     /// A numeric value is not a valid literal.
@@ -137,14 +137,14 @@ fn data_size(token: &str, max: i128) -> Result<usize, DataError> {
 /// Returns bytes for data element.
 ///
 /// Parses data element and returns data as bytes, or None if error.
-pub fn data_as_bytes(line: &str) -> Option<String> {
+pub(crate) fn data_as_bytes(line: &str) -> Option<String> {
     data_bytes(line).ok()
 }
 
 /// Returns bytes for data element, or why the line is not valid data.
 ///
 /// The bytes are returned as a hex string (two characters per byte).
-pub fn data_bytes(line: &str) -> Result<String, DataError> {
+pub(crate) fn data_bytes(line: &str) -> Result<String, DataError> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.is_empty() {
@@ -230,7 +230,7 @@ pub fn data_bytes(line: &str) -> Result<String, DataError> {
 /// Check if line is valid.
 ///
 /// Returns true if line is not error.
-pub fn is_valid_line(opcodes: &[Opcode], line: &str) -> bool {
+pub(crate) fn is_valid_line(opcodes: &[Opcode], line: &str) -> bool {
     if line_type(opcodes, line) == LineType::Error {
         return false;
     }
@@ -240,7 +240,7 @@ pub fn is_valid_line(opcodes: &[Opcode], line: &str) -> bool {
 /// Returns enum of type of line.
 ///
 /// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error.
-pub fn line_type(opcodes: &[Opcode], line: &str) -> LineType {
+pub(crate) fn line_type(opcodes: &[Opcode], line: &str) -> LineType {
     if label_name_from_string(line).is_some() {
         return LineType::Label;
     }
@@ -275,7 +275,7 @@ pub fn line_type(opcodes: &[Opcode], line: &str) -> LineType {
 /// Return number of bytes of data.
 ///
 /// From instruction name, option of number of bytes of data, or 0 is error.
-pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: &str) -> u32 {
+pub(crate) fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: &str) -> u32 {
     match data_bytes(line) {
         Ok(data) => data.len().try_into().unwrap_or_default(),
         Err(err) => {
@@ -293,7 +293,7 @@ pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, file
 /// Parse expected UART hex values from source file comment headers.
 ///
 /// Extracts 8-digit uppercase hex values from lines matching the pattern `//   XXXXXXXX  (`.
-pub fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
+pub(crate) fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
     let mut expected: Vec<String> = Vec::new();
     for line in lines {
         let trimmed = line.trim();
@@ -314,7 +314,7 @@ pub fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
 /// Trim newline from string.
 ///
 /// Removes newline from end of string.
-pub fn trim_newline(input: &mut String) {
+pub(crate) fn trim_newline(input: &mut String) {
     if input.ends_with('\n') {
         input.pop();
         if input.ends_with('\r') {
