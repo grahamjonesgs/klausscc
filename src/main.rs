@@ -28,6 +28,8 @@ mod macros;
 mod messages;
 /// Module to stream a flat DDR image to the board over TCP (network boot).
 mod netload;
+/// Module for integer literal parsing.
+mod num;
 /// Module to manage opcodes.
 mod opcodes;
 /// Module to write to serial and read response.
@@ -46,6 +48,7 @@ use labels::{find_duplicate_label, get_labels, Label};
 use macros::{apply_source_macros, expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
+use num::parse_bits64;
 use opcodes::{add_arguments, add_registers, num_arguments, pc_relative_bits, v2_opcodes_and_macros, Opcode, Pass0, Pass1, Pass2};
 use serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 use std::path::PathBuf;
@@ -158,13 +161,7 @@ fn run() -> Result<(), Error> {
     // net-load mode: flatten an ELF (or take a flat binary) and stream it to the
     // board over TCP — no kbt, no UART. See NETBOOT_PLAN.md / netboot.c.
     if let Some(net_binary_path) = matches.get_one::<String>("net_load") {
-        let entry_addr: Option<u32> = matches.get_one::<String>("entry_point").map(|s| {
-            if s.len() >= 2 && s.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) {
-                u32::from_str_radix(&s[2..], 16).unwrap_or(0x20)
-            } else {
-                s.parse::<u32>().unwrap_or(0x20)
-            }
-        });
+        let entry_addr: Option<u32> = matches.get_one::<u32>("entry_point").copied();
         let board_ip = matches.get_one::<String>("ip").cloned().unwrap_or_default();
         let board_port: u16 = matches
             .get_one::<String>("port")
@@ -202,13 +199,7 @@ fn run() -> Result<(), Error> {
     // optionally send it.  No opcode file is required — it is only used, if it
     // happens to exist, to emit a .code disassembly listing alongside the .kbt.
     if is_binary_input {
-        let entry_addr: Option<u32> = matches.get_one::<String>("entry_point").map(|s| {
-            if s.len() >= 2 && s.get(..2).is_some_and(|p| p.eq_ignore_ascii_case("0x")) {
-                u32::from_str_radix(&s[2..], 16).unwrap_or(0x20)
-            } else {
-                s.parse::<u32>().unwrap_or(0x20)
-            }
-        });
+        let entry_addr: Option<u32> = matches.get_one::<u32>("entry_point").copied();
         if let Some(port) = gdbserver_port {
             if board_flag {
                 return commands::run_gdbserver_board(
@@ -464,13 +455,8 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
     let Some(val_str) = words.next() else {
         return line.to_owned();
     };
-    // Parse as signed 64-bit so we handle negative decimal and full-width hex.
-    let val: i64 = if val_str.len() >= 2 && val_str.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
-        let hex = &val_str[2..].replace('_', "");
-        u64::from_str_radix(hex, 16).map_or(0, |v| v as i64)
-    } else {
-        val_str.parse::<i64>().unwrap_or(0)
-    };
+    // Read as a 64-bit pattern so we handle negative decimal and full-width hex.
+    let val: i64 = parse_bits64(val_str).map_or(0, |v| v as i64);
     // Same bounds as convert_argument: [i32::MIN, 0xFFFF_FFFF] fits in 32 bits.
     if val >= i64::from(i32::MIN) && val <= 0xFFFF_FFFF_i64 {
         return line.to_owned();

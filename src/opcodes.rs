@@ -2,6 +2,7 @@ use crate::files::LineType;
 use crate::labels::{convert_argument, Label};
 use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::messages::{MessageType, MsgList};
+use crate::num::{parse_bits64, parse_int};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
 
@@ -56,15 +57,9 @@ pub enum Operand {
     Rel13,
 }
 
-/// Parse a signed literal: decimal (optionally negative) or `0x` hex.
-fn parse_simm(token: &str) -> Option<i64> {
-    let (neg, t) = token.strip_prefix('-').map_or((false, token), |r| (true, r));
-    let v = if t.len() >= 2 && t.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
-        i64::from_str_radix(&t[2..].replace('_', ""), 16).ok()?
-    } else {
-        t.parse::<i64>().ok()?
-    };
-    Some(if neg { -v } else { v })
+/// Parse a signed literal: decimal or `0x` hex, optionally negative.
+fn parse_simm(token: &str) -> Option<i128> {
+    parse_int(token).ok()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -189,14 +184,10 @@ impl Default for &Pass2 {
 
 /// Parse a single token as a u64 immediate value.
 ///
-/// Handles `0x`/`0X` hex prefix (full 64-bit range) and signed decimal.
+/// Accepts any [`parse_bits64`] literal: hex (full 64-bit range) or signed decimal.
 /// Returns `None` if the token cannot be parsed (e.g. a label name).
 fn parse_imm64(token: &str) -> Option<u64> {
-    if token.len() >= 2 && token.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
-        u64::from_str_radix(&token[2..].replace('_', ""), 16).ok()
-    } else {
-        token.parse::<i64>().ok().map(|v| v as u64)
-    }
+    parse_bits64(token).ok()
 }
 
 /// Return opcode with formatted arguments.
@@ -270,11 +261,7 @@ pub fn add_arguments(
 
 /// Parse a shift/bit count token (embedded `N` field): decimal or `0x` hex.
 fn parse_count(token: &str) -> Option<u32> {
-    if token.len() >= 2 && token.get(..2).is_some_and(|s| s.eq_ignore_ascii_case("0x")) {
-        u32::from_str_radix(&token[2..].replace('_', ""), 16).ok()
-    } else {
-        token.parse::<u32>().ok()
-    }
+    parse_int(token).ok().and_then(|v| u32::try_from(v).ok())
 }
 
 /// Find the opcode whose `text_name` matches the first word of `line`.
@@ -335,7 +322,7 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
                 token_idx += 1;
             }
             Operand::Off8(shift) => {
-                let scale = 1_i64 << shift;
+                let scale = 1_i128 << shift;
                 match tokens.get(token_idx).and_then(|t| parse_simm(t)) {
                     Some(v) if v % scale == 0 && (-128..=127).contains(&(v / scale)) => {
                         word0 |= (((v / scale) as u32) & 0xFF) << 12;

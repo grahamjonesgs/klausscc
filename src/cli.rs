@@ -1,5 +1,6 @@
 //! Command-line interface definition (clap).
 
+use crate::num::parse_u32;
 use crate::serial::AUTO_SERIAL;
 use clap::{Arg, ArgAction, Command};
 
@@ -53,6 +54,7 @@ pub fn set_matches() -> Command {
             Arg::new("entry_point")
                 .long("entry")
                 .num_args(1)
+                .value_parser(parse_u32)
                 .help("Entry point address for ELF / flat-binary input or net-load (hex 0x... or decimal). Optional for ELF files \u{2014} read from ELF header. Required for flat binaries (default 0x20)."),
         )
         .arg(
@@ -194,4 +196,19 @@ pub fn set_matches() -> Command {
                 .num_args(1)
                 .help("Instruction-count cap for the emulator (default 50000000)"),
         )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    // --entry takes hex or decimal and rejects junk instead of falling back to 0x20.
+    fn entry_point_is_parsed() {
+        let parse = |value: &str| set_matches().try_get_matches_from(["klausscc", "-i", "prog.elf", "--entry", value]);
+        assert_eq!(parse("0x40").unwrap().get_one::<u32>("entry_point").copied(), Some(0x40));
+        assert_eq!(parse("64").unwrap().get_one::<u32>("entry_point").copied(), Some(64));
+        assert!(parse("0xZZ").is_err());
+        assert!(parse("0x1_0000_0000").is_err());
+    }
 }
