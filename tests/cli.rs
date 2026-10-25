@@ -89,7 +89,7 @@ fn help_and_version_exit_0() {
 
 #[test]
 fn passing_emulator_test_exits_0() {
-    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/src/klatest/test_strings.kla");
+    let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test_strings.kla");
     let dir = tempfile::tempdir().unwrap();
     let out = klausscc(dir.path(), &["--emulate-test", fixture]);
     assert!(out.status.success(), "stdout: {}", String::from_utf8_lossy(&out.stdout));

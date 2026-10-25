@@ -23,8 +23,8 @@
                     "kind": "bin"
                 }
             },
-           // "args": ["-i", "src/klacode/numbers.kla", "-s", "/dev/ttyUSB1"],
-            "args": ["-i", "src/klacode/count.kla", "-s"],
+           // "args": ["-i", "tests/fixtures/legacy_v1/numbers.kla", "-s", "/dev/ttyUSB1"],
+            "args": ["-i", "tests/fixtures/legacy_v1/count.kla", "-s"],
             "cwd": "${workspaceFolder}",
             "env": { "RUST_BACKTRACE": "full" }
         },

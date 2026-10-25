@@ -282,7 +282,8 @@ FFFFFFFE
 ## Notes
 
 - Tests 11 (I/O) and 12 (strings) require visual/terminal inspection rather than fixed hex comparison
-- Test 12 requires `string_print.kla` from `../klacode/` -- copy it to this directory or adjust the include path
+- Like the other tests, test 12 only needs `uart_stubs.kla`, which lives in this directory
 - Two-register instructions (MULRR, DIVRR, MODRR, CMPGTRR, CMPLERR, MINRR, BSETRR, ROLRR, etc.) require both registers to be specified, e.g. `MULRR A B`, `CMPGTRR A B`
 - Some expected values depend on exact CPU flag behaviour -- if a test fails, check whether the flag semantics match your Verilog implementation
 - All tests can be assembled and verified in batch via `all_tests.txt`
+- `legacy_v1/` holds the old v1-syntax demos; they no longer assemble

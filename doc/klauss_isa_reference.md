@@ -853,7 +853,7 @@ klausscc -c opcode_select.vh -i test_bits.kla -s --test --test-timeout 20
 
 ## Writing Test Programs
 
-Test programs follow a standard structure that enables both manual observation and automated verification. The test files in `src/klatest/` demonstrate this pattern.
+Test programs follow a standard structure that enables both manual observation and automated verification. The test files in `tests/fixtures/` demonstrate this pattern.
 
 ### Test File Structure
 
@@ -955,7 +955,7 @@ klausscc -c opcode_select.vh -i test_regs.kla -s --test
 
 ### Available Test Programs
 
-The `src/klatest/` directory contains test programs covering the full ISA:
+The `tests/fixtures/` directory contains test programs covering the full ISA:
 
 | File | Description |
 |------|-------------|

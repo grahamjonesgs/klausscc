@@ -1399,10 +1399,10 @@ mod tests {
         assert_eq!(err.code(), 1);
     }
 
-    /// Read a git-tracked ELF fixture from the klatest corpus (path is absolute
+    /// Read a git-tracked ELF fixture from the test fixture corpus (path is absolute
     /// via `CARGO_MANIFEST_DIR`, so the test is independent of the working dir).
     fn fixture(name: &str) -> Vec<u8> {
-        let path = format!("{}/src/klatest/{name}", env!("CARGO_MANIFEST_DIR"));
+        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
         std::fs::read(&path).unwrap_or_else(|e| panic!("read fixture {path}: {e}"))
     }
 

@@ -10,8 +10,9 @@ repository = "https://github.com/grahamjonesgs/klausscc.git"
 license = "MIT"
 keywords = ["assembler"]
 categories = ["development-tools"]
-# Ship sources, docs and the lockfile only; editor/CI config and top-level files stay out.
-include = ["src/**", "doc/**", "Cargo.toml", "Cargo.lock", "LICENSE*", "rustfmt.toml", "clippy.toml"]
+# Ship sources, docs, the runtime library, the test fixtures and the lockfile only;
+# editor/CI config and top-level files stay out.
+include = ["src/**", "doc/**", "runtime/**", "tests/**", "Cargo.toml", "Cargo.lock", "LICENSE*", "rustfmt.toml", "clippy.toml"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

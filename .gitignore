@@ -21,7 +21,7 @@ target/
 *.o
 
 # Finder "duplicate" copies of the ELF fixtures
-src/klatest/* 2.elf
+tests/fixtures/* 2.elf
 
 # Editor/backup copies of assembler sources
 *.klaold
@@ -31,13 +31,13 @@ src/klatest/* 2.elf
 *_assembled.txt
 *_assembered.txt
 *_kbt.txt
-src/klatest/speed_code.txt
-src/klatest/test_64bit_debug.txt
-src/klatest/test_64bit_stream.txt
-src/klatest/t
-src/klatest/t.txt
-src/klatest/t.xt
-src/klatest/t.t.xt
+tests/fixtures/speed_code.txt
+tests/fixtures/test_64bit_debug.txt
+tests/fixtures/test_64bit_stream.txt
+tests/fixtures/t
+tests/fixtures/t.txt
+tests/fixtures/t.xt
+tests/fixtures/t.t.xt
 
 # Stray npm lockfile (this is not a Node project)
 package-lock.json

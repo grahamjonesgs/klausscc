@@ -1292,12 +1292,9 @@ mod tests {
         let (oplist, macros_raw) = opcodes::v2_opcodes_and_macros(&mut msg_list);
         let macro_list = expand_embedded_macros(macros_raw, &mut msg_list);
 
-        let cases = [
-            ("src/klatest/v2_hello.kla", "Hi\n"),
-            ("src/klatest/v2_loop.kla", "AB"),
-            ("src/klatest/v2_math.kla", "0"),
-        ];
-        for (file, expected) in cases {
+        let cases = [("v2_hello.kla", "Hi\n"), ("v2_loop.kla", "AB"), ("v2_math.kla", "0")];
+        for (name, expected) in cases {
+            let file = &format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
             let mut tm = MsgList::new();
             let Some((image, entry)) = assemble_to_image(file, &oplist, &macro_list, &mut tm) else {
                 let errs: Vec<String> = tm.list.iter().filter(|m| m.level == MessageType::Error).map(|m| m.text.clone()).collect();
