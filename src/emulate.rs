@@ -1157,16 +1157,22 @@ impl Cpu {
             }
             12 => {
                 // BEXTR — extract imm-described field (start[4:0], len[12:8]); low 32 bits.
+                // len is 5 bits, so a field is 0..=31 bits wide; len 0 extracts nothing (0).
+                // Z is always set from the result: the RTL writes it back with
+                // set_zero (f_bextr) / fmask.zero (pipeline), although F is clear.
                 let start = u64::from(imm32 & 0x1F);
                 let l = u64::from((imm32 >> 8) & 0x1F);
-                let mask = if l >= 32 { 0xFFFF_FFFF } else { (1_u64 << l) - 1 };
-                self.regs[rd] = ((a & 0xFFFF_FFFF) >> start) & mask;
+                let mask = (1_u64 << l) - 1;
+                let field = ((a & 0xFFFF_FFFF) >> start) & mask;
+                self.zero = field == 0;
+                self.regs[rd] = field;
             }
             13 => {
                 // BDEP — deposit rs2's low field into rs1(base) at start; low 32 bits.
+                // Same descriptor as BEXTR (len 0 deposits nothing); no flags.
                 let start = u64::from(imm32 & 0x1F);
                 let l = u64::from((imm32 >> 8) & 0x1F);
-                let mask = if l >= 32 { 0xFFFF_FFFF } else { (1_u64 << l) - 1 };
+                let mask = (1_u64 << l) - 1;
                 let field = (self.regs[rs2] & mask) << start;
                 let clear = !(mask << start) & 0xFFFF_FFFF;
                 self.regs[rd] = (a & clear) | (field & 0xFFFF_FFFF);
@@ -2357,5 +2363,62 @@ mod tests {
         let img = image_from_words(&[0x0000_0800, 0xFF, 0x0000_F011]);
         let (r, _) = emulate_image(&img, default_entry(), 100, false);
         assert!(matches!(r.stop, StopReason::InvalidOpcode(0x0000_0800)));
+    }
+
+    // ---- BEXTR / BDEP --------------------------------------------------------
+    // BEXTR rd, rs1, imm32: 0x9300_0000 | rd<<8 | rs1<<4.  BDEP rd, rs1(base),
+    // rs2(src), imm32: 0x9340_0000 | rd<<8 | rs1<<4 | rs2.  imm32 = start | len<<8.
+
+    #[test]
+    fn bextr_extracts_the_field_and_always_sets_z() {
+        // SETR A 0x12345678 ; BEXTR B A start 8 len 8 -> 0x56, Z clear.
+        let cpu = run_words(&[0x8BD0_0000, 0x1234_5678, 0x9300_0100, 0x0808, HALT]);
+        assert_eq!(cpu.regs[1], 0x56);
+        assert!(!cpu.zero);
+        // SETR A 0xFFFFFF0F ; BEXTR B A start 4 len 4 -> 0: Z set although F is clear.
+        let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FF0F, 0x9300_0100, 0x0404, HALT]);
+        assert_eq!(cpu.regs[1], 0);
+        assert!(cpu.zero, "a zero field sets Z");
+        // INCR A from all ones sets Z ; SETR B 0x30 ; BEXTR C B start 4 len 2 -> 3 clears it.
+        let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x5788_0000, 0x8BD0_0100, 0x30, 0x9300_0210, 0x0204, HALT]);
+        assert_eq!(cpu.regs[2], 3);
+        assert!(!cpu.zero, "a non-zero field clears Z");
+    }
+
+    #[test]
+    fn bextr_reads_the_low_32_bits_and_zero_extends() {
+        // SETR A 0x80000000 sign-extends to 0xFFFFFFFF_80000000 ; BEXTR B A start 28 len 4 -> 8.
+        let cpu = run_words(&[0x8BD0_0000, 0x8000_0000, 0x9300_0100, 0x041C, HALT]);
+        assert_eq!(cpu.regs[1], 8);
+        // len 31 from start 0 keeps bits [30:0] only.
+        let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x9300_0100, 0x1F00, HALT]);
+        assert_eq!(cpu.regs[1], 0x7FFF_FFFF);
+        // len 0 extracts nothing.
+        let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x9300_0100, 0x0003, HALT]);
+        assert_eq!(cpu.regs[1], 0);
+        assert!(cpu.zero);
+    }
+
+    #[test]
+    fn bdep_deposits_the_low_field_of_rs2_and_leaves_flags() {
+        // INCR A from all ones sets Z ; SETR A all ones ; SETR B 0xA5 ;
+        // BDEP C A B start 4 len 4 -> bits [7:4] of the base become 0x5.
+        let cpu = run_words(&[
+            0x8BD0_0000,
+            0xFFFF_FFFF,
+            0x5788_0000, // INCR A -> 0, Z set
+            0x8BD0_0000,
+            0xFFFF_FFFF, // SETR A all ones (base)
+            0x8BD0_0100,
+            0xA5, // SETR B 0xA5 (src: only its low 4 bits go in)
+            0x9340_0201,
+            0x0404, // BDEP C A B start 4 len 4
+            HALT,
+        ]);
+        assert_eq!(cpu.regs[2], 0x0000_0000_FFFF_FF5F, "low 32 bits only, zero-extended");
+        assert!(cpu.zero, "BDEP leaves the flags alone");
+        // len 0 deposits nothing: C = low half of the base.
+        let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x8BD0_0100, 0xA5, 0x9340_0201, 0x0004, HALT]);
+        assert_eq!(cpu.regs[2], 0xFFFF_FFFF);
     }
 }

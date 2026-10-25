@@ -86,6 +86,11 @@ value. Conditional jumps read whatever the last flag-writer left.
   `PC+4` for CALLR). `RET`/`IRET` restore PC from `[31:0]` only.
 - **Shift/rotate counts masked to 6 bits** — count 64 aliases to 0 (no shift).
 - **`CLZ(0) = CTZ(0) = 64`.**
+- **`BEXTR` / `BDEP`** take `start = imm[4:0]`, `len = imm[12:8]` (0–31 bits;
+  `len = 0` is an empty field). The result is 32 bits, zero-extended. `BEXTR`
+  **always** sets `Z` from its result (RTL `f_bextr` sets `set_zero`; the
+  pipeline decodes it with `fmask.zero`), even though `F` is clear in its
+  template; `BDEP` writes no flags.
 - The big-endian→little-endian "fixes" listed in `CPU_ARCHITECTURE.md` §14 are
   **already applied** in the current RTL — emulate the fixed (little-endian)
   behaviour, e.g. byte lane `n` ↔ bits `[8n+7:8n]`.
