@@ -5,7 +5,7 @@ use crate::asm::{assemble, Assembly};
 use crate::error::Error;
 use crate::files::{filename_stem, write_binary_output_file, write_code_output_file};
 use crate::helper::{disassemble_flat_to_pass2, human_bytes, parse_expected_uart_values};
-use crate::image::{build_ddr_image, readmemh, Image};
+use crate::image::{readmemh, Image};
 use crate::layout::CODE_BASE;
 use crate::loader::{load_flat, BinaryInput, Loaded};
 use crate::messages::{print_messages, print_results, MessageType, MsgList};
@@ -496,44 +496,25 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
     }
 }
 
-/// Run the emulator on a single assembled program (`--emulate`).
+/// Run `image` on the emulator and report the run (`--emulate`).
 ///
-/// Builds the flat DDR image, executes the golden model, prints captured UART
-/// output, and streams the per-instruction trace to `trace_file` (or, for `"-"`,
-/// stdout).
+/// Streams the per-instruction trace to `trace_file` (or, for `"-"`, stdout),
+/// prints the summary, then the instruction count, the stop reason and the
+/// captured UART output on stdout.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_emulate(
-    assembly: &Assembly,
-    input_file_name: &str,
+fn emulate_and_report(
+    image: &Image,
     trace_file: Option<&str>,
     max_instructions: u64,
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
-    if msg_list.number_by_type(MessageType::Error) > 0 {
-        msg_list.push("Not emulating due to assembly errors".to_owned(), None, None, MessageType::Error);
-        print_results(msg_list, start_time);
-        return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
-    }
-    let Some(Image { bytes: code, entry }) = assembly.image() else {
-        msg_list.push("No _start address found - cannot emulate".to_owned(), None, None, MessageType::Error);
-        print_results(msg_list, start_time);
-        return Err(Error::Assembly(1));
-    };
-    let image = build_ddr_image(&code);
-    msg_list.push(
-        format!("Emulating {input_file_name}: {} code bytes, entry 0x{entry:08X}", code.len()),
-        None,
-        None,
-        MessageType::Information,
-    );
-
     let mut trace_writer = open_trace_writer(trace_file, msg_list).inspect_err(|_| {
         print_results(msg_list, start_time);
     })?;
     let result = emulate::emulate_image_to_writer(
-        &image,
-        entry,
+        &image.to_ddr(),
+        image.entry,
         max_instructions,
         trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
     );
@@ -553,6 +534,42 @@ pub(crate) fn run_emulate(
     }
     println!("--- end UART ---");
     Ok(())
+}
+
+/// Run the emulator on a single assembled program (`--emulate`).
+///
+/// Lays the assembled program out in memory and runs it with
+/// [`emulate_and_report`].  A build with errors, or without `_start`, is not run.
+#[cfg(not(tarpaulin_include))]
+pub(crate) fn run_emulate(
+    assembly: &Assembly,
+    input_file_name: &str,
+    trace_file: Option<&str>,
+    max_instructions: u64,
+    msg_list: &mut MsgList,
+    start_time: Instant,
+) -> Result<(), Error> {
+    if msg_list.number_by_type(MessageType::Error) > 0 {
+        msg_list.push("Not emulating due to assembly errors".to_owned(), None, None, MessageType::Error);
+        print_results(msg_list, start_time);
+        return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
+    }
+    let Some(image) = assembly.image() else {
+        msg_list.push("No _start address found - cannot emulate".to_owned(), None, None, MessageType::Error);
+        print_results(msg_list, start_time);
+        return Err(Error::Assembly(1));
+    };
+    msg_list.push(
+        format!(
+            "Emulating {input_file_name}: {} code bytes, entry 0x{:08X}",
+            image.bytes.len(),
+            image.entry
+        ),
+        None,
+        None,
+        MessageType::Information,
+    );
+    emulate_and_report(&image, trace_file, max_instructions, msg_list, start_time)
 }
 
 /// Run the emulator on an ELF or flat binary input (`--emulate` with binary input).
@@ -586,32 +603,7 @@ pub(crate) fn run_emulate_elf(
         msg_list.push(format!("Emulating flat binary {binary_path}"), None, None, MessageType::Information);
     }
 
-    let ddr = image.to_ddr();
-    let mut trace_writer = open_trace_writer(trace_file, msg_list).inspect_err(|_| {
-        print_results(msg_list, start_time);
-    })?;
-    let result = emulate::emulate_image_to_writer(
-        &ddr,
-        image.entry,
-        max_instructions,
-        trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
-    );
-    finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
-
-    print_results(msg_list, start_time);
-    println!(
-        "--- Emulator finished: {} instructions, stop = {:?} ---",
-        result.instructions, result.stop
-    );
-    println!("--- Captured UART output ---");
-    {
-        use std::io::Write as _;
-        let mut out = std::io::stdout();
-        let _ = out.write_all(&emulate::uart_bytes(&result.uart));
-        let _ = out.flush();
-    }
-    println!("--- end UART ---");
-    Ok(())
+    emulate_and_report(&image, trace_file, max_instructions, msg_list, start_time)
 }
 
 /// Debug an ELF (or flat binary) on the emulator over the GDB remote protocol.
