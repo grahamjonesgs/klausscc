@@ -962,14 +962,12 @@ pub fn run_test_list(
 ) -> Result<(), Error> {
     if output_serial_port.is_empty() {
         msg_list.push("Test list (-L) requires a serial port (-s)".to_owned(), None, None, MessageType::Error);
-        print_messages(msg_list);
         return Err(Error::Usage("test list (-L) requires a serial port (-s)"));
     }
 
     let test_files = read_test_list(list_file, msg_list);
     if test_files.is_empty() {
         msg_list.push("No test files found in test list".to_owned(), None, None, MessageType::Error);
-        print_messages(msg_list);
         return Err(Error::NoTests(PathBuf::from(list_file)));
     }
 

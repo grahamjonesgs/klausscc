@@ -52,7 +52,7 @@ use error::Error;
 use files::{filename_stem, output_file_name, write_code_output_file};
 use loader::BinaryInput;
 use macros::expand_embedded_macros;
-use messages::{print_messages, print_results, MessageType, MsgList};
+use messages::{print_results, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
 use opcodes::v2_opcodes_and_macros;
 use serial::{monitor_serial, AUTO_SERIAL};
@@ -85,8 +85,8 @@ fn run() -> Result<(), Error> {
     /* Stream messages as they happen rather than dumping them all at the end:
      * during a board load the transfer is otherwise silent and every status
      * line (plus the board's boot log behind it) appears in one burst once the
-     * monitor starts.  print_messages() becomes a no-op; print_results() still
-     * prints the final summary line. */
+     * monitor starts.  print_messages() is then a no-op, so print_results()
+     * prints only the final summary line. */
     msg_list.live = true;
     let start_time = Instant::now();
 
@@ -162,9 +162,7 @@ fn run() -> Result<(), Error> {
         } else {
             output_serial_port.as_str()
         };
-        let monitored = monitor_serial(monitor_port, debug_flag, &mut msg_list).map_err(|err| monitor_failed(monitor_port, err, &mut msg_list));
-        print_messages(&msg_list);
-        return monitored;
+        return monitor_serial(monitor_port, debug_flag, &mut msg_list).map_err(|err| monitor_failed(monitor_port, err, &mut msg_list));
     }
 
     // net-load mode: flatten an ELF (or take a flat binary) and stream it to the
@@ -253,7 +251,6 @@ fn run() -> Result<(), Error> {
     }
 
     if textmate_flag || opcodes_flag {
-        print_messages(&msg_list);
         return html_result.map_err(|err| Error::Other(format!("writing opcode list: {err}")));
     }
 
@@ -370,19 +367,14 @@ fn run() -> Result<(), Error> {
     if monitor_flag {
         if output_serial_port.is_empty() {
             msg_list.push("Monitor flag (-m) requires a serial port (-s)".to_owned(), None, None, MessageType::Error);
-            print_messages(&msg_list);
             return Err(Error::Usage("monitor flag (-m) requires a serial port (-s)"));
         }
-        let monitored =
-            monitor_serial(&output_serial_port, debug_flag, &mut msg_list).map_err(|err| monitor_failed(&output_serial_port, err, &mut msg_list));
-        print_messages(&msg_list);
-        monitored?;
+        monitor_serial(&output_serial_port, debug_flag, &mut msg_list).map_err(|err| monitor_failed(&output_serial_port, err, &mut msg_list))?;
     }
 
     // Check test flag requires serial port
     if test_flag && output_serial_port.is_empty() {
         msg_list.push("Test flag (-T) requires a serial port (-s)".to_owned(), None, None, MessageType::Error);
-        print_messages(&msg_list);
         return Err(Error::Usage("test flag (-T) requires a serial port (-s)"));
     }
 
