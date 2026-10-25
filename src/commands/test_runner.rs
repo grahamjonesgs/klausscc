@@ -3,11 +3,11 @@
 
 use super::{send_failed, write_binary_file};
 use crate::asm::assemble;
+use crate::diag::{print_messages, print_results, Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::parse_expected_uart_values;
 use crate::macros;
-use crate::messages::{print_messages, print_results, MessageType, MsgList};
 use crate::opcodes::Opcode;
 use crate::serial::{run_test_monitor, write_to_board_keep_port};
 use std::fs;
@@ -47,7 +47,7 @@ enum Outcome {
 /// parsed from the source file comments.
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
 pub(crate) fn run_test_mode(
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     bin_string: &str,
     output_serial_port: &str,
     input_file_name: &str,
@@ -133,7 +133,7 @@ pub(crate) fn run_test_mode(
 /// returns the `.kbt` wire string, or `None` when the file cannot be read, the
 /// listing cannot be written or the build has errors.
 #[cfg(not(tarpaulin_include))]
-fn assemble_to_kbt(input_file_name: &str, oplist: &[Opcode], macro_list: &[macros::Macro], msg_list: &mut MsgList) -> Option<String> {
+fn assemble_to_kbt(input_file_name: &str, oplist: &[Opcode], macro_list: &[macros::Macro], msg_list: &mut Diagnostics) -> Option<String> {
     let assembly = assemble(input_file_name, oplist, macro_list, msg_list)?;
 
     let output_file_name = format!("{}.code", filename_stem(input_file_name));
@@ -158,7 +158,7 @@ fn assemble_to_kbt(input_file_name: &str, oplist: &[Opcode], macro_list: &[macro
 /// Each line is a test file path. Blank lines and lines starting with `//` or `#` are ignored.
 /// Paths are resolved relative to the directory containing the list file.
 #[cfg(not(tarpaulin_include))]
-pub(super) fn read_test_list(list_file: &str, msg_list: &mut MsgList) -> Vec<String> {
+pub(super) fn read_test_list(list_file: &str, msg_list: &mut Diagnostics) -> Vec<String> {
     use std::path::Path;
     let list_dir = Path::new(list_file).parent().unwrap_or_else(|| Path::new("."));
 
@@ -202,7 +202,7 @@ pub(crate) fn run_test_list(
     output_serial_port: &str,
     test_timeout: u64,
     send_break: bool,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     if output_serial_port.is_empty() {
         msg_list.push("Test list (-L) requires a serial port (-s)".to_owned(), None, None, MessageType::Error);
@@ -223,7 +223,7 @@ pub(crate) fn run_test_list(
         println!("--- [{}/{}] {} ---", index + 1, test_files.len(), test_file);
 
         // Fresh message list for each test to avoid error accumulation
-        let mut test_msg_list = MsgList::new();
+        let mut test_msg_list = Diagnostics::new();
 
         // A listed file that cannot be read is a failure, not a skip.
         let source = match fs::read_to_string(test_file) {

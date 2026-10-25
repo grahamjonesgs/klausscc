@@ -7,8 +7,8 @@
 //! loss / retransmit that the kbt-over-UART path never needed and the earlier
 //! hand-rolled UDP design would have had to implement.
 
+use crate::diag::{Diagnostics, MessageType};
 use crate::helper::human_bytes;
-use crate::messages::{MessageType, MsgList};
 use std::fmt;
 use std::io::{self, Read as _, Write as _};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs as _};
@@ -125,7 +125,7 @@ fn resolve(ip: &str, port: u16) -> Result<SocketAddr, NetbootError> {
 /// Fails if the board cannot be reached, rejects the image, or reports a
 /// different checksum.
 #[cfg(not(tarpaulin_include))] // Cannot test live TCP in tarpaulin
-pub(crate) fn net_load(ip: &str, port: u16, image: &[u8], entry_pc: u32, msg_list: &mut MsgList) -> Result<(), NetbootError> {
+pub(crate) fn net_load(ip: &str, port: u16, image: &[u8], entry_pc: u32, msg_list: &mut Diagnostics) -> Result<(), NetbootError> {
     let hdr = header(image.len(), entry_pc)?;
     let addr = resolve(ip, port)?;
     msg_list.push(format!("netboot: connecting to {addr}"), None, None, MessageType::Information);

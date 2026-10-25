@@ -29,7 +29,7 @@ pub(crate) enum MessageType {
 
 #[derive(Debug, Default)]
 /// Struct for list of messages.
-pub(crate) struct MsgList {
+pub(crate) struct Diagnostics {
     /// Vector of messages.
     pub list: Vec<Message>,
     /// When true, each pushed message is printed immediately (streamed) rather
@@ -38,9 +38,9 @@ pub(crate) struct MsgList {
     pub live: bool,
 }
 
-/// Implementation of `MsgList`.
-impl MsgList {
-    /// Create new `MsgList`.
+/// Implementation of `Diagnostics`.
+impl Diagnostics {
+    /// Create new `Diagnostics`.
     pub(crate) const fn new() -> Self {
         Self {
             list: Vec::new(),
@@ -48,7 +48,7 @@ impl MsgList {
         }
     }
 
-    /// Returns the number of messages of type `msg_type` in `MsgList`.
+    /// Returns the number of messages of type `msg_type` in `Diagnostics`.
     pub(crate) fn number_by_type(&self, msg_type: MessageType) -> usize {
         self.list.iter().filter(|x| x.level == msg_type).count()
     }
@@ -58,7 +58,7 @@ impl MsgList {
         self.list.iter().any(|x| x.level == MessageType::Error)
     }
 
-    /// Push message to `MsgList`.  In live mode the message is also printed
+    /// Push message to `Diagnostics`.  In live mode the message is also printed
     /// immediately so the user sees progress in real time.
     pub(crate) fn push(&mut self, name: String, line_number: Option<u32>, file_name: Option<String>, msg_type: MessageType) {
         self.list.push(Message {
@@ -120,9 +120,9 @@ fn format_message(msg: &Message) -> String {
 
 /// Print out all messages.
 ///
-/// Prints all the message in passed `MsgList` vector to terminal with coloured messages.
+/// Prints all the message in passed `Diagnostics` vector to terminal with coloured messages.
 #[cfg(not(tarpaulin_include))] // Cannot test this function as it prints to terminal
-pub(crate) fn print_messages(msg_list: &MsgList) {
+pub(crate) fn print_messages(msg_list: &Diagnostics) {
     /* In live mode every message was already printed as it was pushed, so
      * printing them again here would duplicate the whole log. */
     if msg_list.live {
@@ -137,7 +137,7 @@ pub(crate) fn print_messages(msg_list: &MsgList) {
 ///
 /// Takes the message list and start time and prints the results to the users.
 #[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
-pub(crate) fn print_results(msg_list: &MsgList, start_time: Instant) {
+pub(crate) fn print_results(msg_list: &Diagnostics, start_time: Instant) {
     print_messages(msg_list);
     let time_taken: f64 = start_time.elapsed().as_secs_f64();
     eprintln!(
@@ -157,7 +157,7 @@ mod tests {
     #[test]
     // Test that the message list is created correctly
     fn test_msg_list() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         msg_list.push("Test".to_owned(), None, Some("test".to_owned()), MessageType::Information);
         assert_eq!(msg_list.list.len(), 1);
         assert_eq!(msg_list.list[0].text, "Test");
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     // Test that the number of errors is correct
     fn test_number_errors() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert_eq!(msg_list.number_by_type(MessageType::Error), 0);
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     // Test that has_errors only counts errors
     fn test_has_errors() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert!(!msg_list.has_errors());
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);
@@ -192,7 +192,7 @@ mod tests {
     #[test]
     // Test number of warnings
     fn test_number_warnings() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert_eq!(msg_list.number_by_type(MessageType::Warning), 0);
         msg_list.push("Test".to_owned(), None, None, MessageType::Information);
         msg_list.push("Test".to_owned(), None, None, MessageType::Warning);

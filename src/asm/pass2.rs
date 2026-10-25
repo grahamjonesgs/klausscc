@@ -2,15 +2,15 @@
 
 use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, Pass2};
+use crate::diag::Diagnostics;
 use crate::helper::data_as_bytes;
 use crate::labels::Label;
-use crate::messages::MsgList;
 use crate::opcodes::{add_arguments, add_registers, pc_relative_bits, Opcode};
 
 /// Returns pass2 from pass1.
 ///
 /// Pass1 with program counters and returns vector of pass2, with final values.
-pub(super) fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, oplist: &[Opcode], labels: &[Label]) -> Vec<Pass2> {
+pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, oplist: &[Opcode], labels: &[Label]) -> Vec<Pass2> {
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
@@ -50,7 +50,7 @@ mod tests {
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
     fn test_get_pass2_1() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -193,7 +193,7 @@ mod tests {
     #[test]
     // Test get_pass2 for invalid opcode
     fn test_get_pass2_2() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {

@@ -1,7 +1,7 @@
 use crate::asm::line::{LineType, Pass2, SourceLine};
+use crate::diag::{Diagnostics, MessageType};
 use crate::layout::{heap_start, CODE_BASE};
 use crate::macros::Macro;
-use crate::messages::{MessageType, MsgList};
 use crate::opcodes::Opcode;
 use std::io::Error;
 
@@ -96,7 +96,7 @@ pub(crate) fn output_macros_opcodes_html(
     filename_stem: String,
     opcodes: &[Opcode],
     macros: Vec<Macro>,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     opcodes_flag: bool,
     textmate_flag: bool,
 ) -> Result<(), Error> {
@@ -207,7 +207,12 @@ pub(crate) fn output_macros_opcodes_html(
 ///
 /// Writes all macros and opcodes to JSON files.
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-pub(crate) fn output_macros_opcodes_json(filename_stem: String, opcodes: &[Opcode], macros: &[Macro], msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn output_macros_opcodes_json(
+    filename_stem: String,
+    opcodes: &[Opcode],
+    macros: &[Macro],
+    msg_list: &mut Diagnostics,
+) -> Result<(), Error> {
     let mut json_opcode_filename = filename_stem.clone();
     json_opcode_filename.push_str("_opcodes.json");
     let mut json_macro_filename = filename_stem;
@@ -255,7 +260,7 @@ pub(crate) fn output_macros_opcodes_json(filename_stem: String, opcodes: &[Opcod
 ///
 /// Writes all data of opcodes to textmate file.
 #[cfg(not(tarpaulin_include))]
-fn output_opcodes_textmate(filename_stem: String, opcodes: &[Opcode], msg_list: &mut MsgList) -> Result<(), Error> {
+fn output_opcodes_textmate(filename_stem: String, opcodes: &[Opcode], msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut textmate_opcode_filename = filename_stem;
     textmate_opcode_filename.push_str("_textmate.txt");
     msg_list.push(
@@ -295,7 +300,7 @@ fn output_opcodes_textmate(filename_stem: String, opcodes: &[Opcode], msg_list: 
 /// Open text file and return as vector of strings.
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-pub(crate) fn read_file_to_vector(filename: &str, msg_list: &mut MsgList) -> Option<Vec<SourceLine>> {
+pub(crate) fn read_file_to_vector(filename: &str, msg_list: &mut Diagnostics) -> Option<Vec<SourceLine>> {
     read_source_file(filename, msg_list, &mut HashSet::new())
 }
 
@@ -305,7 +310,7 @@ pub(crate) fn read_file_to_vector(filename: &str, msg_list: &mut MsgList) -> Opt
 /// (this one's includers); a file already in it is a recursive include. The
 /// path is compared before the file is opened, and always removed again
 /// afterwards, however reading the file ends.
-fn read_source_file(filename: &str, msg_list: &mut MsgList, open_files: &mut HashSet<PathBuf>) -> Option<Vec<SourceLine>> {
+fn read_source_file(filename: &str, msg_list: &mut Diagnostics, open_files: &mut HashSet<PathBuf>) -> Option<Vec<SourceLine>> {
     let Ok(canonical) = fs::canonicalize(filename) else {
         msg_list.push(format!("Unable to open file {filename}"), None, None, MessageType::Error);
         return None;
@@ -326,7 +331,7 @@ fn read_source_file(filename: &str, msg_list: &mut MsgList, open_files: &mut Has
 }
 
 /// Read the lines of an open source file, expanding its `!include` lines.
-fn read_source_lines(file: File, filename: &str, msg_list: &mut MsgList, open_files: &mut HashSet<PathBuf>) -> Option<Vec<SourceLine>> {
+fn read_source_lines(file: File, filename: &str, msg_list: &mut Diagnostics, open_files: &mut HashSet<PathBuf>) -> Option<Vec<SourceLine>> {
     let buf = BufReader::new(file);
     let mut lines: Vec<SourceLine> = Vec::new();
 
@@ -398,7 +403,7 @@ enum CommentState {
 }
 
 /// Report a block comment that was still open at the end of a file.
-fn unterminated_comment(file_name: &str, line_number: u32, msg_list: &mut MsgList) {
+fn unterminated_comment(file_name: &str, line_number: u32, msg_list: &mut Diagnostics) {
     msg_list.push(
         format!("Comment not terminated in file {file_name}"),
         Some(line_number),
@@ -412,7 +417,7 @@ fn unterminated_comment(file_name: &str, line_number: u32, msg_list: &mut MsgLis
 /// Checks for /* */ and removes them from the vector of strings. Comments do
 /// not nest, may span lines, but never span files: a comment still open at the
 /// end of a file is reported at the line where its `/*` was.
-pub(crate) fn remove_block_comments(lines: Vec<SourceLine>, msg_list: &mut MsgList) -> Vec<SourceLine> {
+pub(crate) fn remove_block_comments(lines: Vec<SourceLine>, msg_list: &mut Diagnostics) -> Vec<SourceLine> {
     let mut state = CommentState::Code;
     // File and line of the `/*` that opened the current comment.
     let mut opened_at: (String, u32) = (String::new(), 0);
@@ -497,7 +502,7 @@ pub(crate) fn write_binary_output_file(filename: &impl AsRef<Path>, output_strin
 /// Output the code details file to given filename.
 ///
 /// Writes all data to the detailed code file.
-pub(crate) fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &[Pass2], msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &[Pass2], msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut file = match File::create(filename) {
         Ok(file) => file,
         #[cfg(not(tarpaulin_include))] // Can't test error creating file
@@ -590,7 +595,7 @@ mod test {
             file_name: "test.kla".to_owned(),
             line_counter: 1,
         }];
-        let output = remove_block_comments(input, &mut MsgList::new());
+        let output = remove_block_comments(input, &mut Diagnostics::new());
         assert_eq!(
             output,
             vec![SourceLine {
@@ -616,7 +621,7 @@ mod test {
                 line_counter: 2,
             },
         ];
-        let output = remove_block_comments(input, &mut MsgList::new());
+        let output = remove_block_comments(input, &mut Diagnostics::new());
         assert_eq!(
             output,
             vec![
@@ -649,7 +654,7 @@ mod test {
                 line_counter: 2,
             },
         ];
-        let output = remove_block_comments(input, &mut MsgList::new());
+        let output = remove_block_comments(input, &mut Diagnostics::new());
         assert_eq!(
             output,
             vec![
@@ -687,7 +692,7 @@ mod test {
                 line_counter: 3,
             },
         ];
-        let output = remove_block_comments(input, &mut MsgList::new());
+        let output = remove_block_comments(input, &mut Diagnostics::new());
         assert_eq!(
             output,
             vec![
@@ -730,7 +735,7 @@ mod test {
                 line_counter: 3,
             },
         ];
-        let output = remove_block_comments(input, &mut MsgList::new());
+        let output = remove_block_comments(input, &mut Diagnostics::new());
         assert_eq!(
             output,
             vec![
@@ -756,7 +761,7 @@ mod test {
     #[test]
     // Test comments are closed at end of file
     fn test_remove_block_comments6() {
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         let input = vec![
             SourceLine {
                 input_text_line: "abc/* This is a /* /*comment ".to_owned(),
@@ -802,8 +807,8 @@ mod test {
     }
 
     /// Run `remove_block_comments` over `lines` (all in `test.kla`).
-    fn strip_block(lines: &[&str]) -> (Vec<String>, MsgList) {
-        let mut msg_list = MsgList::new();
+    fn strip_block(lines: &[&str]) -> (Vec<String>, Diagnostics) {
+        let mut msg_list = Diagnostics::new();
         let input = lines
             .iter()
             .zip(1..)
@@ -943,7 +948,7 @@ mod test {
     #[test]
     // Test for missing file
     fn test_read_file_to_vec1() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         read_file_to_vector("////xxxxxxx", &mut msg_list);
         assert_eq!(msg_list.list[0].text, "Unable to open file ////xxxxxxx");
     }
@@ -951,7 +956,7 @@ mod test {
     #[test]
     // Test for simple file added
     fn test_write_file_to_vec2() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -975,7 +980,7 @@ mod test {
     #[test]
     // Test for included file
     fn test_write_file_to_vec3() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1009,7 +1014,7 @@ mod test {
     #[test]
     // Test for recursive file includes
     fn test_write_file_to_vec4() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1040,7 +1045,7 @@ mod test {
     #[test]
     // Test for missing included file
     fn test_write_file_to_vec5() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1066,7 +1071,7 @@ mod test {
     #[test]
     // Test for missing included file name
     fn test_write_file_to_vec6() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1089,7 +1094,7 @@ mod test {
     #[test]
     // Test for double included file
     fn test_write_file_to_vec7() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1128,7 +1133,7 @@ mod test {
     // A file including itself through a different spelling of its path is
     // caught before it is opened again, not after running out of descriptors.
     fn test_read_file_self_include_other_spelling() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let tmp_dir = TempDir::new().unwrap();
         fs::create_dir(tmp_dir.path().join("sub")).unwrap();
         let file_path1 = tmp_dir.path().join("sub").join("a.kla");
@@ -1152,7 +1157,7 @@ mod test {
     // A failed include still pops the include stack, so including the same
     // file again later is not mistaken for recursion.
     fn test_read_file_failed_include_pops_stack() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let tmp_dir = TempDir::new().unwrap();
         let file_path1 = tmp_dir.path().join("a.kla");
         fs::write(&file_path1, "!include b.kla\n").unwrap();
@@ -1168,7 +1173,7 @@ mod test {
     #[test]
     // The same file may be included twice when it is not its own includer
     fn test_read_file_diamond_include() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let tmp_dir = TempDir::new().unwrap();
         let file_path1 = tmp_dir.path().join("a.kla");
         fs::write(&file_path1, "!include b.kla\n!include c.kla\n").unwrap();
@@ -1187,7 +1192,7 @@ mod test {
                  // Regression: a read error (here, including a directory) repeats on every
                  // read, and the reader reported it forever instead of stopping.
     fn test_read_file_include_directory() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let tmp_dir = TempDir::new().unwrap();
         fs::create_dir(tmp_dir.path().join("dir")).unwrap();
         let file_path1 = tmp_dir.path().join("a.kla");
@@ -1205,7 +1210,7 @@ mod test {
             "{errors:?}"
         );
 
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert!(read_file_to_vector(dir_name, &mut msg_list).is_none());
         assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
     }
@@ -1228,7 +1233,7 @@ mod test {
     #[test]
     fn test_write_code_output_file() {
         let tmp_dir = TempDir::new().unwrap();
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let pass2: Vec<Pass2> = vec![
             Pass2 {
                 input_text_line: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_owned(),

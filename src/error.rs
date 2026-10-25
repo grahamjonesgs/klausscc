@@ -1,10 +1,10 @@
 //! Crate error type for operational failures, and its mapping to the exit status.
 //!
 //! Problems in the user's source (bad operands, undefined labels, ...) are
-//! diagnostics: they are collected in a [`MsgList`](crate::messages::MsgList)
+//! diagnostics: they are collected in a [`Diagnostics`](crate::diag::Diagnostics)
 //! so one run can report all of them.  [`Error`] covers the failures that stop
 //! a command.  By convention a handler reports the failure to the user (to the
-//! live `MsgList`, or on stderr) before returning the `Error`, so `main` only
+//! live `Diagnostics`, or on stderr) before returning the `Error`, so `main` only
 //! has to turn it into an exit code.
 
 use crate::netload::NetbootError;

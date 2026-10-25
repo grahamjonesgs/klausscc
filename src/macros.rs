@@ -1,6 +1,6 @@
 use crate::asm::lexer::{return_comments, strip_comments};
 use crate::asm::line::SourceLine;
-use crate::messages::{MessageType, MsgList};
+use crate::diag::{Diagnostics, MessageType};
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
@@ -58,7 +58,7 @@ fn substitute_args(item: &str, call: &[&str]) -> (String, Vec<SubstError>) {
 ///
 /// Takes Vector of macros, and embeds macros recursively, up to 10 passes.
 /// Will create errors message for more than 10 passes.
-pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec<Macro> {
+pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnostics) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed = true;
     let mut last_macro = String::default();
@@ -131,7 +131,7 @@ pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList)
 ///
 /// Takes the input list of all lines and macro vector and expands. A trailing
 /// `//` comment on a macro call is not part of its arguments.
-pub(crate) fn expand_macros(msg_list: &mut MsgList, input_list: Vec<SourceLine>, macro_list: &mut [Macro]) -> Vec<SourceLine> {
+pub(crate) fn expand_macros(msg_list: &mut Diagnostics, input_list: Vec<SourceLine>, macro_list: &mut [Macro]) -> Vec<SourceLine> {
     let mut pass0: Vec<SourceLine> = Vec::new();
     for code_line in input_list {
         if let Some(macro_name) = macro_name_from_string(&code_line.input_text_line) {
@@ -172,7 +172,7 @@ pub(crate) fn expand_macros(msg_list: &mut MsgList, input_list: Vec<SourceLine>,
 ///
 /// `!macros` files are resolved relative to the directory of the file that
 /// contains the directive, matching `!include`.
-pub(crate) fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut Vec<Macro>, msg_list: &mut MsgList) -> Vec<SourceLine> {
+pub(crate) fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut Vec<Macro>, msg_list: &mut Diagnostics) -> Vec<SourceLine> {
     let mut output: Vec<SourceLine> = Vec::new();
     let mut added = false;
 
@@ -230,7 +230,7 @@ pub(crate) fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut 
 /// Blank or comment lines (anything [`macro_from_string`] rejects) are skipped.
 /// A definition whose name already exists is an error and is not added. Returns
 /// true only when a macro was actually appended.
-fn add_macro_definition(definition: &str, macro_list: &mut Vec<Macro>, line_number: u32, filename: &str, msg_list: &mut MsgList) -> bool {
+fn add_macro_definition(definition: &str, macro_list: &mut Vec<Macro>, line_number: u32, filename: &str, msg_list: &mut Diagnostics) -> bool {
     let Some(new_macro) = macro_from_string(definition, msg_list) else {
         return false;
     };
@@ -250,7 +250,7 @@ fn add_macro_definition(definition: &str, macro_list: &mut Vec<Macro>, line_numb
 /// Parse opcode definition line to macro.
 ///
 /// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None.
-pub(crate) fn macro_from_string(input_line_full: &str, msg_list: &mut MsgList) -> Option<Macro> {
+pub(crate) fn macro_from_string(input_line_full: &str, msg_list: &mut Diagnostics) -> Option<Macro> {
     // Find the macro if it exists
     if input_line_full.trim().find('$').unwrap_or(usize::MAX) != 0 {
         return None;
@@ -364,7 +364,7 @@ pub(crate) fn return_macro_items_replace(
     macros: &mut [Macro],
     input_line_number: u32,
     filename: &str,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
 ) -> Option<Vec<String>> {
     let mut words = line.split_whitespace();
     let mut return_items: Vec<String> = Vec::new();
@@ -444,7 +444,7 @@ mod tests {
     // Regression: "!macro $A %1" then "!macro $B $A" panicked (strip_prefix(' ').unwrap()
     // on an empty expansion). It is now an error.
     fn test_embedded_macro_missing_argument_does_not_panic() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let mut macro_list = Vec::new();
         let input = vec![source_line("!macro $A %1", 1), source_line("!macro $B $A", 2)];
         let output = apply_source_macros(input, &mut macro_list, &mut msg_list);
@@ -452,7 +452,7 @@ mod tests {
         assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
         assert_eq!(msg_list.list.first().unwrap().text, "Missing argument 1 for embedded macro \"$A\" in $B");
         // The embedded call can still pass its own argument through.
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let mut macro_list = Vec::new();
         let input = vec![source_line("!macro $A PUSH %1", 1), source_line("!macro $B $A %1", 2)];
         apply_source_macros(input, &mut macro_list, &mut msg_list);
@@ -464,7 +464,7 @@ mod tests {
     // Regression: a trailing comment on a macro call became extra arguments
     // ("Too many variables" warning, and "//" substituted for %2).
     fn test_macro_call_trailing_comment_is_not_arguments() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut [Macro {
             name: String::from("$WAIT"),
             variables: 1,
@@ -490,7 +490,7 @@ mod tests {
     #[test]
     // "Macro not found" carries the line and file of the call.
     fn test_macro_not_found_has_location() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         expand_macros(&mut msg_list, vec![source_line("$NOPE 1 // why", 7)], &mut []);
         let msg = msg_list.list.first().unwrap();
         assert_eq!(msg.level, MessageType::Error);
@@ -561,7 +561,7 @@ mod tests {
     // Test for variable replacement
     fn test_return_macro_items_replace1() {
         let macros = &mut Vec::<Macro>::new();
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$DELAY"),
             variables: 2,
@@ -584,7 +584,7 @@ mod tests {
     // Test for variable replacement macro as variable
     fn test_return_macro_items_replace2() {
         let macros = &mut Vec::<Macro>::new();
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$DELAY"),
             variables: 3,
@@ -607,7 +607,7 @@ mod tests {
     // Test if macro does not exist
     fn test_return_macro_items_replace3() {
         let macros = &mut Vec::<Macro>::new();
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$DELAY1"),
             variables: 3,
@@ -623,7 +623,7 @@ mod tests {
     // Test if too many variables
     fn test_return_macro_items_replace4() {
         let macros = &mut Vec::<Macro>::new();
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$DELAY1"),
             variables: 3,
@@ -639,7 +639,7 @@ mod tests {
     // Test if invalid variable
     fn test_return_macro_items_replace5() {
         let macros = &mut Vec::<Macro>::new();
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$DELAY1"),
             variables: 3,
@@ -655,7 +655,7 @@ mod tests {
     // Test if invalid variable not set
     fn test_return_macro_items_replace6() {
         let macros = &mut Vec::<Macro>::new();
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$DELAY1"),
             variables: 3,
@@ -671,7 +671,7 @@ mod tests {
     fn test_expand_embedded_macros1() {
         let macros = &mut Vec::<Macro>::new();
 
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
             variables: 2,
@@ -707,7 +707,7 @@ mod tests {
     fn test_expand_embedded_macros2() {
         let macros = &mut Vec::<Macro>::new();
 
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
             variables: 2,
@@ -725,7 +725,7 @@ mod tests {
     fn test_expand_embedded_macros3() {
         let macros = &mut Vec::<Macro>::new();
 
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
             variables: 1,
@@ -751,7 +751,7 @@ mod tests {
     fn test_expand_embedded_macros4() {
         let macros = &mut Vec::<Macro>::new();
 
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
             variables: 2,
@@ -777,7 +777,7 @@ mod tests {
     fn test_expand_embedded_macros5() {
         let macros = &mut Vec::<Macro>::new();
 
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
             variables: 2,
@@ -800,7 +800,7 @@ mod tests {
     fn test_expand_embedded_macros6() {
         let macros = &mut Vec::<Macro>::new();
 
-        let msg_list = &mut MsgList::new();
+        let msg_list = &mut Diagnostics::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
             variables: 2,
@@ -836,7 +836,7 @@ mod tests {
     // Test expand macros, to make sure it expands the macros correctly
     fn test_expand_macros1() {
         use super::*;
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut Vec::<Macro>::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
@@ -877,7 +877,7 @@ mod tests {
     // Test expand macros, with too few variables, gives error
     fn test_expand_macros2() {
         use super::*;
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut Vec::<Macro>::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
@@ -918,7 +918,7 @@ mod tests {
     // Test expand macros, passing too many variables, gives warning
     fn test_expand_macros3() {
         use super::*;
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut Vec::<Macro>::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
@@ -958,7 +958,7 @@ mod tests {
     // Test expand macros, missing macro, gives error
     fn test_expand_macros4() {
         use super::*;
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut Vec::<Macro>::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
@@ -994,7 +994,7 @@ mod tests {
     // Test expand macros if no macro
     fn test_expand_macros5() {
         use super::*;
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut Vec::<Macro>::new();
         macros.push(Macro {
             name: String::from("$MACRO1"),
@@ -1022,7 +1022,7 @@ mod tests {
     #[test]
     // Inline !macro is registered, its directive line removed, the rest passes through
     fn test_apply_source_macros_inline() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut Vec::<Macro>::new();
         let input: Vec<SourceLine> = vec![
             SourceLine {
@@ -1053,7 +1053,7 @@ mod tests {
     #[test]
     // Redefining an existing macro is an error and does not add a duplicate
     fn test_apply_source_macros_redefine() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut vec![Macro {
             name: String::from("$FOO"),
             variables: 0,
@@ -1075,7 +1075,7 @@ mod tests {
     #[test]
     // A user macro that references another user macro is embedded-expanded
     fn test_apply_source_macros_embedded() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut Vec::<Macro>::new();
         let input: Vec<SourceLine> = vec![
             SourceLine {
@@ -1098,7 +1098,7 @@ mod tests {
     #[test]
     // A missing file name after !macros is reported as an error
     fn test_apply_source_macros_missing_name() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let macros = &mut Vec::<Macro>::new();
         let input: Vec<SourceLine> = vec![SourceLine {
             input_text_line: String::from("!macros"),
@@ -1114,7 +1114,7 @@ mod tests {
     #[test]
     // Convert string to macro with no variables
     fn test_macro_from_string1() {
-        let mut msglist = MsgList::new();
+        let mut msglist = Diagnostics::new();
         let input_line = String::from("$POPALL POP A / POP B");
         let macro_result = macro_from_string(&input_line, &mut msglist);
         assert_eq!(
@@ -1131,7 +1131,7 @@ mod tests {
     #[test]
     // Convert string to macro with variables
     fn test_macro_from_string2() {
-        let mut msglist = MsgList::new();
+        let mut msglist = Diagnostics::new();
         let input_line = String::from("$POPALL POP %1 / POP %2");
         let macro_result = macro_from_string(&input_line, &mut msglist);
         assert_eq!(
@@ -1148,7 +1148,7 @@ mod tests {
     #[test]
     // Convert string to macro with comments and spaces before name
     fn test_macro_from_string3() {
-        let mut msglist = MsgList::new();
+        let mut msglist = Diagnostics::new();
         let input_line = String::from("   $POPALL POP %1 / POP %2 //Test Macro");
         let macro_result = macro_from_string(&input_line, &mut msglist);
         assert_eq!(
@@ -1165,7 +1165,7 @@ mod tests {
     #[test]
     // Convert string to macro with missing variables
     fn test_macro_from_string4() {
-        let mut msglist = MsgList::new();
+        let mut msglist = Diagnostics::new();
         let input_line = String::from("$POPALL POP %3 / POP %2");
         let macro_result = macro_from_string(&input_line, &mut msglist);
         assert_eq!(
@@ -1186,7 +1186,7 @@ mod tests {
     #[test]
     // Convert string to macro with variables not a macro
     fn test_macro_from_string5() {
-        let mut msglist = MsgList::new();
+        let mut msglist = Diagnostics::new();
         let input_line = String::from("POPALL POP %1 / POP %2");
         let macro_result = macro_from_string(&input_line, &mut msglist);
         assert_eq!(macro_result, None);
@@ -1195,7 +1195,7 @@ mod tests {
     #[test]
     // Convert string to macro with variables not a macro with dollar in middle
     fn test_macro_from_string6() {
-        let mut msglist = MsgList::new();
+        let mut msglist = Diagnostics::new();
         let input_line = String::from("POP$ALL POP %1 / POP %2");
         let macro_result = macro_from_string(&input_line, &mut msglist);
         assert_eq!(macro_result, None);
@@ -1204,7 +1204,7 @@ mod tests {
     #[test]
     // Convert string to macro with missing variables
     fn test_macro_from_string7() {
-        let mut msglist = MsgList::new();
+        let mut msglist = Diagnostics::new();
         let input_line = String::from("$POPALL POP %5 / POP %3");
         let _macro_result = macro_from_string(&input_line, &mut msglist);
         //assert_eq!(macro_result, None);

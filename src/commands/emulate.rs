@@ -4,12 +4,12 @@
 
 use super::test_runner::read_test_list;
 use crate::asm::{assemble, Assembly};
+use crate::diag::{print_results, Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::filename_stem;
 use crate::helper::{human_bytes, parse_expected_uart_values};
 use crate::image::Image;
 use crate::loader::{load_flat, BinaryInput, Loaded};
-use crate::messages::{print_results, MessageType, MsgList};
 use crate::opcodes::Opcode;
 use crate::{emulate, macros};
 use std::fs;
@@ -24,7 +24,7 @@ use std::time::Instant;
 /// error is already reported to `msg_list`).  The writer is line-buffered so the
 /// trace streams during the run instead of being held in memory.
 #[cfg(not(tarpaulin_include))]
-fn open_trace_writer(trace_file: Option<&str>, msg_list: &mut MsgList) -> Result<Option<Box<dyn std::io::Write>>, Error> {
+fn open_trace_writer(trace_file: Option<&str>, msg_list: &mut Diagnostics) -> Result<Option<Box<dyn std::io::Write>>, Error> {
     use std::io::BufWriter;
     match trace_file {
         None => Ok(None),
@@ -44,7 +44,7 @@ fn open_trace_writer(trace_file: Option<&str>, msg_list: &mut MsgList) -> Result
 
 /// Finish a trace writer: flush it and, for a file destination, report the count.
 #[cfg(not(tarpaulin_include))]
-fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: Option<&str>, instructions: u64, msg_list: &mut MsgList) {
+fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: Option<&str>, instructions: u64, msg_list: &mut Diagnostics) {
     use std::io::Write as _;
     if let Some(w) = writer.as_mut() {
         let _ = w.flush();
@@ -71,7 +71,7 @@ fn emulate_and_report(
     image: &Image,
     trace_file: Option<&str>,
     max_instructions: u64,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     start_time: Instant,
 ) -> Result<(), Error> {
     let mut trace_writer = open_trace_writer(trace_file, msg_list).inspect_err(|_| {
@@ -111,7 +111,7 @@ pub(crate) fn run_emulate(
     input_file_name: &str,
     trace_file: Option<&str>,
     max_instructions: u64,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     start_time: Instant,
 ) -> Result<(), Error> {
     if msg_list.has_errors() {
@@ -147,7 +147,7 @@ pub(crate) fn run_emulate_elf(
     input: BinaryInput<'_>,
     trace_file: Option<&str>,
     max_instructions: u64,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     start_time: Instant,
 ) -> Result<(), Error> {
     let binary_path = input.path;
@@ -182,7 +182,7 @@ pub(crate) fn run_emulate_test(
     macro_list: &[macros::Macro],
     test_path: &str,
     max_instructions: u64,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     start_time: Instant,
 ) -> Result<(), Error> {
     use std::path::Path;
@@ -312,7 +312,7 @@ pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macro
         return Ok(Verdict::NotValidatable);
     }
 
-    let mut test_msgs = MsgList::new();
+    let mut test_msgs = Diagnostics::new();
     let assembly = assemble(file, oplist, macro_list, &mut test_msgs);
     let Some(image) = assembly.filter(|_| !test_msgs.has_errors()).and_then(|assembly| assembly.image()) else {
         return Err("assembly error".to_owned());
@@ -360,7 +360,7 @@ mod tests {
 
     /// The built-in v2 opcode table and expanded macros, as the CLI loads them.
     fn v2_tables() -> (Vec<Opcode>, Vec<macros::Macro>) {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let (oplist, macros_raw) = crate::opcodes::v2_opcodes_and_macros(&mut msg_list);
         let macro_list = macros::expand_embedded_macros(macros_raw, &mut msg_list);
         (oplist, macro_list)

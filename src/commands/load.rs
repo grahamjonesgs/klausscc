@@ -2,13 +2,13 @@
 //! elf2serial and sending a pre-built `.kbt`.
 
 use super::{send_image, write_binary_file, SendOpts};
+use crate::diag::{print_results, Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::write_code_output_file;
 use crate::helper::disassemble_flat_to_pass2;
 use crate::image::readmemh;
 use crate::layout::CODE_BASE;
 use crate::loader::{load_flat, BinaryInput};
-use crate::messages::{print_results, MessageType, MsgList};
 use crate::netload::net_load;
 use crate::serial::AUTO_SERIAL;
 use std::fs;
@@ -22,7 +22,13 @@ use std::time::Instant;
 /// is used verbatim with entry defaulting to `0x20`.  The flat image is wrapped
 /// in the heap-header DDR layout (`build_ddr_image`) and sent via `net_load`.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_netload(input: BinaryInput<'_>, board_ip: &str, board_port: u16, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn run_netload(
+    input: BinaryInput<'_>,
+    board_ip: &str,
+    board_port: u16,
+    msg_list: &mut Diagnostics,
+    start_time: Instant,
+) -> Result<(), Error> {
     if board_ip.is_empty() {
         msg_list.push("net-load requires --ip <board address>".to_owned(), None, None, MessageType::Error);
         print_results(msg_list, start_time);
@@ -49,7 +55,7 @@ pub(crate) fn run_netload(input: BinaryInput<'_>, board_ip: &str, board_port: u1
 /// `boot_rom.v` (`DEPTH_DW` × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
 /// word 0 (`heap_start` = image byte length) to know how much to copy to DDR.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut Diagnostics, start_time: Instant) -> Result<(), Error> {
     // mem-out writes a $readmemh image and does not need an entry point.
     let loaded = load_flat(
         BinaryInput {
@@ -104,7 +110,7 @@ pub(crate) fn run_elf2serial(
     input: BinaryInput<'_>,
     kbt_file_name: &str,
     send: SendOpts<'_>,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     start_time: Instant,
 ) -> Result<(), Error> {
     let binary_path = input.path;
@@ -188,7 +194,7 @@ pub(crate) fn run_elf2serial(
 /// file and no re-encoding.  With `-m` and no `-s`, the serial port is
 /// auto-detected so a bare `-m` can both send and monitor.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Diagnostics, start_time: Instant) -> Result<(), Error> {
     let wire = match fs::read_to_string(kbt_path) {
         Ok(contents) => contents,
         Err(e) => {

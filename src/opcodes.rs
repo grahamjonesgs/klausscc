@@ -1,7 +1,7 @@
 use crate::asm::line::SourceLine;
+use crate::diag::{Diagnostics, MessageType};
 use crate::labels::{convert_argument, Label};
 use crate::macros::{macro_from_string, return_macro, Macro};
-use crate::messages::{MessageType, MsgList};
 use crate::num::{parse_bits64, parse_int};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
@@ -83,7 +83,14 @@ fn parse_imm64(token: &str) -> Option<u64> {
 ///
 /// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values.
 /// Converts label names to hex addresses.
-pub(crate) fn add_arguments(opcodes: &[Opcode], line: &str, msg_list: &mut MsgList, line_number: u32, filename: &str, labels: &[Label]) -> String {
+pub(crate) fn add_arguments(
+    opcodes: &[Opcode],
+    line: &str,
+    msg_list: &mut Diagnostics,
+    line_number: u32,
+    filename: &str,
+    labels: &[Label],
+) -> String {
     let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
     let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
     let mut arguments = String::default();
@@ -165,7 +172,7 @@ fn return_opcode_struct<'a>(line: &str, opcodes: &'a [Opcode]) -> Option<&'a Opc
 /// `doc/ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place `rd==rs1`, embedded
 /// `N<<15`).  Opcodes without a layout fall back to the legacy trailing-nibble
 /// scheme (used by `.vh`-parsed tables).
-pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_list: &mut MsgList, line_number: u32) -> String {
+pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_list: &mut Diagnostics, line_number: u32) -> String {
     let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
         msg_list.push(
             format!("Opcode not found - \"{line}\""),
@@ -279,7 +286,7 @@ pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_
 
 /// Legacy trailing-nibble register packing for `.vh`-parsed opcodes (`hex_code`
 /// carries `?` wildcards in its trailing nibbles).
-fn legacy_add_registers(opcode: &Opcode, line: &str, filename: &str, msg_list: &mut MsgList, line_number: u32) -> String {
+fn legacy_add_registers(opcode: &Opcode, line: &str, filename: &str, msg_list: &mut Diagnostics, line_number: u32) -> String {
     let num_registers = opcode.registers;
     let mut opcode_found = opcode.hex_code.clone();
 
@@ -478,7 +485,7 @@ pub(crate) fn pc_relative_bits(
     line: &str,
     pc: u32,
     labels: &[Label],
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     line_number: u32,
     filename: &str,
 ) -> u32 {
@@ -984,7 +991,7 @@ pub(crate) fn v2_opcodes() -> Vec<Opcode> {
 /// The built-in v2 opcode table plus the standard macro definitions — the
 /// in-code replacement for parsing an `opcode_select.vh` file.
 #[must_use]
-pub(crate) fn v2_opcodes_and_macros(msg_list: &mut MsgList) -> (Vec<Opcode>, Vec<Macro>) {
+pub(crate) fn v2_opcodes_and_macros(msg_list: &mut Diagnostics) -> (Vec<Opcode>, Vec<Macro>) {
     let macros = V2_MACROS.iter().filter_map(|line| macro_from_string(line, msg_list)).collect();
     (v2_opcodes(), macros)
 }
@@ -996,7 +1003,7 @@ pub(crate) fn v2_opcodes_and_macros(msg_list: &mut MsgList) -> (Vec<Opcode>, Vec
     dead_code,
     reason = "legacy `.vh` opcode-file parser; superseded by the built-in v2 table but retained for backward compatibility and unit tests"
 )]
-pub(crate) fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut MsgList) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+pub(crate) fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut Diagnostics) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     if input_list.is_empty() {
         return (None, None);
     }
@@ -1233,7 +1240,7 @@ mod tests {
     #[test]
     // This test is to check that the function will return correct output if the number of registers is correct
     fn test_add_registers1() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -1252,7 +1259,7 @@ mod tests {
     #[test]
     // This test is to check that the function will return an error if the number of registers is incorrect
     fn test_add_registers2() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -1270,7 +1277,7 @@ mod tests {
     #[test]
     // This test is to check that the function will return an error if the length of the opcode is not correct
     fn test_add_registers3() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH A B");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -1288,7 +1295,7 @@ mod tests {
     #[test]
     // Test single hex argument
     fn test_add_arguments1() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 0xFFFF");
         let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -1308,7 +1315,7 @@ mod tests {
     #[test]
     // Test single decimal argument
     fn test_add_arguments2() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1234");
         let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -1328,7 +1335,7 @@ mod tests {
     #[test]
     // Test invalid argument
     fn test_add_arguments3() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH HELLO");
         let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -1348,7 +1355,7 @@ mod tests {
     #[test]
     // Test invalid second argument
     fn test_add_arguments4() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 0xF RRR");
         let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -1368,7 +1375,7 @@ mod tests {
     #[test]
     // Test two arguments
     fn test_add_arguments5() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1 0xF");
         let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -1388,7 +1395,7 @@ mod tests {
     #[test]
     // Test too many arguments
     fn test_add_arguments6() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1 0xF");
         let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
@@ -1409,7 +1416,7 @@ mod tests {
     #[test]
     // Regression: one "Too many arguments" warning was pushed per extra token.
     fn test_add_arguments_extra_tokens_warn_once() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let labels = Vec::<labels::Label>::new();
         let opcodes = &mut v2_opcodes();
         let output = add_arguments(opcodes, "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
@@ -1417,7 +1424,7 @@ mod tests {
         assert_eq!(msg_list.number_by_type(MessageType::Warning), 1);
         assert_eq!(msg_list.list.len(), 1);
 
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         add_arguments(opcodes, "SETR A 1", &mut msg_list, 1, "test", &labels);
         assert_eq!(msg_list.list.len(), 0);
     }
@@ -1558,7 +1565,7 @@ mod tests {
     #[test]
     // Test no macro or opcodes
     fn test_parse_vh_file1() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let vh_list = vec![
             SourceLine {
                 input_text_line: "abc/* This is a comment */def".to_owned(),
@@ -1581,7 +1588,7 @@ mod tests {
     #[test]
     // Test normal macro and opcode
     fn test_parse_vh_file2() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let vh_list = vec![
             SourceLine {
                 input_text_line: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
@@ -1623,7 +1630,7 @@ mod tests {
     #[test]
     // Test duplicate macro
     fn test_parse_vh_file3() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let vh_list = vec![
             SourceLine {
                 input_text_line: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
@@ -1657,7 +1664,7 @@ mod tests {
     #[test]
     // Test empty list
     fn test_parse_vh_file4() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let vh_list = vec![];
 
         let (opt_oplist, opt_macro_list) = parse_vh_file(vh_list, &mut msg_list);
@@ -1669,7 +1676,7 @@ mod tests {
     #[test]
     // Test normal opcode with sections
     fn test_parse_vh_file5() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let vh_list = vec![
             SourceLine {
                 input_text_line: "/// Section 1".to_owned(),
@@ -1833,7 +1840,7 @@ mod tests {
     #[test]
     // add_registers handles three-register (RRR) instructions correctly
     fn test_add_registers_three_regs() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("ADDR A B C");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -1854,7 +1861,7 @@ mod tests {
     // Regression: a count was masked to 6 bits, so "SHLV A 64" encoded as a shift of 0.
     fn test_count_operand_range() {
         let opcodes = &mut v2_opcodes();
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert_eq!(add_registers(opcodes, "SHLV A 0", "t", &mut msg_list, 1), "50204000");
         assert_eq!(add_registers(opcodes, "SHLV A 63", "t", &mut msg_list, 1), "503FC000");
         assert_eq!(add_registers(opcodes, "SHLV A 0x3F", "t", &mut msg_list, 1), "503FC000");
@@ -1874,7 +1881,7 @@ mod tests {
     #[test]
     // ISA v3 mnemonics encode to the same words the emulator/RTL tests use.
     fn test_v3_short_forms_assemble() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let opcodes = &mut v2_opcodes();
         let cases = [
             ("SETR.S A -5", "4BDFB000"),
@@ -1908,7 +1915,7 @@ mod tests {
     #[test]
     // ISA v3 PC-relative targets: short (simm18) and fused (simm13) branches.
     fn test_v3_pc_relative_branches() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let opcodes = &mut v2_opcodes();
         let labels = vec![
             Label {

@@ -6,9 +6,9 @@
 
 use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, SourceLine};
+use crate::diag::{Diagnostics, MessageType};
 use crate::helper::{is_valid_line, line_type, num_data_bytes};
 use crate::layout::CODE_BASE;
-use crate::messages::{MessageType, MsgList};
 use crate::num::{fits_imm32, parse_bits64, parse_int, parse_operand};
 use crate::opcodes::{num_arguments, Opcode};
 
@@ -47,7 +47,7 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
 /// Returns pass1 from pass0.
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
-pub(super) fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, oplist: &[Opcode]) -> Vec<Pass1> {
+pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, oplist: &[Opcode]) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = CODE_BASE; // Byte address: 4 header words × 8 bytes each (64-bit words)
     let mut data_pass0: Vec<SourceLine> = Vec::new();
@@ -213,7 +213,7 @@ mod tests {
     #[test]
     // Test get_pass1 for correct vector returned, with correct program counters
     fn test_get_pass1_1() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -296,7 +296,7 @@ mod tests {
     #[test]
     // Test get_pass1 for correct vector returned, with correct program counters
     fn test_get_pass1_2() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),

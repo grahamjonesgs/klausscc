@@ -4,10 +4,10 @@
 use super::load::run_elf2serial;
 #[cfg(feature = "board")]
 use super::SendOpts;
+use crate::diag::{print_results, Diagnostics, MessageType};
 use crate::error::Error;
 use crate::layout::CODE_BASE;
 use crate::loader::{load_flat, BinaryInput, Loaded};
-use crate::messages::{print_results, MessageType, MsgList};
 use crate::{emulate, gdbserver};
 use std::time::Instant;
 
@@ -17,7 +17,7 @@ use std::time::Instant;
 /// program at 0x20), so ELF addresses equal emulator addresses when the ELF is
 /// linked at 0x20 — the normal `klausscpu.ld` layout.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Diagnostics, start_time: Instant) -> Result<(), Error> {
     let binary_path = input.path;
     let Loaded { image, elf } = load_flat(input, msg_list)?;
     let code_base = u64::from(CODE_BASE);
@@ -62,7 +62,7 @@ pub(crate) fn run_gdbserver_board(
     jtag_khz: u32,
     kbt_file_name: &str,
     send: SendOpts<'_>,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
     start_time: Instant,
 ) -> Result<(), Error> {
     use crate::gdbserver_board;
@@ -102,7 +102,7 @@ pub(crate) fn run_gdbserver_board(
 
 /// `--board` without the `board` feature: explain how to get it.
 #[cfg(all(not(feature = "board"), not(tarpaulin_include)))]
-pub(crate) fn board_unsupported(msg_list: &mut MsgList) -> Error {
+pub(crate) fn board_unsupported(msg_list: &mut Diagnostics) -> Error {
     msg_list.push(
         "--board needs a klausscc built with board support: cargo build --release --features board (needs libftdi1-dev)".to_owned(),
         None,

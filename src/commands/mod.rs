@@ -25,9 +25,9 @@ pub(crate) use gdb::run_gdbserver_board;
 pub(crate) use load::{run_elf2serial, run_kbt_send, run_mem_out, run_netload};
 pub(crate) use test_runner::{run_test_list, run_test_mode};
 
+use crate::diag::{print_results, Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::write_binary_output_file;
-use crate::messages::{print_results, MessageType, MsgList};
 use crate::serial::{monitor_serial_port, write_to_board, write_to_board_keep_port};
 use std::io;
 use std::path::PathBuf;
@@ -35,7 +35,7 @@ use std::time::Instant;
 
 /// Report that the serial monitor stopped on an error, and make it the command's failure.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn monitor_failed(port: &str, err: io::Error, msg_list: &mut MsgList) -> Error {
+pub(crate) fn monitor_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics) -> Error {
     msg_list.push(format!("Serial monitor stopped: \"{err}\""), None, None, MessageType::Warning);
     Error::Serial {
         port: port.to_owned(),
@@ -45,7 +45,7 @@ pub(crate) fn monitor_failed(port: &str, err: io::Error, msg_list: &mut MsgList)
 
 /// Report a failed send to the board's serial port, and make it the command's failure.
 #[cfg(not(tarpaulin_include))]
-fn send_failed(port: &str, err: io::Error, msg_list: &mut MsgList, start_time: Instant) -> Error {
+fn send_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics, start_time: Instant) -> Error {
     msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
     print_results(msg_list, start_time);
     Error::Serial {
@@ -75,7 +75,7 @@ pub(crate) struct SendOpts<'a> {
 /// is sent, and the caller prints the summary.  A failed send is reported and
 /// returned as [`Error::Serial`].
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
+pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnostics, start_time: Instant) -> Result<(), Error> {
     if opts.monitor {
         return match write_to_board_keep_port(wire, opts.port, opts.send_break, true, msg_list) {
             Ok(port) => {
@@ -117,7 +117,7 @@ pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut MsgList,
 /// Writes the `.kbt` wire-format string to `binary_file_name`, reporting (and
 /// returning) a failure.
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub(crate) fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) -> Result<(), Error> {
+pub(crate) fn write_binary_file(msg_list: &mut Diagnostics, binary_file_name: &str, bin_string: &str) -> Result<(), Error> {
     msg_list.push(format!("Writing binary file to {binary_file_name}"), None, None, MessageType::Information);
     write_binary_output_file(&binary_file_name, bin_string).map_err(|result_err| {
         msg_list.push(

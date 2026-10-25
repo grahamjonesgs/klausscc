@@ -1,6 +1,6 @@
 use crate::asm::lexer::{data_name_from_string, is_blank, is_comment, is_start, label_name_from_string};
 use crate::asm::line::{LineType, Pass2};
-use crate::messages::{MessageType, MsgList};
+use crate::diag::{Diagnostics, MessageType};
 use crate::num::{parse_bits64, parse_int, LiteralError};
 use crate::opcodes::{disassemble_word, return_opcode, Opcode};
 use std::fmt;
@@ -275,7 +275,7 @@ pub(crate) fn line_type(opcodes: &[Opcode], line: &str) -> LineType {
 /// Return number of bytes of data.
 ///
 /// From instruction name, option of number of bytes of data, or 0 is error.
-pub(crate) fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: &str) -> u32 {
+pub(crate) fn num_data_bytes(line: &str, msg_list: &mut Diagnostics, line_number: u32, filename: &str) -> u32 {
     match data_bytes(line) {
         Ok(data) => data.len().try_into().unwrap_or_default(),
         Err(err) => {
@@ -501,7 +501,7 @@ mod tests {
 
     #[test]
     fn test_num_data_bytes1() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("#TEST 3");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test");
         assert_eq!(output, 48); // 3 words × 16 hex chars per 64-bit word = 48
@@ -509,7 +509,7 @@ mod tests {
 
     #[test]
     fn test_num_data_bytes2() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let input = String::from("#TEST");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test");
         assert_eq!(output, 0);
@@ -791,7 +791,7 @@ mod tests {
     #[test]
     // A bad data value is reported as an error at its line, with the reason.
     fn test_num_data_bytes_reports_bad_value() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert_eq!(num_data_bytes(".word 12abc", &mut msg_list, 7, "prog.kla"), 0);
         let msg = msg_list.list.first().unwrap();
         assert_eq!(msg.level, MessageType::Error);

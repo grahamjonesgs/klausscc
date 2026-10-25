@@ -1,5 +1,5 @@
+use crate::diag::{Diagnostics, MessageType};
 use crate::helper::{human_bytes, trim_newline};
-use crate::messages::{MessageType, MsgList};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::fmt::Write as _;
@@ -81,7 +81,7 @@ pub(crate) fn find_possible_port() -> Option<String> {
 ///
 /// If port name is `AUTO_SERIAL` then return the first USB serial port found.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn SerialPort>, Error> {
+fn return_port(port_name: &str, msg_list: &mut Diagnostics) -> Result<Box<dyn SerialPort>, Error> {
     let mut local_port_name = port_name.to_owned();
     if port_name == AUTO_SERIAL {
         if let Some(suggested_port) = find_possible_port() {
@@ -175,7 +175,7 @@ pub(crate) fn write_to_board_keep_port(
     port_name: &str,
     send_break: bool,
     skip_load_response: bool,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
 ) -> Result<Box<dyn SerialPort>, Error> {
     use serialport::{DataBits, FlowControl, Parity, StopBits};
 
@@ -291,7 +291,7 @@ pub(crate) fn write_to_board_keep_port(
 ///
 /// Will send the program to the serial port, and wait for the response.
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-pub(crate) fn write_to_board(binary_output: &str, port_name: &str, send_break: bool, msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn write_to_board(binary_output: &str, port_name: &str, send_break: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let _port = write_to_board_keep_port(binary_output, port_name, send_break, false, msg_list)?;
     Ok(())
 }
@@ -316,7 +316,7 @@ fn print_bytes(data: &[u8], debug: bool) {
 /// Continuously reads from the serial port and prints received data to stdout.
 /// Runs until the user presses Ctrl+C, then closes the port cleanly.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub(crate) fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let port = return_port(port_name, msg_list)?;
     monitor_serial_port(port, debug, msg_list)
 }
@@ -364,7 +364,7 @@ struct RawMode;
 impl RawMode {
     /// Turn raw mode on, or warn and return `None` if the terminal refuses.
     #[cfg(not(tarpaulin_include))] // Needs a real terminal
-    fn enable(msg_list: &mut MsgList) -> Option<Self> {
+    fn enable(msg_list: &mut Diagnostics) -> Option<Self> {
         match crossterm::terminal::enable_raw_mode() {
             Ok(()) => Some(Self),
             Err(err) => {
@@ -454,7 +454,7 @@ fn flush_stdin() {
 /// Used after `write_to_board_keep_port` to continue reading from the same port
 /// that was used to upload the program, ensuring no UART output is missed.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut MsgList) -> Result<(), Error> {
+pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
     port.set_timeout(Duration::from_millis(500))?;
 
     let running = Arc::new(AtomicBool::new(true));
@@ -559,7 +559,7 @@ pub(crate) fn run_test_monitor(
     mut port: Box<dyn SerialPort>,
     expected_values: &[String],
     timeout_secs: u64,
-    msg_list: &mut MsgList,
+    msg_list: &mut Diagnostics,
 ) -> io::Result<TestResult> {
     port.set_timeout(Duration::from_millis(500)).unwrap_or(());
 

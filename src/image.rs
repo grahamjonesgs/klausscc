@@ -9,8 +9,8 @@
 //! boot, the boot ROM ([`readmemh`]) and the emulator.
 
 use crate::asm::line::{LineType, Pass2};
+use crate::diag::{Diagnostics, MessageType};
 use crate::layout::{heap_start, CODE_BASE, HEAP_HEADER_WORDS};
-use crate::messages::{MessageType, MsgList};
 use std::fmt::Write as _;
 
 /// A program ready to load: its bytes as they sit in memory from
@@ -83,7 +83,7 @@ impl Image {
     /// the program is not a whole number of 32-bit words, which the board
     /// cannot load; see [`calc_checksum`].
     #[must_use]
-    pub(crate) fn to_kbt(&self, msg_list: &mut MsgList) -> Option<String> {
+    pub(crate) fn to_kbt(&self, msg_list: &mut Diagnostics) -> Option<String> {
         let mut out = String::with_capacity(1 + (CODE_BASE as usize + self.bytes.len() + 4) * 2 + 10);
         out.push('S');
 
@@ -169,7 +169,7 @@ fn encode_word_kbt(w: u32) -> String {
 /// them cannot be loaded: that is reported as an error and `None` is returned,
 /// rather than a checksum the board would reject.
 #[must_use]
-fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> Option<String> {
+fn calc_checksum(input_string: &str, msg_list: &mut Diagnostics) -> Option<String> {
     // Strip S framing char only (Z/X are not present — caller hasn't appended them yet).
     let stripped: String = input_string.chars().filter(|&c| c != 'S').collect();
 
@@ -212,7 +212,7 @@ fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> Option<String> {
 /// code is laid out one after another (see [`hex_to_bytes`]) and framed by
 /// [`Image::to_kbt`].  The program must have exactly one `_start`, which is
 /// its entry point; otherwise that is reported and `None` returned.
-pub(crate) fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<String> {
+pub(crate) fn create_bin_string(pass2: &[Pass2], msg_list: &mut Diagnostics) -> Option<String> {
     let mut starts = pass2.iter().filter(|x| x.line_type == LineType::Start);
     let entry = match (starts.next(), starts.next()) {
         (Some(start), None) => start.program_counter,
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn to_kbt_frames_header_program_entry_and_checksum() {
         let image = Image::new(vec![0x00, 0x00, 0x01, 0x6C], 0x20);
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let kbt = image.to_kbt(&mut msg_list).unwrap();
         // heap_start = 0x20 + 4 = 0x24, rounded up to 8 = 0x28.
         let header = format!("28000000{}", "0".repeat(8 + 3 * 16));
@@ -334,7 +334,7 @@ mod tests {
             line(LineType::Opcode, 0x20, "8BD0000000000041"),
             line(LineType::Opcode, 0x28, "6C010000"),
         ];
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let image = Image::from_lines(&lines).unwrap();
         assert_eq!(image.to_kbt(&mut msg_list), create_bin_string(&lines, &mut msg_list));
         assert!(msg_list.list.is_empty());
@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn to_kbt_rejects_a_part_word() {
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert_eq!(Image::new(vec![1, 2, 3], 0x20).to_kbt(&mut msg_list), None);
         assert_eq!(
             msg_list.list[0].text,
@@ -352,7 +352,7 @@ mod tests {
         let mut image = Image::new(vec![1, 2, 3], 0x20);
         image.pad_to_word();
         assert_eq!(image.bytes, vec![1, 2, 3, 0]);
-        assert!(image.to_kbt(&mut MsgList::new()).is_some());
+        assert!(image.to_kbt(&mut Diagnostics::new()).is_some());
     }
 
     #[test]
@@ -416,7 +416,7 @@ mod tests {
             program_counter: 5,
             line_type: LineType::Data,
         });
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         // Word 0: heap_start=0x28 LE → "28000000"; hi32=0 → "00000000".
         // Entry pc=1 LE → "01000000". 4-char opcodes pass through unchanged.
@@ -452,13 +452,13 @@ mod tests {
                 line_type: LineType::Data,
             },
         ];
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert_eq!(create_bin_string(&pass2, &mut msg_list), None);
         assert_eq!(
             msg_list.list[0].text,
             "Program image is not a whole number of 32-bit words, length is 78 hex characters"
         );
-        assert_eq!(calc_checksum("S0000", &mut MsgList::new()), None);
+        assert_eq!(calc_checksum("S0000", &mut Diagnostics::new()), None);
     }
 
     #[test]
@@ -490,7 +490,7 @@ mod tests {
             program_counter: 5,
             line_type: LineType::Data,
         });
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
         assert_eq!(msg_list.list[0].text, "Multiple start addresses found");
@@ -525,7 +525,7 @@ mod tests {
             program_counter: 5,
             line_type: LineType::Data,
         });
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
         assert_eq!(msg_list.list[0].text, "No start address found");

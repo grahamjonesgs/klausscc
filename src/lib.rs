@@ -11,6 +11,8 @@ mod asm;
 mod cli;
 /// Module of subcommand handlers (the `run_*` entry points).
 mod commands;
+/// Diagnostics: the errors, warnings and notes reported to the user.
+mod diag;
 /// Module: independent ISA emulator (golden-model trace generator).
 pub mod emulate;
 /// Module defining the crate error type and exit codes.
@@ -38,8 +40,6 @@ mod layout;
 mod loader;
 /// Module to manage macros.
 mod macros;
-/// Module to manage messages.
-mod messages;
 /// Module to stream a flat DDR image to the board over TCP (network boot).
 mod netload;
 /// Module for integer literal parsing.
@@ -53,11 +53,11 @@ use commands::{
     monitor_failed, run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload,
     run_test_list, run_test_mode, send_image, write_binary_file, SendOpts,
 };
+use diag::{print_results, Diagnostics, MessageType};
 use error::Error;
 use files::{filename_stem, output_file_name, write_code_output_file};
 use loader::BinaryInput;
 use macros::expand_embedded_macros;
-use messages::{print_results, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
 use opcodes::v2_opcodes_and_macros;
 use serial::{monitor_serial, AUTO_SERIAL};
@@ -87,7 +87,7 @@ fn run_command() -> Result<(), Error> {
 
     use files::output_macros_opcodes_html;
 
-    let mut msg_list = MsgList::new();
+    let mut msg_list = Diagnostics::new();
     /* Stream messages as they happen rather than dumping them all at the end:
      * during a board load the transfer is otherwise silent and every status
      * line (plus the board's boot log behind it) appears in one burst once the

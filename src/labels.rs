@@ -1,6 +1,6 @@
 use crate::asm::lexer::{data_name_from_string, label_name_from_string, strip_comments};
 use crate::asm::line::Pass1;
-use crate::messages::{MessageType, MsgList};
+use crate::diag::{Diagnostics, MessageType};
 use crate::num::{fits_imm32, is_hex_literal, parse_bits64, parse_int, LiteralError};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,7 +17,7 @@ pub(crate) struct Label {
 /// Converts argument to label value or converts to Hex. An undefined label or
 /// a malformed or out-of-range literal is reported as an error at the line and
 /// returns `None`.
-pub(crate) fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32, filename: &str, labels: &[Label]) -> Option<String> {
+pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_number: u32, filename: &str, labels: &[Label]) -> Option<String> {
     let argument_trim = argument.trim();
     let mut error = |text: String| msg_list.push(text, Some(line_number), Some(filename.to_owned()), MessageType::Error);
 
@@ -72,7 +72,7 @@ pub(crate) fn convert_argument(argument: &str, msg_list: &mut MsgList, line_numb
 /// Check if label is duplicate.
 ///
 /// Check if label is duplicate, and output message if duplicate is found.
-pub(crate) fn find_duplicate_label(labels: &[Label], msg_list: &mut MsgList) {
+pub(crate) fn find_duplicate_label(labels: &[Label], msg_list: &mut Diagnostics) {
     for label in labels {
         let opt_found_line = return_label_value(&label.name, labels);
         if opt_found_line.unwrap_or(0) != label.program_counter {
@@ -89,7 +89,7 @@ pub(crate) fn find_duplicate_label(labels: &[Label], msg_list: &mut MsgList) {
 /// Create the vector of labels.
 ///
 /// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels.
-pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
+pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut Diagnostics) -> Vec<Label> {
     let labels: Vec<Label> = pass1
         .iter()
         .filter(|n| label_name_from_string(&n.input_text_line).is_some() || data_name_from_string(&n.input_text_line).is_some())
@@ -217,7 +217,7 @@ mod tests {
                 name: "label1".to_owned(),
             },
         ];
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         find_duplicate_label(&labels, &mut msg_list);
         assert_eq!(msg_list.number_by_type(MessageType::Error), 1);
         assert_eq!(msg_list.number_by_type(MessageType::Warning), 0);
@@ -242,7 +242,7 @@ mod tests {
                 name: "#data1".to_owned(),
             },
         ];
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         assert_eq!(convert_argument("0x1234", &mut msg_list, 3, "test", &labels), Some("00001234".to_owned()));
         assert_eq!(convert_argument("1234", &mut msg_list, 5, "test", &labels), Some("000004D2".to_owned()));
         assert_eq!(
@@ -286,7 +286,7 @@ mod tests {
                 name: "#data1".to_owned(),
             },
         ];
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
 
         // Check for label reference without colon suffix
         assert_eq!(convert_argument("label1", &mut msg_list, 0, "test", &labels), Some("00000001".to_owned()));
@@ -337,7 +337,7 @@ mod tests {
             "4294967296",
             "99999999999999999999",
         ] {
-            let mut msg_list = MsgList::new();
+            let mut msg_list = Diagnostics::new();
             assert_eq!(convert_argument(bad, &mut msg_list, 9, "prog.kla", &labels), None, "{bad}");
             assert_eq!(msg_list.number_by_type(MessageType::Error), 1, "{bad}");
             assert_eq!(msg_list.number_by_type(MessageType::Warning), 0, "{bad}");
@@ -355,7 +355,7 @@ mod tests {
     // Literal forms shared with the rest of the assembler (num::parse_int).
     fn test_convert_argument_literal_forms() {
         let labels = Vec::new();
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let mut convert = |arg: &str| convert_argument(arg, &mut msg_list, 1, "t", &labels);
         assert_eq!(convert("0x1_0"), Some("00000010".to_owned()));
         assert_eq!(convert("0XFF"), Some("000000FF".to_owned()));
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     // Test that the labels are correctly extracted from the pass1 list
     fn test_get_labels() {
-        let msglist = &mut MsgList::new();
+        let msglist = &mut Diagnostics::new();
         let pass1 = vec![
             Pass1 {
                 program_counter: 0,

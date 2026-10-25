@@ -6,11 +6,11 @@
 //! binary-input mode uses (`--net-load`, `--mem-out`, elf2serial,
 //! `--emulate`, `--gdbserver`).
 
+use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::helper::human_bytes;
 use crate::image::Image;
 use crate::layout::CODE_BASE;
-use crate::messages::{MessageType, MsgList};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
@@ -64,7 +64,7 @@ impl Loaded {
 /// binary default of `0x20`.  A file that cannot be read, or an ELF with no
 /// loadable segments, is reported and returned as the command's failure.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn load_flat(input: BinaryInput<'_>, msg_list: &mut MsgList) -> Result<Loaded, Error> {
+pub(crate) fn load_flat(input: BinaryInput<'_>, msg_list: &mut Diagnostics) -> Result<Loaded, Error> {
     let path = input.path;
     let file_data = fs::read(path).map_err(|source| {
         msg_list.push(format!("Cannot read binary file {path}: {source}"), None, None, MessageType::Error);

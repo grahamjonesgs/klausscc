@@ -4,10 +4,10 @@
 //! `!include`s), drop block comments, apply source and built-in macros, give
 //! every line its address ([`pass1`]), collect the labels, and encode every
 //! line ([`pass2`]).  Problems in the source are diagnostics in the
-//! [`MsgList`]; assembly carries on past them so that one run reports them
+//! [`Diagnostics`]; assembly carries on past them so that one run reports them
 //! all and the `.code` listing can show where they are.  Callers decide what
 //! a build with errors may still be used for, by checking
-//! [`MsgList::has_errors`].
+//! [`Diagnostics::has_errors`].
 //!
 //! [`line`] holds the per-line records that flow between the passes and
 //! [`lexer`] the pure text predicates used to classify a source line.  Both
@@ -19,11 +19,11 @@ pub(crate) mod line;
 mod pass1;
 mod pass2;
 
+use crate::diag::{Diagnostics, MessageType};
 use crate::files::{read_file_to_vector, remove_block_comments};
 use crate::image::{create_bin_string, Image};
 use crate::labels::{find_duplicate_label, get_labels};
 use crate::macros::{apply_source_macros, expand_macros, Macro};
-use crate::messages::{MessageType, MsgList};
 use crate::opcodes::Opcode;
 use line::{Pass2, SourceLine};
 use pass1::get_pass1;
@@ -39,7 +39,7 @@ pub(crate) struct Assembly {
 impl Assembly {
     /// The `.kbt` wire-format image of the program, or `None` (reported) when
     /// it does not have exactly one `_start` or is not whole 32-bit words.
-    pub(crate) fn to_kbt(&self, msg_list: &mut MsgList) -> Option<String> {
+    pub(crate) fn to_kbt(&self, msg_list: &mut Diagnostics) -> Option<String> {
         create_bin_string(&self.lines, msg_list)
     }
 
@@ -54,7 +54,7 @@ impl Assembly {
 /// Returns `None` only when the file (or one it includes) cannot be read,
 /// which is reported.  Otherwise the assembly is returned even when it has
 /// errors; see the [module documentation](self).
-pub(crate) fn assemble(input_file_name: &str, oplist: &[Opcode], macro_list: &[Macro], msg_list: &mut MsgList) -> Option<Assembly> {
+pub(crate) fn assemble(input_file_name: &str, oplist: &[Opcode], macro_list: &[Macro], msg_list: &mut Diagnostics) -> Option<Assembly> {
     msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
     let input_list = read_file_to_vector(input_file_name, msg_list)?;
     Some(assemble_lines(input_list, oplist, macro_list, msg_list))
@@ -63,7 +63,7 @@ pub(crate) fn assemble(input_file_name: &str, oplist: &[Opcode], macro_list: &[M
 /// Assemble source lines that have already been read.
 ///
 /// The lines' own `!macro` definitions are added to a copy of `macro_list`.
-pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, oplist: &[Opcode], macro_list: &[Macro], msg_list: &mut MsgList) -> Assembly {
+pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, oplist: &[Opcode], macro_list: &[Macro], msg_list: &mut Diagnostics) -> Assembly {
     let input_list = remove_block_comments(input_list, msg_list);
 
     // Fold in any `!macro` / `!macros` definitions from the source, then expand.
@@ -89,8 +89,8 @@ mod tests {
     use crate::opcodes::v2_opcodes_and_macros;
 
     /// Assemble `source` (as `test.kla`) with the built-in v2 table, without file I/O.
-    fn assemble_text(source: &str) -> (Vec<Pass2>, MsgList) {
-        let mut msg_list = MsgList::new();
+    fn assemble_text(source: &str) -> (Vec<Pass2>, Diagnostics) {
+        let mut msg_list = Diagnostics::new();
         let (oplist, macros_raw) = v2_opcodes_and_macros(&mut msg_list);
         let macro_list = expand_embedded_macros(macros_raw, &mut msg_list);
         let input: Vec<SourceLine> = source
@@ -107,7 +107,7 @@ mod tests {
     }
 
     /// The `(line, text)` of every message of `level`.
-    fn messages_of(msg_list: &MsgList, level: MessageType) -> Vec<(Option<u32>, String)> {
+    fn messages_of(msg_list: &Diagnostics, level: MessageType) -> Vec<(Option<u32>, String)> {
         msg_list
             .list
             .iter()
@@ -203,7 +203,7 @@ mod tests {
     fn assemble_reports_an_unreadable_file() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("missing.kla");
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let (oplist, macros) = v2_opcodes_and_macros(&mut msg_list);
         assert!(assemble(&file.to_string_lossy(), &oplist, &macros, &mut msg_list).is_none());
         assert!(msg_list.has_errors());
@@ -215,7 +215,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("bad.kla");
         std::fs::write(&file, "_start\nNOTANOP A\nHALT\n").unwrap();
-        let mut msg_list = MsgList::new();
+        let mut msg_list = Diagnostics::new();
         let (oplist, macros) = v2_opcodes_and_macros(&mut msg_list);
         let assembly = assemble(&file.to_string_lossy(), &oplist, &macros, &mut msg_list).unwrap();
         assert!(msg_list.has_errors());
