@@ -354,6 +354,14 @@ pub(crate) const fn is_mmio(addr: u32) -> bool {
     addr >> 28 == 0xF
 }
 
+/// The last address a `len`-byte access at `addr` touches (`addr` itself for
+/// an empty access), or `None` if the access runs past `0xFFFF_FFFF`.
+#[cfg(any(test, feature = "board"))]
+pub(crate) fn access_last_addr(addr: u32, len: usize) -> Option<u32> {
+    let span = u32::try_from(len.saturating_sub(1)).ok()?;
+    addr.checked_add(span)
+}
+
 impl MonitorCmd for EmuTarget {
     fn handle_monitor_cmd(&mut self, cmd: &[u8], mut out: ConsoleOutput<'_>) -> Result<(), Self::Error> {
         match std::str::from_utf8(cmd).map(str::trim) {
@@ -685,6 +693,21 @@ pub fn serve(cpu: Cpu, port: u16) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn access_last_addr_rejects_ranges_past_the_top() {
+        assert_eq!(access_last_addr(0x1000, 0), Some(0x1000));
+        assert_eq!(access_last_addr(0x1000, 1), Some(0x1000));
+        assert_eq!(access_last_addr(0x1000, 4), Some(0x1003));
+        assert_eq!(access_last_addr(0xFFFF_FFFC, 4), Some(0xFFFF_FFFF));
+        assert_eq!(access_last_addr(0xFFFF_FFFD, 4), None);
+        assert_eq!(access_last_addr(0xFFFF_FFFF, 2), None);
+        #[cfg(target_pointer_width = "64")]
+        {
+            assert_eq!(access_last_addr(0, 0x1_0000_0000), Some(0xFFFF_FFFF));
+            assert_eq!(access_last_addr(0, 0x1_0000_0001), None);
+        }
+    }
 
     #[test]
     fn register_packet_round_trips() {

@@ -20,7 +20,7 @@
 //! On detach the server removes its breakpoints, clears "attached" and lets
 //! the program run on.
 
-use crate::gdbserver::{is_mmio, KlaussCpuArch, KlaussRegId, KlaussRegs, HW_BREAKPOINTS, HW_WATCHPOINTS, TRAP_WORD, TRIPLE};
+use crate::gdbserver::{access_last_addr, is_mmio, KlaussCpuArch, KlaussRegId, KlaussRegs, HW_BREAKPOINTS, HW_WATCHPOINTS, TRAP_WORD, TRIPLE};
 use crate::jtag::{DmiReq, Jtag};
 use gdbstub::common::{Endianness, Pid, Signal};
 use gdbstub::conn::ConnectionExt;
@@ -196,8 +196,9 @@ impl Board {
         if buf.is_empty() {
             return Ok(());
         }
+        let last_addr = access_last_addr(addr, buf.len()).ok_or_else(|| past_top(addr, buf.len()))?;
         let first = addr & !7;
-        let last = (addr + buf.len() as u32 - 1) & !7;
+        let last = last_addr & !7;
         let n = ((last - first) / 8 + 1) as usize;
         let mut done = 0;
         // bound one batch (~128 dwords = 1 KiB)
@@ -224,28 +225,42 @@ impl Board {
         if data.is_empty() {
             return Ok(());
         }
+        let last = access_last_addr(addr, data.len()).ok_or_else(|| past_top(addr, data.len()))?;
         let first = addr & !7;
-        let end = addr + data.len() as u32;
         let mut reqs = vec![DmiReq::Write(MEM_ADDR, u64::from(first))];
-        let mut base = first;
-        while base < end {
+        for base in (first..=last & !7).step_by(8) {
             let mut bytes = [0_u8; 8];
             let mut be = 0_u64;
             for (lane, b) in bytes.iter_mut().enumerate() {
                 let a = base + lane as u32;
-                if a >= addr && a < end {
+                if a >= addr && a <= last {
                     *b = data[(a - addr) as usize];
                     be |= 1 << lane;
                 }
             }
             reqs.push(DmiReq::Write(DATA0, u64::from_le_bytes(bytes)));
             reqs.push(DmiReq::Write(MEM_CMD, be | MEM_WRITE | MEM_INC));
-            base += 8;
         }
         reqs.push(DmiReq::Read(DMSTATUS));
         let v = self.batch(&reqs)?;
         self.check_mem(v[v.len() - 1])
     }
+}
+
+/// The error for a memory access that runs past `0xFFFF_FFFF`.
+fn past_top(addr: u32, len: usize) -> String {
+    format!("{len} bytes at 0x{addr:08X} run past the end of the address space")
+}
+
+/// Disarm every hardware breakpoint and watchpoint slot and clear the debug
+/// module's sticky error.
+fn clear_slots(board: &mut Board) -> JResult<()> {
+    let clear: Vec<DmiReq> = (0..HW_BREAKPOINTS as u8)
+        .map(|i| DmiReq::Write(BP0 + i, 0))
+        .chain((0..HW_WATCHPOINTS as u8).map(|i| DmiReq::Write(WP0 + i, 0)))
+        .chain(std::iter::once(DmiReq::Write(DMSTATUS, 0)))
+        .collect();
+    board.batch(&clear).map(drop)
 }
 
 // ---- target -----------------------------------------------------------------
@@ -298,8 +313,15 @@ impl BoardTarget {
         }
     }
 
-    fn mem_allowed(&self, addr: u32, len: usize) -> bool {
-        self.allow_mmio || !(is_mmio(addr) || is_mmio(addr.wrapping_add(len.saturating_sub(1) as u32)))
+    /// Check a debugger memory access: EFAULT if it runs past `0xFFFF_FFFF`,
+    /// or touches MMIO while that is off limits.
+    fn check_access(&self, addr: u32, len: usize) -> TargetResult<(), Self> {
+        let last = access_last_addr(addr, len).ok_or(TargetError::Errno(14))?; // EFAULT
+        if self.allow_mmio || !(is_mmio(addr) || is_mmio(last)) {
+            Ok(())
+        } else {
+            Err(TargetError::Errno(14))
+        }
     }
 
     /// Resume (or step) from the halt.  A compiled-in TRAP at the PC is
@@ -419,27 +441,37 @@ impl BoardTarget {
     }
 
     /// Undo everything the session set and let the program run on.
+    ///
+    /// Best effort: every step is tried even when an earlier one fails (a
+    /// `TRAP` left patched into program memory is worse than a failed
+    /// halt), and the first error is returned.
     fn detach(&mut self) -> JResult<()> {
+        let mut first_err: Option<String> = None;
+        let mut note = |result: JResult<()>| {
+            if let Err(e) = result {
+                first_err.get_or_insert(e);
+            }
+        };
         if self.running {
-            self.interrupt()?;
+            note(self.interrupt().map(drop));
         }
-        let bps: Vec<(u32, u32)> = self.sw_breakpoints.iter().map(|(a, w)| (*a, *w)).collect();
-        for (addr, orig) in bps {
-            self.board.write_mem(addr, &orig.to_le_bytes())?;
+        for (addr, orig) in std::mem::take(&mut self.sw_breakpoints) {
+            note(self.board.write_mem(addr, &orig.to_le_bytes()));
         }
-        self.sw_breakpoints.clear();
-        for slot in 0..HW_BREAKPOINTS {
-            self.hw_breakpoints[slot] = None;
-            self.write_bp(slot)?;
-        }
-        for slot in 0..HW_WATCHPOINTS {
-            self.watches[slot] = None;
-            self.write_wp(slot)?;
-        }
+        self.hw_breakpoints = [None; HW_BREAKPOINTS];
+        self.watches = [None; HW_WATCHPOINTS];
+        note(clear_slots(&mut self.board));
         // a program that executed HALT stays halted (resuming would run on
-        // past its end)
-        let at_halt = self.exited || (self.board.status()? >> 4) & 7 == CAUSE_HALT;
-        self.board.control(if at_halt { 0 } else { CTL_RESUMEREQ })
+        // past its end); if the status cannot be read, only clear "attached"
+        let resume = match self.board.status() {
+            Ok(st) => !self.exited && (st >> 4) & 7 != CAUSE_HALT,
+            Err(e) => {
+                note(Err(e));
+                false
+            }
+        };
+        note(self.board.control(if resume { CTL_RESUMEREQ } else { 0 }));
+        first_err.map_or(Ok(()), Err)
     }
 }
 
@@ -530,9 +562,7 @@ impl SingleThreadBase for BoardTarget {
     }
 
     fn read_addrs(&mut self, start_addr: u32, data: &mut [u8]) -> TargetResult<usize, Self> {
-        if !self.mem_allowed(start_addr, data.len()) {
-            return Err(TargetError::Errno(14)); // EFAULT
-        }
+        self.check_access(start_addr, data.len())?;
         self.board.read_mem(start_addr, data).map_err(|e| terr(&e))?;
         // show the original words under software breakpoints
         let end = u64::from(start_addr) + data.len() as u64;
@@ -548,9 +578,7 @@ impl SingleThreadBase for BoardTarget {
     }
 
     fn write_addrs(&mut self, start_addr: u32, data: &[u8]) -> TargetResult<(), Self> {
-        if !self.mem_allowed(start_addr, data.len()) {
-            return Err(TargetError::Errno(14));
-        }
+        self.check_access(start_addr, data.len())?;
         self.board.write_mem(start_addr, data).map_err(|e| terr(&e))
     }
 
@@ -767,12 +795,7 @@ impl run_blocking::BlockingEventLoop for BoardEventLoop {
 /// running program is halted where it is.
 pub fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> Result<(), String>>) -> JResult<u32> {
     // start clean: a server that was killed leaves its slots armed
-    let clear: Vec<DmiReq> = (0..HW_BREAKPOINTS as u8)
-        .map(|i| DmiReq::Write(BP0 + i, 0))
-        .chain((0..HW_WATCHPOINTS as u8).map(|i| DmiReq::Write(WP0 + i, 0)))
-        .chain(std::iter::once(DmiReq::Write(DMSTATUS, 0)))
-        .collect();
-    board.batch(&clear)?;
+    clear_slots(board)?;
     if let Some(load) = load {
         board.control(CTL_ATTACHED | CTL_HALT_ON_LOAD)?;
         board.status()?;
