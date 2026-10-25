@@ -29,6 +29,8 @@ mod jtag;
 mod labels;
 /// The memory map: heap header, code base, heap start and the MMIO window.
 mod layout;
+/// Loading an ELF or flat binary as a board program.
+mod loader;
 /// Module to manage macros.
 mod macros;
 /// Module to manage messages.
@@ -56,9 +58,6 @@ use serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
-
-/// Magic bytes at the start of every ELF file (`0x7F` `E` `L` `F`).
-pub(crate) const ELF_MAGIC: &[u8] = b"\x7fELF";
 
 /// Main function for Klausscc.
 ///

@@ -7,12 +7,13 @@ use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::{disassemble_flat_to_pass2, human_bytes, parse_expected_uart_values};
 use crate::image::{build_ddr_image, readmemh, Image};
 use crate::layout::CODE_BASE;
+use crate::loader::{load_flat, Loaded};
 use crate::messages::{print_messages, MessageType, MsgList};
 use crate::netload::net_load;
 use crate::opcodes::Opcode;
 use crate::serial::{monitor_serial_port, run_test_monitor, write_to_board_keep_port, AUTO_SERIAL};
 use crate::{emulate, gdbserver, macros};
-use crate::{print_results, write_binary_file, write_to_device, ELF_MAGIC};
+use crate::{print_results, write_binary_file, write_to_device};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -43,158 +44,6 @@ enum Outcome {
     /// Counted as a failure without counts: the file cannot be read, or the
     /// serial port failed while the test was reading UART output.
     Failed(String),
-}
-
-/// Parse an ELF file and extract its LOAD segments as a contiguous flat buffer.
-///
-/// Returns `(flat_bytes, base_address, entry_address)` where `flat_bytes` covers
-/// the range `[base_address, base_address + flat_bytes.len())`.  Gaps between
-/// non-contiguous LOAD segments are zero-filled.  Returns `None` if the file
-/// cannot be parsed or contains no LOAD segments with data.
-fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
-    use object::{Object as _, ObjectSegment as _, ObjectSymbol as _};
-    /// Max gap between contiguous LOAD segments before the rest is dropped (see below).
-    const MAX_SEGMENT_GAP: u64 = 0x40_0000; // 4 MB
-    let file = object::File::parse(data).ok()?;
-
-    // Collect all LOAD segments that actually have bytes in the file.
-    let mut segments: Vec<(u64, Vec<u8>)> = file
-        .segments()
-        .filter_map(|seg| {
-            let addr = seg.address();
-            let bytes = seg.data().ok()?.to_vec();
-            if bytes.is_empty() {
-                None
-            } else {
-                Some((addr, bytes))
-            }
-        })
-        .collect();
-    segments.sort_by_key(|(addr, _)| *addr);
-
-    if segments.is_empty() {
-        return None;
-    }
-
-    // Only keep the first contiguous cluster of segments.  Embedded ELFs often
-    // place code/data at a low VMA and a completely separate region (e.g. XIP
-    // flash, ITCM, peripheral windows) at a very high VMA.  Zero-filling the
-    // gap between them would produce a multi-hundred-MB flat buffer that stalls
-    // encoding and disassembly.  Segments separated by more than MAX_SEGMENT_GAP
-    // bytes from the previous one are treated as a different physical memory
-    // region and dropped from this cluster.
-    let cluster: Vec<(u64, Vec<u8>)> = segments
-        .into_iter()
-        .scan(None::<u64>, |prev_end, (addr, bytes)| {
-            let gap = prev_end.map_or(0, |end| addr.saturating_sub(end));
-            *prev_end = Some(addr + bytes.len() as u64);
-            if gap <= MAX_SEGMENT_GAP {
-                Some(Some((addr, bytes)))
-            } else {
-                Some(None)
-            }
-        })
-        .take_while(Option::is_some)
-        .flatten()
-        .collect();
-
-    if cluster.is_empty() {
-        return None;
-    }
-
-    let base = cluster[0].0;
-    let end = cluster.iter().map(|(addr, bytes)| addr + bytes.len() as u64).max()?;
-    let mut flat = vec![0_u8; (end - base) as usize];
-    for (addr, bytes) in &cluster {
-        let offset = (addr - base) as usize;
-        flat[offset..offset + bytes.len()].copy_from_slice(bytes);
-    }
-
-    // Determine entry point:
-    // 1. ELF e_entry header field (set by linker ENTRY() directive)
-    // 2. Fall back to _start symbol address
-    // 3. Final fallback: base address of first LOAD segment
-    let entry = {
-        let e = file.entry();
-        if e != 0 {
-            e
-        } else {
-            file.symbols().find(|sym| sym.name() == Ok("_start")).map_or(base, |sym| sym.address())
-        }
-    };
-
-    Some((flat, base, entry))
-}
-
-/// ELF layout captured while flattening, kept for diagnostic logging.
-struct ElfLayout {
-    /// ELF virtual base address (VMA of the first LOAD segment).
-    base: u64,
-    /// ELF entry point (`e_entry` / `_start`) as an ELF virtual address.
-    entry: u64,
-}
-
-/// Flatten a loaded input file into a board image payload plus entry address.
-///
-/// Shared core of every `--net-load` / `--mem-out` / `elf2serial` / `--emulate`
-/// path.  If `file_data` is an ELF (detected via [`ELF_MAGIC`]) its LOAD segments
-/// are extracted ([`parse_elf_to_flat`]) and the entry point is translated from
-/// ELF VMA to a board byte address: `(elf_entry - elf_base) + HEAP_HEADER_WORDS*8`
-/// (the board loads the image immediately after the heap header).  Otherwise the
-/// bytes are used verbatim with a default board entry of `0x20`.  `entry_override`,
-/// when set, wins in both cases.
-///
-/// Returns `None` only when ELF parsing fails.  The returned `Option<ElfLayout>`
-/// is `Some` for ELF inputs (for the caller's log line) and `None` for flat
-/// binaries.  The returned bytes are NOT padded — callers that need 4-byte
-/// alignment pad afterwards.
-fn flatten_input(file_data: Vec<u8>, entry_override: Option<u32>) -> Option<(Vec<u8>, u32, Option<ElfLayout>)> {
-    if file_data.starts_with(ELF_MAGIC) {
-        let (flat, elf_base, elf_entry) = parse_elf_to_flat(&file_data)?;
-        let board_entry = elf_entry.saturating_sub(elf_base) + u64::from(CODE_BASE);
-        let entry = entry_override.unwrap_or(board_entry as u32);
-        Some((
-            flat,
-            entry,
-            Some(ElfLayout {
-                base: elf_base,
-                entry: elf_entry,
-            }),
-        ))
-    } else {
-        Some((file_data, entry_override.unwrap_or(0x20_u32), None))
-    }
-}
-
-/// Read an input file, reporting a failure.
-#[cfg(not(tarpaulin_include))]
-fn read_input(path: &str, msg_list: &mut MsgList) -> Result<Vec<u8>, Error> {
-    fs::read(path).map_err(|source| {
-        msg_list.push(format!("Cannot read binary file {path}: {source}"), None, None, MessageType::Error);
-        Error::Read {
-            path: PathBuf::from(path),
-            source,
-        }
-    })
-}
-
-/// [`flatten_input`], reporting an unparsable ELF.
-#[cfg(not(tarpaulin_include))]
-fn flatten_or_report(
-    file_data: Vec<u8>,
-    entry_override: Option<u32>,
-    path: &str,
-    msg_list: &mut MsgList,
-) -> Result<(Vec<u8>, u32, Option<ElfLayout>), Error> {
-    flatten_input(file_data, entry_override).ok_or_else(|| {
-        msg_list.push(
-            format!("Failed to extract LOAD segments from ELF file {path}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        Error::Elf(PathBuf::from(path))
-    })
 }
 
 /// Report that the serial monitor stopped on an error, and make it the command's failure.
@@ -239,33 +88,10 @@ pub(crate) fn run_netload(
         return Err(Error::Usage("net-load requires --ip <board address>"));
     }
 
-    let file_data = read_input(binary_path, msg_list)?;
+    let loaded = load_flat(binary_path, entry_override, msg_list)?;
+    msg_list.push(loaded.detected_message(true), None, None, MessageType::Information);
 
-    let (mut binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
-    if let Some(elf) = elf {
-        msg_list.push(
-            format!(
-                "Detected ELF file: {}, ELF base 0x{:08X}, ELF entry 0x{:08X}, board entry 0x{entry_addr:08X}",
-                human_bytes(binary_data.len()),
-                elf.base,
-                elf.entry
-            ),
-            None,
-            None,
-            MessageType::Information,
-        );
-    } else {
-        msg_list.push("Detected flat binary (no ELF header)".to_owned(), None, None, MessageType::Information);
-    }
-
-    // Pad to a 4-byte boundary so every word is complete.
-    while binary_data.len() % 4 != 0 {
-        binary_data.push(0);
-    }
-
-    let image = build_ddr_image(&binary_data);
-
-    if let Err(err) = net_load(board_ip, board_port, &image, entry_addr, msg_list) {
+    if let Err(err) = net_load(board_ip, board_port, &loaded.image.to_ddr(), loaded.image.entry, msg_list) {
         msg_list.push(format!("netboot failed: \"{err}\""), None, None, MessageType::Error);
         print_results(msg_list, start_time);
         return Err(Error::Netboot(err));
@@ -283,27 +109,11 @@ pub(crate) fn run_netload(
 /// word 0 (`heap_start` = image byte length) to know how much to copy to DDR.
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
-    let file_data = read_input(binary_path, msg_list)?;
-
     // mem-out writes a $readmemh image and does not need an entry point.
-    let (binary_data, _entry, elf) = flatten_or_report(file_data, None, binary_path, msg_list)?;
-    if let Some(elf) = elf {
-        msg_list.push(
-            format!(
-                "Detected ELF file: {}, ELF base 0x{:08X}, ELF entry 0x{:08X}",
-                human_bytes(binary_data.len()),
-                elf.base,
-                elf.entry
-            ),
-            None,
-            None,
-            MessageType::Information,
-        );
-    } else {
-        msg_list.push("Detected flat binary (no ELF header)".to_owned(), None, None, MessageType::Information);
-    }
+    let loaded = load_flat(binary_path, None, msg_list)?;
+    msg_list.push(loaded.detected_message(false), None, None, MessageType::Information);
 
-    let image = build_ddr_image(&binary_data);
+    let image = loaded.image.to_ddr();
 
     if let Err(e) = fs::write(mem_file_name, readmemh(&image)) {
         msg_list.push(
@@ -355,33 +165,18 @@ pub(crate) fn run_elf2serial(
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
-    let file_data = read_input(binary_path, msg_list)?;
-
-    // Convert ELF virtual address → board byte address inside flatten_input:
-    // the flat buffer starts at ELF VMA `elf_base` but is loaded by the board
+    // load_flat converts the ELF entry point to a board byte address: the
+    // flat buffer starts at ELF VMA `elf_base` but is loaded by the board
     // immediately after the heap header, so board_entry = (elf_entry - elf_base)
     // + HEAP_HEADER_WORDS * 8.
-    let (binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
-    if let Some(elf) = elf {
-        msg_list.push(
-            format!(
-                "Detected ELF file: {}, ELF base 0x{:08X}, ELF entry 0x{:08X}, board entry 0x{entry_addr:08X}",
-                human_bytes(binary_data.len()),
-                elf.base,
-                elf.entry
-            ),
-            None,
-            None,
-            MessageType::Information,
-        );
-    } else {
-        msg_list.push("Detected flat binary (no ELF header)".to_owned(), None, None, MessageType::Information);
-    }
+    let loaded = load_flat(binary_path, entry_override, msg_list)?;
+    msg_list.push(loaded.detected_message(true), None, None, MessageType::Information);
 
     // Pad to whole 32-bit words: the board loads words, and the .code
     // listing below shows the last part word as a whole one.
-    let mut image = Image::new(binary_data, entry_addr);
+    let mut image = loaded.image;
     image.pad_to_word();
+    let entry_addr = image.entry;
     let heap_start = image.heap_start();
 
     // The image was padded to whole words above, so this only fails on a bug,
@@ -724,15 +519,14 @@ pub(crate) fn run_emulate_elf(
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
-    let file_data = read_input(binary_path, msg_list)?;
-
-    let (binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
+    let Loaded { image, elf } = load_flat(binary_path, entry_override, msg_list)?;
     if let Some(elf) = elf {
         msg_list.push(
             format!(
-                "Emulating ELF {binary_path}: {}, ELF base 0x{:08X}, board entry 0x{entry_addr:08X}",
-                human_bytes(binary_data.len()),
-                elf.base
+                "Emulating ELF {binary_path}: {}, ELF base 0x{:08X}, board entry 0x{:08X}",
+                human_bytes(image.bytes.len()),
+                elf.base,
+                image.entry
             ),
             None,
             None,
@@ -742,13 +536,13 @@ pub(crate) fn run_emulate_elf(
         msg_list.push(format!("Emulating flat binary {binary_path}"), None, None, MessageType::Information);
     }
 
-    let image = build_ddr_image(&binary_data);
+    let ddr = image.to_ddr();
     let mut trace_writer = open_trace_writer(trace_file, msg_list).inspect_err(|_| {
         print_results(msg_list, start_time);
     })?;
     let result = emulate::emulate_image_to_writer(
-        &image,
-        entry_addr,
+        &ddr,
+        image.entry,
         max_instructions,
         trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
     );
@@ -783,8 +577,7 @@ pub(crate) fn run_gdbserver(
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
-    let file_data = read_input(binary_path, msg_list)?;
-    let (binary_data, entry_addr, elf) = flatten_or_report(file_data, entry_override, binary_path, msg_list)?;
+    let Loaded { image, elf } = load_flat(binary_path, entry_override, msg_list)?;
     let code_base = u64::from(CODE_BASE);
     if let Some(elf) = &elf {
         if elf.base != code_base {
@@ -801,7 +594,7 @@ pub(crate) fn run_gdbserver(
     }
     print_results(msg_list, start_time);
 
-    let cpu = emulate::Cpu::new(&build_ddr_image(&binary_data), entry_addr);
+    let cpu = emulate::Cpu::new(&image.to_ddr(), image.entry);
     match gdbserver::serve(cpu, port) {
         Ok(summary) => {
             eprintln!("klausscc gdbserver: {summary}");
@@ -1404,100 +1197,6 @@ mod tests {
         let err = report_batch(&results, "list.txt").unwrap_err();
         assert!(matches!(err, Error::NoTests(_)), "{err:?}");
         assert_eq!(err.code(), 1);
-    }
-
-    /// Read a git-tracked ELF fixture from the test fixture corpus (path is absolute
-    /// via `CARGO_MANIFEST_DIR`, so the test is independent of the working dir).
-    fn fixture(name: &str) -> Vec<u8> {
-        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
-        std::fs::read(&path).unwrap_or_else(|e| panic!("read fixture {path}: {e}"))
-    }
-
-    // ---- parse_elf_to_flat ---------------------------------------------------
-
-    #[test]
-    fn parse_elf_extracts_hello() {
-        let (flat, base, entry) = parse_elf_to_flat(&fixture("hello.elf")).expect("hello.elf should parse");
-        assert_eq!(base, 0x20, "first LOAD segment VMA");
-        assert_eq!(entry, 0x20, "entry point (e_entry)");
-        assert_eq!(flat.len(), 3980, "flattened LOAD-segment image length");
-        // The entry point must land inside the loaded image.
-        assert!(entry >= base && (entry - base) < flat.len() as u64, "entry within loaded range");
-    }
-
-    #[test]
-    fn parse_elf_extracts_test_64bit() {
-        let (flat, base, entry) = parse_elf_to_flat(&fixture("test_64bit.elf")).expect("should parse");
-        assert_eq!((base, entry, flat.len()), (0x20, 0x20, 8507));
-    }
-
-    #[test]
-    fn parse_elf_is_deterministic() {
-        let data = fixture("hello.elf");
-        assert_eq!(parse_elf_to_flat(&data), parse_elf_to_flat(&data));
-    }
-
-    #[test]
-    fn parse_elf_rejects_non_elf() {
-        assert!(parse_elf_to_flat(b"not an ELF file at all").is_none());
-        assert!(parse_elf_to_flat(&[]).is_none());
-    }
-
-    #[test]
-    fn parse_elf_rejects_truncated_elf() {
-        // ELF magic but an otherwise-invalid/empty header → no usable LOAD segments.
-        let mut bad = ELF_MAGIC.to_vec();
-        bad.extend_from_slice(&[0_u8; 64]);
-        assert!(parse_elf_to_flat(&bad).is_none());
-    }
-
-    // ---- flatten_input -------------------------------------------------------
-
-    #[test]
-    fn flatten_flat_binary_uses_default_entry() {
-        let raw = vec![0xDE_u8, 0xAD, 0xBE, 0xEF];
-        let (data, entry, elf) = flatten_input(raw.clone(), None).expect("flat path is infallible");
-        assert_eq!(data, raw, "flat bytes pass through verbatim");
-        assert_eq!(entry, 0x20, "default board entry for a flat binary");
-        assert!(elf.is_none(), "no ELF metadata for a flat binary");
-    }
-
-    #[test]
-    fn flatten_flat_binary_entry_override_wins() {
-        let (_, entry, _) = flatten_input(vec![1, 2, 3], Some(0x1000)).expect("flat path");
-        assert_eq!(entry, 0x1000);
-    }
-
-    #[test]
-    fn flatten_elf_translates_entry_to_board_address() {
-        let data = fixture("hello.elf");
-        let (flat, base, elf_entry) = parse_elf_to_flat(&data).unwrap();
-        let (fdata, entry, meta) = flatten_input(data, None).expect("ELF should flatten");
-
-        assert_eq!(fdata, flat, "ELF path returns the parse_elf_to_flat buffer");
-        let meta = meta.expect("ELF metadata present for ELF input");
-        assert_eq!((meta.base, meta.entry), (base, elf_entry), "metadata mirrors parse output");
-
-        // board entry = (elf_entry - elf_base) + heap-header bytes
-        let expected = (elf_entry.saturating_sub(base) + u64::from(CODE_BASE)) as u32;
-        assert_eq!(entry, expected, "VMA-to-board entry translation");
-        assert_eq!(entry, 0x20, "hello.elf loads at the start of the post-header image");
-    }
-
-    #[test]
-    fn flatten_elf_entry_override_wins() {
-        let (_, entry, meta) = flatten_input(fixture("hello.elf"), Some(0xABC)).expect("ELF");
-        assert_eq!(entry, 0xABC, "explicit --entry overrides the computed board entry");
-        assert!(meta.is_some(), "override does not suppress ELF metadata");
-    }
-
-    #[test]
-    fn flatten_rejects_bad_elf() {
-        // Starts with ELF magic (so the flat fallback is skipped) but is not a
-        // valid ELF → flatten_input propagates parse_elf_to_flat's None.
-        let mut bad = ELF_MAGIC.to_vec();
-        bad.extend_from_slice(&[0_u8; 64]);
-        assert!(flatten_input(bad, None).is_none());
     }
 
     // ---- verify_emulated -----------------------------------------------------
