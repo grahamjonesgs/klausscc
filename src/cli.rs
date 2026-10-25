@@ -203,6 +203,14 @@ mod tests {
     use super::*;
 
     #[test]
+    // clap's own consistency checks: duplicate ids or short flags, dangling
+    // `requires`/`conflicts_with` names, bad defaults. These otherwise only
+    // surface as a panic when the offending flag is used.
+    fn command_definition_is_valid() {
+        set_matches().debug_assert();
+    }
+
+    #[test]
     // --entry takes hex or decimal and rejects junk instead of falling back to 0x20.
     fn entry_point_is_parsed() {
         let parse = |value: &str| set_matches().try_get_matches_from(["klausscc", "-i", "prog.elf", "--entry", value]);
