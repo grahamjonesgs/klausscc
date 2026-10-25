@@ -3,7 +3,7 @@
 //! Same register layout, target description and stop reporting as the
 //! emulator server (`gdbserver.rs`), but the target is core 1 of a Nexys A7
 //! running a `DEBUG_EN=1` bitstream, reached over the on-board USB-JTAG
-//! (`jtag.rs`) through the debug module (`klaussCPU/debug_module.sv`).
+//! (`jtag/`) through the debug module (`klaussCPU/debug_module.sv`).
 //!
 //! * Hardware breakpoints: the debug module's 4 PC comparators (`Z1`).
 //! * Software breakpoints (`Z0`): the word at the address is replaced by

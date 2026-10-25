@@ -17,8 +17,9 @@ mod gdbserver;
 mod gdbserver_board;
 /// Module of helper functions.
 mod helper;
-/// JTAG over the board's FT2232H, and the debug module's DMI.
-#[cfg(feature = "board")]
+/// JTAG over the board's FT2232H, and the debug module's DMI.  The pure MPSSE
+/// framing is also built for tests, so they run without libftdi.
+#[cfg(any(test, feature = "board"))]
 mod jtag;
 /// Module to manage labels.
 mod labels;
