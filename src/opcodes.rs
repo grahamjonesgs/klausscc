@@ -263,10 +263,10 @@ pub fn add_arguments(
 
 /// Parse a shift/bit count token (embedded `N` field): decimal or `0x` hex.
 ///
-/// Returns `None` for anything that is not a non-negative literal; the caller
-/// checks that the count fits the 6-bit field.
-fn parse_count(token: &str) -> Option<u32> {
-    parse_int(token).ok().and_then(|v| u32::try_from(v).ok())
+/// Returns `None` for anything that is not a literal; the caller checks that
+/// the count fits the 6-bit field.
+fn parse_count(token: &str) -> Option<i128> {
+    parse_int(token).ok()
 }
 
 /// Find the opcode whose `text_name` matches the first word of `line`.
@@ -356,7 +356,7 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
             Operand::Count => {
                 // The N field is 6 bits: report a bigger count rather than masking it.
                 match tokens.get(token_idx).map(|t| (t, parse_count(t))) {
-                    Some((_, Some(count))) if count < 64 => word0 |= count << 15,
+                    Some((_, Some(count @ 0..=63))) => word0 |= (count as u32) << 15,
                     Some((token, Some(_))) => {
                         msg_list.push(
                             format!("Count {token} out of range 0..=63 - \"{line}\""),
@@ -2002,10 +2002,12 @@ mod tests {
         assert_eq!(msg.text, "Count 64 out of range 0..=63 - \"SHLV A 64\"");
         assert_eq!((msg.level == MessageType::Error, msg.line_number), (true, Some(5)));
 
+        // Negative counts are out of range too, not a register error.
         assert_eq!(
             add_registers(opcodes, &"SHLV A -1".to_owned(), "t".to_owned(), &mut msg_list, 6),
             "ERR     "
         );
+        assert_eq!(msg_list.list.last().unwrap().text, "Count -1 out of range 0..=63 - \"SHLV A -1\"");
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 2);
     }
 
