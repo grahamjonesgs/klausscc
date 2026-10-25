@@ -116,9 +116,9 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
                 Err(Error::other("No ports found"))
             }
             Ok(ports) => {
-                let mut max_ports: i32 = -1;
-                for (port_count, port) in (0_u32..).zip(ports) {
-                    if port_count > 0 {
+                let port_count = ports.len();
+                for (index, port) in ports.into_iter().enumerate() {
+                    if index > 0 {
                         all_ports.push_str(",\n");
                     }
                     if let SerialPortType::UsbPort(info) = port.port_type {
@@ -129,20 +129,9 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
                     } else {
                         let _ = write!(all_ports, "Non-USB Serial Device {}", port.port_name);
                     }
-
-                    max_ports = port_count.try_into().unwrap_or_default();
                 }
 
-                let ports_msg = match max_ports {
-                    -1_i32 => "no ports were found".to_owned(),
-                    0_i32 => {
-                        format!("only port {all_ports} was found")
-                    }
-                    _ => {
-                        format!("the following {max_ports} ports were found:\n{all_ports}")
-                    }
-                };
-
+                let ports_msg = ports_found_message(port_count, &all_ports);
                 msg_list.push(format!("Error opening serial port, {ports_msg}"), None, None, MessageType::Error);
 
                 if suggested_port.is_some() {
@@ -163,6 +152,17 @@ fn return_port(port_name: &str, msg_list: &mut MsgList) -> Result<Box<dyn Serial
         return Err(Error::other("Unknown error"));
     };
     Ok(port)
+}
+
+/// Describe the serial ports found, for the error when a port will not open.
+///
+/// `all_ports` is the list of `count` port descriptions, one per line.
+fn ports_found_message(count: usize, all_ports: &str) -> String {
+    match count {
+        0 => "no ports were found".to_owned(),
+        1 => format!("only port {all_ports} was found"),
+        _ => format!("the following {count} ports were found:\n{all_ports}"),
+    }
 }
 
 /// Output the code details file to given serial port, keeping the port open.
@@ -578,5 +578,15 @@ mod tests {
     #[test]
     fn test_extract_hex_value_lowercase_rejected() {
         assert_eq!(extract_hex_value("0000abcd"), None);
+    }
+
+    // ---- ports_found_message -------------------------------------------------
+
+    #[test]
+    fn ports_found_message_counts_every_port() {
+        assert_eq!(ports_found_message(0, ""), "no ports were found");
+        assert_eq!(ports_found_message(1, "A"), "only port A was found");
+        assert_eq!(ports_found_message(2, "A,\nB"), "the following 2 ports were found:\nA,\nB");
+        assert_eq!(ports_found_message(3, "A,\nB,\nC"), "the following 3 ports were found:\nA,\nB,\nC");
     }
 }
