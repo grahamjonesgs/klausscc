@@ -1,14 +1,14 @@
-use crate::helper::strip_comments;
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
 use crate::opcodes::{InputData, Opcode, Pass2};
 use std::io::Error;
 
+use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::{
-    fs::File,
+    fs::{self, File},
     io::{prelude::*, BufReader},
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 #[derive(PartialEq, Eq, Debug, Clone)]
@@ -87,27 +87,15 @@ pub fn format_opcodes(input: &String) -> String {
     (*input).clone()
 }
 
-/// Return the filename from include string.
+/// Return the file named by an `!include` line.
 ///
-/// Returns the filename from include string.
-pub fn get_include_filename(input_line: &str) -> Option<String> {
-    if !input_line.trim().starts_with("!include") {
-        return None;
-    }
-    let line = input_line.replace("!include", "");
-    let stripped_line = strip_comments(&line);
-    let mut words = stripped_line.split_whitespace();
-    Some(words.next().unwrap_or("").to_owned())
-}
-
-/// Return true if string is !include.
-///
-/// Checks if the string is include and returns true if it is.
-pub fn is_include(line: &str) -> bool {
-    if line.trim().starts_with("!include") {
-        return true;
-    }
-    false
+/// `None` if the line is not an `!include` (the first non-blank text must be
+/// `!include`); otherwise the first word after it, before any `//` comment,
+/// which is empty when the name is missing.
+pub fn include_target(input_line: &str) -> Option<&str> {
+    let rest = input_line.trim_start().strip_prefix("!include")?;
+    let rest = rest.find("//").map_or(rest, |comment| &rest[..comment]);
+    Some(rest.split_whitespace().next().unwrap_or(""))
 }
 
 /// Outputs the opcodes and macros as html for documentation.
@@ -317,24 +305,38 @@ fn output_opcodes_textmate(filename_stem: String, opcodes: &[Opcode], msg_list: 
 /// Open text file and return as vector of strings.
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList, opened_files: &mut Vec<String>) -> Option<Vec<InputData>> {
-    let file_result = File::open(filename);
-    if file_result.is_err() {
+pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList) -> Option<Vec<InputData>> {
+    read_source_file(filename, msg_list, &mut HashSet::new())
+}
+
+/// Read one source file, expanding its `!include` lines.
+///
+/// `open_files` holds the canonical paths of the files currently being read
+/// (this one's includers); a file already in it is a recursive include. The
+/// path is compared before the file is opened, and always removed again
+/// afterwards, however reading the file ends.
+fn read_source_file(filename: &str, msg_list: &mut MsgList, open_files: &mut HashSet<PathBuf>) -> Option<Vec<InputData>> {
+    let Ok(canonical) = fs::canonicalize(filename) else {
         msg_list.push(format!("Unable to open file {filename}"), None, None, MessageType::Error);
         return None;
+    };
+    if open_files.contains(&canonical) {
+        msg_list.push(format!("Recursive include of file {filename}"), None, None, MessageType::Error);
+        return None;
     }
+    let Ok(file) = File::open(&canonical) else {
+        msg_list.push(format!("Unable to open file {filename}"), None, None, MessageType::Error);
+        return None;
+    };
 
-    let Ok(file) = file_result else { return None };
+    open_files.insert(canonical.clone());
+    let lines = read_source_lines(file, filename, msg_list, open_files);
+    open_files.remove(&canonical);
+    lines
+}
 
-    for file_found in opened_files.clone() {
-        if file_found == filename {
-            msg_list.push(format!("Recursive include of file {filename}"), None, None, MessageType::Error);
-            return None;
-        }
-    }
-
-    opened_files.push(filename.to_owned());
-
+/// Read the lines of an open source file, expanding its `!include` lines.
+fn read_source_lines(file: File, filename: &str, msg_list: &mut MsgList, open_files: &mut HashSet<PathBuf>) -> Option<Vec<InputData>> {
     let buf = BufReader::new(file);
     let mut lines: Vec<InputData> = Vec::new();
 
@@ -343,9 +345,8 @@ pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList, opened_files:
         match line {
             Ok(line_contents) => {
                 line_number += 1;
-                if is_include(&line_contents) {
-                    let include_file = get_include_filename(&line_contents);
-                    if include_file.clone().unwrap_or_default() == String::default() {
+                if let Some(include_file) = include_target(&line_contents) {
+                    if include_file.is_empty() {
                         msg_list.push(
                             format!("Missing include file name in {filename}"),
                             Some(line_number),
@@ -357,23 +358,18 @@ pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList, opened_files:
 
                     // Get the include file from the same directory as the previous file
                     let parent = Path::new(filename).parent().unwrap_or_else(|| Path::new(""));
-                    let new_include_file = parent.join(include_file.unwrap_or_default()).to_string_lossy().into_owned();
+                    let new_include_file = parent.join(include_file).to_string_lossy().into_owned();
 
-                    let include_lines = read_file_to_vector(&new_include_file, msg_list, opened_files);
-                    if include_lines.is_none() {
+                    let Some(include_lines) = read_source_file(&new_include_file, msg_list, open_files) else {
                         msg_list.push(
                             format!("Unable to open include file {new_include_file} in {filename}"),
                             Some(line_number),
                             Some(filename.to_owned()),
                             MessageType::Error,
                         );
-                        //return None;
                         return Some(lines);
-                    }
-                    let unwrapped_include_lines = include_lines.unwrap_or_default();
-                    for included_line in unwrapped_include_lines {
-                        lines.push(included_line);
-                    }
+                    };
+                    lines.extend(include_lines);
                 } else {
                     lines.push(InputData {
                         input: line_contents,
@@ -384,14 +380,13 @@ pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList, opened_files:
             }
             #[cfg(not(tarpaulin_include))] // Cannot test error reading file line in tarpaulin
             Err(err) => msg_list.push(
-                format!("Error parsing opcode file: {err}"),
+                format!("Error reading source file {filename}: {err}"),
                 Some(line_number),
                 Some(filename.to_owned()),
                 MessageType::Error,
             ),
         }
     }
-    opened_files.pop();
     Some(lines)
 }
 
@@ -879,28 +874,30 @@ mod test {
     }
 
     #[test]
-    // Tests for the is_include to check if there is a !include as first non white-space
-    fn test_is_include1() {
-        assert!(is_include("!include file.type"));
-        assert!(is_include("!include"));
-        assert!(is_include("    !include   123 234 456"));
+    // Tests for include_target recognising !include as first non white-space
+    fn test_include_target_is_include() {
+        assert_eq!(include_target("!include file.type"), Some("file.type"));
+        assert_eq!(include_target("!include"), Some(""));
+        assert_eq!(include_target("    !include   123 234 456"), Some("123"));
     }
 
     #[test]
-    // Tests for the not is_include
-    fn test_is_include2() {
-        assert!(!is_include("include file.type"));
-        assert!(!is_include("!!include"));
+    // Tests for lines that are not !include
+    fn test_include_target_not_include() {
+        assert_eq!(include_target("include file.type"), None);
+        assert_eq!(include_target("!!include"), None);
+        assert_eq!(include_target("test_line"), None);
     }
 
     #[test]
-    // Check functions returns correct filename from !include
-    fn test_get_include_filename() {
-        assert_eq!(get_include_filename("!include myfile.name"), Some("myfile.name".to_owned()));
-        assert_eq!(get_include_filename("test_line"), None);
-        assert_eq!(get_include_filename("!include myfile.name extra words"), Some("myfile.name".to_owned()));
-        assert_eq!(get_include_filename("!include"), Some(String::default()));
-        assert_eq!(get_include_filename("!include //test comment"), Some(String::default()));
+    // Check include_target returns correct filename from !include
+    fn test_include_target_filename() {
+        assert_eq!(include_target("!include myfile.name"), Some("myfile.name"));
+        assert_eq!(include_target("!include myfile.name extra words"), Some("myfile.name"));
+        assert_eq!(include_target("!include //test comment"), Some(""));
+        assert_eq!(include_target("!include lib.kla // helpers"), Some("lib.kla"));
+        // Only the leading directive is removed, not every occurrence of it.
+        assert_eq!(include_target("!include my!include.kla"), Some("my!include.kla"));
     }
 
     #[test]
@@ -948,8 +945,7 @@ mod test {
     // Test for missing file
     fn test_read_file_to_vec1() {
         let mut msg_list = MsgList::new();
-        let mut opened_files: Vec<String> = Vec::new();
-        read_file_to_vector("////xxxxxxx", &mut msg_list, &mut opened_files);
+        read_file_to_vector("////xxxxxxx", &mut msg_list);
         assert_eq!(msg_list.list.first().unwrap_or_default().text, "Unable to open file ////xxxxxxx");
     }
 
@@ -957,7 +953,6 @@ mod test {
     // Test for simple file added
     fn test_write_file_to_vec2() {
         let mut msg_list = MsgList::new();
-        let mut opened_files: Vec<String> = Vec::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -970,7 +965,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 2");
         _ = writeln!(tmp_file1, "Test line in file 4");
 
-        let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        let lines = read_file_to_vector(file_name1, &mut msg_list);
         assert_eq!(lines.clone().unwrap().first().unwrap_or_default().input, "Test line in file");
         assert_eq!(lines.unwrap().len(), 4);
 
@@ -982,7 +977,6 @@ mod test {
     // Test for included file
     fn test_write_file_to_vec3() {
         let mut msg_list = MsgList::new();
-        let mut opened_files: Vec<String> = Vec::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1002,7 +996,7 @@ mod test {
         _ = writeln!(tmp_file2, "Test line in file 2 line 2");
         _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
-        let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        let lines = read_file_to_vector(file_name1, &mut msg_list);
         assert_eq!(
             lines.clone().unwrap_or_default().first().unwrap_or_default().input,
             "Test line in file 1 line 0"
@@ -1026,7 +1020,6 @@ mod test {
     // Test for recursive file includes
     fn test_write_file_to_vec4() {
         let mut msg_list = MsgList::new();
-        let mut opened_files: Vec<String> = Vec::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1046,7 +1039,7 @@ mod test {
         _ = writeln!(tmp_file2, "!include test1.kla");
         _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
-        _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        _ = read_file_to_vector(file_name1, &mut msg_list);
         assert_eq!(
             msg_list.list.first().unwrap_or_default().text,
             format!("Recursive include of file {file_name1}")
@@ -1061,7 +1054,6 @@ mod test {
     // Test for missing included file
     fn test_write_file_to_vec5() {
         let mut msg_list = MsgList::new();
-        let mut opened_files: Vec<String> = Vec::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1076,7 +1068,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 1 line 1");
         _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
-        let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        let lines = read_file_to_vector(file_name1, &mut msg_list);
         assert_eq!(
             msg_list.list.first().unwrap_or_default().text,
             format!("Unable to open file {file_name2}")
@@ -1094,7 +1086,6 @@ mod test {
     // Test for missing included file name
     fn test_write_file_to_vec6() {
         let mut msg_list = MsgList::new();
-        let mut opened_files: Vec<String> = Vec::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1106,7 +1097,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 1 line 1");
         _ = writeln!(tmp_file1, "Test line in file 1 line 2");
 
-        let lines = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        let lines = read_file_to_vector(file_name1, &mut msg_list);
         assert_eq!(
             msg_list.list.first().unwrap_or_default().text,
             format!("Missing include file name in {file_name1}")
@@ -1121,7 +1112,6 @@ mod test {
     // Test for double included file
     fn test_write_file_to_vec7() {
         let mut msg_list = MsgList::new();
-        let mut opened_files: Vec<String> = Vec::new();
 
         let tmp_dir = TempDir::new().unwrap();
 
@@ -1147,7 +1137,7 @@ mod test {
         let binding3 = file_path3;
         let file_name3: &str = binding3.to_str().unwrap();
 
-        _ = read_file_to_vector(file_name1, &mut msg_list, &mut opened_files);
+        _ = read_file_to_vector(file_name1, &mut msg_list);
         assert_eq!(
             msg_list.list.first().unwrap_or_default().text,
             format!("Unable to open file {file_name3}")
@@ -1160,6 +1150,64 @@ mod test {
         drop(tmp_file1);
         drop(tmp_file2);
         _ = tmp_dir.close();
+    }
+
+    #[test]
+    // A file including itself through a different spelling of its path is
+    // caught before it is opened again, not after running out of descriptors.
+    fn test_read_file_self_include_other_spelling() {
+        let mut msg_list = MsgList::new();
+        let tmp_dir = TempDir::new().unwrap();
+        fs::create_dir(tmp_dir.path().join("sub")).unwrap();
+        let file_path1 = tmp_dir.path().join("sub").join("a.kla");
+        fs::write(&file_path1, "line 1\n!include ./a.kla\n!include ../sub/a.kla\nline 4\n").unwrap();
+        let file_name1 = file_path1.to_str().unwrap();
+
+        let lines = read_file_to_vector(file_name1, &mut msg_list).unwrap();
+        let recursive: Vec<&str> = msg_list
+            .list
+            .iter()
+            .filter(|m| m.text.starts_with("Recursive include"))
+            .map(|m| m.text.as_str())
+            .collect();
+        assert_eq!(recursive.len(), 1);
+        assert!(recursive[0].ends_with("a.kla"), "{recursive:?}");
+        // Reading stops at the failed include, as for any include error.
+        assert_eq!(lines.len(), 1);
+    }
+
+    #[test]
+    // A failed include still pops the include stack, so including the same
+    // file again later is not mistaken for recursion.
+    fn test_read_file_failed_include_pops_stack() {
+        let mut msg_list = MsgList::new();
+        let tmp_dir = TempDir::new().unwrap();
+        let file_path1 = tmp_dir.path().join("a.kla");
+        fs::write(&file_path1, "!include b.kla\n").unwrap();
+        fs::write(tmp_dir.path().join("b.kla"), "b line\n!include missing.kla\n").unwrap();
+        fs::write(tmp_dir.path().join("c.kla"), "!include b.kla\n!include b.kla\n").unwrap();
+        let file_name_c = tmp_dir.path().join("c.kla");
+
+        _ = read_file_to_vector(file_path1.to_str().unwrap(), &mut msg_list);
+        _ = read_file_to_vector(file_name_c.to_str().unwrap(), &mut msg_list);
+        assert!(msg_list.list.iter().all(|m| !m.text.starts_with("Recursive include")));
+    }
+
+    #[test]
+    // The same file may be included twice when it is not its own includer
+    fn test_read_file_diamond_include() {
+        let mut msg_list = MsgList::new();
+        let tmp_dir = TempDir::new().unwrap();
+        let file_path1 = tmp_dir.path().join("a.kla");
+        fs::write(&file_path1, "!include b.kla\n!include c.kla\n").unwrap();
+        fs::write(tmp_dir.path().join("b.kla"), "b\n!include d.kla\n").unwrap();
+        fs::write(tmp_dir.path().join("c.kla"), "c\n!include d.kla\n").unwrap();
+        fs::write(tmp_dir.path().join("d.kla"), "d\n").unwrap();
+
+        let lines = read_file_to_vector(file_path1.to_str().unwrap(), &mut msg_list).unwrap();
+        let text: Vec<&str> = lines.iter().map(|l| l.input.as_str()).collect();
+        assert_eq!(text, vec!["b", "d", "c", "d"]);
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
     }
 
     #[test]

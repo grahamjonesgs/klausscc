@@ -294,8 +294,7 @@ fn run() -> Result<(), Error> {
 
     // Parse the input file
     msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
-    let mut opened_input_files: Vec<String> = Vec::new(); // Used for recursive includes check
-    let Some(input_list) = read_file_to_vector(&input_file_name, &mut msg_list, &mut opened_input_files) else {
+    let Some(input_list) = read_file_to_vector(&input_file_name, &mut msg_list) else {
         print_results(&msg_list, start_time);
         return Err(Error::Assembly(msg_list.number_by_type(&MessageType::Error).max(1)));
     };
@@ -750,8 +749,7 @@ pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_p
 #[cfg(not(tarpaulin_include))]
 pub fn assemble_file(input_file_name: &str, oplist: &[Opcode], macro_list: &[macros::Macro], msg_list: &mut MsgList) -> Option<String> {
     msg_list.push(format!("Input file is {input_file_name}"), None, None, MessageType::Information);
-    let mut opened_input_files: Vec<String> = Vec::new();
-    let input_list_option = read_file_to_vector(input_file_name, msg_list, &mut opened_input_files);
+    let input_list_option = read_file_to_vector(input_file_name, msg_list);
     input_list_option.as_ref()?;
 
     let input_list = remove_block_comments(input_list_option.unwrap_or_else(|| [].to_vec()), msg_list);
@@ -844,8 +842,7 @@ pub(crate) fn assemble_to_image(
     macro_list: &[macros::Macro],
     msg_list: &mut MsgList,
 ) -> Option<(Vec<u8>, u32)> {
-    let mut opened_input_files: Vec<String> = Vec::new();
-    let input_list_option = read_file_to_vector(input_file_name, msg_list, &mut opened_input_files);
+    let input_list_option = read_file_to_vector(input_file_name, msg_list);
     let input_list = remove_block_comments(input_list_option?, msg_list);
     let mut macro_list_clone = macro_list.to_vec();
     let input_list = apply_source_macros(input_list, &mut macro_list_clone, msg_list);
