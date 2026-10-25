@@ -5,7 +5,7 @@
 //! [`run`], which reads the command line and runs the selected mode.  The
 //! golden-model [`emulate`] module is public so it can be driven directly.
 
-/// The assembler's shared line records and lexer predicates.
+/// The assembler: `.kla` source in, addressed machine code out.
 mod asm;
 /// Module defining the command-line interface (clap).
 mod cli;

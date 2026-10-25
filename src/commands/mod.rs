@@ -57,7 +57,7 @@ fn send_failed(port: &str, err: io::Error, msg_list: &mut MsgList, start_time: I
 /// Where and how to send a `.kbt` wire image to the board.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SendOpts<'a> {
-    /// Serial port name (`-s`) or [`AUTO_SERIAL`]; empty means do not send.
+    /// Serial port name (`-s`) or [`AUTO_SERIAL`](crate::serial::AUTO_SERIAL); empty means do not send.
     pub(crate) port: &'a str,
     /// Send a break first, so the board resets into its loader (no `-n`).
     pub(crate) send_break: bool,

@@ -21,7 +21,7 @@
 //! context word `{INT_MASK, flags, PC}` is pushed, the source's mask bit
 //! cleared and the timer's pending bit acknowledged; `IRET` restores all of
 //! it, and `WAIT` sleeps until a source is ready.  Time is modelled as
-//! [`CYCLES_PER_INSTRUCTION`] cycles per retired instruction, so interrupt
+//! [`CYCLES_PER_INSTRUCTION`](crate::emulate::CYCLES_PER_INSTRUCTION) cycles per retired instruction, so interrupt
 //! *timing* differs from the RTL (no golden-trace use) while the
 //! architectural effects match.  Blitter / Ethernet interrupts (sources 1-2)
 //! are not modelled.
@@ -35,10 +35,10 @@
 //! └─────┴────────┴──────────────────┴──────┴─────┴─────┴─────┘
 //! ```
 //!
-//! - **LEN [31:30]**: `01`=1 word, `10`=2 words, `11`=3 words, `00`=illegal.
-//! - **CLASS [29:26]**: major class (1=ALU-rr, 2=ALU-imm, 3=cmp, 4=shift/bit,
+//! - **LEN `[31:30]`**: `01`=1 word, `10`=2 words, `11`=3 words, `00`=illegal.
+//! - **CLASS `[29:26]`**: major class (1=ALU-rr, 2=ALU-imm, 3=cmp, 4=shift/bit,
 //!   5=unary, 6=load, 7=store, 8=branch, 9=stack, A=mul/div, B=system, C=I/O).
-//! - **rd [11:8]**, **rs1 [7:4]**, **rs2 [3:0]**: register fields (stores put
+//! - **rd `[11:8]`**, **rs1 `[7:4]`**, **rs2 `[3:0]`**: register fields (stores put
 //!   the data source in `rd`).  `imm32` at PC+4; `imm64` = lo32@PC+4, hi32@PC+8.
 //!
 //! Decoding is done directly from the 32-bit word's bit fields, independent of
@@ -1445,8 +1445,8 @@ impl Cpu {
         }
     }
 
-    /// IRET — pop the saved interrupt context and restore PC[31:0], flags[38:32]
-    /// and `INT_MASK` [42:39].
+    /// IRET — pop the saved interrupt context and restore PC`[31:0]`, flags`[38:32]`
+    /// and `INT_MASK` `[42:39]`.
     ///
     /// The 7-bit saved word is `{Z,E,C,V,S,L,U}` (bit38→Z … bit32→U), but only the
     /// unified `Z/S/C/V` are consumed (§1.5); the derived `E`(bit37)/`L`(bit33)/

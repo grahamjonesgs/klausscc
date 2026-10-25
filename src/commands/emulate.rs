@@ -114,7 +114,7 @@ pub(crate) fn run_emulate(
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
-    if msg_list.number_by_type(MessageType::Error) > 0 {
+    if msg_list.has_errors() {
         msg_list.push("Not emulating due to assembly errors".to_owned(), None, None, MessageType::Error);
         print_results(msg_list, start_time);
         return Err(Error::Assembly(msg_list.number_by_type(MessageType::Error)));
