@@ -260,6 +260,9 @@ pub fn add_arguments(
 }
 
 /// Parse a shift/bit count token (embedded `N` field): decimal or `0x` hex.
+///
+/// Returns `None` for anything that is not a non-negative literal; the caller
+/// checks that the count fits the 6-bit field.
 fn parse_count(token: &str) -> Option<u32> {
     parse_int(token).ok().and_then(|v| u32::try_from(v).ok())
 }
@@ -349,9 +352,19 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
             // ORs them in via `pc_relative_bits`.
             Operand::Rel18 | Operand::Rel13 => token_idx += 1,
             Operand::Count => {
-                match tokens.get(token_idx).and_then(|t| parse_count(t)) {
-                    Some(count) => word0 |= (count & 0x3F) << 15,
-                    None => ok = false,
+                // The N field is 6 bits: report a bigger count rather than masking it.
+                match tokens.get(token_idx).map(|t| (t, parse_count(t))) {
+                    Some((_, Some(count))) if count < 64 => word0 |= count << 15,
+                    Some((token, Some(_))) => {
+                        msg_list.push(
+                            format!("Count {token} out of range 0..=63 - \"{line}\""),
+                            Some(line_number),
+                            Some(filename),
+                            MessageType::Error,
+                        );
+                        return "ERR     ".to_owned();
+                    }
+                    _ => ok = false,
                 }
                 token_idx += 1;
             }
@@ -1942,6 +1955,40 @@ mod tests {
         let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
         // A=0, B=1, C=2 → "00010" + "0" + "1" + "2"
         assert_eq!(output, String::from("00010012"));
+    }
+
+    #[test]
+    // Regression: a count was masked to 6 bits, so "SHLV A 64" encoded as a shift of 0.
+    fn test_count_operand_range() {
+        let opcodes = &mut v2_opcodes();
+        let mut msg_list = MsgList::new();
+        assert_eq!(
+            add_registers(opcodes, &"SHLV A 0".to_owned(), "t".to_owned(), &mut msg_list, 1),
+            "50204000"
+        );
+        assert_eq!(
+            add_registers(opcodes, &"SHLV A 63".to_owned(), "t".to_owned(), &mut msg_list, 1),
+            "503FC000"
+        );
+        assert_eq!(
+            add_registers(opcodes, &"SHLV A 0x3F".to_owned(), "t".to_owned(), &mut msg_list, 1),
+            "503FC000"
+        );
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+
+        assert_eq!(
+            add_registers(opcodes, &"SHLV A 64".to_owned(), "t".to_owned(), &mut msg_list, 5),
+            "ERR     "
+        );
+        let msg = msg_list.list.last().unwrap();
+        assert_eq!(msg.text, "Count 64 out of range 0..=63 - \"SHLV A 64\"");
+        assert_eq!((msg.level == MessageType::Error, msg.line_number), (true, Some(5)));
+
+        assert_eq!(
+            add_registers(opcodes, &"SHLV A -1".to_owned(), "t".to_owned(), &mut msg_list, 6),
+            "ERR     "
+        );
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 2);
     }
 
     #[test]
