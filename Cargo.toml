@@ -13,17 +13,17 @@ categories = ["development-tools"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.5"}
+clap = { version = "4.6.7"}
 chrono = { version = "0.4" }
-colored = { version = "3.0"}
-itertools = { version = "0.14"}
-serialport = { version = "4.8", default-features = false}
+colored = { version = "3.1.1"}
+itertools = { version = "0.15.0"}
+serialport = { version = "4.10", default-features = false}
 tempfile = "3.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = {version = "1.0"}
-ctrlc = { version = "3.4" }
-crossterm = { version = "0.28" }
-object = { version = "0.36", default-features = false, features = ["read"] }
+ctrlc = { version = "3.5.2" }
+crossterm = { version = "0.29" }
+object = { version = "0.40.0", default-features = false, features = ["read"] }
 gdbstub = "0.7"
 
 [features]
