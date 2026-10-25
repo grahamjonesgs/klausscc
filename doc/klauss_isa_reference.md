@@ -265,9 +265,13 @@ Specify a string in double quotes to store character data with a length prefix:
 #MESSAGE "Test line"
 ```
 
-- Strings are stored with a 4-byte length prefix followed by the character data
+- Strings are stored with a 4-byte length prefix (the number of 32-bit words of
+  character data) followed by the characters, packed 4 per word and NUL-padded;
+  there is always at least one NUL byte
 - `\n` is converted to a carriage return + newline (`\r\n`)
-- Data is aligned to 4-byte (32-bit word) boundaries
+- Every data item occupies a whole number of 64-bit (8-byte) words, so a string
+  does not break the 8-byte alignment `MEMGET64` / `MEMSET64` need for the data
+  after it
 
 ### Referencing Data
 

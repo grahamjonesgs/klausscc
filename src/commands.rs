@@ -423,7 +423,12 @@ pub(crate) fn run_elf2serial(
     out.push_str(&encode_word_kbt(entry_addr));
 
     // Checksum computed before Z delimiter; returns 8-char LE 32-bit word.
-    let checksum = calc_checksum(&out, msg_list);
+    // The image was padded to whole words above, so this only fails on a bug,
+    // but an image the board would reject is never written or sent.
+    let Some(checksum) = calc_checksum(&out, msg_list) else {
+        print_results(msg_list, start_time);
+        return Err(Error::Assembly(msg_list.number_by_type(&MessageType::Error)));
+    };
     out.push('Z');
     out.push_str(&checksum);
     out.push('X');

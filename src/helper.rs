@@ -74,9 +74,8 @@ pub fn encode_hex_kbt(hex: &str) -> String {
 /// Compute the kbt checksum for a LE-encoded wire string.
 ///
 /// For each 8-char (32-bit) chunk in the data stream the LE bytes are decoded back to
-/// the natural 32-bit word V, and `V[31:16] + V[15:0]` is accumulated.  Any trailing
-/// 4-char groups (test artefacts — real programs only have 32-bit words) are summed as
-/// natural 16-bit values.  The checksum formula is:
+/// the natural 32-bit word V, and `V[31:16] + V[15:0]` is accumulated.  The checksum
+/// formula is:
 ///
 ///   `chk = (running_sum + count) % 65536`.
 ///
@@ -87,51 +86,46 @@ pub fn encode_hex_kbt(hex: &str) -> String {
 /// every other word in the stream.  The caller is responsible for writing the `Z`
 /// delimiter; this function must be called **before** appending `Z` so that `Z` is
 /// not included in the sum.
+///
+/// The board loads whole 32-bit words, so a stream that is not a whole number of
+/// them cannot be loaded: that is reported as an error and `None` is returned,
+/// rather than a checksum the board would reject.
 #[must_use]
-pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> String {
+pub fn calc_checksum(input_string: &str, msg_list: &mut MsgList) -> Option<String> {
     // Strip S framing char only (Z/X are not present — caller hasn't appended them yet).
     let stripped: String = input_string.chars().filter(|&c| c != 'S').collect();
 
-    if !stripped.len().is_multiple_of(4) {
+    if !stripped.len().is_multiple_of(8) {
         msg_list.push(
-            format!("LE checksum string length not a multiple of 4, length is {}", stripped.len()),
+            format!(
+                "Program image is not a whole number of 32-bit words, length is {} hex characters",
+                stripped.len()
+            ),
             None,
             None,
             MessageType::Error,
         );
-        return encode_word_kbt(0);
+        return None;
     }
 
-    let mut sum: i32 = 0;
+    let mut sum: u32 = 0;
     let mut count: u32 = 0;
-    let mut i: usize = 0;
 
     // Process 8-char groups as LE-encoded 32-bit words.
     // Decode each word to its natural value V, accumulate V[31:16] + V[15:0].
-    while i + 8 <= stripped.len() {
-        let chunk = &stripped[i..i + 8];
-        let b0 = i32::from_str_radix(&chunk[0..2], 16).unwrap_or(0);
-        let b1 = i32::from_str_radix(&chunk[2..4], 16).unwrap_or(0);
-        let b2 = i32::from_str_radix(&chunk[4..6], 16).unwrap_or(0);
-        let b3 = i32::from_str_radix(&chunk[6..8], 16).unwrap_or(0);
-        // natural V = b0 | b1<<8 | b2<<16 | b3<<24
-        // V[31:16] = b3*256 + b2,   V[15:0] = b1*256 + b0
-        sum = (sum + b3 * 256 + b2 + b1 * 256 + b0) % (0xFFFF_i32 + 1);
+    for chunk in stripped.as_bytes().as_chunks::<8>().0 {
+        let le = std::str::from_utf8(chunk)
+            .ok()
+            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+            .unwrap_or(0);
+        let v = le.swap_bytes(); // natural V = b0 | b1<<8 | b2<<16 | b3<<24
+        sum = (sum + (v >> 16) + (v & 0xFFFF)) % 0x1_0000;
         count += 2;
-        i += 8;
-    }
-    // Any trailing 4-char groups (test-only artefacts) summed as natural 16-bit.
-    while i + 4 <= stripped.len() {
-        let chunk = &stripped[i..i + 4];
-        let val = i32::from_str_radix(chunk, 16).unwrap_or(0);
-        sum = (sum + val) % (0xFFFF_i32 + 1);
-        count += 1;
-        i += 4;
     }
 
     // chk = running_sum + last_addr×2 (FPGA formula, adj=0)
-    let chk = ((sum + count as i32) % (0xFFFF_i32 + 1)) as u32;
-    encode_word_kbt(chk)
+    let chk = (sum + count) % 0x1_0000;
+    Some(encode_word_kbt(chk))
 }
 
 /// Return String of bit codes with start/stop bytes and CRC.
@@ -190,7 +184,7 @@ pub fn create_bin_string(pass2: &[Pass2], msg_list: &mut MsgList) -> Option<Stri
 
     // Checksum must be computed before the Z delimiter is appended.
     // Returns an 8-char LE-encoded 32-bit word.
-    let checksum = calc_checksum(&output_string, msg_list);
+    let checksum = calc_checksum(&output_string, msg_list)?;
 
     output_string.push('Z');
     output_string.push_str(&checksum);
@@ -308,6 +302,8 @@ pub enum DataError {
     NotPositive(String),
     /// A size is larger than the board's memory.
     TooLarge(String),
+    /// A byte count is not a whole number of 32-bit words.
+    NotWordMultiple(String),
 }
 
 impl fmt::Display for DataError {
@@ -318,6 +314,7 @@ impl fmt::Display for DataError {
             Self::BadValue(token, err) => write!(f, "invalid value \"{token}\" ({err})"),
             Self::NotPositive(token) => write!(f, "size \"{token}\" must be greater than zero"),
             Self::TooLarge(token) => write!(f, "size \"{token}\" is larger than memory"),
+            Self::NotWordMultiple(token) => write!(f, "size \"{token}\" must be a multiple of 4 bytes"),
         }
     }
 }
@@ -364,16 +361,21 @@ pub fn data_bytes(line: &str) -> Result<String, DataError> {
         return Ok(format!("{lo32:08X}{hi32:08X}"));
     }
 
-    // Handle .zeropad N directive — EXACTLY N bytes of zero (no rounding).
+    // Handle .zeropad N directive — EXACTLY N bytes of zero (no rounding to 8).
     // Assembler-internal: emitted by get_pass1 to 8-byte-align the start of a data
     // section so 64-bit loads (MEMREADR / MEMGET64), which mask the address down to
     // an 8-byte boundary, read .word data cleanly instead of the preceding word.
+    // N must be a whole number of 32-bit words: the board loads the program a word
+    // at a time, so a part word would shift everything after it, entry included.
     if first_word == ".zeropad" {
         let count_str = words.next().unwrap_or("");
         if count_str.is_empty() {
             return Err(DataError::Malformed);
         }
         let byte_count = data_size(count_str, MAX_DATA_BYTES)?;
+        if !byte_count.is_multiple_of(4) {
+            return Err(DataError::NotWordMultiple(count_str.to_owned()));
+        }
         return Ok("00".repeat(byte_count));
     }
 
@@ -399,16 +401,18 @@ pub fn data_bytes(line: &str) -> Result<String, DataError> {
 
         if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
             let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
-            let mut output_hex = String::default();
-            // Length is based on multiples of 4
-
-            output_hex.push_str(format!("{:08X}", (input_string.len() + 4 - input_string.len() % 4) / 4).as_str()); // Add length of string to start
+            // Length prefix: the number of 32-bit words holding the characters,
+            // which always include at least one NUL byte.
+            let char_words = input_string.len() / 4 + 1;
+            let mut output_hex = format!("{char_words:08X}");
             for char in input_string.as_bytes() {
-                let hex = format!("{char:02X}");
-                output_hex.push_str(&hex);
+                let _ = write!(output_hex, "{char:02X}");
             }
-            let needed_bytes = 8 - (output_hex.len() % 8);
-            for _n in 0..needed_bytes {
+            // NUL-pad the characters out to `char_words`, then the whole item out to
+            // a 64-bit word, like every other data item, so data after a string stays
+            // 8-byte aligned for MEMGET64 / MEMSET64.
+            let item_bytes = (4 + char_words * 4).next_multiple_of(8);
+            while output_hex.len() < item_bytes * 2 {
                 output_hex.push('0');
             }
             return Ok(output_hex);
@@ -672,6 +676,37 @@ mod tests {
             bin_string,
             Some("S28000000000000000000000000000000000000000000000000000000000000001234432101000000Z92550000X".to_owned())
         );
+    }
+
+    #[test]
+    // A stream that is not whole 32-bit words gets no .kbt at all, rather than
+    // one with a zero checksum
+    fn test_create_bin_string_part_word() {
+        let pass2 = vec![
+            Pass2 {
+                opcode: String::default(),
+                file_name: String::from("test"),
+                input_text_line: String::default(),
+                line_counter: 0,
+                program_counter: 0x20,
+                line_type: LineType::Start,
+            },
+            Pass2 {
+                opcode: String::from("000000"),
+                file_name: String::from("test"),
+                input_text_line: String::default(),
+                line_counter: 0,
+                program_counter: 0x20,
+                line_type: LineType::Data,
+            },
+        ];
+        let mut msg_list = MsgList::new();
+        assert_eq!(create_bin_string(&pass2, &mut msg_list), None);
+        assert_eq!(
+            msg_list.list.first().unwrap_or_default().text,
+            "Program image is not a whole number of 32-bit words, length is 78 hex characters"
+        );
+        assert_eq!(calc_checksum("S0000", &mut MsgList::new()), None);
     }
 
     #[test]
@@ -948,7 +983,23 @@ mod tests {
     fn test_data_as_bytes4() {
         let input = String::from("#TEST \"Hello\"");
         let output = data_as_bytes(&input);
-        assert_eq!(output, Some("0000000248656C6C6F000000".to_owned()),);
+        // Prefix (2 character words), "Hello\0\0\0", then a NUL word so the
+        // item is a whole number of 64-bit words.
+        assert_eq!(output, Some("0000000248656C6C6F00000000000000".to_owned()),);
+    }
+
+    #[test]
+    // Every string is a whole number of 64-bit words, whatever its length
+    fn test_data_as_bytes_string_word_aligned() {
+        for (text, prefix) in [("", 1), ("abc", 1), ("abcd", 2), ("Hello", 2), ("abcdefg", 2), ("abcdefgh", 3)] {
+            let output = data_as_bytes(&format!("#S \"{text}\"")).unwrap();
+            assert!(output.len().is_multiple_of(16), "{text:?} -> {output}");
+            assert_eq!(output.get(..8), Some(format!("{prefix:08X}").as_str()), "{text:?}");
+            // Characters are always followed by at least one NUL byte.
+            assert!(output.len() / 2 > 4 + text.len(), "{text:?}");
+        }
+        // A 3-word string: prefix + 3 words = 16 bytes, no extra padding needed.
+        assert_eq!(data_as_bytes("#S \"abcdefgh\"").unwrap().len(), 32);
     }
 
     #[test]
@@ -980,10 +1031,14 @@ mod tests {
     }
 
     #[test]
-    // .zeropad N emits EXACTLY N bytes of zero (no 8-byte rounding), unlike .space.
+    // .zeropad N emits EXACTLY N bytes of zero (no 8-byte rounding), unlike .space,
+    // and N must be a whole number of 32-bit words.
     fn test_data_as_bytes_zeropad() {
         assert_eq!(data_as_bytes(".zeropad 4"), Some("00000000".to_owned())); // 4 bytes
-        assert_eq!(data_as_bytes(".zeropad 2"), Some("0000".to_owned())); // 2 bytes, no rounding
+        assert_eq!(data_as_bytes(".zeropad 12"), Some("0".repeat(24))); // 12 bytes, no rounding to 8
+                                                                        // A part word would misalign the board's word-at-a-time load.
+        assert_eq!(data_bytes(".zeropad 2"), Err(DataError::NotWordMultiple("2".to_owned())));
+        assert_eq!(data_bytes(".zeropad 3"), Err(DataError::NotWordMultiple("3".to_owned())));
         assert_eq!(data_as_bytes(".zeropad 0"), None);
         assert_eq!(data_as_bytes(".zeropad"), None);
         // Contrast with .space, which rounds up to a whole 64-bit word.

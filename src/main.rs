@@ -897,6 +897,36 @@ mod tests {
     }
 
     #[test]
+    // Regression: a string was 4 + 4N bytes, so data after one in a .data section
+    // sat at 4 mod 8, and a 64-bit store to it (masked down to 8 bytes) overwrote
+    // the last word of the string.
+    fn test_data_after_string_stays_8_byte_aligned() {
+        let (pass2, msg_list) = assemble_text("_start\nHALT\n.data\n#S \"Hello\"\n#T \"ABCDEFGHIJKL\"\n#V 1\n.text\n");
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        for name in ["#S", "#T", "#V"] {
+            let line = pass2.iter().find(|p| p.input_text_line.starts_with(name)).unwrap();
+            assert!(line.program_counter.is_multiple_of(8), "{name} at 0x{:X}", line.program_counter);
+        }
+    }
+
+    #[test]
+    // Regression: `.zeropad 3` only logged a checksum-length error and still
+    // produced a .kbt with checksum 0; a part-word pad is now a data error.
+    fn test_part_word_zeropad_is_error() {
+        let (_, msg_list) = assemble_text("_start\nHALT\n.zeropad 3\n");
+        assert_eq!(
+            messages_of(&msg_list, &MessageType::Error),
+            vec![(
+                Some(3),
+                "Error in data definition for .zeropad 3: size \"3\" must be a multiple of 4 bytes".to_owned()
+            )]
+        );
+        let (pass2, mut msg_list) = assemble_text("_start\nHALT\n.zeropad 4\n");
+        assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
+        assert!(create_bin_string(&pass2, &mut msg_list).is_some());
+    }
+
+    #[test]
     // Regression: an undefined label was a warning, so "JMP nowhere:" assembled
     // to a jump to address 0 and the build succeeded.
     fn test_undefined_label_is_error() {
@@ -1046,7 +1076,7 @@ mod tests {
         assert_eq!(pass1.get(3).unwrap_or_default().program_counter, 52); // #DATA1 0x2 inline (+4)
         assert_eq!(pass1.get(4).unwrap_or_default().program_counter, 68); // RET  (2 data words×8=16)
         assert_eq!(pass1.get(5).unwrap_or_default().program_counter, 72); // #DATA1 "HELLO" inline (+4)
-        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 84); // RET  (string=12 bytes)
+        assert_eq!(pass1.get(6).unwrap_or_default().program_counter, 88); // RET  (string=16 bytes: 2 × 64-bit words)
     }
 
     #[test]
@@ -1212,7 +1242,7 @@ mod tests {
         assert_eq!(pass2.get(4).unwrap_or_default().opcode, "00000030");
         assert_eq!(pass2.get(5).unwrap_or_default().opcode, "000000720000AAAA");
         assert_eq!(pass2.get(6).unwrap_or_default().opcode, "00000A340000000A0000000B");
-        assert_eq!(pass2.get(7).unwrap_or_default().opcode, "0000000248454C4C4F000000");
+        assert_eq!(pass2.get(7).unwrap_or_default().opcode, "0000000248454C4C4F00000000000000"); // padded to 2 × 64-bit words
         assert_eq!(pass2.get(8).unwrap_or_default().opcode, "");
     }
 
