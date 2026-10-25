@@ -55,11 +55,11 @@ pub fn parse_int(token: &str) -> Result<i128, LiteralError> {
         Some(b'+') => (false, &token[1..]),
         _ => (false, token),
     };
-    let magnitude = if is_hex_literal(unsigned) {
-        let digits = &unsigned[2..];
-        digits_value(digits.chars().filter(|&c| c != '_'), 16)?
-    } else {
-        digits_value(unsigned.chars(), 10)?
+    // Only one sign is allowed, so look for the prefix directly rather than
+    // through `is_hex_literal`, which would skip a second sign.
+    let magnitude = match unsigned.get(..2) {
+        Some(prefix) if prefix.eq_ignore_ascii_case("0x") => digits_value(unsigned[2..].chars().filter(|&c| c != '_'), 16)?,
+        _ => digits_value(unsigned.chars(), 10)?,
     };
     let value = i128::from(magnitude);
     Ok(if negative { -value } else { value })
@@ -77,6 +77,28 @@ pub fn parse_bits64(token: &str) -> Result<u64, LiteralError> {
     }
     // In range [i64::MIN, u64::MAX]: truncating to 64 bits is the two's complement pattern.
     Ok(value as u64)
+}
+
+/// Parse an instruction operand literal under the assembler's immediate rule.
+///
+/// A hex literal is read as a 64-bit pattern and reinterpreted as signed, so
+/// `0xFFFF_FFFF_FFFF_FFFF` is `-1`; a decimal literal keeps its value, so
+/// `18446744073709551615` stays `u64::MAX`.
+#[inline]
+pub fn parse_operand(token: &str) -> Result<i128, LiteralError> {
+    if is_hex_literal(token) {
+        parse_bits64(token).map(|bits| i128::from(bits as i64))
+    } else {
+        parse_int(token)
+    }
+}
+
+/// Returns true when an operand value fits a 32-bit immediate word.
+///
+/// The CPU sign-extends the word, so `i32::MIN ..= 0xFFFF_FFFF` is accepted.
+#[inline]
+pub fn fits_imm32(value: i128) -> bool {
+    (i128::from(i32::MIN)..=0xFFFF_FFFF).contains(&value)
 }
 
 /// Parse a literal that must fit in a `u32` (an address such as `--entry`).
@@ -142,6 +164,8 @@ mod tests {
         assert_eq!(parse_int("0xGG"), Err(LiteralError::InvalidDigit));
         assert_eq!(parse_int("--5"), Err(LiteralError::InvalidDigit));
         assert_eq!(parse_int("0x-5"), Err(LiteralError::InvalidDigit));
+        assert_eq!(parse_int("--0x5"), Err(LiteralError::InvalidDigit));
+        assert_eq!(parse_int("-+0x5"), Err(LiteralError::InvalidDigit));
         assert_eq!(parse_int("LOOP"), Err(LiteralError::InvalidDigit));
         assert_eq!(parse_int("loop:"), Err(LiteralError::InvalidDigit));
         assert_eq!(parse_int(" 5"), Err(LiteralError::InvalidDigit)); // callers pass whole tokens
@@ -171,6 +195,27 @@ mod tests {
         assert_eq!(parse_bits64("-9223372036854775808"), Ok(1_u64 << 63));
         assert_eq!(parse_bits64("-9223372036854775809"), Err(LiteralError::Overflow));
         assert_eq!(parse_bits64("12abc"), Err(LiteralError::InvalidDigit));
+    }
+
+    #[test]
+    fn operand_values() {
+        assert_eq!(parse_operand("0xFFFFFFFFFFFFFFFF"), Ok(-1));
+        assert_eq!(parse_operand("0x8000000000000000"), Ok(i128::from(i64::MIN)));
+        assert_eq!(parse_operand("-0x10"), Ok(-16));
+        assert_eq!(parse_operand("18446744073709551615"), Ok(i128::from(u64::MAX)));
+        assert_eq!(parse_operand("-1"), Ok(-1));
+        assert_eq!(parse_operand("0xGG"), Err(LiteralError::InvalidDigit));
+    }
+
+    #[test]
+    fn imm32_bounds() {
+        assert!(fits_imm32(0));
+        assert!(fits_imm32(-1));
+        assert!(fits_imm32(i128::from(i32::MIN)));
+        assert!(fits_imm32(0xFFFF_FFFF));
+        assert!(!fits_imm32(0x1_0000_0000));
+        assert!(!fits_imm32(i128::from(i32::MIN) - 1));
+        assert!(!fits_imm32(i128::from(u64::MAX)));
     }
 
     #[test]

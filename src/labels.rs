@@ -1,6 +1,6 @@
 use crate::helper::{data_name_from_string, strip_comments};
 use crate::messages::{MessageType, MsgList};
-use crate::num::{is_hex_literal, parse_bits64, parse_int, LiteralError};
+use crate::num::{fits_imm32, is_hex_literal, parse_bits64, parse_int, LiteralError};
 use crate::opcodes::Pass1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,7 +53,7 @@ pub fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32
         match parse_bits64(argument_trim) {
             Ok(bits) => {
                 let value = bits as i64;
-                if value >= i64::from(i32::MIN) && value <= 0xFFFF_FFFF_i64 {
+                if fits_imm32(i128::from(value)) {
                     return Some(format!("{:08X}", value as u32));
                 }
                 error(format!("Hex value 0x{bits:016X} out of bounds"));
@@ -66,7 +66,7 @@ pub fn convert_argument(argument: &str, msg_list: &mut MsgList, line_number: u32
 
     match parse_int(argument_trim) {
         Ok(n) => {
-            if n >= i128::from(i32::MIN) && n <= 0xFFFF_FFFF {
+            if fits_imm32(n) {
                 return Some(format!("{:08X}", n as u32));
             }
             error(format!("Decimal value {n} out of bounds"));

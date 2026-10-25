@@ -48,7 +48,7 @@ use labels::{find_duplicate_label, get_labels, Label};
 use macros::{apply_source_macros, expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
-use num::{parse_bits64, parse_int};
+use num::{fits_imm32, parse_bits64, parse_int, parse_operand};
 use opcodes::{add_arguments, add_registers, num_arguments, pc_relative_bits, v2_opcodes_and_macros, Opcode, Pass0, Pass1, Pass2};
 use serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 use std::path::PathBuf;
@@ -455,10 +455,14 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
     let Some(val_str) = words.next() else {
         return line.to_owned();
     };
-    // Read as a 64-bit pattern so we handle negative decimal and full-width hex.
-    let val: i64 = parse_bits64(val_str).map_or(0, |v| v as i64);
-    // Same bounds as convert_argument: [i32::MIN, 0xFFFF_FFFF] fits in 32 bits.
-    if val >= i64::from(i32::MIN) && val <= 0xFFFF_FFFF_i64 {
+    // Same rule as convert_argument: hex is a 64-bit pattern (0xFFFF_FFFF_FFFF_FFFF
+    // is -1 and fits), decimal keeps its value (18446744073709551615 does not fit).
+    // Labels, bad literals and values no 64-bit word can hold stay SETR, so
+    // convert_argument reports them.
+    let Ok(val) = parse_operand(val_str) else {
+        return line.to_owned();
+    };
+    if fits_imm32(val) || parse_bits64(val_str).is_err() {
         return line.to_owned();
     }
     // Upgrade: replace the leading "SETR" (any case) with "SETR64".
@@ -913,6 +917,33 @@ mod tests {
 
         let (_, msg_list) = assemble_text("_start\nloop:\nJMP loop:\nJMP loop\n");
         assert_eq!(messages_of(&msg_list, &MessageType::Error), vec![]);
+    }
+
+    #[test]
+    // Regression: a decimal SETR value that only fits 64 bits as a two's-complement
+    // pattern (e.g. u64::MAX) stayed SETR and failed the 32-bit bounds check.
+    fn test_upgrade_setr_to_setr64() {
+        assert_eq!(upgrade_setr_to_setr64("SETR A 18446744073709551615"), "SETR64 A 18446744073709551615");
+        assert_eq!(upgrade_setr_to_setr64("  setr B 0x1_0000_0000 // big"), "  SETR64 B 0x1_0000_0000 // big");
+        assert_eq!(upgrade_setr_to_setr64("SETR C 9223372036854775808"), "SETR64 C 9223372036854775808");
+        assert_eq!(upgrade_setr_to_setr64("SETR D -2147483649"), "SETR64 D -2147483649");
+        // Fits a sign-extended 32-bit word, or not a 64-bit literal at all: unchanged.
+        for line in [
+            "SETR A 0xFFFFFFFFFFFFFFFF",
+            "SETR A 4294967295",
+            "SETR A -1",
+            "SETR A loop:",
+            "SETR A 12abc",
+            "SETR A -9223372036854775809",
+            "COPY A B",
+        ] {
+            assert_eq!(upgrade_setr_to_setr64(line), line);
+        }
+
+        let (pass2, msg_list) = assemble_text("_start\nSETR A 18446744073709551615\nHALT\n");
+        assert_eq!(messages_of(&msg_list, &MessageType::Error), vec![]);
+        let setr = pass2.iter().find(|p| p.line_counter == 2).unwrap();
+        assert!(setr.opcode.ends_with("FFFFFFFFFFFFFFFF"), "{}", setr.opcode);
     }
 
     #[test]
