@@ -3,17 +3,16 @@
 
 use crate::asm::{assemble, Assembly};
 use crate::error::Error;
-use crate::files::{filename_stem, write_code_output_file};
+use crate::files::{filename_stem, write_binary_output_file, write_code_output_file};
 use crate::helper::{disassemble_flat_to_pass2, human_bytes, parse_expected_uart_values};
 use crate::image::{build_ddr_image, readmemh, Image};
 use crate::layout::CODE_BASE;
-use crate::loader::{load_flat, Loaded};
-use crate::messages::{print_messages, MessageType, MsgList};
+use crate::loader::{load_flat, BinaryInput, Loaded};
+use crate::messages::{print_messages, print_results, MessageType, MsgList};
 use crate::netload::net_load;
 use crate::opcodes::Opcode;
-use crate::serial::{monitor_serial_port, run_test_monitor, write_to_board_keep_port, AUTO_SERIAL};
+use crate::serial::{monitor_serial_port, run_test_monitor, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 use crate::{emulate, gdbserver, macros};
-use crate::{print_results, write_binary_file, write_to_device};
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -67,6 +66,85 @@ fn send_failed(port: &str, err: io::Error, msg_list: &mut MsgList, start_time: I
     }
 }
 
+/// Where and how to send a `.kbt` wire image to the board.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct SendOpts<'a> {
+    /// Serial port name (`-s`) or [`AUTO_SERIAL`]; empty means do not send.
+    pub(crate) port: &'a str,
+    /// Send a break first, so the board resets into its loader (no `-n`).
+    pub(crate) send_break: bool,
+    /// Keep the port open and monitor the board's UART afterwards (`-m`).
+    pub(crate) monitor: bool,
+    /// Show the bytes the monitor receives (`-d`).
+    pub(crate) debug: bool,
+}
+
+/// Send the `.kbt` wire string `wire` to the board over `opts.port`.
+///
+/// With `opts.monitor` the port stays open: once the image is sent the summary
+/// is printed and the board's UART is monitored until the user quits, and the
+/// monitor's outcome is returned.  Otherwise this returns as soon as the image
+/// is sent, and the caller prints the summary.  A failed send is reported and
+/// returned as [`Error::Serial`].
+#[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
+pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
+    if opts.monitor {
+        return match write_to_board_keep_port(wire, opts.port, opts.send_break, true, msg_list) {
+            Ok(port) => {
+                msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+                print_results(msg_list, start_time);
+                monitor_serial_port(port, opts.debug, msg_list).map_err(|err| monitor_failed(opts.port, err, msg_list))
+            }
+            Err(err) => Err(send_failed(opts.port, err, msg_list, start_time)),
+        };
+    }
+
+    let error_count = msg_list.number_by_type(MessageType::Error);
+    if error_count > 0 {
+        msg_list.push(
+            "Not writing to serial port due to assembly errors".to_owned(),
+            None,
+            None,
+            MessageType::Warning,
+        );
+        return Err(Error::Assembly(error_count));
+    }
+    match write_to_board(wire, opts.port, opts.send_break, msg_list) {
+        Ok(()) => {
+            msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
+            Ok(())
+        }
+        Err(err) => {
+            msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
+            Err(Error::Serial {
+                port: opts.port.to_owned(),
+                source: err,
+            })
+        }
+    }
+}
+
+/// Writes the binary file.
+///
+/// Writes the `.kbt` wire-format string to `binary_file_name`, reporting (and
+/// returning) a failure.
+#[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
+pub(crate) fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) -> Result<(), Error> {
+    msg_list.push(format!("Writing binary file to {binary_file_name}"), None, None, MessageType::Information);
+    write_binary_output_file(&binary_file_name, bin_string).map_err(|result_err| {
+        msg_list.push(
+            format!("Unable to write to binary code file {binary_file_name:?}, error {result_err}"),
+            None,
+            None,
+            MessageType::Error,
+        );
+        Error::Write {
+            path: PathBuf::from(binary_file_name),
+            source: result_err,
+        }
+    })
+}
+
 /// Flatten an ELF (or take a flat binary) and stream it to the board over TCP.
 ///
 /// Detects ELF magic automatically: ELF LOAD segments are extracted and the
@@ -74,21 +152,14 @@ fn send_failed(port: &str, err: io::Error, msg_list: &mut MsgList, start_time: I
 /// is used verbatim with entry defaulting to `0x20`.  The flat image is wrapped
 /// in the heap-header DDR layout (`build_ddr_image`) and sent via `net_load`.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_netload(
-    binary_path: &str,
-    entry_override: Option<u32>,
-    board_ip: &str,
-    board_port: u16,
-    msg_list: &mut MsgList,
-    start_time: Instant,
-) -> Result<(), Error> {
+pub(crate) fn run_netload(input: BinaryInput<'_>, board_ip: &str, board_port: u16, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
     if board_ip.is_empty() {
         msg_list.push("net-load requires --ip <board address>".to_owned(), None, None, MessageType::Error);
         print_results(msg_list, start_time);
         return Err(Error::Usage("net-load requires --ip <board address>"));
     }
 
-    let loaded = load_flat(binary_path, entry_override, msg_list)?;
+    let loaded = load_flat(input, msg_list)?;
     msg_list.push(loaded.detected_message(true), None, None, MessageType::Information);
 
     if let Err(err) = net_load(board_ip, board_port, &loaded.image.to_ddr(), loaded.image.entry, msg_list) {
@@ -110,7 +181,13 @@ pub(crate) fn run_netload(
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
     // mem-out writes a $readmemh image and does not need an entry point.
-    let loaded = load_flat(binary_path, None, msg_list)?;
+    let loaded = load_flat(
+        BinaryInput {
+            path: binary_path,
+            entry: None,
+        },
+        msg_list,
+    )?;
     msg_list.push(loaded.detected_message(false), None, None, MessageType::Information);
 
     let image = loaded.image.to_ddr();
@@ -150,26 +227,22 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
 /// - **Flat binary**: bytes are used verbatim; entry point comes from `--entry`
 ///   (defaults to `0x20` if not given).
 ///
-/// The resulting wire string is written to a `.kbt` file and, when a serial port
-/// is given, sent to the board exactly like the normal assembly path.
+/// The resulting wire string is written to a `.kbt` file or, when `send` names a
+/// serial port, sent to the board exactly like the normal assembly path.
 #[cfg(not(tarpaulin_include))]
-#[allow(clippy::too_many_arguments, reason = "mirrors the full assemble→send path; all parameters are required")]
 pub(crate) fn run_elf2serial(
-    binary_path: &str,
-    entry_override: Option<u32>,
-    output_serial_port: &str,
+    input: BinaryInput<'_>,
     kbt_file_name: &str,
-    monitor_flag: bool,
-    debug_flag: bool,
-    no_break_flag: bool,
+    send: SendOpts<'_>,
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
+    let binary_path = input.path;
     // load_flat converts the ELF entry point to a board byte address: the
     // flat buffer starts at ELF VMA `elf_base` but is loaded by the board
     // immediately after the heap header, so board_entry = (elf_entry - elf_base)
     // + HEAP_HEADER_WORDS * 8.
-    let loaded = load_flat(binary_path, entry_override, msg_list)?;
+    let loaded = load_flat(input, msg_list)?;
     msg_list.push(loaded.detected_message(true), None, None, MessageType::Information);
 
     // Pad to whole 32-bit words: the board loads words, and the .code
@@ -197,13 +270,13 @@ pub(crate) fn run_elf2serial(
      * the image is sent straight from memory (`out`), so writing these (large)
      * files just adds several seconds for no benefit. */
     let mut outcome: Result<(), Error> = Ok(());
-    if output_serial_port.is_empty() {
+    if send.port.is_empty() {
         outcome = write_binary_file(msg_list, kbt_file_name, &out);
     }
 
     // Optionally produce a .code disassembly listing alongside the .kbt, using
     // the built-in ISA-v2 opcode table.  (Skipped for a serial load — see above.)
-    if output_serial_port.is_empty() {
+    if send.port.is_empty() {
         let opcodes = crate::opcodes::v2_opcodes();
         let code_file_name = {
             let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
@@ -227,18 +300,11 @@ pub(crate) fn run_elf2serial(
         return outcome.and(Err(Error::Assembly(error_count)));
     }
 
-    if !output_serial_port.is_empty() {
-        if monitor_flag {
-            return match write_to_board_keep_port(&out, output_serial_port, !no_break_flag, true, msg_list) {
-                Ok(port) => {
-                    msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
-                    print_results(msg_list, start_time);
-                    monitor_serial_port(port, debug_flag, msg_list).map_err(|err| monitor_failed(output_serial_port, err, msg_list))
-                }
-                Err(err) => Err(send_failed(output_serial_port, err, msg_list, start_time)),
-            };
+    if !send.port.is_empty() {
+        outcome = send_image(&out, send, msg_list, start_time);
+        if send.monitor {
+            return outcome;
         }
-        outcome = write_to_device(msg_list, &out, output_serial_port, !no_break_flag);
     }
 
     print_results(msg_list, start_time);
@@ -252,15 +318,7 @@ pub(crate) fn run_elf2serial(
 /// file and no re-encoding.  With `-m` and no `-s`, the serial port is
 /// auto-detected so a bare `-m` can both send and monitor.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_kbt_send(
-    kbt_path: &str,
-    output_serial_port: &str,
-    monitor_flag: bool,
-    debug_flag: bool,
-    no_break_flag: bool,
-    msg_list: &mut MsgList,
-    start_time: Instant,
-) -> Result<(), Error> {
+pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
     let wire = match fs::read_to_string(kbt_path) {
         Ok(contents) => contents,
         Err(e) => {
@@ -275,13 +333,13 @@ pub(crate) fn run_kbt_send(
     let wire_trimmed = wire.trim();
 
     // A bare `-m` with no `-s` should still send: auto-detect the serial port.
-    let serial_port = if output_serial_port.is_empty() && monitor_flag {
-        AUTO_SERIAL
+    let send = if send.port.is_empty() && send.monitor {
+        SendOpts { port: AUTO_SERIAL, ..send }
     } else {
-        output_serial_port
+        send
     };
 
-    if serial_port.is_empty() {
+    if send.port.is_empty() {
         msg_list.push(
             "Nothing to do: a .kbt input needs a serial port (-s) to send or -m to monitor".to_owned(),
             None,
@@ -299,18 +357,10 @@ pub(crate) fn run_kbt_send(
         MessageType::Information,
     );
 
-    if monitor_flag {
-        return match write_to_board_keep_port(wire_trimmed, serial_port, !no_break_flag, true, msg_list) {
-            Ok(port) => {
-                msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
-                print_results(msg_list, start_time);
-                monitor_serial_port(port, debug_flag, msg_list).map_err(|err| monitor_failed(serial_port, err, msg_list))
-            }
-            Err(err) => Err(send_failed(serial_port, err, msg_list, start_time)),
-        };
+    let outcome = send_image(wire_trimmed, send, msg_list, start_time);
+    if send.monitor {
+        return outcome;
     }
-
-    let outcome = write_to_device(msg_list, wire_trimmed, serial_port, !no_break_flag);
     print_results(msg_list, start_time);
     outcome
 }
@@ -512,14 +562,14 @@ pub(crate) fn run_emulate(
 /// prebuilt C ELFs (queens, `test_64bit`, …) can be cross-checked against the RTL.
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_emulate_elf(
-    binary_path: &str,
-    entry_override: Option<u32>,
+    input: BinaryInput<'_>,
     trace_file: Option<&str>,
     max_instructions: u64,
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
-    let Loaded { image, elf } = load_flat(binary_path, entry_override, msg_list)?;
+    let binary_path = input.path;
+    let Loaded { image, elf } = load_flat(input, msg_list)?;
     if let Some(elf) = elf {
         msg_list.push(
             format!(
@@ -570,14 +620,9 @@ pub(crate) fn run_emulate_elf(
 /// program at 0x20), so ELF addresses equal emulator addresses when the ELF is
 /// linked at 0x20 — the normal `klausscpu.ld` layout.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_gdbserver(
-    binary_path: &str,
-    entry_override: Option<u32>,
-    port: u16,
-    msg_list: &mut MsgList,
-    start_time: Instant,
-) -> Result<(), Error> {
-    let Loaded { image, elf } = load_flat(binary_path, entry_override, msg_list)?;
+pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut MsgList, start_time: Instant) -> Result<(), Error> {
+    let binary_path = input.path;
+    let Loaded { image, elf } = load_flat(input, msg_list)?;
     let code_base = u64::from(CODE_BASE);
     if let Some(elf) = &elf {
         if elf.base != code_base {
@@ -614,15 +659,12 @@ pub(crate) fn run_gdbserver(
 /// the program's first instruction; without one, the running program is
 /// halted where it is.  Then lldb is served as for the emulator.
 #[cfg(all(feature = "board", not(tarpaulin_include)))]
-#[allow(clippy::too_many_arguments, reason = "mirrors the CLI options")]
 pub(crate) fn run_gdbserver_board(
-    binary_path: &str,
-    entry_override: Option<u32>,
+    input: BinaryInput<'_>,
     port: u16,
-    output_serial_port: &str,
-    kbt_file_name: &str,
-    no_break_flag: bool,
     jtag_khz: u32,
+    kbt_file_name: &str,
+    send: SendOpts<'_>,
     msg_list: &mut MsgList,
     start_time: Instant,
 ) -> Result<(), Error> {
@@ -635,22 +677,18 @@ pub(crate) fn run_gdbserver_board(
     let (mut board, desc) = gdbserver_board::Board::open(jtag_khz).map_err(fail)?;
     eprintln!("klausscc gdbserver: {desc}");
 
-    let pc = if output_serial_port.is_empty() {
+    let pc = if send.port.is_empty() {
         gdbserver_board::attach(&mut board, None).map_err(fail)?
     } else {
+        // Load only: the debugger, not the serial monitor, takes over after.
+        let send = SendOpts {
+            monitor: false,
+            debug: false,
+            ..send
+        };
         let mut load = || {
-            run_elf2serial(
-                binary_path,
-                entry_override,
-                output_serial_port,
-                kbt_file_name,
-                false,
-                false,
-                no_break_flag,
-                msg_list,
-                start_time,
-            )
-            .map_err(|err| format!("loading {binary_path} over {output_serial_port} failed ({err})"))
+            run_elf2serial(input, kbt_file_name, send, msg_list, start_time)
+                .map_err(|err| format!("loading {} over {} failed ({err})", input.path, send.port))
         };
         gdbserver_board::attach(&mut board, Some(&mut load)).map_err(fail)?
     };
@@ -667,26 +705,14 @@ pub(crate) fn run_gdbserver_board(
 
 /// `--board` without the `board` feature: explain how to get it.
 #[cfg(all(not(feature = "board"), not(tarpaulin_include)))]
-#[allow(clippy::too_many_arguments, clippy::unnecessary_wraps, reason = "same signature as the real one")]
-pub(crate) fn run_gdbserver_board(
-    _binary_path: &str,
-    _entry_override: Option<u32>,
-    _port: u16,
-    _output_serial_port: &str,
-    _kbt_file_name: &str,
-    _no_break_flag: bool,
-    _jtag_khz: u32,
-    msg_list: &mut MsgList,
-    _start_time: Instant,
-) -> Result<(), Error> {
+pub(crate) fn board_unsupported(msg_list: &mut MsgList) -> Error {
     msg_list.push(
         "--board needs a klausscc built with board support: cargo build --release --features board (needs libftdi1-dev)".to_owned(),
         None,
         None,
         MessageType::Error,
     );
-    print_messages(msg_list);
-    Err(Error::Usage("--board needs a klausscc built with board support"))
+    Error::Usage("--board needs a klausscc built with board support")
 }
 
 /// Batch-verify the emulator against `.kla` files with expected `// ` UART values.

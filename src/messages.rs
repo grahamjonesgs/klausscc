@@ -1,5 +1,6 @@
 use chrono::{Local, NaiveTime};
 use colored::{ColoredString, Colorize as _};
+use std::time::Instant;
 
 #[derive(Debug)]
 /// Struct for message.
@@ -130,6 +131,23 @@ pub fn print_messages(msg_list: &MsgList) {
     for msg in &msg_list.list {
         println!("{}", format_message(msg));
     }
+}
+
+/// Prints results of assembly.
+///
+/// Takes the message list and start time and prints the results to the users.
+#[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
+pub fn print_results(msg_list: &MsgList, start_time: Instant) {
+    print_messages(msg_list);
+    let time_taken: f64 = start_time.elapsed().as_secs_f64();
+    eprintln!(
+        "Completed with {} error{} and {} warning{} in {:.3} seconds",
+        msg_list.number_by_type(MessageType::Error),
+        if msg_list.number_by_type(MessageType::Error) == 1 { "" } else { "s" },
+        msg_list.number_by_type(MessageType::Warning),
+        if msg_list.number_by_type(MessageType::Warning) == 1 { "" } else { "s" },
+        time_taken,
+    );
 }
 
 #[cfg(test)]

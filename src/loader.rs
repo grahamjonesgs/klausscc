@@ -18,6 +18,16 @@ use std::path::PathBuf;
 /// Magic bytes at the start of every ELF file (`0x7F` `E` `L` `F`).
 pub(crate) const ELF_MAGIC: &[u8] = b"\x7fELF";
 
+/// A binary input file, and the entry point to use for it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct BinaryInput<'a> {
+    /// The ELF or flat binary file.
+    pub(crate) path: &'a str,
+    /// `--entry`: the entry point to use instead of the ELF's own (or a flat
+    /// binary's default of `0x20`).
+    pub(crate) entry: Option<u32>,
+}
+
 /// An input file loaded as a board program.
 #[derive(Debug)]
 pub(crate) struct Loaded {
@@ -48,13 +58,14 @@ impl Loaded {
     }
 }
 
-/// Read `path` and flatten it into a board program ([`flatten_input`]).
+/// Read `input.path` and flatten it into a board program ([`flatten_input`]).
 ///
-/// `entry_override` (`--entry`) wins over the ELF's entry point and the flat
+/// `input.entry` (`--entry`) wins over the ELF's entry point and the flat
 /// binary default of `0x20`.  A file that cannot be read, or an ELF with no
 /// loadable segments, is reported and returned as the command's failure.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn load_flat(path: &str, entry_override: Option<u32>, msg_list: &mut MsgList) -> Result<Loaded, Error> {
+pub(crate) fn load_flat(input: BinaryInput<'_>, msg_list: &mut MsgList) -> Result<Loaded, Error> {
+    let path = input.path;
     let file_data = fs::read(path).map_err(|source| {
         msg_list.push(format!("Cannot read binary file {path}: {source}"), None, None, MessageType::Error);
         Error::Read {
@@ -62,7 +73,7 @@ pub(crate) fn load_flat(path: &str, entry_override: Option<u32>, msg_list: &mut 
             source,
         }
     })?;
-    let Some((bytes, entry, elf)) = flatten_input(file_data, entry_override) else {
+    let Some((bytes, entry, elf)) = flatten_input(file_data, input.entry) else {
         msg_list.push(
             format!("Failed to extract LOAD segments from ELF file {path}"),
             None,

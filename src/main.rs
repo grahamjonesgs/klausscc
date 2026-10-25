@@ -46,15 +46,16 @@ mod serial;
 use cli::set_matches;
 use commands::{
     monitor_failed, run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload,
-    run_test_list, run_test_mode,
+    run_test_list, run_test_mode, send_image, write_binary_file, SendOpts,
 };
 use error::Error;
-use files::{filename_stem, output_file_name, write_binary_output_file, write_code_output_file};
+use files::{filename_stem, output_file_name, write_code_output_file};
+use loader::BinaryInput;
 use macros::expand_embedded_macros;
-use messages::{print_messages, MessageType, MsgList};
+use messages::{print_messages, print_results, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
 use opcodes::v2_opcodes_and_macros;
-use serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
+use serial::{monitor_serial, AUTO_SERIAL};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -121,6 +122,7 @@ fn run() -> Result<(), Error> {
     let emulate_flag = matches.get_flag("emulate");
     let gdbserver_port: Option<u16> = matches.get_one::<u16>("gdbserver").copied();
     let board_flag = matches.get_flag("board");
+    #[cfg(feature = "board")]
     let jtag_khz: u32 = matches.get_one::<u32>("jtag_khz").copied().unwrap_or(10_000);
     let trace_file: Option<String> = matches.get_one::<String>("trace").cloned();
     let emulate_test_file: Option<String> = matches.get_one::<String>("emulate_test").cloned();
@@ -128,6 +130,12 @@ fn run() -> Result<(), Error> {
         .get_one::<String>("max_instructions")
         .and_then(|s| s.parse().ok())
         .unwrap_or(emulate::DEFAULT_MAX_INSTRUCTIONS);
+    let send_opts = SendOpts {
+        port: &output_serial_port,
+        send_break: !no_break_flag,
+        monitor: monitor_flag,
+        debug: debug_flag,
+    };
 
     // Classify the input file by extension (case-insensitive).  The file type is
     // determined from the name rather than from a mode-specific flag:
@@ -162,13 +170,16 @@ fn run() -> Result<(), Error> {
     // net-load mode: flatten an ELF (or take a flat binary) and stream it to the
     // board over TCP — no kbt, no UART. See NETBOOT_PLAN.md / netboot.c.
     if let Some(net_binary_path) = matches.get_one::<String>("net_load") {
-        let entry_addr: Option<u32> = matches.get_one::<u32>("entry_point").copied();
+        let input = BinaryInput {
+            path: net_binary_path,
+            entry: matches.get_one::<u32>("entry_point").copied(),
+        };
         let board_ip = matches.get_one::<String>("ip").cloned().unwrap_or_default();
         let board_port: u16 = matches
             .get_one::<String>("port")
             .and_then(|p| p.parse().ok())
             .unwrap_or(NETBOOT_DEFAULT_PORT);
-        run_netload(net_binary_path, entry_addr, &board_ip, board_port, &mut msg_list, start_time)?;
+        run_netload(input, &board_ip, board_port, &mut msg_list, start_time)?;
 
         /* After a successful net-load, optionally monitor the board's UART (and
          * forward keystrokes), exactly like -s -m.  The load itself is over TCP,
@@ -200,57 +211,28 @@ fn run() -> Result<(), Error> {
     // optionally send it.  No opcode file is required — it is only used, if it
     // happens to exist, to emit a .code disassembly listing alongside the .kbt.
     if is_binary_input {
-        let entry_addr: Option<u32> = matches.get_one::<u32>("entry_point").copied();
+        let input = BinaryInput {
+            path: &input_file_name,
+            entry: matches.get_one::<u32>("entry_point").copied(),
+        };
         if let Some(port) = gdbserver_port {
             if board_flag {
-                return commands::run_gdbserver_board(
-                    &input_file_name,
-                    entry_addr,
-                    port,
-                    &output_serial_port,
-                    &binary_file_name,
-                    no_break_flag,
-                    jtag_khz,
-                    &mut msg_list,
-                    start_time,
-                );
+                #[cfg(feature = "board")]
+                return commands::run_gdbserver_board(input, port, jtag_khz, &binary_file_name, send_opts, &mut msg_list, start_time);
+                #[cfg(not(feature = "board"))]
+                return Err(commands::board_unsupported(&mut msg_list));
             }
-            return run_gdbserver(&input_file_name, entry_addr, port, &mut msg_list, start_time);
+            return run_gdbserver(input, port, &mut msg_list, start_time);
         }
         if emulate_flag {
-            return run_emulate_elf(
-                &input_file_name,
-                entry_addr,
-                trace_file.as_deref(),
-                max_instructions,
-                &mut msg_list,
-                start_time,
-            );
+            return run_emulate_elf(input, trace_file.as_deref(), max_instructions, &mut msg_list, start_time);
         }
-        return run_elf2serial(
-            &input_file_name,
-            entry_addr,
-            &output_serial_port,
-            &binary_file_name,
-            monitor_flag,
-            debug_flag,
-            no_break_flag,
-            &mut msg_list,
-            start_time,
-        );
+        return run_elf2serial(input, &binary_file_name, send_opts, &mut msg_list, start_time);
     }
 
     // .kbt input: already in board wire format — send and/or monitor verbatim.
     if is_kbt_input {
-        return run_kbt_send(
-            &input_file_name,
-            &output_serial_port,
-            monitor_flag,
-            debug_flag,
-            no_break_flag,
-            &mut msg_list,
-            start_time,
-        );
+        return run_kbt_send(&input_file_name, send_opts, &mut msg_list, start_time);
     }
 
     // The opcode table is built in to the assembler (ISA encoding v2) — the old
@@ -346,28 +328,11 @@ fn run() -> Result<(), Error> {
                         start_time,
                     );
                 }
+                outcome = send_image(&bin_string, send_opts, &mut msg_list, start_time);
                 if monitor_flag {
-                    // Monitor mode: send to board, keep port open, then monitor UART output
-                    match write_to_board_keep_port(&bin_string, &output_serial_port, !no_break_flag, true, &mut msg_list) {
-                        Ok(port) => {
-                            msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
-                            print_results(&msg_list, start_time);
-                            let monitored = monitor_serial_port(port, debug_flag, &mut msg_list)
-                                .map_err(|err| monitor_failed(&output_serial_port, err, &mut msg_list));
-                            print_messages(&msg_list);
-                            return monitored;
-                        }
-                        Err(err) => {
-                            msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
-                            print_results(&msg_list, start_time);
-                            return Err(Error::Serial {
-                                port: output_serial_port,
-                                source: err,
-                            });
-                        }
-                    }
+                    // Monitor mode: the board's UART was monitored after the send.
+                    return outcome;
                 }
-                outcome = write_to_device(&mut msg_list, &bin_string, &output_serial_port, !no_break_flag);
             }
         } else {
             if remove_file(&binary_file_name).is_ok() {
@@ -422,73 +387,4 @@ fn run() -> Result<(), Error> {
     }
 
     Ok(())
-}
-
-/// Prints results of assembly.
-///
-/// Takes the message list and start time and prints the results to the users.
-#[cfg(not(tarpaulin_include))] // Cannot test printing in tarpaulin
-pub fn print_results(msg_list: &MsgList, start_time: Instant) {
-    print_messages(msg_list);
-    let time_taken: f64 = start_time.elapsed().as_secs_f64();
-    eprintln!(
-        "Completed with {} error{} and {} warning{} in {:.3} seconds",
-        msg_list.number_by_type(MessageType::Error),
-        if msg_list.number_by_type(MessageType::Error) == 1 { "" } else { "s" },
-        msg_list.number_by_type(MessageType::Warning),
-        if msg_list.number_by_type(MessageType::Warning) == 1 { "" } else { "s" },
-        time_taken,
-    );
-}
-
-/// Writes the binary file.
-///
-/// Writes the `.kbt` wire-format string to `binary_file_name`, reporting (and
-/// returning) a failure.
-#[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub fn write_binary_file(msg_list: &mut MsgList, binary_file_name: &str, bin_string: &str) -> Result<(), Error> {
-    msg_list.push(format!("Writing binary file to {binary_file_name}"), None, None, MessageType::Information);
-    write_binary_output_file(&binary_file_name, bin_string).map_err(|result_err| {
-        msg_list.push(
-            format!("Unable to write to binary code file {binary_file_name:?}, error {result_err}"),
-            None,
-            None,
-            MessageType::Error,
-        );
-        Error::Write {
-            path: PathBuf::from(binary_file_name),
-            source: result_err,
-        }
-    })
-}
-
-/// Send machine code to device.
-///
-/// Sends the resultant code on the serial device defined if no errors were found.
-/// Fails if errors were already reported or the send fails.
-#[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub fn write_to_device(msg_list: &mut MsgList, bin_string: &str, output_serial_port: &str, send_break: bool) -> Result<(), Error> {
-    let error_count = msg_list.number_by_type(MessageType::Error);
-    if error_count > 0 {
-        msg_list.push(
-            "Not writing to serial port due to assembly errors".to_owned(),
-            None,
-            None,
-            MessageType::Warning,
-        );
-        return Err(Error::Assembly(error_count));
-    }
-    match write_to_board(bin_string, output_serial_port, send_break, msg_list) {
-        Ok(()) => {
-            msg_list.push("Wrote to serial port".to_owned(), None, None, MessageType::Information);
-            Ok(())
-        }
-        Err(err) => {
-            msg_list.push(format!("Failed to write to serial port, error \"{err}\""), None, None, MessageType::Error);
-            Err(Error::Serial {
-                port: output_serial_port.to_owned(),
-                source: err,
-            })
-        }
-    }
 }
