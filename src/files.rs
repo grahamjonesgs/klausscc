@@ -1,7 +1,8 @@
+use crate::asm::line::{LineType, Pass2, SourceLine};
 use crate::layout::{heap_start, CODE_BASE};
 use crate::macros::Macro;
 use crate::messages::{MessageType, MsgList};
-use crate::opcodes::{InputData, Opcode, Pass2};
+use crate::opcodes::Opcode;
 use std::io::Error;
 
 use std::collections::HashSet;
@@ -11,18 +12,6 @@ use std::{
     io::{prelude::*, BufReader},
     path::{Path, PathBuf},
 };
-
-#[derive(PartialEq, Eq, Debug, Clone)]
-/// Defines the type of line.
-pub enum LineType {
-    Blank,
-    Comment,
-    Data,
-    Error,
-    Label,
-    Opcode,
-    Start,
-}
 
 /// Return the stem of given filename.
 ///
@@ -306,7 +295,7 @@ fn output_opcodes_textmate(filename_stem: String, opcodes: &[Opcode], msg_list: 
 /// Open text file and return as vector of strings.
 ///
 /// Reads any given file by filename, adding the fill line by line into vector and returns None or Some(String). Manages included files.
-pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList) -> Option<Vec<InputData>> {
+pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList) -> Option<Vec<SourceLine>> {
     read_source_file(filename, msg_list, &mut HashSet::new())
 }
 
@@ -316,7 +305,7 @@ pub fn read_file_to_vector(filename: &str, msg_list: &mut MsgList) -> Option<Vec
 /// (this one's includers); a file already in it is a recursive include. The
 /// path is compared before the file is opened, and always removed again
 /// afterwards, however reading the file ends.
-fn read_source_file(filename: &str, msg_list: &mut MsgList, open_files: &mut HashSet<PathBuf>) -> Option<Vec<InputData>> {
+fn read_source_file(filename: &str, msg_list: &mut MsgList, open_files: &mut HashSet<PathBuf>) -> Option<Vec<SourceLine>> {
     let Ok(canonical) = fs::canonicalize(filename) else {
         msg_list.push(format!("Unable to open file {filename}"), None, None, MessageType::Error);
         return None;
@@ -337,9 +326,9 @@ fn read_source_file(filename: &str, msg_list: &mut MsgList, open_files: &mut Has
 }
 
 /// Read the lines of an open source file, expanding its `!include` lines.
-fn read_source_lines(file: File, filename: &str, msg_list: &mut MsgList, open_files: &mut HashSet<PathBuf>) -> Option<Vec<InputData>> {
+fn read_source_lines(file: File, filename: &str, msg_list: &mut MsgList, open_files: &mut HashSet<PathBuf>) -> Option<Vec<SourceLine>> {
     let buf = BufReader::new(file);
-    let mut lines: Vec<InputData> = Vec::new();
+    let mut lines: Vec<SourceLine> = Vec::new();
 
     let mut line_number = 0;
     for line in buf.lines() {
@@ -372,8 +361,8 @@ fn read_source_lines(file: File, filename: &str, msg_list: &mut MsgList, open_fi
                     };
                     lines.extend(include_lines);
                 } else {
-                    lines.push(InputData {
-                        input: line_contents,
+                    lines.push(SourceLine {
+                        input_text_line: line_contents,
                         file_name: filename.to_owned(),
                         line_counter: line_number,
                     });
@@ -423,11 +412,11 @@ fn unterminated_comment(file_name: &str, line_number: u32, msg_list: &mut MsgLis
 /// Checks for /* */ and removes them from the vector of strings. Comments do
 /// not nest, may span lines, but never span files: a comment still open at the
 /// end of a file is reported at the line where its `/*` was.
-pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> Vec<InputData> {
+pub fn remove_block_comments(lines: Vec<SourceLine>, msg_list: &mut MsgList) -> Vec<SourceLine> {
     let mut state = CommentState::Code;
     // File and line of the `/*` that opened the current comment.
     let mut opened_at: (String, u32) = (String::new(), 0);
-    let mut new_lines: Vec<InputData> = Vec::new();
+    let mut new_lines: Vec<SourceLine> = Vec::new();
     for line in lines {
         let in_comment = matches!(state, CommentState::Comment | CommentState::Star);
         if in_comment && opened_at.0 != line.file_name {
@@ -436,7 +425,7 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
         }
 
         let mut new_line = String::default();
-        for char in line.input.chars() {
+        for char in line.input_text_line.chars() {
             state = match (state, char) {
                 (CommentState::Code, '/') => CommentState::Slash,
                 (CommentState::Code, _) => {
@@ -471,8 +460,8 @@ pub fn remove_block_comments(lines: Vec<InputData>, msg_list: &mut MsgList) -> V
             CommentState::Star => CommentState::Comment,
             other => other,
         };
-        new_lines.push(InputData {
-            input: new_line,
+        new_lines.push(SourceLine {
+            input_text_line: new_line,
             file_name: line.file_name,
             line_counter: line.line_counter,
         });
@@ -596,16 +585,16 @@ mod test {
     #[test]
     // Test remove of comments in single line
     fn test_remove_block_comments1() {
-        let input = vec![InputData {
-            input: "abc/* This is a comment */def".to_owned(),
+        let input = vec![SourceLine {
+            input_text_line: "abc/* This is a comment */def".to_owned(),
             file_name: "test.kla".to_owned(),
             line_counter: 1,
         }];
         let output = remove_block_comments(input, &mut MsgList::new());
         assert_eq!(
             output,
-            vec![InputData {
-                input: "abcdef".to_owned(),
+            vec![SourceLine {
+                input_text_line: "abcdef".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 1,
             }]
@@ -616,13 +605,13 @@ mod test {
     // Test remove of comments in two lines
     fn test_remove_block_comments2() {
         let input = vec![
-            InputData {
-                input: "abc/* This is a comment */def".to_owned(),
+            SourceLine {
+                input_text_line: "abc/* This is a comment */def".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "abc/* This is a comment */def".to_owned(),
+            SourceLine {
+                input_text_line: "abc/* This is a comment */def".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 2,
             },
@@ -631,13 +620,13 @@ mod test {
         assert_eq!(
             output,
             vec![
-                InputData {
-                    input: "abcdef".to_owned(),
+                SourceLine {
+                    input_text_line: "abcdef".to_owned(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 1,
                 },
-                InputData {
-                    input: "abcdef".to_owned(),
+                SourceLine {
+                    input_text_line: "abcdef".to_owned(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 2
                 },
@@ -649,13 +638,13 @@ mod test {
     // Test remove of comments in across two lines
     fn test_remove_block_comments3() {
         let input = vec![
-            InputData {
-                input: "abc/* This is a comment ".to_owned(),
+            SourceLine {
+                input_text_line: "abc/* This is a comment ".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "so is this */def".to_owned(),
+            SourceLine {
+                input_text_line: "so is this */def".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 2,
             },
@@ -664,13 +653,13 @@ mod test {
         assert_eq!(
             output,
             vec![
-                InputData {
-                    input: "abc".to_owned(),
+                SourceLine {
+                    input_text_line: "abc".to_owned(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 1,
                 },
-                InputData {
-                    input: "def".to_owned(),
+                SourceLine {
+                    input_text_line: "def".to_owned(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 2,
                 },
@@ -682,18 +671,18 @@ mod test {
     // Test remove of comments in across three line with blank line left
     fn test_remove_block_comments4() {
         let input = vec![
-            InputData {
-                input: "abc/* This is a comment ".to_owned(),
+            SourceLine {
+                input_text_line: "abc/* This is a comment ".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "so is this def".to_owned(),
+            SourceLine {
+                input_text_line: "so is this def".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 2,
             },
-            InputData {
-                input: "*/def".to_owned(),
+            SourceLine {
+                input_text_line: "*/def".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 3,
             },
@@ -702,18 +691,18 @@ mod test {
         assert_eq!(
             output,
             vec![
-                InputData {
-                    input: "abc".to_owned(),
+                SourceLine {
+                    input_text_line: "abc".to_owned(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 1,
                 },
-                InputData {
-                    input: String::default(),
+                SourceLine {
+                    input_text_line: String::default(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 2,
                 },
-                InputData {
-                    input: "def".to_owned(),
+                SourceLine {
+                    input_text_line: "def".to_owned(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 3,
                 },
@@ -725,18 +714,18 @@ mod test {
     // Test restart comments
     fn test_remove_block_comments5() {
         let input = vec![
-            InputData {
-                input: "abc/* This is a /* /*comment ".to_owned(),
+            SourceLine {
+                input_text_line: "abc/* This is a /* /*comment ".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "so is this def".to_owned(),
+            SourceLine {
+                input_text_line: "so is this def".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 2,
             },
-            InputData {
-                input: "*/def".to_owned(),
+            SourceLine {
+                input_text_line: "*/def".to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: 3,
             },
@@ -745,18 +734,18 @@ mod test {
         assert_eq!(
             output,
             vec![
-                InputData {
-                    input: "abc".to_owned(),
+                SourceLine {
+                    input_text_line: "abc".to_owned(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 1,
                 },
-                InputData {
-                    input: String::default(),
+                SourceLine {
+                    input_text_line: String::default(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 2,
                 },
-                InputData {
-                    input: "def".to_owned(),
+                SourceLine {
+                    input_text_line: "def".to_owned(),
                     file_name: "test.kla".to_owned(),
                     line_counter: 3,
                 },
@@ -769,18 +758,18 @@ mod test {
     fn test_remove_block_comments6() {
         let msg_list = &mut MsgList::new();
         let input = vec![
-            InputData {
-                input: "abc/* This is a /* /*comment ".to_owned(),
+            SourceLine {
+                input_text_line: "abc/* This is a /* /*comment ".to_owned(),
                 file_name: "test1.kla".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "so is this def".to_owned(),
+            SourceLine {
+                input_text_line: "so is this def".to_owned(),
                 file_name: "test1.kla".to_owned(),
                 line_counter: 2,
             },
-            InputData {
-                input: "def".to_owned(),
+            SourceLine {
+                input_text_line: "def".to_owned(),
                 file_name: "test2.kla".to_owned(),
                 line_counter: 3,
             },
@@ -789,18 +778,18 @@ mod test {
         assert_eq!(
             output,
             vec![
-                InputData {
-                    input: "abc".to_owned(),
+                SourceLine {
+                    input_text_line: "abc".to_owned(),
                     file_name: "test1.kla".to_owned(),
                     line_counter: 1,
                 },
-                InputData {
-                    input: String::default(),
+                SourceLine {
+                    input_text_line: String::default(),
                     file_name: "test1.kla".to_owned(),
                     line_counter: 2,
                 },
-                InputData {
-                    input: "def".to_owned(),
+                SourceLine {
+                    input_text_line: "def".to_owned(),
                     file_name: "test2.kla".to_owned(),
                     line_counter: 3,
                 },
@@ -818,13 +807,16 @@ mod test {
         let input = lines
             .iter()
             .zip(1..)
-            .map(|(line, n)| InputData {
-                input: (*line).to_owned(),
+            .map(|(line, n)| SourceLine {
+                input_text_line: (*line).to_owned(),
                 file_name: "test.kla".to_owned(),
                 line_counter: n,
             })
             .collect();
-        let output = remove_block_comments(input, &mut msg_list).into_iter().map(|l| l.input).collect();
+        let output = remove_block_comments(input, &mut msg_list)
+            .into_iter()
+            .map(|l| l.input_text_line)
+            .collect();
         (output, msg_list)
     }
 
@@ -973,7 +965,7 @@ mod test {
         _ = writeln!(tmp_file1, "Test line in file 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(lines.clone().unwrap()[0].input, "Test line in file");
+        assert_eq!(lines.clone().unwrap()[0].input_text_line, "Test line in file");
         assert_eq!(lines.unwrap().len(), 4);
 
         drop(tmp_file1);
@@ -1004,9 +996,9 @@ mod test {
         _ = writeln!(tmp_file2, "Test line in file 2 line 4");
 
         let lines = read_file_to_vector(file_name1, &mut msg_list);
-        assert_eq!(lines.clone().unwrap_or_default()[0].input, "Test line in file 1 line 0");
-        assert_eq!(lines.clone().unwrap_or_default()[2].input, "Test line in file 2 line 1");
-        assert_eq!(lines.clone().unwrap_or_default()[6].input, "Test line in file 1 line 2");
+        assert_eq!(lines.clone().unwrap_or_default()[0].input_text_line, "Test line in file 1 line 0");
+        assert_eq!(lines.clone().unwrap_or_default()[2].input_text_line, "Test line in file 2 line 1");
+        assert_eq!(lines.clone().unwrap_or_default()[6].input_text_line, "Test line in file 1 line 2");
         assert_eq!(lines.unwrap().len(), 7);
 
         drop(tmp_file1);
@@ -1185,7 +1177,7 @@ mod test {
         fs::write(tmp_dir.path().join("d.kla"), "d\n").unwrap();
 
         let lines = read_file_to_vector(file_path1.to_str().unwrap(), &mut msg_list).unwrap();
-        let text: Vec<&str> = lines.iter().map(|l| l.input.as_str()).collect();
+        let text: Vec<&str> = lines.iter().map(|l| l.input_text_line.as_str()).collect();
         assert_eq!(text, vec!["b", "d", "c", "d"]);
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
     }

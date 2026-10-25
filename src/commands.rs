@@ -1,13 +1,14 @@
 //! Subcommand handlers — each `run_*` function drives one CLI mode end to end
 //! (net-load, mem-out, elf2serial, kbt send, emulate, and the test runners).
 
+use crate::asm::line::Pass2;
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::{build_ddr_image, disassemble_flat_to_pass2, encode_word_kbt, human_bytes, parse_expected_uart_values};
 use crate::layout::{heap_start, CODE_BASE, HEAP_HEADER_WORDS};
 use crate::messages::{print_messages, MessageType, MsgList};
 use crate::netload::net_load;
-use crate::opcodes::{Opcode, Pass2};
+use crate::opcodes::Opcode;
 use crate::serial::{monitor_serial_port, run_test_monitor, write_to_board_keep_port, AUTO_SERIAL};
 use crate::{assemble_file, assemble_to_image, build_flat_code, print_results, write_binary_file, write_to_device, ELF_MAGIC};
 use crate::{emulate, gdbserver, helper, macros};

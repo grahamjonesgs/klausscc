@@ -1,21 +1,10 @@
-use crate::files::LineType;
+use crate::asm::line::SourceLine;
 use crate::labels::{convert_argument, Label};
 use crate::macros::{macro_from_string, return_macro, Macro};
 use crate::messages::{MessageType, MsgList};
 use crate::num::{parse_bits64, parse_int};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-/// Struct for opcode argument.
-pub struct InputData {
-    /// File name of input file.
-    pub file_name: String,
-    /// Text name of opcode.
-    pub input: String,
-    /// Line number of input file.
-    pub line_counter: u32,
-}
 
 /// One source-operand slot of a v2 instruction, describing how the operand
 /// token maps onto the instruction word (`doc/ISA_ENCODING_V2.md` §1). The uniform
@@ -80,49 +69,6 @@ pub struct Opcode {
     /// Ordered source-operand layout (empty for legacy `.vh`-parsed opcodes).
     #[serde(default)]
     pub ops: Vec<Operand>,
-}
-
-#[derive(Debug)]
-/// Struct for Pass0.
-pub struct Pass0 {
-    /// File name of input file.
-    pub file_name: String,
-    /// Line text.
-    pub input_text_line: String,
-    /// Line number of input file.
-    pub line_counter: u32,
-}
-
-#[derive(Debug)]
-/// Struct for Pass1.
-pub struct Pass1 {
-    /// File name of input file.
-    pub file_name: String,
-    /// Line text.
-    pub input_text_line: String,
-    /// Line number of input file.
-    pub line_counter: u32,
-    /// Line type.
-    pub line_type: LineType,
-    /// Program counter.
-    pub program_counter: u32,
-}
-
-#[derive(Debug, Clone)]
-/// Struct for Pass2.
-pub struct Pass2 {
-    /// File name of input file.
-    pub file_name: String,
-    /// Line text.
-    pub input_text_line: String,
-    /// Line number of input file.
-    pub line_counter: u32,
-    /// Line type.
-    pub line_type: LineType,
-    /// Opcode as string.
-    pub opcode: String,
-    /// Program counter.
-    pub program_counter: u32,
 }
 
 /// Parse a single token as a u64 immediate value.
@@ -1061,7 +1007,7 @@ pub fn v2_opcodes_and_macros(msg_list: &mut MsgList) -> (Vec<Opcode>, Vec<Macro>
     dead_code,
     reason = "legacy `.vh` opcode-file parser; superseded by the built-in v2 table but retained for backward compatibility and unit tests"
 )]
-pub fn parse_vh_file(input_list: Vec<InputData>, msg_list: &mut MsgList) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
+pub fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut MsgList) -> (Option<Vec<Opcode>>, Option<Vec<Macro>>) {
     if input_list.is_empty() {
         return (None, None);
     }
@@ -1071,11 +1017,11 @@ pub fn parse_vh_file(input_list: Vec<InputData>, msg_list: &mut MsgList) -> (Opt
     let mut section_name = String::default();
 
     for line in input_list {
-        if let Some(section) = line.input.trim().strip_prefix("///") {
+        if let Some(section) = line.input_text_line.trim().strip_prefix("///") {
             section.to_owned().trim().clone_into(&mut section_name);
         }
 
-        match opcode_from_string(&line.input) {
+        match opcode_from_string(&line.input_text_line) {
             None => (),
             Some(opcode) => {
                 if return_opcode(&opcode.text_name, &mut opcodes).is_some() {
@@ -1098,7 +1044,7 @@ pub fn parse_vh_file(input_list: Vec<InputData>, msg_list: &mut MsgList) -> (Opt
                 });
             }
         }
-        match macro_from_string(&line.input, msg_list) {
+        match macro_from_string(&line.input_text_line, msg_list) {
             None => (),
             Some(found_macro) => {
                 if return_macro(&found_macro.name, &macros).is_some() {
@@ -1625,13 +1571,13 @@ mod tests {
     fn test_parse_vh_file1() {
         let mut msg_list = MsgList::new();
         let vh_list = vec![
-            InputData {
-                input: "abc/* This is a comment */def".to_owned(),
+            SourceLine {
+                input_text_line: "abc/* This is a comment */def".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "abc/* This is a comment */def".to_owned(),
+            SourceLine {
+                input_text_line: "abc/* This is a comment */def".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 2,
             },
@@ -1648,13 +1594,13 @@ mod tests {
     fn test_parse_vh_file2() {
         let mut msg_list = MsgList::new();
         let vh_list = vec![
-            InputData {
-                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
+            SourceLine {
+                input_text_line: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
+            SourceLine {
+                input_text_line: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 2,
             },
@@ -1690,23 +1636,23 @@ mod tests {
     fn test_parse_vh_file3() {
         let mut msg_list = MsgList::new();
         let vh_list = vec![
-            InputData {
-                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
+            SourceLine {
+                input_text_line: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
+            SourceLine {
+                input_text_line: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 2,
             },
-            InputData {
-                input: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
+            SourceLine {
+                input_text_line: "$WAIT DELAYV %1 / DELAYV %2 ".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 3,
             },
-            InputData {
-                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
+            SourceLine {
+                input_text_line: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 4,
             },
@@ -1736,28 +1682,28 @@ mod tests {
     fn test_parse_vh_file5() {
         let mut msg_list = MsgList::new();
         let vh_list = vec![
-            InputData {
-                input: "/// Section 1".to_owned(),
+            SourceLine {
+                input_text_line: "/// Section 1".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: "16'h06??: t_push_addr;    // PUSH push value to reg".to_owned(),
+            SourceLine {
+                input_text_line: "16'h06??: t_push_addr;    // PUSH push value to reg".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 2,
             },
-            InputData {
-                input: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
+            SourceLine {
+                input_text_line: "16'h05??: t_compare_regs;    // CMPRR Compare registers".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 3,
             },
-            InputData {
-                input: "/// Section 2".to_owned(),
+            SourceLine {
+                input_text_line: "/// Section 2".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 4,
             },
-            InputData {
-                input: "16'h16??: t_pop_addr;    // POP pop value from reg".to_owned(),
+            SourceLine {
+                input_text_line: "16'h16??: t_pop_addr;    // POP pop value from reg".to_owned(),
                 file_name: "opcode_select.vh".to_owned(),
                 line_counter: 5,
             },

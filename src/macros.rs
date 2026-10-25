@@ -1,6 +1,6 @@
-use crate::helper::{return_comments, strip_comments};
+use crate::asm::lexer::{return_comments, strip_comments};
+use crate::asm::line::SourceLine;
 use crate::messages::{MessageType, MsgList};
-use crate::opcodes::{InputData, Pass0};
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;
@@ -131,15 +131,15 @@ pub fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut MsgList) -> Vec
 ///
 /// Takes the input list of all lines and macro vector and expands. A trailing
 /// `//` comment on a macro call is not part of its arguments.
-pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<InputData>, macro_list: &mut [Macro]) -> Vec<Pass0> {
-    let mut pass0: Vec<Pass0> = Vec::new();
+pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<SourceLine>, macro_list: &mut [Macro]) -> Vec<SourceLine> {
+    let mut pass0: Vec<SourceLine> = Vec::new();
     for code_line in input_list {
-        if let Some(macro_name) = macro_name_from_string(&code_line.input) {
-            let call = strip_comments(&code_line.input);
+        if let Some(macro_name) = macro_name_from_string(&code_line.input_text_line) {
+            let call = strip_comments(&code_line.input_text_line);
             let items = return_macro_items_replace(&call, macro_list, code_line.line_counter, &code_line.file_name, msg_list);
             if let Some(items_vec) = items {
                 for item in items_vec {
-                    pass0.push(Pass0 {
+                    pass0.push(SourceLine {
                         input_text_line: format!("{item} // Macro expansion from {macro_name}"),
                         file_name: code_line.file_name.clone(),
                         line_counter: code_line.line_counter,
@@ -152,18 +152,10 @@ pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<InputData>, macro_l
                     Some(code_line.file_name.clone()),
                     MessageType::Error,
                 );
-                pass0.push(Pass0 {
-                    file_name: code_line.file_name,
-                    input_text_line: code_line.input,
-                    line_counter: code_line.line_counter,
-                });
+                pass0.push(code_line);
             }
         } else {
-            pass0.push(Pass0 {
-                file_name: code_line.file_name,
-                input_text_line: code_line.input,
-                line_counter: code_line.line_counter,
-            });
+            pass0.push(code_line);
         }
     }
     pass0
@@ -180,12 +172,12 @@ pub fn expand_macros(msg_list: &mut MsgList, input_list: Vec<InputData>, macro_l
 ///
 /// `!macros` files are resolved relative to the directory of the file that
 /// contains the directive, matching `!include`.
-pub fn apply_source_macros(input_list: Vec<InputData>, macro_list: &mut Vec<Macro>, msg_list: &mut MsgList) -> Vec<InputData> {
-    let mut output: Vec<InputData> = Vec::new();
+pub fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut Vec<Macro>, msg_list: &mut MsgList) -> Vec<SourceLine> {
+    let mut output: Vec<SourceLine> = Vec::new();
     let mut added = false;
 
     for line in input_list {
-        let stripped = strip_comments(&line.input);
+        let stripped = strip_comments(&line.input_text_line);
         let first_word = stripped.split_whitespace().next().unwrap_or("");
         match first_word {
             "!macro" => {
@@ -420,9 +412,9 @@ mod tests {
     use super::*;
 
     /// One source line of `test.kla`.
-    fn source_line(input: &str, line_counter: u32) -> InputData {
-        InputData {
-            input: input.to_owned(),
+    fn source_line(input: &str, line_counter: u32) -> SourceLine {
+        SourceLine {
+            input_text_line: input.to_owned(),
             file_name: "test.kla".to_owned(),
             line_counter,
         }
@@ -858,16 +850,16 @@ mod tests {
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
             comment: String::default(),
         });
-        //  let mut input: Vec<InputData> = Vec::<InputData>::new();
+        //  let mut input: Vec<SourceLine> = Vec::<SourceLine>::new();
 
-        let input: Vec<InputData> = vec![
-            InputData {
-                input: String::from("$MACRO1 A B"),
+        let input: Vec<SourceLine> = vec![
+            SourceLine {
+                input_text_line: String::from("$MACRO1 A B"),
                 file_name: "File1".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: String::from("$MACRO2 C D"),
+            SourceLine {
+                input_text_line: String::from("$MACRO2 C D"),
                 file_name: "File2".to_owned(),
                 line_counter: 2,
             },
@@ -900,14 +892,14 @@ mod tests {
             comment: String::default(),
         });
         // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
-        let input: Vec<InputData> = vec![
-            InputData {
-                input: String::from("$MACRO1 A B"),
+        let input: Vec<SourceLine> = vec![
+            SourceLine {
+                input_text_line: String::from("$MACRO1 A B"),
                 file_name: "File1".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: String::from("$MACRO2 C"),
+            SourceLine {
+                input_text_line: String::from("$MACRO2 C"),
                 file_name: "File1".to_owned(),
                 line_counter: 2,
             },
@@ -941,14 +933,14 @@ mod tests {
             comment: String::default(),
         });
         // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
-        let input: Vec<InputData> = vec![
-            InputData {
-                input: String::from("$MACRO1 A B"),
+        let input: Vec<SourceLine> = vec![
+            SourceLine {
+                input_text_line: String::from("$MACRO1 A B"),
                 file_name: "File1".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: String::from("$MACRO2 C D"),
+            SourceLine {
+                input_text_line: String::from("$MACRO2 C D"),
                 file_name: "File1".to_owned(),
                 line_counter: 2,
             },
@@ -981,14 +973,14 @@ mod tests {
             comment: String::default(),
         });
         // let input = vec![String::from("$MACRO7 A B"), String::from("$MACRO2 C D")];
-        let input: Vec<InputData> = vec![
-            InputData {
-                input: String::from("$MACRO7 A B"),
+        let input: Vec<SourceLine> = vec![
+            SourceLine {
+                input_text_line: String::from("$MACRO7 A B"),
                 file_name: "File1".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: String::from("$MACRO2 C D"),
+            SourceLine {
+                input_text_line: String::from("$MACRO2 C D"),
                 file_name: "File1".to_owned(),
                 line_counter: 1,
             },
@@ -1017,8 +1009,8 @@ mod tests {
             comment: String::default(),
         });
 
-        let input: Vec<InputData> = vec![InputData {
-            input: String::from("OPCODE1 A B"),
+        let input: Vec<SourceLine> = vec![SourceLine {
+            input_text_line: String::from("OPCODE1 A B"),
             file_name: "File1".to_owned(),
             line_counter: 1,
         }];
@@ -1032,26 +1024,26 @@ mod tests {
     fn test_apply_source_macros_inline() {
         let mut msg_list = MsgList::new();
         let macros = &mut Vec::<Macro>::new();
-        let input: Vec<InputData> = vec![
-            InputData {
-                input: String::from("!macro $INC3 ADDV %1 3"),
+        let input: Vec<SourceLine> = vec![
+            SourceLine {
+                input_text_line: String::from("!macro $INC3 ADDV %1 3"),
                 file_name: "F".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: String::from("$INC3 A"),
+            SourceLine {
+                input_text_line: String::from("$INC3 A"),
                 file_name: "F".to_owned(),
                 line_counter: 2,
             },
-            InputData {
-                input: String::from("NOP"),
+            SourceLine {
+                input_text_line: String::from("NOP"),
                 file_name: "F".to_owned(),
                 line_counter: 3,
             },
         ];
         let output = apply_source_macros(input, macros, &mut msg_list);
         assert_eq!(output.len(), 2); // the !macro directive line is stripped
-        assert_eq!(output.first().unwrap().input, "$INC3 A");
+        assert_eq!(output.first().unwrap().input_text_line, "$INC3 A");
         assert_eq!(macros.len(), 1);
         assert_eq!(macros.first().unwrap().name, "$INC3");
         assert_eq!(macros.first().unwrap().items, vec![String::from("ADDV %1 3")]);
@@ -1068,13 +1060,13 @@ mod tests {
             items: vec![String::from("NOP")],
             comment: String::default(),
         }];
-        let input: Vec<InputData> = vec![InputData {
-            input: String::from("!macro $FOO HALT"),
+        let input: Vec<SourceLine> = vec![SourceLine {
+            input_text_line: String::from("!macro $FOO HALT"),
             file_name: "F".to_owned(),
             line_counter: 1,
         }];
         let output = apply_source_macros(input, macros, &mut msg_list);
-        assert_eq!(output, Vec::<InputData>::new()); // directive consumed
+        assert_eq!(output, Vec::<SourceLine>::new()); // directive consumed
         assert_eq!(macros.len(), 1); // no duplicate added
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
         assert_eq!(msg_list.list.first().unwrap().text, "Duplicate macro definition $FOO found");
@@ -1085,14 +1077,14 @@ mod tests {
     fn test_apply_source_macros_embedded() {
         let mut msg_list = MsgList::new();
         let macros = &mut Vec::<Macro>::new();
-        let input: Vec<InputData> = vec![
-            InputData {
-                input: String::from("!macro $BASE NOP / NOP"),
+        let input: Vec<SourceLine> = vec![
+            SourceLine {
+                input_text_line: String::from("!macro $BASE NOP / NOP"),
                 file_name: "F".to_owned(),
                 line_counter: 1,
             },
-            InputData {
-                input: String::from("!macro $WRAP $BASE / HALT"),
+            SourceLine {
+                input_text_line: String::from("!macro $WRAP $BASE / HALT"),
                 file_name: "F".to_owned(),
                 line_counter: 2,
             },
@@ -1108,13 +1100,13 @@ mod tests {
     fn test_apply_source_macros_missing_name() {
         let mut msg_list = MsgList::new();
         let macros = &mut Vec::<Macro>::new();
-        let input: Vec<InputData> = vec![InputData {
-            input: String::from("!macros"),
+        let input: Vec<SourceLine> = vec![SourceLine {
+            input_text_line: String::from("!macros"),
             file_name: "F".to_owned(),
             line_counter: 1,
         }];
         let output = apply_source_macros(input, macros, &mut msg_list);
-        assert_eq!(output, Vec::<InputData>::new());
+        assert_eq!(output, Vec::<SourceLine>::new());
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
         assert_eq!(msg_list.list.first().unwrap().text, "Missing file name for !macros in F");
     }

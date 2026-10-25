@@ -1,5 +1,7 @@
 //! Top level file for Klausscc.
 
+/// The assembler's shared line records and lexer predicates.
+mod asm;
 /// Module defining the command-line interface (clap).
 mod cli;
 /// Module of subcommand handlers (the `run_*` entry points).
@@ -37,23 +39,23 @@ mod num;
 mod opcodes;
 /// Module to write to serial and read response.
 mod serial;
+use asm::lexer::strip_comments;
+use asm::line::{LineType, Pass1, Pass2, SourceLine};
 use cli::set_matches;
 use commands::{
     monitor_failed, run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload,
     run_test_list, run_test_mode,
 };
 use error::Error;
-use files::{
-    filename_stem, output_file_name, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file, LineType,
-};
-use helper::{build_ddr_image, create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes, strip_comments};
+use files::{filename_stem, output_file_name, read_file_to_vector, remove_block_comments, write_binary_output_file, write_code_output_file};
+use helper::{build_ddr_image, create_bin_string, data_as_bytes, is_valid_line, line_type, num_data_bytes};
 use labels::{find_duplicate_label, get_labels, Label};
 use layout::CODE_BASE;
 use macros::{apply_source_macros, expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
 use num::{fits_imm32, parse_bits64, parse_int, parse_operand};
-use opcodes::{add_arguments, add_registers, num_arguments, pc_relative_bits, v2_opcodes_and_macros, Opcode, Pass0, Pass1, Pass2};
+use opcodes::{add_arguments, add_registers, num_arguments, pc_relative_bits, v2_opcodes_and_macros, Opcode};
 use serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -478,10 +480,10 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
 /// Returns pass1 from pass0.
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
-pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
+pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = CODE_BASE; // Byte address: 4 header words × 8 bytes each (64-bit words)
-    let mut data_pass0: Vec<Pass0> = Vec::new();
+    let mut data_pass0: Vec<SourceLine> = Vec::new();
     let mut in_data_section = false;
 
     for pass in pass0 {
@@ -520,13 +522,13 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
                         0
                     }
                 };
-                data_pass0.push(Pass0 {
+                data_pass0.push(SourceLine {
                     input_text_line: format!("{name}:"),
                     file_name: pass.file_name.clone(),
                     line_counter: pass.line_counter,
                 });
                 if size > 0 {
-                    data_pass0.push(Pass0 {
+                    data_pass0.push(SourceLine {
                         input_text_line: format!(".space {size}"),
                         file_name: pass.file_name.clone(),
                         line_counter: pass.line_counter,
@@ -859,19 +861,18 @@ pub(crate) fn assemble_to_image(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use opcodes::InputData;
 
     /// Assemble `source` (as `test.kla`) with the built-in v2 table, without file I/O.
     fn assemble_text(source: &str) -> (Vec<Pass2>, MsgList) {
         let mut msg_list = MsgList::new();
         let (oplist, macros_raw) = opcodes::v2_opcodes_and_macros(&mut msg_list);
         let mut macro_list = expand_embedded_macros(macros_raw, &mut msg_list);
-        let input: Vec<InputData> = source
+        let input: Vec<SourceLine> = source
             .lines()
             .enumerate()
-            .map(|(i, line)| InputData {
+            .map(|(i, line)| SourceLine {
                 file_name: "test.kla".to_owned(),
-                input: line.to_owned(),
+                input_text_line: line.to_owned(),
                 line_counter: u32::try_from(i + 1).unwrap(),
             })
             .collect();
@@ -1028,37 +1029,37 @@ mod tests {
         });
 
         let pass0 = vec![
-            Pass0 {
+            SourceLine {
                 input_text_line: "MOV A B".to_owned(),
                 file_name: String::new(),
                 line_counter: 1,
             },
-            Pass0 {
+            SourceLine {
                 input_text_line: "PUSH A".to_owned(),
                 file_name: String::new(),
                 line_counter: 2,
             },
-            Pass0 {
+            SourceLine {
                 input_text_line: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 3,
             },
-            Pass0 {
+            SourceLine {
                 input_text_line: "#DATA1 0x2".to_owned(), // Should be moved to end
                 file_name: String::new(),
                 line_counter: 4,
             },
-            Pass0 {
+            SourceLine {
                 input_text_line: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 5,
             },
-            Pass0 {
+            SourceLine {
                 input_text_line: "#DATA1 \"HELLO\"".to_owned(), // Should be moved to end
                 file_name: String::new(),
                 line_counter: 6,
             },
-            Pass0 {
+            SourceLine {
                 input_text_line: "RET".to_owned(),
                 file_name: String::new(),
                 line_counter: 7,
@@ -1092,7 +1093,7 @@ mod tests {
             section: String::new(),
         });
 
-        let pass0 = vec![Pass0 {
+        let pass0 = vec![SourceLine {
             input_text_line: "Test_not_code_line".to_owned(),
             file_name: String::new(),
             line_counter: 1,

@@ -1,9 +1,9 @@
-use crate::files::LineType;
-use crate::labels::label_name_from_string;
+use crate::asm::lexer::{data_name_from_string, is_blank, is_comment, is_start, label_name_from_string};
+use crate::asm::line::{LineType, Pass2};
 use crate::layout::{heap_start, CODE_BASE, HEAP_HEADER_WORDS};
 use crate::messages::{MessageType, MsgList};
 use crate::num::{parse_bits64, parse_int, LiteralError};
-use crate::opcodes::{disassemble_word, return_opcode, Opcode, Pass2};
+use crate::opcodes::{disassemble_word, return_opcode, Opcode};
 use std::fmt;
 use std::fmt::Write as _;
 
@@ -405,68 +405,6 @@ pub fn data_bytes(line: &str) -> Result<String, DataError> {
     }
 }
 
-/// Extracts data name from string.
-///
-/// Checks if start of first word is hash if so return data name as option string.
-pub fn data_name_from_string(line: &str) -> Option<String> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.starts_with('#') {
-        return Some(first_word.to_owned());
-    }
-    None
-}
-
-/// Check if line is blank.
-///
-/// Returns true if line if just whitespace.
-pub fn is_blank(line: &str) -> bool {
-    let words = line.split_whitespace();
-
-    for word in words {
-        if !word.is_empty() {
-            return false;
-        }
-    }
-    true
-}
-
-/// Check if line is comment.
-///
-/// Returns true if line if just comment.
-pub fn is_comment(line: &str) -> bool {
-    let word = line.trim();
-    if word.len() < 2 {
-        return false;
-    }
-
-    let bytes = word.as_bytes();
-    let mut found_first = false;
-
-    for (i, &item) in bytes.iter().enumerate() {
-        if item == b'/' && i == 0 {
-            found_first = true;
-        }
-        if item == b'/' && i == 1 && found_first {
-            return true;
-        }
-    }
-    false
-}
-
-/// Check if line is start.
-///
-/// Returns true if line is start.
-pub fn is_start(line: &str) -> bool {
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if i == 0 && word.to_uppercase() == "_START" {
-            return true;
-        }
-    }
-    false
-}
-
 /// Check if line is valid.
 ///
 /// Returns true if line is not error.
@@ -529,25 +467,6 @@ pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, file
             0
         }
     }
-}
-
-/// Returns trailing comments.
-///
-/// Removes comments and starting and training whitespace.
-pub fn return_comments(input: &str) -> String {
-    input
-        .find("//")
-        .map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
-}
-
-/// Strip trailing comments.
-///
-/// Removes comments and starting and training whitespace.
-pub fn strip_comments(input: &str) -> String {
-    input.find("//").map_or_else(
-        || input.trim().to_owned(),
-        |location| input.get(0..location).unwrap_or("").trim().to_owned(),
-    )
 }
 
 /// Parse expected UART hex values from source file comment headers.
@@ -799,50 +718,6 @@ mod tests {
     }
 
     #[test]
-    // Test that comment is stripped
-    fn test_strip_comments() {
-        assert_eq!(strip_comments("Hello, world! //This is a comment"), "Hello, world!");
-        assert_eq!(strip_comments("Hello, world! //"), "Hello, world!");
-        assert_eq!(strip_comments(""), "");
-    }
-
-    #[test]
-    // Test that comment is returned
-    fn test_return_comments() {
-        assert_eq!(return_comments("Hello, world! //This is a comment"), "This is a comment");
-        assert_eq!(return_comments("Hello, world! //"), "");
-        assert_eq!(return_comments("Hello, world!"), "");
-    }
-
-    #[test]
-    // Test true is returned for comment
-    fn test_is_comment1() {
-        assert!(is_comment("//This is a comment"));
-        assert!(is_comment("      //This is a comment"));
-    }
-
-    #[test]
-    // Test false is returned for non-comment
-    fn test_is_comment2() {
-        assert!(!is_comment("Hello //This is a comment"));
-        assert!(!is_comment(" "));
-    }
-
-    #[test]
-    // Test for blank line returns true
-    fn test_is_blank1() {
-        assert!(is_blank(" "));
-        assert!(is_blank(""));
-    }
-
-    #[test]
-    // Test for non blank line returns false
-    fn test_is_blank2() {
-        assert!(!is_blank("1234"));
-        assert!(!is_blank("    1234"));
-    }
-
-    #[test]
     // Test for valid line returns true is opcode is found
     fn test_is_valid_line1() {
         let input = String::from("PUSH");
@@ -1054,38 +929,6 @@ mod tests {
         // Contrast with .space, which rounds up to a whole 64-bit word.
         assert_eq!(data_as_bytes(".space 4"), Some("0000000000000000".to_owned())); // 8 bytes
         assert_eq!(line_type(&mut Vec::new(), ".zeropad 4"), LineType::Data);
-    }
-
-    #[test]
-    // Test for correct label name
-    fn test_label_name_from_string1() {
-        let input = String::from("LOOP:");
-        let output = label_name_from_string(&input);
-        assert_eq!(output, Some("LOOP:".to_owned()));
-    }
-
-    #[test]
-    // Test for invalid label name
-    fn test_label_name_from_string2() {
-        let input = String::from("LOOP");
-        let output = label_name_from_string(&input);
-        assert_eq!(output, None);
-    }
-
-    #[test]
-    // Test for correct data name
-    fn test_data_name_from_string1() {
-        let input = String::from("#TEST");
-        let output = data_name_from_string(&input);
-        assert_eq!(output, Some("#TEST".to_owned()));
-    }
-
-    #[test]
-    // Test for invalid data name
-    fn test_data_name_from_string2() {
-        let input = String::from("TEST");
-        let output = data_name_from_string(&input);
-        assert_eq!(output, None);
     }
 
     #[test]

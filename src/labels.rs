@@ -1,7 +1,7 @@
-use crate::helper::{data_name_from_string, strip_comments};
+use crate::asm::lexer::{data_name_from_string, label_name_from_string, strip_comments};
+use crate::asm::line::Pass1;
 use crate::messages::{MessageType, MsgList};
 use crate::num::{fits_imm32, is_hex_literal, parse_bits64, parse_int, LiteralError};
-use crate::opcodes::Pass1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Label struct.
@@ -150,18 +150,6 @@ pub fn get_labels(pass1: &[Pass1], msg_list: &mut MsgList) -> Vec<Label> {
     labels
 }
 
-/// Extracts label from string.
-///
-/// Checks if end of first word is colon if so return label as option string.
-pub fn label_name_from_string(line: &str) -> Option<String> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.ends_with(':') {
-        return Some(first_word.to_owned());
-    }
-    None
-}
-
 /// Return program counter for label.
 ///
 /// Return option of program counter for label if it exists, or None.
@@ -178,30 +166,7 @@ pub fn return_label_value(line: &str, labels: &mut Vec<Label>) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::files::LineType;
-
-    #[test]
-    // Check that labels are correctly extracted from strings test for label
-    fn test_label_name_from_string1() {
-        assert_eq!(label_name_from_string("label:"), Some("label:".to_owned()));
-        assert_eq!(label_name_from_string("label: "), Some("label:".to_owned()));
-        assert_eq!(label_name_from_string("label:"), Some("label:".to_owned()));
-        assert_eq!(label_name_from_string("     label:"), Some("label:".to_owned()));
-        assert_eq!(label_name_from_string("     label: dummy words"), Some("label:".to_owned()));
-    }
-
-    #[test]
-    // Check that none is returned if not a label
-    fn test_label_name_from_string2() {
-        assert_eq!(label_name_from_string("label :"), None);
-        assert_eq!(label_name_from_string("label : "), None);
-        assert_eq!(label_name_from_string("label"), None);
-        assert_eq!(label_name_from_string("label "), None);
-        assert_eq!(label_name_from_string(" label"), None);
-        assert_eq!(label_name_from_string(" label "), None);
-        assert_eq!(label_name_from_string("lab:el"), None);
-        assert_eq!(label_name_from_string("  xxxxxxx   label:"), None);
-    }
+    use crate::asm::line::LineType;
 
     #[test]
     // Check that labels are correctly extracted from strings test for data
