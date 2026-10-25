@@ -459,8 +459,8 @@ pub(crate) fn run_elf2serial(
             let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
             format!("{stem}.code")
         };
-        let mut pass2 = disassemble_flat_to_pass2(&binary_data, CODE_BASE, &opcodes);
-        if let Err(e) = write_code_output_file(&code_file_name, &mut pass2, msg_list) {
+        let pass2 = disassemble_flat_to_pass2(&binary_data, CODE_BASE, &opcodes);
+        if let Err(e) = write_code_output_file(&code_file_name, &pass2, msg_list) {
             msg_list.push(
                 format!("Failed to write disassembly file {code_file_name}: {e}"),
                 None,

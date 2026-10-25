@@ -314,12 +314,12 @@ fn run() -> Result<(), Error> {
     let pass0 = expand_macros(&mut msg_list, input_list, &mut macro_list);
 
     // Pass 1 to get line numbers and labels
-    let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, oplist.clone());
-    let mut labels = get_labels(&pass1, &mut msg_list);
-    find_duplicate_label(&mut labels, &mut msg_list);
+    let pass1: Vec<Pass1> = get_pass1(&mut msg_list, pass0, &oplist);
+    let labels = get_labels(&pass1, &mut msg_list);
+    find_duplicate_label(&labels, &mut msg_list);
 
     // Pass 2 to get create output
-    let mut pass2 = get_pass2(&mut msg_list, pass1, oplist, labels);
+    let pass2 = get_pass2(&mut msg_list, pass1, &oplist, &labels);
 
     // Emulator mode: build the flat DDR image from the assembled program and run
     // the golden-model. Additive — returns early, leaving normal modes untouched.
@@ -335,7 +335,7 @@ fn run() -> Result<(), Error> {
     }
 
     // The .code listing is written even when assembly failed: it shows where.
-    if let Err(result_err) = write_code_output_file(&output_file_name, &mut pass2, &mut msg_list) {
+    if let Err(result_err) = write_code_output_file(&output_file_name, &pass2, &mut msg_list) {
         msg_list.push(
             format!("Unable to write to code file {output_file_name}, error {result_err}"),
             None,
@@ -480,7 +480,7 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
 /// Returns pass1 from pass0.
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
-pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec<Opcode>) -> Vec<Pass1> {
+pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, oplist: &[Opcode]) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = CODE_BASE; // Byte address: 4 header words × 8 bytes each (64-bit words)
     let mut data_pass0: Vec<SourceLine> = Vec::new();
@@ -540,7 +540,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec
 
         // Rewrite "SETR R val" → "SETR64 R val" before line_type/num_arguments when val > 32 bits.
         let upgraded_line = upgrade_setr_to_setr64(&pass.input_text_line);
-        let lt = line_type(&mut oplist, &upgraded_line);
+        let lt = line_type(oplist, &upgraded_line);
 
         // Defer labels in data section to end of program with data
         if in_data_section && lt == LineType::Label {
@@ -555,7 +555,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec
             program_counter,
             line_type: lt.clone(),
         });
-        if !is_valid_line(&mut oplist, strip_comments(&upgraded_line)) {
+        if !is_valid_line(oplist, &strip_comments(&upgraded_line)) {
             msg_list.push(
                 format!("Error {upgraded_line}"),
                 Some(pass.line_counter),
@@ -564,7 +564,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec
             );
         }
         if lt == LineType::Opcode {
-            let num_args = num_arguments(&mut oplist, &strip_comments(&upgraded_line));
+            let num_args = num_arguments(oplist, &strip_comments(&upgraded_line));
             if let Some(arguments) = num_args {
                 program_counter += (arguments + 1) * 4; // Each word = 4 bytes
             }
@@ -578,7 +578,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec
                 // Keep inline data when no explicit .data section is active.
                 // This preserves label semantics for C compiler output data blocks.
                 //
-                program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, pass.file_name.clone()) / 2;
+                program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, &pass.file_name) / 2;
             }
         }
     }
@@ -601,7 +601,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec
         program_counter += pad;
     }
     for data_pass in data_pass0 {
-        let lt = line_type(&mut oplist, &data_pass.input_text_line);
+        let lt = line_type(oplist, &data_pass.input_text_line);
         pass1.push(Pass1 {
             input_text_line: data_pass.input_text_line.clone(),
             file_name: data_pass.file_name.clone(),
@@ -611,7 +611,7 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec
         });
 
         if lt == LineType::Data {
-            program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, data_pass.file_name) / 2;
+            program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, &data_pass.file_name) / 2;
         }
     }
     pass1
@@ -620,40 +620,20 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<SourceLine>, mut oplist: Vec
 /// Returns pass2 from pass1.
 ///
 /// Pass1 with program counters and returns vector of pass2, with final values.
-pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opcode>, mut labels: Vec<Label>) -> Vec<Pass2> {
+pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, oplist: &[Opcode], labels: &[Label]) -> Vec<Pass2> {
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
-            let mut opcode = add_registers(
-                &mut oplist,
-                &strip_comments(&line.input_text_line.clone()),
-                line.file_name.clone(),
-                msg_list,
-                line.line_counter,
-            );
+            let code = strip_comments(&line.input_text_line);
+            let mut opcode = add_registers(oplist, &code, &line.file_name, msg_list, line.line_counter);
             // ISA v3 PC-relative targets need this line's address.
-            let rel = pc_relative_bits(
-                &oplist,
-                &strip_comments(&line.input_text_line.clone()),
-                line.program_counter,
-                &mut labels,
-                msg_list,
-                line.line_counter,
-                &line.file_name,
-            );
+            let rel = pc_relative_bits(oplist, &code, line.program_counter, labels, msg_list, line.line_counter, &line.file_name);
             if rel != 0 {
                 if let Some(w0) = opcode.get(..8).and_then(|h| u32::from_str_radix(h, 16).ok()) {
                     opcode = format!("{:08X}{}", w0 | rel, &opcode[8..]);
                 }
             }
-            opcode.push_str(&add_arguments(
-                &mut oplist,
-                &strip_comments(&line.input_text_line.clone()),
-                msg_list,
-                line.line_counter,
-                &line.file_name,
-                &mut labels,
-            ));
+            opcode.push_str(&add_arguments(oplist, &code, msg_list, line.line_counter, &line.file_name, labels));
             opcode
         } else if line.line_type == LineType::Data {
             data_as_bytes(line.input_text_line.as_str()).unwrap_or_default()
@@ -663,7 +643,7 @@ pub fn get_pass2(msg_list: &mut MsgList, pass1: Vec<Pass1>, mut oplist: Vec<Opco
 
         pass2.push(Pass2 {
             input_text_line: line.input_text_line,
-            file_name: line.file_name.clone(),
+            file_name: line.file_name,
             line_counter: line.line_counter,
             program_counter: line.program_counter,
             line_type: if new_opcode.contains("ERR") { LineType::Error } else { line.line_type },
@@ -757,13 +737,13 @@ pub fn assemble_file(input_file_name: &str, oplist: &[Opcode], macro_list: &[mac
     let mut macro_list_clone = macro_list.to_vec();
     let input_list = apply_source_macros(input_list, &mut macro_list_clone, msg_list);
     let pass0 = expand_macros(msg_list, input_list, &mut macro_list_clone);
-    let pass1: Vec<Pass1> = get_pass1(msg_list, pass0, oplist.to_vec());
-    let mut labels = get_labels(&pass1, msg_list);
-    find_duplicate_label(&mut labels, msg_list);
-    let mut pass2 = get_pass2(msg_list, pass1, oplist.to_vec(), labels);
+    let pass1: Vec<Pass1> = get_pass1(msg_list, pass0, oplist);
+    let labels = get_labels(&pass1, msg_list);
+    find_duplicate_label(&labels, msg_list);
+    let pass2 = get_pass2(msg_list, pass1, oplist, &labels);
 
-    let output_file_name = format!("{}.code", filename_stem(&input_file_name.to_owned()));
-    if let Err(result_err) = write_code_output_file(&output_file_name, &mut pass2, msg_list) {
+    let output_file_name = format!("{}.code", filename_stem(input_file_name));
+    if let Err(result_err) = write_code_output_file(&output_file_name, &pass2, msg_list) {
         msg_list.push(
             format!("Unable to write to code file {output_file_name}, error {result_err}"),
             None,
@@ -847,10 +827,10 @@ pub(crate) fn assemble_to_image(
     let mut macro_list_clone = macro_list.to_vec();
     let input_list = apply_source_macros(input_list, &mut macro_list_clone, msg_list);
     let pass0 = expand_macros(msg_list, input_list, &mut macro_list_clone);
-    let pass1: Vec<Pass1> = get_pass1(msg_list, pass0, oplist.to_vec());
-    let mut labels = get_labels(&pass1, msg_list);
-    find_duplicate_label(&mut labels, msg_list);
-    let pass2 = get_pass2(msg_list, pass1, oplist.to_vec(), labels);
+    let pass1: Vec<Pass1> = get_pass1(msg_list, pass0, oplist);
+    let labels = get_labels(&pass1, msg_list);
+    find_duplicate_label(&labels, msg_list);
+    let pass2 = get_pass2(msg_list, pass1, oplist, &labels);
     if msg_list.number_by_type(&MessageType::Error) > 0 {
         return None;
     }
@@ -878,10 +858,10 @@ mod tests {
             .collect();
         let input = apply_source_macros(input, &mut macro_list, &mut msg_list);
         let pass0 = expand_macros(&mut msg_list, input, &mut macro_list);
-        let pass1 = get_pass1(&mut msg_list, pass0, oplist.clone());
-        let mut labels = get_labels(&pass1, &mut msg_list);
-        find_duplicate_label(&mut labels, &mut msg_list);
-        let pass2 = get_pass2(&mut msg_list, pass1, oplist, labels);
+        let pass1 = get_pass1(&mut msg_list, pass0, &oplist);
+        let labels = get_labels(&pass1, &mut msg_list);
+        find_duplicate_label(&labels, &mut msg_list);
+        let pass2 = get_pass2(&mut msg_list, pass1, &oplist, &labels);
         (pass2, msg_list)
     }
 
@@ -1065,7 +1045,7 @@ mod tests {
                 line_counter: 7,
             },
         ];
-        let pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
+        let pass1 = get_pass1(&mut msg_list, pass0, opcodes);
         // Byte addressing: PC starts at 32 (4 header words × 8 bytes each in 64-bit).
         // Each instruction word = 4 bytes (opcode encoding unchanged).
         // Each 64-bit data word = 8 bytes (16 hex chars).
@@ -1098,7 +1078,7 @@ mod tests {
             file_name: String::new(),
             line_counter: 1,
         }];
-        let _pass1 = get_pass1(&mut msg_list, pass0, opcodes.clone());
+        let _pass1 = get_pass1(&mut msg_list, pass0, opcodes);
         assert_eq!(msg_list.list[0].text, "Error Test_not_code_line");
     }
 
@@ -1231,8 +1211,8 @@ mod tests {
                     line_type: LineType::Error,
                 },
             ],
-            opcodes.clone(),
-            labels,
+            opcodes,
+            &labels,
         );
         assert_eq!(pass2[0].opcode, "00000020EEEEEEEEFFFFFFFF");
         assert_eq!(pass2[1].opcode, "0000004000000007");
@@ -1269,8 +1249,8 @@ mod tests {
                 program_counter: 0,
                 line_type: LineType::Opcode,
             }],
-            opcodes.clone(),
-            labels,
+            opcodes,
+            &labels,
         );
         assert_eq!(pass2[0].opcode, "ERR     ");
     }

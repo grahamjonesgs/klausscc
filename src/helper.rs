@@ -408,9 +408,8 @@ pub fn data_bytes(line: &str) -> Result<String, DataError> {
 /// Check if line is valid.
 ///
 /// Returns true if line is not error.
-pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
-    let temp_line: String = line;
-    if line_type(opcodes, &temp_line) == LineType::Error {
+pub fn is_valid_line(opcodes: &[Opcode], line: &str) -> bool {
+    if line_type(opcodes, line) == LineType::Error {
         return false;
     }
     true
@@ -419,7 +418,7 @@ pub fn is_valid_line(opcodes: &mut Vec<Opcode>, line: String) -> bool {
 /// Returns enum of type of line.
 ///
 /// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error.
-pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
+pub fn line_type(opcodes: &[Opcode], line: &str) -> LineType {
     if label_name_from_string(line).is_some() {
         return LineType::Label;
     }
@@ -454,7 +453,7 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
 /// Return number of bytes of data.
 ///
 /// From instruction name, option of number of bytes of data, or 0 is error.
-pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: String) -> u32 {
+pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: &str) -> u32 {
     match data_bytes(line) {
         Ok(data) => data.len().try_into().unwrap_or_default(),
         Err(err) => {
@@ -463,7 +462,7 @@ pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, file
             } else {
                 format!("Error in data definition for {line}: {err}")
             };
-            msg_list.push(text, Some(line_number), Some(filename), MessageType::Error);
+            msg_list.push(text, Some(line_number), Some(filename.to_owned()), MessageType::Error);
             0
         }
     }
@@ -731,7 +730,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = is_valid_line(opcodes, input);
+        let output = is_valid_line(opcodes, &input);
         assert!(output);
     }
 
@@ -748,7 +747,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = is_valid_line(opcodes, input);
+        let output = is_valid_line(opcodes, &input);
         assert!(!output);
     }
 
@@ -756,8 +755,7 @@ mod tests {
     // Test for opcode line type
     fn test_line_type1() {
         let input = String::from("PUSH");
-        let mut opcodes = Vec::<Opcode>::new();
-        opcodes.push(Opcode {
+        let opcodes = vec![Opcode {
             text_name: String::from("PUSH"),
             hex_code: String::from("1234"),
             ops: Vec::new(),
@@ -765,8 +763,8 @@ mod tests {
             variables: 0,
             registers: 0,
             section: String::default(),
-        });
-        let output = line_type(&mut opcodes, &input);
+        }];
+        let output = line_type(&opcodes, &input);
         assert_eq!(output, LineType::Opcode);
     }
     #[test]
@@ -826,7 +824,7 @@ mod tests {
     fn test_num_data_bytes1() {
         let mut msg_list = MsgList::new();
         let input = String::from("#TEST 3");
-        let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
+        let output = num_data_bytes(&input, &mut msg_list, 0, "test");
         assert_eq!(output, 48); // 3 words × 16 hex chars per 64-bit word = 48
     }
 
@@ -834,7 +832,7 @@ mod tests {
     fn test_num_data_bytes2() {
         let mut msg_list = MsgList::new();
         let input = String::from("#TEST");
-        let output = num_data_bytes(&input, &mut msg_list, 0, "test".to_owned());
+        let output = num_data_bytes(&input, &mut msg_list, 0, "test");
         assert_eq!(output, 0);
         assert_eq!(msg_list.list[0].text, "Error in data definition for #TEST");
     }
@@ -928,7 +926,7 @@ mod tests {
         assert_eq!(data_as_bytes(".zeropad"), None);
         // Contrast with .space, which rounds up to a whole 64-bit word.
         assert_eq!(data_as_bytes(".space 4"), Some("0000000000000000".to_owned())); // 8 bytes
-        assert_eq!(line_type(&mut Vec::new(), ".zeropad 4"), LineType::Data);
+        assert_eq!(line_type(&Vec::new(), ".zeropad 4"), LineType::Data);
     }
 
     #[test]
@@ -1115,7 +1113,7 @@ mod tests {
     // A bad data value is reported as an error at its line, with the reason.
     fn test_num_data_bytes_reports_bad_value() {
         let mut msg_list = MsgList::new();
-        assert_eq!(num_data_bytes(".word 12abc", &mut msg_list, 7, "prog.kla".to_owned()), 0);
+        assert_eq!(num_data_bytes(".word 12abc", &mut msg_list, 7, "prog.kla"), 0);
         let msg = msg_list.list.first().unwrap();
         assert_eq!(msg.level, MessageType::Error);
         assert_eq!(msg.line_number, Some(7));

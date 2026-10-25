@@ -83,14 +83,7 @@ fn parse_imm64(token: &str) -> Option<u64> {
 ///
 /// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values.
 /// Converts label names to hex addresses.
-pub fn add_arguments(
-    opcodes: &mut Vec<Opcode>,
-    line: &String,
-    msg_list: &mut MsgList,
-    line_number: u32,
-    filename: &str,
-    labels: &mut Vec<Label>,
-) -> String {
+pub fn add_arguments(opcodes: &[Opcode], line: &str, msg_list: &mut MsgList, line_number: u32, filename: &str, labels: &[Label]) -> String {
     let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
     let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
     let mut arguments = String::default();
@@ -172,16 +165,12 @@ fn return_opcode_struct<'a>(line: &str, opcodes: &'a [Opcode]) -> Option<&'a Opc
 /// `doc/ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place `rd==rs1`, embedded
 /// `N<<15`).  Opcodes without a layout fall back to the legacy trailing-nibble
 /// scheme (used by `.vh`-parsed tables).
-#[allow(
-    clippy::ptr_arg,
-    reason = "shares the &mut Vec<Opcode> signature convention with add_arguments / num_registers"
-)]
-pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String, msg_list: &mut MsgList, line_number: u32) -> String {
-    let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes).cloned() else {
+pub fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_list: &mut MsgList, line_number: u32) -> String {
+    let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
         msg_list.push(
             format!("Opcode not found - \"{line}\""),
             Some(line_number),
-            Some(filename),
+            Some(filename.to_owned()),
             MessageType::Error,
         );
         return "ERR     ".to_owned();
@@ -189,14 +178,14 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
 
     // Legacy path: opcodes with no v2 operand layout keep the trailing-nibble fill.
     if opcode.ops.is_empty() {
-        return legacy_add_registers(&opcode, line, &filename, msg_list, line_number);
+        return legacy_add_registers(opcode, line, filename, msg_list, line_number);
     }
 
     let Ok(mut word0) = u32::from_str_radix(&opcode.hex_code, 16) else {
         msg_list.push(
             format!("Incorrect opcode template - \"{line}\""),
             Some(line_number),
-            Some(filename),
+            Some(filename.to_owned()),
             MessageType::Error,
         );
         return "ERR     ".to_owned();
@@ -250,7 +239,7 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
                         msg_list.push(
                             format!("Count {token} out of range 0..=63 - \"{line}\""),
                             Some(line_number),
-                            Some(filename),
+                            Some(filename.to_owned()),
                             MessageType::Error,
                         );
                         return "ERR     ".to_owned();
@@ -280,7 +269,7 @@ pub fn add_registers(opcodes: &mut Vec<Opcode>, line: &String, filename: String,
         msg_list.push(
             format!("Incorrect register definition - \"{line}\""),
             Some(line_number),
-            Some(filename),
+            Some(filename.to_owned()),
             MessageType::Error,
         );
         return "ERR     ".to_owned();
@@ -484,15 +473,7 @@ pub fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> 
 /// The target token is a label (`name:`) or an absolute address. Out-of-range
 /// or misaligned targets are reported as errors and yield 0.
 #[allow(clippy::too_many_arguments, reason = "mirrors add_arguments' reporting context")]
-pub fn pc_relative_bits(
-    opcodes: &[Opcode],
-    line: &str,
-    pc: u32,
-    labels: &mut Vec<Label>,
-    msg_list: &mut MsgList,
-    line_number: u32,
-    filename: &str,
-) -> u32 {
+pub fn pc_relative_bits(opcodes: &[Opcode], line: &str, pc: u32, labels: &[Label], msg_list: &mut MsgList, line_number: u32, filename: &str) -> u32 {
     let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
         return 0;
     };
@@ -528,7 +509,7 @@ pub fn pc_relative_bits(
 /// Returns number of args for opcode.
 ///
 /// From opcode name, option of number of arguments for opcode, or None.
-pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
+pub fn num_arguments(opcodes: &[Opcode], line: &str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -542,7 +523,7 @@ pub fn num_arguments(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
 /// Returns number of registers for opcode.
 ///
 /// From opcode name, option of number of registers for opcode, or None.
-fn num_registers(opcodes: &mut Vec<Opcode>, line: &str) -> Option<u32> {
+fn num_registers(opcodes: &[Opcode], line: &str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -1024,7 +1005,7 @@ pub fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut MsgList) -> (Op
         match opcode_from_string(&line.input_text_line) {
             None => (),
             Some(opcode) => {
-                if return_opcode(&opcode.text_name, &mut opcodes).is_some() {
+                if return_opcode(&opcode.text_name, &opcodes).is_some() {
                     msg_list.push(
                         format!("Duplicate Opcode {} found", opcode.text_name),
                         Some(line.line_counter),
@@ -1065,7 +1046,7 @@ pub fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut MsgList) -> (Op
 /// Returns hex opcode from name.
 ///
 /// Checks if first word is opcode and if so returns opcode hex value.
-pub fn return_opcode(line: &str, opcodes: &mut Vec<Opcode>) -> Option<String> {
+pub fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
@@ -1256,7 +1237,7 @@ mod tests {
             registers: 2,
             section: String::default(),
         });
-        let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &input, "test", &mut msg_list, 1);
         assert_eq!(output, String::from("00005601"));
     }
 
@@ -1275,7 +1256,7 @@ mod tests {
             registers: 1,
             section: String::default(),
         });
-        let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &input, "test", &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
@@ -1293,7 +1274,7 @@ mod tests {
             registers: 1,
             section: String::default(),
         });
-        let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &input, "test", &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
     }
     #[test]
@@ -1301,7 +1282,7 @@ mod tests {
     fn test_add_arguments1() {
         let mut msg_list = MsgList::new();
         let input = String::from("PUSH 0xFFFF");
-        let mut labels = Vec::<labels::Label>::new();
+        let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1312,7 +1293,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("0000FFFF"));
     }
 
@@ -1321,7 +1302,7 @@ mod tests {
     fn test_add_arguments2() {
         let mut msg_list = MsgList::new();
         let input = String::from("PUSH 1234");
-        let mut labels = Vec::<labels::Label>::new();
+        let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1332,7 +1313,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("000004D2"));
     }
 
@@ -1341,7 +1322,7 @@ mod tests {
     fn test_add_arguments3() {
         let mut msg_list = MsgList::new();
         let input = String::from("PUSH HELLO");
-        let mut labels = Vec::<labels::Label>::new();
+        let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1352,7 +1333,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000000"));
     }
 
@@ -1361,7 +1342,7 @@ mod tests {
     fn test_add_arguments4() {
         let mut msg_list = MsgList::new();
         let input = String::from("PUSH 0xF RRR");
-        let mut labels = Vec::<labels::Label>::new();
+        let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1372,7 +1353,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("0000000F00000000"));
     }
 
@@ -1381,7 +1362,7 @@ mod tests {
     fn test_add_arguments5() {
         let mut msg_list = MsgList::new();
         let input = String::from("PUSH 1 0xF");
-        let mut labels = Vec::<labels::Label>::new();
+        let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1392,7 +1373,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("000000010000000F"));
     }
 
@@ -1401,7 +1382,7 @@ mod tests {
     fn test_add_arguments6() {
         let mut msg_list = MsgList::new();
         let input = String::from("PUSH 1 0xF");
-        let mut labels = Vec::<labels::Label>::new();
+        let labels = Vec::<labels::Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1412,7 +1393,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, &input, &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(msg_list.list[0].text, "Too many arguments found - \"PUSH 1 0xF\"");
     }
@@ -1421,15 +1402,15 @@ mod tests {
     // Regression: one "Too many arguments" warning was pushed per extra token.
     fn test_add_arguments_extra_tokens_warn_once() {
         let mut msg_list = MsgList::new();
-        let mut labels = Vec::<labels::Label>::new();
+        let labels = Vec::<labels::Label>::new();
         let opcodes = &mut v2_opcodes();
-        let output = add_arguments(opcodes, &"SETR A 1 2 3 4".to_owned(), &mut msg_list, 1, "test", &mut labels);
+        let output = add_arguments(opcodes, "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(msg_list.number_by_type(&MessageType::Warning), 1);
         assert_eq!(msg_list.list.len(), 1);
 
         let mut msg_list = MsgList::new();
-        add_arguments(opcodes, &"SETR A 1".to_owned(), &mut msg_list, 1, "test", &mut labels);
+        add_arguments(opcodes, "SETR A 1", &mut msg_list, 1, "test", &labels);
         assert_eq!(msg_list.list.len(), 0);
     }
 
@@ -1856,7 +1837,7 @@ mod tests {
             registers: 3,
             section: String::default(),
         });
-        let output = add_registers(opcodes, &input, "test".to_owned(), &mut msg_list, 1);
+        let output = add_registers(opcodes, &input, "test", &mut msg_list, 1);
         // A=0, B=1, C=2 → "00010" + "0" + "1" + "2"
         assert_eq!(output, String::from("00010012"));
     }
@@ -1866,33 +1847,18 @@ mod tests {
     fn test_count_operand_range() {
         let opcodes = &mut v2_opcodes();
         let mut msg_list = MsgList::new();
-        assert_eq!(
-            add_registers(opcodes, &"SHLV A 0".to_owned(), "t".to_owned(), &mut msg_list, 1),
-            "50204000"
-        );
-        assert_eq!(
-            add_registers(opcodes, &"SHLV A 63".to_owned(), "t".to_owned(), &mut msg_list, 1),
-            "503FC000"
-        );
-        assert_eq!(
-            add_registers(opcodes, &"SHLV A 0x3F".to_owned(), "t".to_owned(), &mut msg_list, 1),
-            "503FC000"
-        );
+        assert_eq!(add_registers(opcodes, "SHLV A 0", "t", &mut msg_list, 1), "50204000");
+        assert_eq!(add_registers(opcodes, "SHLV A 63", "t", &mut msg_list, 1), "503FC000");
+        assert_eq!(add_registers(opcodes, "SHLV A 0x3F", "t", &mut msg_list, 1), "503FC000");
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
 
-        assert_eq!(
-            add_registers(opcodes, &"SHLV A 64".to_owned(), "t".to_owned(), &mut msg_list, 5),
-            "ERR     "
-        );
+        assert_eq!(add_registers(opcodes, "SHLV A 64", "t", &mut msg_list, 5), "ERR     ");
         let msg = msg_list.list.last().unwrap();
         assert_eq!(msg.text, "Count 64 out of range 0..=63 - \"SHLV A 64\"");
         assert_eq!((msg.level == MessageType::Error, msg.line_number), (true, Some(5)));
 
         // Negative counts are out of range too, not a register error.
-        assert_eq!(
-            add_registers(opcodes, &"SHLV A -1".to_owned(), "t".to_owned(), &mut msg_list, 6),
-            "ERR     "
-        );
+        assert_eq!(add_registers(opcodes, "SHLV A -1", "t", &mut msg_list, 6), "ERR     ");
         assert_eq!(msg_list.list.last().unwrap().text, "Count -1 out of range 0..=63 - \"SHLV A -1\"");
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 2);
     }
@@ -1917,13 +1883,13 @@ mod tests {
             ("LEAVERET", "66800000"),
         ];
         for (src, want) in cases {
-            let got = add_registers(opcodes, &src.to_owned(), "test".to_owned(), &mut msg_list, 1);
+            let got = add_registers(opcodes, src, "test", &mut msg_list, 1);
             assert_eq!(got, want, "{src}");
         }
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
         // Out-of-range / misaligned short immediates are rejected.
         for bad in ["SETR.S A 300", "LDIDX64A.S A B 12", "LDIDX64A.S A B 2048"] {
-            let got = add_registers(opcodes, &bad.to_owned(), "test".to_owned(), &mut msg_list, 1);
+            let got = add_registers(opcodes, bad, "test", &mut msg_list, 1);
             assert_eq!(got, "ERR     ", "{bad}");
         }
         // Disassembly round-trips the scaled offset.
@@ -1936,7 +1902,7 @@ mod tests {
     fn test_v3_pc_relative_branches() {
         let mut msg_list = MsgList::new();
         let opcodes = &mut v2_opcodes();
-        let mut labels = vec![
+        let labels = vec![
             Label {
                 name: "LOOP:".to_owned(),
                 program_counter: 0x28,
@@ -1948,19 +1914,19 @@ mod tests {
         ];
         // BNEI A 0 LOOP: at 0x30 -> -2 words in [20:8]; register fields in word0.
         let line = "BNEI A 0 LOOP:".to_owned();
-        let w0 = u32::from_str_radix(&add_registers(opcodes, &line, "t".to_owned(), &mut msg_list, 1), 16).unwrap();
-        let rel = pc_relative_bits(opcodes, &line, 0x30, &mut labels, &mut msg_list, 1, "t");
+        let w0 = u32::from_str_radix(&add_registers(opcodes, &line, "t", &mut msg_list, 1), 16).unwrap();
+        let rel = pc_relative_bits(opcodes, &line, 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(w0 | rel, 0x747F_FE00);
         // JMP.S LOOP: at 0x40 -> -6 words in [17:0].
-        let rel = pc_relative_bits(opcodes, "JMP.S LOOP:", 0x40, &mut labels, &mut msg_list, 1, "t");
+        let rel = pc_relative_bits(opcodes, "JMP.S LOOP:", 0x40, &labels, &mut msg_list, 1, "t");
         assert_eq!(0x6100_0000 | rel, 0x6103_FFFA);
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 0);
         // A fused branch 256 KB away is out of simm13 range: reported, no bits.
-        let rel = pc_relative_bits(opcodes, "BEQ A B FAR:", 0x30, &mut labels, &mut msg_list, 1, "t");
+        let rel = pc_relative_bits(opcodes, "BEQ A B FAR:", 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(rel, 0);
         assert_eq!(msg_list.number_by_type(&MessageType::Error), 1);
         // ...but in range for a short branch.
-        let rel = pc_relative_bits(opcodes, "CALL.S FAR:", 0x30, &mut labels, &mut msg_list, 1, "t");
+        let rel = pc_relative_bits(opcodes, "CALL.S FAR:", 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(rel, (0x0004_0000 - 0x30) / 4);
         assert_eq!(disassemble_word(0x747F_FE00, opcodes).unwrap().0, "BNEI A 0 PC-8");
     }

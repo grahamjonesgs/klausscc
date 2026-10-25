@@ -16,7 +16,7 @@ use std::{
 /// Return the stem of given filename.
 ///
 /// Looks for first dot in the string, and returns the slice before the dot.
-pub fn filename_stem(full_name: &String) -> String {
+pub fn filename_stem(full_name: &str) -> String {
     let path = Path::new(full_name);
     let stem = path.file_stem();
     let parent = path
@@ -37,14 +37,14 @@ pub fn output_file_name(explicit: Option<&str>, input_file_name: &str, extension
     match explicit {
         Some(name) if name.to_ascii_lowercase().ends_with(&suffix.to_ascii_lowercase()) => name.to_owned(),
         Some(name) => format!("{name}{suffix}"),
-        None => format!("{}{suffix}", filename_stem(&input_file_name.to_owned())),
+        None => format!("{}{suffix}", filename_stem(input_file_name)),
     }
 }
 
 /// Format a given string, adding spaces between groups of 4.
 ///
 /// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string.
-pub fn format_opcodes(input: &String) -> String {
+pub fn format_opcodes(input: &str) -> String {
     if input.len() == 4 {
         return format!("{input}              ");
     }
@@ -74,7 +74,7 @@ pub fn format_opcodes(input: &String) -> String {
         result.push_str(input.get(20..24).unwrap_or("    "));
         return result;
     }
-    (*input).clone()
+    input.to_owned()
 }
 
 /// Return the file named by an `!include` line.
@@ -148,7 +148,7 @@ pub fn output_macros_opcodes_html(
         sorted_opcodes.sort_by(|first: &Opcode, second: &Opcode| first.hex_code.cmp(&second.hex_code));
 
         let mut old_section = String::default();
-        for opcode in sorted_opcodes.clone() {
+        for opcode in &sorted_opcodes {
             if old_section != opcode.section {
                 html_file.write_all(
                     format!(
@@ -174,7 +174,7 @@ pub fn output_macros_opcodes_html(
         let mut sorted_macros: Vec<Macro> = macros;
         sorted_macros.sort_by(|first, second| first.name.cmp(&second.name));
 
-        for macro_item in sorted_macros.clone() {
+        for macro_item in &sorted_macros {
             html_file.write_all(
                 format!(
                     "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>\n",
@@ -497,7 +497,7 @@ pub fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str
 /// Output the code details file to given filename.
 ///
 /// Writes all data to the detailed code file.
-pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &mut Vec<Pass2>, msg_list: &mut MsgList) -> Result<(), Error> {
+pub fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &[Pass2], msg_list: &mut MsgList) -> Result<(), Error> {
     let mut file = match File::create(filename) {
         Ok(file) => file,
         #[cfg(not(tarpaulin_include))] // Can't test error creating file
@@ -902,8 +902,8 @@ mod test {
     #[test]
     // Check correct filename stem is returned
     fn test_filename_stem() {
-        assert_eq!(filename_stem(&"file.type".to_owned()), "file");
-        assert_eq!(filename_stem(&"file".to_owned()), "file");
+        assert_eq!(filename_stem("file.type"), "file");
+        assert_eq!(filename_stem("file"), "file");
         assert_eq!(
             filename_stem(&format!("{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file.kla")),
             format!("{MAIN_SEPARATOR_STR}my_path{MAIN_SEPARATOR_STR}file")
@@ -933,11 +933,11 @@ mod test {
     #[test]
     // Check for formatting of codes used for debug file
     fn test_format_opcodes() {
-        assert_eq!(format_opcodes(&"0000000000000000".to_owned()), "00000000 00000000");
-        assert_eq!(format_opcodes(&"0000".to_owned()), "0000              ");
-        assert_eq!(format_opcodes(&"0123456789ABCDEF".to_owned()), "01234567 89ABCDEF");
-        assert_eq!(format_opcodes(&"12345678".to_owned()), "12345678         ");
-        assert_eq!(format_opcodes(&"123".to_owned()), "123");
+        assert_eq!(format_opcodes("0000000000000000"), "00000000 00000000");
+        assert_eq!(format_opcodes("0000"), "0000              ");
+        assert_eq!(format_opcodes("0123456789ABCDEF"), "01234567 89ABCDEF");
+        assert_eq!(format_opcodes("12345678"), "12345678         ");
+        assert_eq!(format_opcodes("123"), "123");
     }
 
     #[test]
@@ -1229,7 +1229,7 @@ mod test {
     fn test_write_code_output_file() {
         let tmp_dir = TempDir::new().unwrap();
         let mut msg_list = MsgList::new();
-        let mut pass2: Vec<Pass2> = vec![
+        let pass2: Vec<Pass2> = vec![
             Pass2 {
                 input_text_line: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_owned(),
                 file_name: String::from("test"),
@@ -1308,7 +1308,7 @@ mod test {
         let binding = file_path1;
         let file_name1: &str = binding.to_str().unwrap();
 
-        let result_write = write_code_output_file(file_name1, &mut pass2, &mut msg_list);
+        let result_write = write_code_output_file(file_name1, &pass2, &mut msg_list);
         result_write.unwrap();
 
         let buffer = fs::read_to_string(file_name1).unwrap();
