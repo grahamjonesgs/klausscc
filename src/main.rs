@@ -48,7 +48,7 @@ use labels::{find_duplicate_label, get_labels, Label};
 use macros::{apply_source_macros, expand_embedded_macros, expand_macros};
 use messages::{print_messages, MessageType, MsgList};
 use netload::NETBOOT_DEFAULT_PORT;
-use num::parse_bits64;
+use num::{parse_bits64, parse_int};
 use opcodes::{add_arguments, add_registers, num_arguments, pc_relative_bits, v2_opcodes_and_macros, Opcode, Pass0, Pass1, Pass2};
 use serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port, AUTO_SERIAL};
 use std::path::PathBuf;
@@ -502,7 +502,18 @@ pub fn get_pass1(msg_list: &mut MsgList, pass0: Vec<Pass0>, mut oplist: Vec<Opco
             if parts.len() >= 3 {
                 let name = parts[1];
                 let size_str = parts[2];
-                let size: u32 = size_str.parse().unwrap_or(0);
+                let size = match parse_int(size_str) {
+                    Ok(size) if size >= 0 => size,
+                    _ => {
+                        msg_list.push(
+                            format!("Invalid size {size_str} for {first_word} {name}"),
+                            Some(pass.line_counter),
+                            Some(pass.file_name.clone()),
+                            MessageType::Error,
+                        );
+                        0
+                    }
+                };
                 data_pass0.push(Pass0 {
                     input_text_line: format!("{name}:"),
                     file_name: pass.file_name.clone(),
@@ -849,6 +860,63 @@ pub(crate) fn assemble_to_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opcodes::InputData;
+
+    /// Assemble `source` (as `test.kla`) with the built-in v2 table, without file I/O.
+    fn assemble_text(source: &str) -> (Vec<Pass2>, MsgList) {
+        let mut msg_list = MsgList::new();
+        let (oplist, macros_raw) = opcodes::v2_opcodes_and_macros(&mut msg_list);
+        let mut macro_list = expand_embedded_macros(macros_raw, &mut msg_list);
+        let input: Vec<InputData> = source
+            .lines()
+            .enumerate()
+            .map(|(i, line)| InputData {
+                file_name: "test.kla".to_owned(),
+                input: line.to_owned(),
+                line_counter: u32::try_from(i + 1).unwrap(),
+            })
+            .collect();
+        let input = apply_source_macros(input, &mut macro_list, &mut msg_list);
+        let pass0 = expand_macros(&mut msg_list, input, &mut macro_list);
+        let pass1 = get_pass1(&mut msg_list, pass0, oplist.clone());
+        let mut labels = get_labels(&pass1, &mut msg_list);
+        find_duplicate_label(&mut labels, &mut msg_list);
+        let pass2 = get_pass2(&mut msg_list, pass1, oplist, labels);
+        (pass2, msg_list)
+    }
+
+    /// The `(line, text)` of every message of `level`.
+    fn messages_of(msg_list: &MsgList, level: &MessageType) -> Vec<(Option<u32>, String)> {
+        msg_list
+            .list
+            .iter()
+            .filter(|m| m.level == *level)
+            .map(|m| (m.line_number, m.text.clone()))
+            .collect()
+    }
+
+    #[test]
+    // Regression: a bad .comm size was parsed with unwrap_or(0) and silently reserved nothing.
+    fn test_comm_bad_size_is_error() {
+        let (_, msg_list) = assemble_text("_start\nHALT\n.comm buf, 12abc, 4\n");
+        assert_eq!(
+            messages_of(&msg_list, &MessageType::Error),
+            vec![(Some(3), "Invalid size 12abc for .comm buf".to_owned())]
+        );
+
+        let (_, msg_list) = assemble_text("_start\nHALT\n.comm buf, 0x10, 4\n");
+        assert_eq!(messages_of(&msg_list, &MessageType::Error), vec![]);
+    }
+
+    #[test]
+    // Regression: data values that do not parse are errors at their line.
+    fn test_bad_data_values_are_errors() {
+        let (_, msg_list) = assemble_text("_start\nHALT\n.word 12abc\n#BUF -5\n");
+        let errors = messages_of(&msg_list, &MessageType::Error);
+        assert_eq!(errors.len(), 2, "{errors:?}");
+        assert_eq!(errors[0].0, Some(3));
+        assert_eq!(errors[1].0, Some(4));
+    }
 
     #[test]
     // Test get_pass1 for correct vector returned, with correct program counters

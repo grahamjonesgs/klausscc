@@ -1,7 +1,9 @@
 use crate::files::LineType;
 use crate::labels::label_name_from_string;
 use crate::messages::{MessageType, MsgList};
+use crate::num::{parse_bits64, parse_int, LiteralError};
 use crate::opcodes::{disassemble_word, return_opcode, Opcode, Pass2};
+use std::fmt;
 use std::fmt::Write as _;
 
 /// Number of reserved words at the start of memory for the heap header.
@@ -285,32 +287,74 @@ pub fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcod
     result
 }
 
+/// Largest single data item, in bytes: the whole of the board's 128 MiB memory.
+const MAX_DATA_BYTES: i128 = 128 * 1024 * 1024;
+
+/// Why a data line could not be turned into bytes.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DataError {
+    /// The line is not a complete data definition (missing value, bad string, ...).
+    Malformed,
+    /// A numeric value is not a valid literal.
+    BadValue(String, LiteralError),
+    /// A size is zero or negative.
+    NotPositive(String),
+    /// A size is larger than the board's memory.
+    TooLarge(String),
+}
+
+impl fmt::Display for DataError {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Malformed => f.write_str("malformed data definition"),
+            Self::BadValue(token, err) => write!(f, "invalid value \"{token}\" ({err})"),
+            Self::NotPositive(token) => write!(f, "size \"{token}\" must be greater than zero"),
+            Self::TooLarge(token) => write!(f, "size \"{token}\" is larger than memory"),
+        }
+    }
+}
+
+/// Parse a data size (bytes or words) that must be positive and at most `max`.
+fn data_size(token: &str, max: i128) -> Result<usize, DataError> {
+    let value = parse_int(token).map_err(|err| DataError::BadValue(token.to_owned(), err))?;
+    if value <= 0 {
+        return Err(DataError::NotPositive(token.to_owned()));
+    }
+    if value > max {
+        return Err(DataError::TooLarge(token.to_owned()));
+    }
+    // 1..=max, and max fits in usize on every supported target.
+    Ok(value as usize)
+}
+
 /// Returns bytes for data element.
 ///
 /// Parses data element and returns data as bytes, or None if error.
 pub fn data_as_bytes(line: &str) -> Option<String> {
+    data_bytes(line).ok()
+}
+
+/// Returns bytes for data element, or why the line is not valid data.
+///
+/// The bytes are returned as a hex string (two characters per byte).
+pub fn data_bytes(line: &str) -> Result<String, DataError> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.is_empty() {
-        return None;
+        return Err(DataError::Malformed);
     }
 
     // Handle .word VALUE directive — emit a single 64-bit word
     if first_word == ".word" {
         let value_str = words.next().unwrap_or("");
         if value_str.is_empty() {
-            return None;
+            return Err(DataError::Malformed);
         }
-        let value: i64 = if value_str.len() >= 2 && (value_str.get(0..2).unwrap_or("  ") == "0x" || value_str.get(0..2).unwrap_or("  ") == "0X") {
-            let without_prefix = value_str.trim_start_matches("0x").trim_start_matches("0X");
-            i64::from_str_radix(without_prefix, 16).unwrap_or(0)
-        } else {
-            value_str.parse::<i64>().unwrap_or(0)
-        };
-        let v64 = value as u64;
+        let v64 = parse_bits64(value_str).map_err(|err| DataError::BadValue(value_str.to_owned(), err))?;
         let lo32 = (v64 & 0xFFFF_FFFF) as u32;
         let hi32 = ((v64 >> 32) & 0xFFFF_FFFF) as u32;
-        return Some(format!("{lo32:08X}{hi32:08X}"));
+        return Ok(format!("{lo32:08X}{hi32:08X}"));
     }
 
     // Handle .zeropad N directive — EXACTLY N bytes of zero (no rounding).
@@ -319,40 +363,27 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
     // an 8-byte boundary, read .word data cleanly instead of the preceding word.
     if first_word == ".zeropad" {
         let count_str = words.next().unwrap_or("");
-        let byte_count: i64 = count_str.parse::<i64>().unwrap_or(0);
-        if byte_count <= 0 {
-            return None;
+        if count_str.is_empty() {
+            return Err(DataError::Malformed);
         }
-        return Some("00".repeat(byte_count as usize));
+        let byte_count = data_size(count_str, MAX_DATA_BYTES)?;
+        return Ok("00".repeat(byte_count));
     }
 
     // Handle .space N directive — N bytes of zero, rounded up to 64-bit word boundary
     if first_word == ".space" {
         let count_str = words.next().unwrap_or("");
         if count_str.is_empty() {
-            return None;
+            return Err(DataError::Malformed);
         }
-        let byte_count: i64 = if count_str.len() >= 2 && (count_str.get(0..2).unwrap_or("  ") == "0x" || count_str.get(0..2).unwrap_or("  ") == "0X")
-        {
-            let without_prefix = count_str.trim_start_matches("0x").trim_start_matches("0X");
-            i64::from_str_radix(without_prefix, 16).unwrap_or(0)
-        } else {
-            count_str.parse::<i64>().unwrap_or(0)
-        };
-        if byte_count <= 0 {
-            return None;
-        }
-        let word_count = (byte_count + 7) / 8;
-        let mut data = String::default();
-        for _ in 0..word_count {
-            data.push_str("0000000000000000");
-        }
-        return Some(data);
+        let byte_count = data_size(count_str, MAX_DATA_BYTES)?;
+        let word_count = byte_count.div_ceil(8);
+        return Ok("0000000000000000".repeat(word_count));
     }
 
     let second_word = words.next().unwrap_or("");
     if second_word.is_empty() {
-        return None;
+        return Err(DataError::Malformed);
     }
 
     // Check if next word starts with quote
@@ -373,32 +404,13 @@ pub fn data_as_bytes(line: &str) -> Option<String> {
             for _n in 0..needed_bytes {
                 output_hex.push('0');
             }
-            return Some(output_hex);
+            return Ok(output_hex);
         }
-        None
+        Err(DataError::Malformed)
     } else {
-        // Check if next word is a number
-        // let int_value: i64;
-        let int_value = if second_word.len() >= 2 && (second_word.get(0..2).unwrap_or("  ") == "0x" || second_word.get(0..2).unwrap_or("  ") == "0X")
-        {
-            let without_prefix1 = second_word.trim_start_matches("0x");
-            let without_prefix2 = without_prefix1.trim_start_matches("0X");
-            let int_value_result = i64::from_str_radix(&without_prefix2.replace('_', ""), 16);
-            int_value_result.unwrap_or(0)
-        } else {
-            let int_value_result = second_word.parse::<i64>();
-            int_value_result.unwrap_or(0)
-        };
-
-        if int_value == 0 {
-            None
-        } else {
-            let mut data = String::default();
-            for _ in 0..int_value {
-                data.push_str("0000000000000000");
-            }
-            Some(data)
-        }
+        // `#name N` reserves N zeroed 64-bit words.
+        let word_count = data_size(second_word, MAX_DATA_BYTES / 8)?;
+        Ok("0000000000000000".repeat(word_count))
     }
 }
 
@@ -514,18 +526,18 @@ pub fn line_type(opcodes: &mut Vec<Opcode>, line: &str) -> LineType {
 ///
 /// From instruction name, option of number of bytes of data, or 0 is error.
 pub fn num_data_bytes(line: &str, msg_list: &mut MsgList, line_number: u32, filename: String) -> u32 {
-    data_as_bytes(line).map_or_else(
-        || {
-            msg_list.push(
-                format!("Error in data definition for {line}"),
-                Some(line_number),
-                Some(filename),
-                MessageType::Error,
-            );
+    match data_bytes(line) {
+        Ok(data) => data.len().try_into().unwrap_or_default(),
+        Err(err) => {
+            let text = if err == DataError::Malformed {
+                format!("Error in data definition for {line}")
+            } else {
+                format!("Error in data definition for {line}: {err}")
+            };
+            msg_list.push(text, Some(line_number), Some(filename), MessageType::Error);
             0
-        },
-        |data| data.len().try_into().unwrap_or_default(),
-    )
+        }
+    }
 }
 
 /// Returns trailing comments.
@@ -1120,6 +1132,73 @@ mod tests {
     fn test_data_as_bytes_space_zero() {
         let output = data_as_bytes(".space 0");
         assert_eq!(output, None);
+    }
+
+    #[test]
+    // Regression: .word used i64 parsing with unwrap_or(0), so these all emitted 0.
+    fn test_data_bytes_word_full_range() {
+        assert_eq!(data_bytes(".word 0x8000000000000000"), Ok("0000000080000000".to_owned()));
+        assert_eq!(data_bytes(".word 0xFFFFFFFFFFFFFFFF"), Ok("FFFFFFFFFFFFFFFF".to_owned()));
+        assert_eq!(data_bytes(".word 0x1_000"), Ok("0000100000000000".to_owned()));
+        assert_eq!(data_bytes(".word -9223372036854775808"), Ok("0000000080000000".to_owned()));
+    }
+
+    #[test]
+    // Regression: a malformed .word value is an error, not a silent 0.
+    fn test_data_bytes_word_bad_value() {
+        assert_eq!(
+            data_bytes(".word 12abc"),
+            Err(DataError::BadValue("12abc".to_owned(), LiteralError::InvalidDigit))
+        );
+        assert_eq!(
+            data_bytes(".word 0x1_0000_0000_0000_0000"),
+            Err(DataError::BadValue("0x1_0000_0000_0000_0000".to_owned(), LiteralError::Overflow))
+        );
+        assert_eq!(
+            data_bytes(".word label:"),
+            Err(DataError::BadValue("label:".to_owned(), LiteralError::InvalidDigit))
+        );
+    }
+
+    #[test]
+    // Regression: .space sizes were parsed with unwrap_or(0); negative and junk sizes are errors.
+    fn test_data_bytes_space_sizes() {
+        assert_eq!(data_bytes(".space 0x10"), Ok("0".repeat(32)));
+        assert_eq!(data_bytes(".space 0x1_0"), Ok("0".repeat(32)));
+        assert_eq!(data_bytes(".space -8"), Err(DataError::NotPositive("-8".to_owned())));
+        assert_eq!(data_bytes(".space 0"), Err(DataError::NotPositive("0".to_owned())));
+        assert_eq!(
+            data_bytes(".space 12abc"),
+            Err(DataError::BadValue("12abc".to_owned(), LiteralError::InvalidDigit))
+        );
+        assert_eq!(data_bytes(".space 0x100000000"), Err(DataError::TooLarge("0x100000000".to_owned())));
+    }
+
+    #[test]
+    // Regression: "#name -5" produced a zero-size item; it is now an error.
+    fn test_data_bytes_named_sizes() {
+        assert_eq!(data_bytes("#BUF 0x1_0"), Ok("0".repeat(16 * 16)));
+        assert_eq!(data_bytes("#BUF -5"), Err(DataError::NotPositive("-5".to_owned())));
+        assert_eq!(
+            data_bytes("#BUF 99999999999999999999"),
+            Err(DataError::BadValue("99999999999999999999".to_owned(), LiteralError::Overflow))
+        );
+        assert_eq!(data_bytes("#BUF 0x10000000"), Err(DataError::TooLarge("0x10000000".to_owned())));
+        assert_eq!(data_bytes("#BUF"), Err(DataError::Malformed));
+    }
+
+    #[test]
+    // A bad data value is reported as an error at its line, with the reason.
+    fn test_num_data_bytes_reports_bad_value() {
+        let mut msg_list = MsgList::new();
+        assert_eq!(num_data_bytes(".word 12abc", &mut msg_list, 7, "prog.kla".to_owned()), 0);
+        let msg = msg_list.list.first().unwrap();
+        assert_eq!(msg.level, MessageType::Error);
+        assert_eq!(msg.line_number, Some(7));
+        assert_eq!(
+            msg.text,
+            "Error in data definition for .word 12abc: invalid value \"12abc\" (invalid digit)"
+        );
     }
 
     #[test]
