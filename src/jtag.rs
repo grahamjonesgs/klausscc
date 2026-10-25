@@ -7,7 +7,7 @@
 //! Vivado's `hw_server` (hardware manager) holds the same channel while it
 //! runs; close it first.
 //!
-//! Built with the `jtag` cargo feature (links the system libftdi1).
+//! Built with the `board` cargo feature (links the system libftdi1).
 
 use std::ffi::{c_char, c_int, c_uchar, c_void, CStr};
 use std::fmt;
@@ -81,26 +81,31 @@ const IR_IDCODE: u64 = 0x09;
 const IR_USER3: u64 = 0x22;
 
 /// MPSSE JTAG master on FT2232H channel A.
+///
+/// Holds a raw libftdi context, so it is neither `Send` nor `Sync`: the
+/// gdbserver drives it from the thread that opened it.
 pub struct Jtag {
+    /// A live context from `ftdi_new`, freed in `Drop`; never null.
     ctx: *mut ftdi_context,
     /// Run-Test/Idle clocks after every scan (lets the DMI request cross).
     idle_clocks: u32,
 }
 
-// SAFETY: the context is only ever used from the owning thread.
-unsafe impl Send for Jtag {}
-
 impl Jtag {
     /// Open the first FT2232H (0403:6010) channel A and configure MPSSE JTAG
     /// at `khz` kHz (60 MHz / (2 * (divisor + 1))).
     pub fn open(khz: u32) -> Result<Self> {
-        // SAFETY: plain libftdi1 calls on a context we own.
+        // SAFETY: ftdi_new has no preconditions; a null result is checked below.
         let ctx = unsafe { ftdi_new() };
         if ctx.is_null() {
             return Err(JtagError("ftdi_new failed".into()));
         }
+        // From here `jtag` owns `ctx`: its Drop frees it on every early return.
         let mut jtag = Self { ctx, idle_clocks: 16 };
+        // SAFETY: `ctx` is the live, non-null context from ftdi_new above, used
+        // only through `jtag`; the same holds for each "as above" call below.
         jtag.check(unsafe { ftdi_set_interface(ctx, INTERFACE_A) }, "set interface A")?;
+        // SAFETY: as above.
         let rc = unsafe { ftdi_usb_open(ctx, 0x0403, 0x6010) };
         if rc < 0 {
             return Err(JtagError(format!(
@@ -109,10 +114,15 @@ impl Jtag {
                 jtag.last_error()
             )));
         }
+        // SAFETY: as above.
         jtag.check(unsafe { ftdi_usb_reset(ctx) }, "usb reset")?;
+        // SAFETY: as above.
         jtag.check(unsafe { ftdi_set_latency_timer(ctx, 1) }, "latency timer")?;
+        // SAFETY: as above.
         jtag.check(unsafe { ftdi_set_bitmode(ctx, 0, BITMODE_RESET) }, "bitmode reset")?;
+        // SAFETY: as above.
         jtag.check(unsafe { ftdi_set_bitmode(ctx, 0, BITMODE_MPSSE) }, "bitmode MPSSE")?;
+        // SAFETY: as above.
         jtag.check(unsafe { ftdi_tcioflush(ctx) }, "flush")?;
         let div = (30_000 / khz.max(1)).saturating_sub(1).min(0xFFFF);
         jtag.write(&[
@@ -134,9 +144,15 @@ impl Jtag {
         Ok(jtag)
     }
 
+    /// libftdi's description of the last error on this context.
     fn last_error(&self) -> String {
-        // SAFETY: libftdi returns a static, NUL-terminated string.
-        unsafe { CStr::from_ptr(ftdi_get_error_string(self.ctx)) }.to_string_lossy().into_owned()
+        // SAFETY: `self.ctx` is a live context (see the field).
+        let msg = unsafe { ftdi_get_error_string(self.ctx) };
+        if msg.is_null() {
+            return "unknown libftdi error".to_owned();
+        }
+        // SAFETY: a non-null result is a static, NUL-terminated C string.
+        unsafe { CStr::from_ptr(msg) }.to_string_lossy().into_owned()
     }
 
     fn check(&self, rc: c_int, what: &str) -> Result<()> {
@@ -148,7 +164,7 @@ impl Jtag {
     }
 
     fn write(&mut self, buf: &[u8]) -> Result<()> {
-        // SAFETY: buf is valid for buf.len() bytes.
+        // SAFETY: `self.ctx` is live, and libftdi only reads `buf.len()` bytes of `buf`.
         let n = unsafe { ftdi_write_data(self.ctx, buf.as_ptr(), buf.len() as c_int) };
         if n as usize == buf.len() {
             Ok(())
@@ -162,7 +178,7 @@ impl Jtag {
         let mut got = 0;
         let mut tries = 0;
         while got < n {
-            // SAFETY: out[got..] is valid for n - got bytes.
+            // SAFETY: `self.ctx` is live, and `out[got..]` is valid for `n - got` bytes.
             let r = unsafe { ftdi_read_data(self.ctx, out[got..].as_mut_ptr(), (n - got) as c_int) };
             if r < 0 {
                 return Err(JtagError(format!("ftdi read: {}", self.last_error())));
@@ -353,7 +369,7 @@ impl DmiReq {
 
 impl Drop for Jtag {
     fn drop(&mut self) {
-        // SAFETY: the context is valid until freed here.
+        // SAFETY: `self.ctx` is live (see the field) and is never used after ftdi_free.
         unsafe {
             ftdi_set_bitmode(self.ctx, 0, BITMODE_RESET);
             ftdi_usb_close(self.ctx);
