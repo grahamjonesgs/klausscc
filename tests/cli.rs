@@ -66,6 +66,28 @@ fn missing_input_exits_1() {
 }
 
 #[test]
+fn bad_command_line_exits_1_not_2() {
+    // clap's own usage-error status is 2, which means "tests failed" here.
+    let dir = tempfile::tempdir().unwrap();
+    let out = klausscc(dir.path(), &["--no-such-flag"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--no-such-flag"));
+
+    let out = klausscc(dir.path(), &[]);
+    assert_eq!(out.status.code(), Some(1), "no arguments prints help and fails");
+}
+
+#[test]
+fn help_and_version_exit_0() {
+    let dir = tempfile::tempdir().unwrap();
+    for flag in ["--help", "--version"] {
+        let out = klausscc(dir.path(), &[flag]);
+        assert!(out.status.success(), "{flag}");
+        assert!(!out.stdout.is_empty(), "{flag} prints to stdout");
+    }
+}
+
+#[test]
 fn passing_emulator_test_exits_0() {
     let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/src/klatest/test_strings.kla");
     let dir = tempfile::tempdir().unwrap();

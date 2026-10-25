@@ -85,7 +85,20 @@ fn run() -> Result<(), Error> {
     msg_list.live = true;
     let start_time = Instant::now();
 
-    let matches = set_matches().get_matches();
+    /* try_get_matches() rather than get_matches(): clap exits with status 2 on
+     * a bad command line, which would read as "tests failed". */
+    let matches = match set_matches().try_get_matches() {
+        Ok(matches) => matches,
+        Err(err) => {
+            // --help and --version go to stdout and succeed; anything else is a usage error.
+            let _ = err.print();
+            return if err.use_stderr() {
+                Err(Error::Usage("invalid command line"))
+            } else {
+                Ok(())
+            };
+        }
+    };
     let input_file_name: String = matches.get_one::<String>("input").cloned().unwrap_or_default();
     let binary_file_name = output_file_name(matches.get_one::<String>("bitcode").map(String::as_str), &input_file_name, "kbt");
     let output_file_name = output_file_name(matches.get_one::<String>("output").map(String::as_str), &input_file_name, "code");
