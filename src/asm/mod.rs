@@ -29,7 +29,7 @@ mod source;
 pub(crate) mod symbols;
 
 use crate::diag::Diagnostics;
-use crate::isa::Opcode;
+use crate::isa::Isa;
 use crate::output::image::{Image, create_bin_string};
 use line::{Pass2, SourceLine};
 use macros::{Macro, apply_source_macros, expand_macros};
@@ -63,16 +63,16 @@ impl Assembly {
 /// Returns `None` only when the file (or one it includes) cannot be read,
 /// which is reported.  Otherwise the assembly is returned even when it has
 /// errors; see the [module documentation](self).
-pub(crate) fn assemble(input_file_name: &str, oplist: &[Opcode], macro_list: &[Macro], msg_list: &mut Diagnostics) -> Option<Assembly> {
+pub(crate) fn assemble(input_file_name: &str, isa: &Isa, macro_list: &[Macro], msg_list: &mut Diagnostics) -> Option<Assembly> {
     msg_list.info(format!("Input file is {input_file_name}"));
     let input_list = read_file_to_vector(input_file_name, msg_list)?;
-    Some(assemble_lines(input_list, oplist, macro_list, msg_list))
+    Some(assemble_lines(input_list, isa, macro_list, msg_list))
 }
 
 /// Assemble source lines that have already been read.
 ///
 /// The lines' own `!macro` definitions are added to a copy of `macro_list`.
-pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, oplist: &[Opcode], macro_list: &[Macro], msg_list: &mut Diagnostics) -> Assembly {
+pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, isa: &Isa, macro_list: &[Macro], msg_list: &mut Diagnostics) -> Assembly {
     let input_list = remove_block_comments(input_list, msg_list);
 
     // Fold in any `!macro` / `!macros` definitions from the source, then expand.
@@ -81,12 +81,12 @@ pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, oplist: &[Opcode], mac
     let pass0 = expand_macros(msg_list, input_list, &macro_list);
 
     // Pass 1 to get line numbers and labels
-    let pass1 = get_pass1(msg_list, pass0, oplist);
+    let pass1 = get_pass1(msg_list, pass0, isa);
     let labels = get_labels(&pass1, msg_list);
 
     // Pass 2 to create the output
     Assembly {
-        lines: get_pass2(msg_list, pass1, oplist, &labels),
+        lines: get_pass2(msg_list, pass1, isa, &labels),
     }
 }
 
@@ -99,7 +99,7 @@ mod tests {
     /// Assemble `source` (as `test.kla`) with the built-in v2 table, without file I/O.
     fn assemble_text(source: &str) -> (Vec<Pass2>, Diagnostics) {
         let mut msg_list = Diagnostics::new();
-        let (oplist, macros_raw) = v2_opcodes_and_macros(&mut msg_list);
+        let (isa, macros_raw) = v2_opcodes_and_macros(&mut msg_list);
         let macro_list = expand_embedded_macros(macros_raw, &mut msg_list);
         let input: Vec<SourceLine> = source
             .lines()
@@ -110,7 +110,7 @@ mod tests {
                 line_counter: u32::try_from(i + 1).unwrap(),
             })
             .collect();
-        let assembly = assemble_lines(input, oplist, &macro_list, &mut msg_list);
+        let assembly = assemble_lines(input, &isa, &macro_list, &mut msg_list);
         (assembly.lines, msg_list)
     }
 
@@ -212,8 +212,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("missing.kla");
         let mut msg_list = Diagnostics::new();
-        let (oplist, macros) = v2_opcodes_and_macros(&mut msg_list);
-        assert!(assemble(&file.to_string_lossy(), oplist, &macros, &mut msg_list).is_none());
+        let (isa, macros) = v2_opcodes_and_macros(&mut msg_list);
+        assert!(assemble(&file.to_string_lossy(), &isa, &macros, &mut msg_list).is_none());
         assert!(msg_list.has_errors());
     }
 
@@ -224,8 +224,8 @@ mod tests {
         let file = dir.path().join("bad.kla");
         std::fs::write(&file, "_start\nNOTANOP A\nHALT\n").unwrap();
         let mut msg_list = Diagnostics::new();
-        let (oplist, macros) = v2_opcodes_and_macros(&mut msg_list);
-        let assembly = assemble(&file.to_string_lossy(), oplist, &macros, &mut msg_list).unwrap();
+        let (isa, macros) = v2_opcodes_and_macros(&mut msg_list);
+        let assembly = assemble(&file.to_string_lossy(), &isa, &macros, &mut msg_list).unwrap();
         assert!(msg_list.has_errors());
         assert_eq!(assembly.lines.len(), 3);
         assert_eq!(msg_list.messages()[0].text(), format!("Input file is {}", file.to_string_lossy()));

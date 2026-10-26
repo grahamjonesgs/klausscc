@@ -8,7 +8,7 @@ use crate::asm::data::num_data_bytes;
 use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, SourceLine};
 use crate::diag::Diagnostics;
-use crate::isa::{Opcode, num_arguments};
+use crate::isa::{Isa, Opcode};
 use crate::layout::CODE_BASE;
 use crate::num::{fits_imm32, parse_bits64, parse_int, parse_operand};
 
@@ -47,7 +47,7 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
 /// Returns pass1 from pass0.
 ///
 /// Takes the macro expanded pass0 and returns vector of pass1, with the program counters.
-pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, oplist: &[Opcode]) -> Vec<Pass1> {
+pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, isa: &Isa) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = CODE_BASE; // Byte address: 4 header words × 8 bytes each (64-bit words)
     // Data and its labels, already classified, to be placed after the code.
@@ -113,7 +113,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
 
         // Rewrite "SETR R val" → "SETR64 R val" before classifying the line and counting its arguments when val > 32 bits.
         let upgraded_line = upgrade_setr_to_setr64(&pass.input_text_line);
-        let lt = LineType::classify(&upgraded_line, oplist);
+        let lt = LineType::classify(&upgraded_line, isa);
 
         // Defer labels in data section to end of program with data
         if in_data_section && lt == LineType::Label {
@@ -132,7 +132,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
             msg_list.error_at(&pass.file_name, pass.line_counter, format!("Error {upgraded_line}"));
         }
         if lt == LineType::Opcode {
-            let num_args = num_arguments(oplist, strip_comments(&upgraded_line));
+            let num_args = isa.find(strip_comments(&upgraded_line)).map(Opcode::imm_words);
             if let Some(arguments) = num_args {
                 program_counter += (arguments + 1) * 4; // Each word = 4 bytes
             }
@@ -187,7 +187,6 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::table::V2_OPCODES;
 
     #[test]
     // Regression: a decimal SETR value that only fits 64 bits as a two's-complement
@@ -215,7 +214,7 @@ mod tests {
     // Test get_pass1 for correct vector returned, with correct program counters
     fn test_get_pass1_1() {
         let mut msg_list = Diagnostics::new();
-        let opcodes = V2_OPCODES;
+        let opcodes = &Isa::v2();
 
         let pass0 = vec![
             SourceLine {
@@ -277,7 +276,7 @@ mod tests {
             file_name: String::new(),
             line_counter: 1,
         }];
-        let _pass1 = get_pass1(&mut msg_list, pass0, V2_OPCODES);
+        let _pass1 = get_pass1(&mut msg_list, pass0, &Isa::v2());
         assert_eq!(msg_list.messages()[0].text(), "Error Test_not_code_line");
     }
 
@@ -295,7 +294,7 @@ mod tests {
                 line_counter,
             })
             .collect();
-        let pass1 = get_pass1(&mut msg_list, pass0, V2_OPCODES);
+        let pass1 = get_pass1(&mut msg_list, pass0, &Isa::v2());
         let types: Vec<LineType> = pass1.iter().map(|p| p.line_type).collect();
         assert_eq!(
             types,

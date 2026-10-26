@@ -2,8 +2,7 @@
 
 use super::{Macro, macro_from_string};
 use crate::diag::Diagnostics;
-use crate::isa::Opcode;
-use crate::isa::table::V2_OPCODES;
+use crate::isa::Isa;
 
 /// Standard macro definitions bundled with the assembler (formerly the `.vh`
 /// header's `/* Macro definition */` block).
@@ -46,9 +45,9 @@ const V2_MACROS: &[&str] = &[
 /// The built-in v2 opcode table plus the standard macro definitions — the
 /// in-code replacement for parsing an `opcode_select.vh` file.
 #[must_use]
-pub(crate) fn v2_opcodes_and_macros(msg_list: &mut Diagnostics) -> (&'static [Opcode], Vec<Macro>) {
+pub(crate) fn v2_opcodes_and_macros(msg_list: &mut Diagnostics) -> (Isa, Vec<Macro>) {
     let macros = V2_MACROS.iter().filter_map(|line| macro_from_string(line, msg_list)).collect();
-    (V2_OPCODES, macros)
+    (Isa::v2(), macros)
 }
 
 #[cfg(test)]

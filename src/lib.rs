@@ -46,7 +46,7 @@ use commands::{
 };
 use diag::{Diagnostics, MessageType};
 use error::Error;
-use isa::Opcode;
+use isa::Isa;
 use link::serial::SerialTarget;
 use output::listing::write_code_output_file;
 use std::path::{Path, PathBuf};
@@ -168,13 +168,13 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
             use output::docs::{output_macros_opcodes_html, output_opcodes_textmate};
 
             const STEM: &str = "klausscc_opcodes_v2";
-            let (oplist, macro_list) = opcode_tables(msg_list);
+            let (isa, macro_list) = opcode_tables(msg_list);
             let mut html_result = Ok(());
             if cli.opcodes {
-                html_result = output_macros_opcodes_html(STEM, oplist, &macro_list, msg_list);
+                html_result = output_macros_opcodes_html(STEM, isa.opcodes(), &macro_list, msg_list);
             }
             if cli.textmate && html_result.is_ok() {
-                html_result = output_opcodes_textmate(STEM, oplist, msg_list);
+                html_result = output_opcodes_textmate(STEM, isa.opcodes(), msg_list);
             }
             if let Err(result_err) = &html_result {
                 msg_list.error(format!("Error {result_err} writing opcode list to HTML"));
@@ -183,14 +183,14 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         }
         // Emulator batch-verify mode: assemble + emulate each .kla and check UART.
         Mode::EmulateTest(path) => {
-            let (oplist, macro_list) = opcode_tables(msg_list);
-            run_emulate_test(oplist, &macro_list, Path::new(path), cli.max_instructions, msg_list)
+            let (isa, macro_list) = opcode_tables(msg_list);
+            run_emulate_test(&isa, &macro_list, Path::new(path), cli.max_instructions, msg_list)
         }
         // Batch test list mode.
         Mode::TestList { list, port } => {
-            let (oplist, macro_list) = opcode_tables(msg_list);
+            let (isa, macro_list) = opcode_tables(msg_list);
             let timeout = Duration::from_secs(cli.test_timeout);
-            run_test_list(oplist, &macro_list, Path::new(list), port, timeout, send.reset, msg_list)
+            run_test_list(&isa, &macro_list, Path::new(list), port, timeout, send.reset, msg_list)
         }
         // Emulator mode: build the flat DDR image from the assembled program
         // and run the golden-model.
@@ -206,10 +206,10 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
 ///
 /// The old external `opcode_select.vh` file is gone; the lists are built in code.
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
-fn opcode_tables(msg_list: &mut Diagnostics) -> (&'static [Opcode], Vec<Macro>) {
-    let (oplist, macro_list_raw) = v2_opcodes_and_macros(msg_list);
+fn opcode_tables(msg_list: &mut Diagnostics) -> (Isa, Vec<Macro>) {
+    let (isa, macro_list_raw) = v2_opcodes_and_macros(msg_list);
     let macro_list = expand_embedded_macros(macro_list_raw, msg_list);
-    (oplist, macro_list)
+    (isa, macro_list)
 }
 
 /// Assemble `input` with the built-in opcode table.
@@ -218,8 +218,8 @@ fn opcode_tables(msg_list: &mut Diagnostics) -> (&'static [Opcode], Vec<Macro>) 
 /// where they are; only an unreadable source is an `Err`.
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn assemble(input: &str, msg_list: &mut Diagnostics) -> Result<Assembly, Error> {
-    let (oplist, macro_list) = opcode_tables(msg_list);
-    asm::assemble(input, oplist, &macro_list, msg_list).ok_or_else(|| Error::Assembly(msg_list.count(MessageType::Error).max(1)))
+    let (isa, macro_list) = opcode_tables(msg_list);
+    asm::assemble(input, &isa, &macro_list, msg_list).ok_or_else(|| Error::Assembly(msg_list.count(MessageType::Error).max(1)))
 }
 
 /// Assemble `input`, write its `.code` listing and `.kbt`, and send, test or

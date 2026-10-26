@@ -5,27 +5,32 @@ use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, Pass2};
 use crate::asm::symbols::SymbolTable;
 use crate::diag::Diagnostics;
-use crate::isa::Opcode;
+use crate::isa::Isa;
 use crate::isa::encode::{add_arguments, add_registers, pc_relative_bits};
 
 /// Returns pass2 from pass1.
 ///
 /// Pass1 with program counters and returns vector of pass2, with final values.
-pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, oplist: &[Opcode], labels: &SymbolTable) -> Vec<Pass2> {
+pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, isa: &Isa, labels: &SymbolTable) -> Vec<Pass2> {
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
             let code = strip_comments(&line.input_text_line);
-            let mut opcode = add_registers(oplist, code, &line.file_name, msg_list, line.line_counter);
-            // ISA v3 PC-relative targets need this line's address.
-            let rel = pc_relative_bits(oplist, code, line.program_counter, labels, msg_list, line.line_counter, &line.file_name);
-            if rel != 0
-                && let Some(w0) = opcode.get(..8).and_then(|h| u32::from_str_radix(h, 16).ok())
-            {
-                opcode = format!("{:08X}{}", w0 | rel, &opcode[8..]);
+            if let Some(op) = isa.find(code) {
+                let mut opcode = add_registers(op, code, &line.file_name, msg_list, line.line_counter);
+                // ISA v3 PC-relative targets need this line's address.
+                let rel = pc_relative_bits(op, code, line.program_counter, labels, msg_list, line.line_counter, &line.file_name);
+                if rel != 0
+                    && let Some(w0) = opcode.get(..8).and_then(|h| u32::from_str_radix(h, 16).ok())
+                {
+                    opcode = format!("{:08X}{}", w0 | rel, &opcode[8..]);
+                }
+                opcode.push_str(&add_arguments(op, code, msg_list, line.line_counter, &line.file_name, labels));
+                opcode
+            } else {
+                msg_list.error_at(&line.file_name, line.line_counter, format!("Opcode not found - \"{code}\""));
+                "ERR     ".to_owned()
             }
-            opcode.push_str(&add_arguments(oplist, code, msg_list, line.line_counter, &line.file_name, labels));
-            opcode
         } else if line.line_type == LineType::Data {
             data_as_bytes(line.input_text_line.as_str()).unwrap_or_default()
         } else {
@@ -47,14 +52,13 @@ pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, oplist: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::table::V2_OPCODES;
 
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
     fn test_get_pass2_1() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let opcodes = V2_OPCODES;
+        let opcodes = &Isa::v2();
         let pass2 = get_pass2(
             &mut msg_list,
             vec![
@@ -141,7 +145,7 @@ mod tests {
     fn test_get_pass2_2() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let opcodes = V2_OPCODES;
+        let opcodes = &Isa::v2();
         let pass2 = get_pass2(
             &mut msg_list,
             vec![Pass1 {

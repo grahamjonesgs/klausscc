@@ -8,7 +8,7 @@ use crate::asm::{Assembly, assemble};
 use crate::diag::{Diagnostics, MessageType};
 use crate::emu;
 use crate::error::Error;
-use crate::isa::Opcode;
+use crate::isa::Isa;
 use crate::link::serial::{hex_token, parse_expected_uart_values};
 use crate::loader::{BinaryInput, Loaded, load_flat};
 use crate::num::human_bytes;
@@ -152,7 +152,7 @@ pub(crate) fn run_emulate_elf(
 /// values, assemble + emulate and compare captured UART tokens in order.
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_emulate_test(
-    oplist: &[Opcode],
+    isa: &Isa,
     macro_list: &[macros::Macro],
     test_path: &Path,
     max_instructions: u64,
@@ -189,7 +189,7 @@ pub(crate) fn run_emulate_test(
     let mut failed_files: Vec<String> = Vec::new();
 
     for file in &files {
-        match verify_emulated(file, oplist, macro_list, max_instructions) {
+        match verify_emulated(file, isa, macro_list, max_instructions) {
             Ok(Verdict::NotValidatable) => {} // skip non-validatable files silently
             Ok(Verdict::Pass { matched, instructions }) => {
                 total_files += 1;
@@ -264,7 +264,7 @@ pub(crate) enum Verdict {
 /// Each UART line contributes its leading 8 upper-case hex digits (mirroring the
 /// serial test runner), and the values are compared in order.  Returns `Err`
 /// with a short reason when the file cannot be read or does not assemble.
-pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macros::Macro], max_instructions: u64) -> Result<Verdict, String> {
+pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro], max_instructions: u64) -> Result<Verdict, String> {
     // A file that cannot be read is a failure, not a silently skipped file.
     let source = fs::read_to_string(file).map_err(|e| format!("cannot read: {e}"))?;
     let raw_lines: Vec<String> = source.lines().map(String::from).collect();
@@ -274,7 +274,7 @@ pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macro
     }
 
     let mut test_msgs = Diagnostics::new();
-    let assembly = assemble(file, oplist, macro_list, &mut test_msgs);
+    let assembly = assemble(file, isa, macro_list, &mut test_msgs);
     let Some(image) = assembly.filter(|_| !test_msgs.has_errors()).and_then(|assembly| assembly.image()) else {
         return Err("assembly error".to_owned());
     };
@@ -315,18 +315,18 @@ mod tests {
     }
 
     /// The built-in v2 opcode table and expanded macros, as the CLI loads them.
-    fn v2_tables() -> (&'static [Opcode], Vec<macros::Macro>) {
+    fn v2_tables() -> (Isa, Vec<macros::Macro>) {
         let mut msg_list = Diagnostics::new();
-        let (oplist, macros_raw) = macros::v2_opcodes_and_macros(&mut msg_list);
+        let (isa, macros_raw) = macros::v2_opcodes_and_macros(&mut msg_list);
         let macro_list = macros::expand_embedded_macros(macros_raw, &mut msg_list);
-        (oplist, macro_list)
+        (isa, macro_list)
     }
 
     /// The corpus `--emulate-test tests/fixtures` runs: every file with expected
     /// UART values must assemble and print exactly those values on the emulator.
     #[test]
     fn emulator_corpus_passes() {
-        let (oplist, macro_list) = v2_tables();
+        let (isa, macro_list) = v2_tables();
         let mut files: Vec<PathBuf> = fs::read_dir(fixture_dir())
             .expect("read fixture dir")
             .flatten()
@@ -339,7 +339,7 @@ mod tests {
         let mut failures: Vec<String> = Vec::new();
         for path in &files {
             let file = path.to_string_lossy();
-            match verify_emulated(&file, oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS) {
+            match verify_emulated(&file, &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS) {
                 Ok(Verdict::NotValidatable) => {}
                 Ok(Verdict::Pass { .. }) => passed.push(file.into_owned()),
                 other => failures.push(format!("{file}: {other:?}")),
@@ -362,8 +362,8 @@ mod tests {
         let file = dir.path().join("wrong.kla");
         fs::write(&file, source).expect("write fixture");
 
-        let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let (isa, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(
             verdict,
             Ok(Verdict::Fail {
@@ -379,8 +379,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("plain.kla");
         fs::write(&file, "// no expected values here\nHALT\n").expect("write fixture");
-        let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let (isa, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(verdict, Ok(Verdict::NotValidatable));
     }
 
@@ -388,8 +388,8 @@ mod tests {
     fn verify_fails_an_unreadable_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("missing.kla");
-        let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let (isa, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert!(matches!(&verdict, Err(reason) if reason.starts_with("cannot read: ")), "{verdict:?}");
     }
 
@@ -398,8 +398,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("bad.kla");
         fs::write(&file, "//   00000001  (never printed)\nNOTANOPCODE A\nHALT\n").expect("write fixture");
-        let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let (isa, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(verdict, Err("assembly error".to_owned()));
     }
 }

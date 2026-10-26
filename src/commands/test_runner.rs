@@ -6,7 +6,7 @@ use crate::asm::assemble;
 use crate::asm::macros;
 use crate::diag::{Diagnostics, print_messages};
 use crate::error::Error;
-use crate::isa::Opcode;
+use crate::isa::Isa;
 use crate::link::serial::{AwaitAck, ResetMethod, SerialTarget, TestResult, parse_expected_uart_values, run_test_monitor, write_to_board};
 use crate::output::filename_stem;
 use crate::output::listing::write_code_output_file;
@@ -112,8 +112,8 @@ pub(crate) fn run_test_mode(
 /// returns the `.kbt` wire string, or `None` when the file cannot be read, the
 /// listing cannot be written or the build has errors.
 #[cfg(not(tarpaulin_include))]
-fn assemble_to_kbt(input_file_name: &str, oplist: &[Opcode], macro_list: &[macros::Macro], msg_list: &mut Diagnostics) -> Option<String> {
-    let assembly = assemble(input_file_name, oplist, macro_list, msg_list)?;
+fn assemble_to_kbt(input_file_name: &str, isa: &Isa, macro_list: &[macros::Macro], msg_list: &mut Diagnostics) -> Option<String> {
+    let assembly = assemble(input_file_name, isa, macro_list, msg_list)?;
 
     let output_file_name = format!("{}.code", filename_stem(input_file_name));
     if let Err(result_err) = write_code_output_file(&output_file_name, &assembly.lines, msg_list) {
@@ -164,7 +164,7 @@ pub(super) fn read_test_list(list_file: &Path, msg_list: &mut Diagnostics) -> Ve
 /// and prints per-test and aggregate results.
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_test_list(
-    oplist: &[Opcode],
+    isa: &Isa,
     macro_list: &[macros::Macro],
     list_file: &Path,
     port: SerialTarget<'_>,
@@ -203,7 +203,7 @@ pub(crate) fn run_test_list(
         };
 
         // Assemble the test file
-        let Some(bin_string) = assemble_to_kbt(test_file, oplist, macro_list, &mut test_msg_list) else {
+        let Some(bin_string) = assemble_to_kbt(test_file, isa, macro_list, &mut test_msg_list) else {
             println!("  SKIP: assembly failed");
             print_messages(&test_msg_list);
             results.push(BatchTestResult {

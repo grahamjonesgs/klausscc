@@ -2,7 +2,7 @@
 //! and literal fields of word 0, the appended immediate words, and the
 //! PC-relative branch fields that need the instruction's address.
 
-use super::{Opcode, Operand, num_arguments, num_registers, return_opcode_struct};
+use super::{Opcode, Operand, reg_index};
 use crate::asm::symbols::{SymbolTable, convert_argument};
 use crate::diag::Diagnostics;
 use crate::num::{parse_bits64, parse_int};
@@ -26,15 +26,15 @@ fn parse_imm64(token: &str) -> Option<u64> {
 /// Returns the hex code argument from the line, converting arguments from decimal to 8 digit hex values.
 /// Converts label names to hex addresses.
 pub(crate) fn add_arguments(
-    opcodes: &[Opcode],
+    opcode: &Opcode,
     line: &str,
     msg_list: &mut Diagnostics,
     line_number: u32,
     filename: &str,
     labels: &SymbolTable,
 ) -> String {
-    let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
-    let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
+    let num_registers = opcode.reg_tokens();
+    let num_arguments = opcode.imm_words();
     let mut arguments = String::default();
 
     // Special case: 2-variable instruction with a single 64-bit literal (e.g. SETR64).
@@ -92,12 +92,7 @@ fn parse_count(token: &str) -> Option<i128> {
 /// [`Operand`] layout and `doc/ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`,
 /// in-place `rd==rs1`, embedded `N<<15`); an opcode without operands is its
 /// template.
-pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_list: &mut Diagnostics, line_number: u32) -> String {
-    let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
-        msg_list.error_at(filename, line_number, format!("Opcode not found - \"{line}\""));
-        return "ERR     ".to_owned();
-    };
-
+pub(crate) fn add_registers(opcode: &Opcode, line: &str, filename: &str, msg_list: &mut Diagnostics, line_number: u32) -> String {
     let mut word0 = opcode.template;
 
     let tokens: Vec<&str> = line.split_whitespace().collect();
@@ -153,16 +148,10 @@ pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_
                 token_idx += 1;
             }
             Operand::Rd | Operand::Rs1 | Operand::Rs2 | Operand::RdRs1 => {
-                let nib = tokens.get(token_idx).map_or_else(|| "X".to_owned(), |t| map_reg_to_hex(t));
-                match u32::from_str_radix(&nib, 16) {
-                    Ok(n) => match op {
-                        Operand::Rd => word0 |= n << 8,
-                        Operand::Rs1 => word0 |= n << 4,
-                        Operand::Rs2 => word0 |= n,
-                        Operand::RdRs1 => word0 |= (n << 8) | (n << 4),
-                        _ => {}
-                    },
-                    Err(_) => ok = false,
+                match tokens.get(token_idx).and_then(|t| reg_index(t)) {
+                    // Each register field is a nibble; RdRs1 is two of them.
+                    Some(n) => word0 |= (n * 0x111) & op.mask(),
+                    None => ok = false,
                 }
                 token_idx += 1;
             }
@@ -176,38 +165,13 @@ pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_
     format!("{word0:08X}")
 }
 
-/// Register name to hex.
-///
-/// Map the register to the hex code for the opcode.
-fn map_reg_to_hex(input: &str) -> String {
-    match input.to_uppercase().as_str() {
-        "A" => "0".to_owned(),
-        "B" => "1".to_owned(),
-        "C" => "2".to_owned(),
-        "D" => "3".to_owned(),
-        "E" => "4".to_owned(),
-        "F" => "5".to_owned(),
-        "G" => "6".to_owned(),
-        "H" => "7".to_owned(),
-        "I" => "8".to_owned(),
-        "J" => "9".to_owned(),
-        "K" => "A".to_owned(),
-        "L" => "B".to_owned(),
-        "M" => "C".to_owned(),
-        "N" => "D".to_owned(),
-        "O" => "E".to_owned(),
-        "P" => "F".to_owned(),
-        _ => "X".to_owned(),
-    }
-}
-
 /// ISA v3 PC-relative targets (`Rel18` short branches, `Rel13` fused
 /// branches): the word-0 bits for this line, given its byte address `pc`.
 /// The target token is a label (`name:`) or an absolute address. Out-of-range
 /// or misaligned targets are reported as errors and yield 0.
 #[allow(clippy::too_many_arguments, reason = "mirrors add_arguments' reporting context")]
 pub(crate) fn pc_relative_bits(
-    opcodes: &[Opcode],
+    opcode: &Opcode,
     line: &str,
     pc: u32,
     labels: &SymbolTable,
@@ -215,9 +179,6 @@ pub(crate) fn pc_relative_bits(
     line_number: u32,
     filename: &str,
 ) -> u32 {
-    let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
-        return 0;
-    };
     let tokens: Vec<&str> = line.split_whitespace().collect();
     for (i, op) in opcode.ops.iter().enumerate() {
         let what = match op {
@@ -250,14 +211,20 @@ pub(crate) fn pc_relative_bits(
 mod tests {
     use super::*;
     use crate::diag::MessageType;
+    use crate::isa::Isa;
     use crate::isa::disasm::disassemble_word;
     use crate::isa::table::V2_OPCODES;
+
+    /// The v2 opcode `line` starts with.
+    fn op(line: &str) -> &'static Opcode {
+        Isa::v2().find(line).unwrap()
+    }
 
     #[test]
     // Register operands are packed into their v2 fields (rd[11:8], rs1[7:4])
     fn test_add_registers1() {
         let mut msg_list = Diagnostics::new();
-        let output = add_registers(V2_OPCODES, "COPY A B", "test", &mut msg_list, 1);
+        let output = add_registers(op("COPY A B"), "COPY A B", "test", &mut msg_list, 1);
         assert_eq!(output, String::from("54000010"));
         assert!(msg_list.messages().is_empty());
     }
@@ -266,7 +233,7 @@ mod tests {
     // A missing register operand is an error
     fn test_add_registers2() {
         let mut msg_list = Diagnostics::new();
-        let output = add_registers(V2_OPCODES, "COPY A", "test", &mut msg_list, 1);
+        let output = add_registers(op("COPY A"), "COPY A", "test", &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
         assert_eq!(msg_list.messages()[0].text(), "Incorrect register definition - \"COPY A\"");
     }
@@ -275,7 +242,7 @@ mod tests {
     // A register name that is not A..P is an error
     fn test_add_registers3() {
         let mut msg_list = Diagnostics::new();
-        let output = add_registers(V2_OPCODES, "COPY A Z", "test", &mut msg_list, 1);
+        let output = add_registers(op("COPY A Z"), "COPY A Z", "test", &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
         assert_eq!(msg_list.count(MessageType::Error), 1);
     }
@@ -285,7 +252,7 @@ mod tests {
     fn test_add_arguments1() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(V2_OPCODES, "PUSHV 0xFFFF", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(op("PUSHV 0xFFFF"), "PUSHV 0xFFFF", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("0000FFFF"));
     }
 
@@ -294,7 +261,7 @@ mod tests {
     fn test_add_arguments2() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(V2_OPCODES, "PUSHV 1234", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(op("PUSHV 1234"), "PUSHV 1234", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("000004D2"));
     }
 
@@ -303,7 +270,7 @@ mod tests {
     fn test_add_arguments3() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(V2_OPCODES, "PUSHV HELLO", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(op("PUSHV HELLO"), "PUSHV HELLO", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000000"));
         assert_eq!(msg_list.count(MessageType::Error), 1);
     }
@@ -313,7 +280,7 @@ mod tests {
     fn test_add_arguments4() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(V2_OPCODES, "PUSHV64 0xF RRR", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(op("PUSHV64 0xF RRR"), "PUSHV64 0xF RRR", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("0000000F00000000"));
         assert_eq!(msg_list.count(MessageType::Error), 1);
     }
@@ -323,7 +290,7 @@ mod tests {
     fn test_add_arguments5() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(V2_OPCODES, "PUSHV64 1 0xF", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(op("PUSHV64 1 0xF"), "PUSHV64 1 0xF", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("000000010000000F"));
         assert!(msg_list.messages().is_empty());
     }
@@ -333,7 +300,7 @@ mod tests {
     fn test_add_arguments6() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(V2_OPCODES, "PUSHV 1 0xF", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(op("PUSHV 1 0xF"), "PUSHV 1 0xF", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(msg_list.messages()[0].text(), "Too many arguments found - \"PUSHV 1 0xF\"");
     }
@@ -343,22 +310,14 @@ mod tests {
     fn test_add_arguments_extra_tokens_warn_once() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let opcodes = V2_OPCODES;
-        let output = add_arguments(opcodes, "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(op("SETR A 1 2 3 4"), "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(msg_list.count(MessageType::Warning), 1);
         assert_eq!(msg_list.messages().len(), 1);
 
         let mut msg_list = Diagnostics::new();
-        add_arguments(opcodes, "SETR A 1", &mut msg_list, 1, "test", &labels);
+        add_arguments(op("SETR A 1"), "SETR A 1", &mut msg_list, 1, "test", &labels);
         assert_eq!(msg_list.messages().len(), 0);
-    }
-
-    #[test]
-    fn test_map_reg_to_hex() {
-        assert_eq!(map_reg_to_hex("B"), "1");
-        assert_eq!(map_reg_to_hex("P"), "F");
-        assert_eq!(map_reg_to_hex("Z"), "X");
     }
 
     #[test]
@@ -374,18 +333,18 @@ mod tests {
         for opcode in zero_operand {
             let line = opcode.name;
             assert_eq!(
-                add_registers(opcodes, line, "t", &mut msg_list, 1),
+                add_registers(op(line), line, "t", &mut msg_list, 1),
                 format!("{:08X}", opcode.template),
                 "{line}"
             );
-            assert_eq!(add_arguments(opcodes, line, &mut msg_list, 1, "t", &labels), "", "{line}");
-            assert_eq!(pc_relative_bits(opcodes, line, 0x20, &labels, &mut msg_list, 1, "t"), 0, "{line}");
+            assert_eq!(add_arguments(op(line), line, &mut msg_list, 1, "t", &labels), "", "{line}");
+            assert_eq!(pc_relative_bits(op(line), line, 0x20, &labels, &mut msg_list, 1, "t"), 0, "{line}");
             assert_eq!(disassemble_word(opcode.template, opcodes), Some((line.to_owned(), 0)), "{line}");
         }
         // The encodings themselves, as the listing and the emulator see them.
         let mut words = Vec::new();
         for line in ["NOP", "HALT", "WAIT", "RESET", "TRAP", "RET", "IRET", "LEAVE", "LEAVERET", "nop"] {
-            words.push(add_registers(opcodes, line, "t", &mut msg_list, 1));
+            words.push(add_registers(op(line), line, "t", &mut msg_list, 1));
         }
         assert_eq!(
             words,
@@ -400,7 +359,7 @@ mod tests {
     // add_registers handles three-register (RRR) instructions correctly
     fn test_add_registers_three_regs() {
         let mut msg_list = Diagnostics::new();
-        let output = add_registers(V2_OPCODES, "ADDR A B C", "test", &mut msg_list, 1);
+        let output = add_registers(op("ADDR A B C"), "ADDR A B C", "test", &mut msg_list, 1);
         // rd=A(0)<<8 | rs1=B(1)<<4 | rs2=C(2)
         assert_eq!(output, String::from("44200012"));
     }
@@ -408,20 +367,19 @@ mod tests {
     #[test]
     // Regression: a count was masked to 6 bits, so "SHLV A 64" encoded as a shift of 0.
     fn test_count_operand_range() {
-        let opcodes = V2_OPCODES;
         let mut msg_list = Diagnostics::new();
-        assert_eq!(add_registers(opcodes, "SHLV A 0", "t", &mut msg_list, 1), "50204000");
-        assert_eq!(add_registers(opcodes, "SHLV A 63", "t", &mut msg_list, 1), "503FC000");
-        assert_eq!(add_registers(opcodes, "SHLV A 0x3F", "t", &mut msg_list, 1), "503FC000");
+        assert_eq!(add_registers(op("SHLV A 0"), "SHLV A 0", "t", &mut msg_list, 1), "50204000");
+        assert_eq!(add_registers(op("SHLV A 63"), "SHLV A 63", "t", &mut msg_list, 1), "503FC000");
+        assert_eq!(add_registers(op("SHLV A 0x3F"), "SHLV A 0x3F", "t", &mut msg_list, 1), "503FC000");
         assert_eq!(msg_list.count(MessageType::Error), 0);
 
-        assert_eq!(add_registers(opcodes, "SHLV A 64", "t", &mut msg_list, 5), "ERR     ");
+        assert_eq!(add_registers(op("SHLV A 64"), "SHLV A 64", "t", &mut msg_list, 5), "ERR     ");
         let msg = msg_list.messages().last().unwrap();
         assert_eq!(msg.text(), "Count 64 out of range 0..=63 - \"SHLV A 64\"");
         assert_eq!((msg.level() == MessageType::Error, msg.line_number()), (true, Some(5)));
 
         // Negative counts are out of range too, not a register error.
-        assert_eq!(add_registers(opcodes, "SHLV A -1", "t", &mut msg_list, 6), "ERR     ");
+        assert_eq!(add_registers(op("SHLV A -1"), "SHLV A -1", "t", &mut msg_list, 6), "ERR     ");
         assert_eq!(msg_list.messages().last().unwrap().text(), "Count -1 out of range 0..=63 - \"SHLV A -1\"");
         assert_eq!(msg_list.count(MessageType::Error), 2);
     }
@@ -446,13 +404,13 @@ mod tests {
             ("LEAVERET", "66800000"),
         ];
         for (src, want) in cases {
-            let got = add_registers(opcodes, src, "test", &mut msg_list, 1);
+            let got = add_registers(op(src), src, "test", &mut msg_list, 1);
             assert_eq!(got, want, "{src}");
         }
         assert_eq!(msg_list.count(MessageType::Error), 0);
         // Out-of-range / misaligned short immediates are rejected.
         for bad in ["SETR.S A 300", "LDIDX64A.S A B 12", "LDIDX64A.S A B 2048"] {
-            let got = add_registers(opcodes, bad, "test", &mut msg_list, 1);
+            let got = add_registers(op(bad), bad, "test", &mut msg_list, 1);
             assert_eq!(got, "ERR     ", "{bad}");
         }
         // Disassembly round-trips the scaled offset.
@@ -468,19 +426,19 @@ mod tests {
         let labels = SymbolTable::from_pairs(&[("LOOP:", 0x28), ("FAR:", 0x0004_0000)]);
         // BNEI A 0 LOOP: at 0x30 -> -2 words in [20:8]; register fields in word0.
         let line = "BNEI A 0 LOOP:".to_owned();
-        let w0 = u32::from_str_radix(&add_registers(opcodes, &line, "t", &mut msg_list, 1), 16).unwrap();
-        let rel = pc_relative_bits(opcodes, &line, 0x30, &labels, &mut msg_list, 1, "t");
+        let w0 = u32::from_str_radix(&add_registers(op(&line), &line, "t", &mut msg_list, 1), 16).unwrap();
+        let rel = pc_relative_bits(op(&line), &line, 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(w0 | rel, 0x747F_FE00);
         // JMP.S LOOP: at 0x40 -> -6 words in [17:0].
-        let rel = pc_relative_bits(opcodes, "JMP.S LOOP:", 0x40, &labels, &mut msg_list, 1, "t");
+        let rel = pc_relative_bits(op("JMP.S LOOP:"), "JMP.S LOOP:", 0x40, &labels, &mut msg_list, 1, "t");
         assert_eq!(0x6100_0000 | rel, 0x6103_FFFA);
         assert_eq!(msg_list.count(MessageType::Error), 0);
         // A fused branch 256 KB away is out of simm13 range: reported, no bits.
-        let rel = pc_relative_bits(opcodes, "BEQ A B FAR:", 0x30, &labels, &mut msg_list, 1, "t");
+        let rel = pc_relative_bits(op("BEQ A B FAR:"), "BEQ A B FAR:", 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(rel, 0);
         assert_eq!(msg_list.count(MessageType::Error), 1);
         // ...but in range for a short branch.
-        let rel = pc_relative_bits(opcodes, "CALL.S FAR:", 0x30, &labels, &mut msg_list, 1, "t");
+        let rel = pc_relative_bits(op("CALL.S FAR:"), "CALL.S FAR:", 0x30, &labels, &mut msg_list, 1, "t");
         assert_eq!(rel, (0x0004_0000 - 0x30) / 4);
         assert_eq!(disassemble_word(0x747F_FE00, opcodes).unwrap().0, "BNEI A 0 PC-8");
     }
