@@ -317,9 +317,8 @@ mod tests {
     /// The built-in v2 opcode table and expanded macros, as the CLI loads them.
     fn v2_tables() -> (Isa, Vec<macros::Macro>) {
         let mut msg_list = Diagnostics::new();
-        let (isa, macros_raw) = macros::v2_opcodes_and_macros(&mut msg_list);
-        let macro_list = macros::expand_embedded_macros(macros_raw, &mut msg_list);
-        (isa, macro_list)
+        let macro_list = macros::expand_embedded_macros(macros::builtin_macros(), &mut msg_list);
+        (Isa::v2(), macro_list)
     }
 
     /// The corpus `--emulate-test tests/fixtures` runs: every file with expected

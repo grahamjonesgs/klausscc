@@ -37,7 +37,7 @@ mod num;
 /// The files the tool writes: listing, program image and opcode docs.
 mod output;
 use asm::Assembly;
-use asm::macros::{Macro, expand_embedded_macros, v2_opcodes_and_macros};
+use asm::macros::{Macro, builtin_macros, expand_embedded_macros};
 use clap::{CommandFactory as _, Parser as _};
 use cli::{Cli, Mode};
 use commands::{
@@ -207,9 +207,8 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
 /// The old external `opcode_select.vh` file is gone; the lists are built in code.
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn opcode_tables(msg_list: &mut Diagnostics) -> (Isa, Vec<Macro>) {
-    let (isa, macro_list_raw) = v2_opcodes_and_macros(msg_list);
-    let macro_list = expand_embedded_macros(macro_list_raw, msg_list);
-    (isa, macro_list)
+    let macro_list = expand_embedded_macros(builtin_macros(), msg_list);
+    (Isa::v2(), macro_list)
 }
 
 /// Assemble `input` with the built-in opcode table.

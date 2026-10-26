@@ -2,7 +2,6 @@
 
 use super::{Macro, macro_from_string};
 use crate::diag::Diagnostics;
-use crate::isa::Isa;
 
 /// Standard macro definitions bundled with the assembler (formerly the `.vh`
 /// header's `/* Macro definition */` block).
@@ -42,12 +41,15 @@ const V2_MACROS: &[&str] = &[
     "$TXSTR PUSH A / COPY A %1 / CALL TX_STR: / POP A",
 ];
 
-/// The built-in v2 opcode table plus the standard macro definitions — the
-/// in-code replacement for parsing an `opcode_select.vh` file.
+/// The standard macro definitions, parsed — the in-code replacement for the
+/// macros of an `opcode_select.vh` file.
+///
+/// The definitions are constant and parse without a message (a test checks
+/// that), so there is nothing to report.
 #[must_use]
-pub(crate) fn v2_opcodes_and_macros(msg_list: &mut Diagnostics) -> (Isa, Vec<Macro>) {
-    let macros = V2_MACROS.iter().filter_map(|line| macro_from_string(line, msg_list)).collect();
-    (Isa::v2(), macros)
+pub(crate) fn builtin_macros() -> Vec<Macro> {
+    let mut no_messages = Diagnostics::new();
+    V2_MACROS.iter().filter_map(|line| macro_from_string(line, &mut no_messages)).collect()
 }
 
 #[cfg(test)]
@@ -58,8 +60,9 @@ mod tests {
     // Every built-in definition parses, and parsing them reports nothing.
     fn test_builtin_macros_all_parse() {
         let mut msg_list = Diagnostics::new();
-        let (_, macros) = v2_opcodes_and_macros(&mut msg_list);
+        let macros: Vec<Macro> = V2_MACROS.iter().filter_map(|line| macro_from_string(line, &mut msg_list)).collect();
         assert_eq!(macros.len(), V2_MACROS.len());
         assert!(msg_list.messages().is_empty());
+        assert_eq!(builtin_macros(), macros);
     }
 }

@@ -93,14 +93,14 @@ pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, isa: &Isa, macro_list:
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asm::macros::{expand_embedded_macros, v2_opcodes_and_macros};
+    use crate::asm::macros::{builtin_macros, expand_embedded_macros};
     use crate::diag::MessageType;
 
     /// Assemble `source` (as `test.kla`) with the built-in v2 table, without file I/O.
     fn assemble_text(source: &str) -> (Vec<Pass2>, Diagnostics) {
         let mut msg_list = Diagnostics::new();
-        let (isa, macros_raw) = v2_opcodes_and_macros(&mut msg_list);
-        let macro_list = expand_embedded_macros(macros_raw, &mut msg_list);
+        let isa = Isa::v2();
+        let macro_list = expand_embedded_macros(builtin_macros(), &mut msg_list);
         let input: Vec<SourceLine> = source
             .lines()
             .enumerate()
@@ -212,7 +212,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("missing.kla");
         let mut msg_list = Diagnostics::new();
-        let (isa, macros) = v2_opcodes_and_macros(&mut msg_list);
+        let (isa, macros) = (Isa::v2(), builtin_macros());
         assert!(assemble(&file.to_string_lossy(), &isa, &macros, &mut msg_list).is_none());
         assert!(msg_list.has_errors());
     }
@@ -224,7 +224,7 @@ mod tests {
         let file = dir.path().join("bad.kla");
         std::fs::write(&file, "_start\nNOTANOP A\nHALT\n").unwrap();
         let mut msg_list = Diagnostics::new();
-        let (isa, macros) = v2_opcodes_and_macros(&mut msg_list);
+        let (isa, macros) = (Isa::v2(), builtin_macros());
         let assembly = assemble(&file.to_string_lossy(), &isa, &macros, &mut msg_list).unwrap();
         assert!(msg_list.has_errors());
         assert_eq!(assembly.lines.len(), 3);

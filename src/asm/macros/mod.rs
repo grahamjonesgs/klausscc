@@ -7,7 +7,7 @@ mod builtin;
 use crate::asm::lexer::{return_comments, strip_comments};
 use crate::asm::line::SourceLine;
 use crate::diag::Diagnostics;
-pub(crate) use builtin::v2_opcodes_and_macros;
+pub(crate) use builtin::builtin_macros;
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
