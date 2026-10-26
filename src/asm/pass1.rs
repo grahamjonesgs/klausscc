@@ -111,7 +111,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
             continue;
         }
 
-        // Rewrite "SETR R val" → "SETR64 R val" before line_type/num_arguments when val > 32 bits.
+        // Rewrite "SETR R val" → "SETR64 R val" before classifying the line and counting its arguments when val > 32 bits.
         let upgraded_line = upgrade_setr_to_setr64(&pass.input_text_line);
         let lt = LineType::classify(&upgraded_line, oplist);
 

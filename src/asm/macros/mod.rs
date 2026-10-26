@@ -103,19 +103,20 @@ fn substitute_args(item: &str, call: &[&str]) -> (String, Vec<SubstError>) {
 ///
 /// Takes Vector of macros, and embeds macros recursively, up to 10 passes.
 /// Will create errors message for more than 10 passes.  Problems with an
-/// embedded call are reported at the definition that makes it, when that
-/// definition came from the source.
+/// embedded call, and running out of passes, are reported at the definition
+/// that makes the call, when that definition came from the source.
 pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnostics) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed = true;
-    let mut last_macro = String::default();
+    // The index of the last macro that still had an embedded call.
+    let mut last_macro: Option<usize> = None;
 
     let mut input_macros = macros;
 
     while pass < 10 && changed {
         changed = false;
         let mut output_macros: Vec<Macro> = Vec::with_capacity(input_macros.len());
-        for input_macro in &input_macros {
+        for (index, input_macro) in input_macros.iter().enumerate() {
             let mut output_items: Vec<String> = Vec::new();
             for item in &input_macro.items {
                 let Some(embedded) = find_macro(item, &input_macros) else {
@@ -152,7 +153,7 @@ pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnost
                     }
                     output_items.push(substituted);
                 }
-                last_macro.clone_from(&input_macro.name);
+                last_macro = Some(index);
                 changed = true;
             }
             output_macros.push(Macro {
@@ -169,8 +170,9 @@ pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnost
         // replaced now.
         input_macros = output_macros;
     }
-    if changed {
-        msg_list.error(format!("Too many macro passes, check {last_macro}"));
+    // Each pass keeps the list's order, so the index still names that macro.
+    if changed && let Some(last) = last_macro.and_then(|index| input_macros.get(index)) {
+        last.error(msg_list, format!("Too many macro passes, check {}", last.name));
     }
     input_macros
 }
@@ -259,8 +261,7 @@ pub(crate) fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut 
     }
 
     if added {
-        let expanded = expand_embedded_macros(macro_list.clone(), msg_list);
-        *macro_list = expanded;
+        *macro_list = expand_embedded_macros(std::mem::take(macro_list), msg_list);
     }
     output
 }
@@ -435,6 +436,20 @@ mod tests {
         apply_source_macros(input, &mut macro_list, &mut msg_list);
         assert_eq!(msg_list.messages().len(), 0);
         assert_eq!(find_macro("$B", &macro_list).unwrap().items, vec!["PUSH %1".to_owned()]);
+    }
+
+    #[test]
+    // Source macros that call each other for ever are reported at the
+    // definition still making a call when the passes run out.
+    fn test_recursive_source_macros_have_location() {
+        let mut msg_list = Diagnostics::new();
+        let mut macro_list = Vec::new();
+        let input = vec![source_line("!macro $A NOP / $B", 1), source_line("!macro $B $A", 2)];
+        apply_source_macros(input, &mut macro_list, &mut msg_list);
+        assert_eq!(msg_list.count(MessageType::Error), 1);
+        let msg = msg_list.messages().first().unwrap();
+        assert_eq!(msg.text(), "Too many macro passes, check $B");
+        assert_eq!((msg.line_number(), msg.file_name()), (Some(2), Some("test.kla")));
     }
 
     #[test]
