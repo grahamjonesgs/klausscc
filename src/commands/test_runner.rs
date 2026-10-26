@@ -3,11 +3,11 @@
 
 use super::{send_failed, write_binary_file};
 use crate::asm::assemble;
+use crate::asm::macros;
 use crate::diag::{Diagnostics, print_messages};
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::parse_expected_uart_values;
-use crate::macros;
 use crate::opcodes::Opcode;
 use crate::serial::{run_test_monitor, write_to_board_keep_port};
 use std::fs;

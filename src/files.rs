@@ -1,7 +1,7 @@
 use crate::asm::line::{LineType, Pass2, SourceLine};
+use crate::asm::macros::Macro;
 use crate::diag::Diagnostics;
 use crate::layout::{CODE_BASE, heap_start};
-use crate::macros::Macro;
 use crate::opcodes::Opcode;
 use std::io::Error;
 

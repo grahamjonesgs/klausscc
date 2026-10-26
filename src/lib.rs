@@ -36,8 +36,6 @@ mod jtag;
 mod layout;
 /// Loading an ELF or flat binary as a board program.
 mod loader;
-/// Module to manage macros.
-mod macros;
 /// Module to stream a flat DDR image to the board over TCP (network boot).
 mod netload;
 /// Module for integer literal parsing.
@@ -47,6 +45,7 @@ mod opcodes;
 /// Module to write to serial and read response.
 mod serial;
 use asm::Assembly;
+use asm::macros::{Macro, expand_embedded_macros, v2_opcodes_and_macros};
 use clap::{CommandFactory as _, Parser as _};
 use cli::{Cli, Mode};
 use commands::{
@@ -56,8 +55,7 @@ use commands::{
 use diag::{Diagnostics, MessageType};
 use error::Error;
 use files::write_code_output_file;
-use macros::{Macro, expand_embedded_macros};
-use opcodes::{Opcode, v2_opcodes_and_macros};
+use opcodes::Opcode;
 use std::path::PathBuf;
 use std::process::ExitCode;
 

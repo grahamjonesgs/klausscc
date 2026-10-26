@@ -1,6 +1,13 @@
+//! Assembler macros: `$NAME item / item` definitions, from the built-in
+//! table or the source's `!macro` directives, and their expansion into
+//! source lines.
+
+mod builtin;
+
 use crate::asm::lexer::{return_comments, strip_comments};
 use crate::asm::line::SourceLine;
 use crate::diag::Diagnostics;
+pub(crate) use builtin::v2_opcodes_and_macros;
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;

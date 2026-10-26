@@ -3,15 +3,16 @@
 //! output.
 
 use super::test_runner::read_test_list;
+use crate::asm::macros;
 use crate::asm::{Assembly, assemble};
 use crate::diag::{Diagnostics, MessageType};
+use crate::emulate;
 use crate::error::Error;
 use crate::files::filename_stem;
 use crate::helper::{human_bytes, parse_expected_uart_values};
 use crate::image::Image;
 use crate::loader::{BinaryInput, Loaded, load_flat};
 use crate::opcodes::Opcode;
-use crate::{emulate, macros};
 use std::fs;
 use std::path::PathBuf;
 
@@ -319,7 +320,7 @@ mod tests {
     /// The built-in v2 opcode table and expanded macros, as the CLI loads them.
     fn v2_tables() -> (Vec<Opcode>, Vec<macros::Macro>) {
         let mut msg_list = Diagnostics::new();
-        let (oplist, macros_raw) = crate::opcodes::v2_opcodes_and_macros(&mut msg_list);
+        let (oplist, macros_raw) = macros::v2_opcodes_and_macros(&mut msg_list);
         let macro_list = macros::expand_embedded_macros(macros_raw, &mut msg_list);
         (oplist, macro_list)
     }

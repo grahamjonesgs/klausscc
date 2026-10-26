@@ -16,6 +16,7 @@
 
 pub(crate) mod lexer;
 pub(crate) mod line;
+pub(crate) mod macros;
 mod pass1;
 mod pass2;
 pub(crate) mod symbols;
@@ -23,9 +24,9 @@ pub(crate) mod symbols;
 use crate::diag::Diagnostics;
 use crate::files::{read_file_to_vector, remove_block_comments};
 use crate::image::{Image, create_bin_string};
-use crate::macros::{Macro, apply_source_macros, expand_macros};
 use crate::opcodes::Opcode;
 use line::{Pass2, SourceLine};
+use macros::{Macro, apply_source_macros, expand_macros};
 use pass1::get_pass1;
 use pass2::get_pass2;
 use symbols::{find_duplicate_label, get_labels};
@@ -86,9 +87,8 @@ pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, oplist: &[Opcode], mac
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asm::macros::{expand_embedded_macros, v2_opcodes_and_macros};
     use crate::diag::MessageType;
-    use crate::macros::expand_embedded_macros;
-    use crate::opcodes::v2_opcodes_and_macros;
 
     /// Assemble `source` (as `test.kla`) with the built-in v2 table, without file I/O.
     fn assemble_text(source: &str) -> (Vec<Pass2>, Diagnostics) {
