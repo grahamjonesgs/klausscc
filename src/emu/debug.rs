@@ -178,7 +178,7 @@ impl Cpu {
         if let Some(stop) = self.stop {
             return Some(stop);
         }
-        self.advance(allow_irq);
+        self.step_inner(allow_irq);
         if self.halted { Some(StopReason::Halt) } else { self.stop }
     }
 

@@ -84,6 +84,12 @@ impl Flags {
         self.put(Self::V, on);
     }
 
+    /// Set Z and S from a 64-bit result (the arithmetic producers).
+    pub(super) const fn set_zs(&mut self, res: u64) {
+        self.set_zero(res == 0);
+        self.set_sign(res >> 63 == 1);
+    }
+
     /// Debugger nibble: bit 3 = Z, bit 2 = S, bit 1 = C, bit 0 = V.
     pub(super) const fn to_nibble(self) -> u8 {
         self.0

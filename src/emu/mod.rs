@@ -285,7 +285,7 @@ impl Cpu {
     /// returning its `(pc, word)` for the trace.  With `allow_irq` false (a
     /// debugger single-step) no interrupt is taken, and a `WAIT` completes as
     /// if woken, leaving the interrupt pending for the next continue.
-    fn advance(&mut self, allow_irq: bool) -> Option<(u32, u32)> {
+    fn step_inner(&mut self, allow_irq: bool) -> Option<(u32, u32)> {
         if self.waiting {
             if !allow_irq {
                 if self.timer_can_fire() {
@@ -313,7 +313,7 @@ impl Cpu {
         }
         let word = self.read32(pc);
         self.last_write = None;
-        self.step(word);
+        self.execute(word);
         self.instret += 1;
         self.tick(CYCLES_PER_INSTRUCTION);
         Some((pc, word))
@@ -333,7 +333,7 @@ impl Cpu {
             if self.stop.is_some() {
                 break;
             }
-            if let Some((pc, word)) = self.advance(true) {
+            if let Some((pc, word)) = self.step_inner(true) {
                 count += 1;
                 if let Some(t) = trace.as_deref_mut() {
                     self.trace_line(t, count, pc, word);

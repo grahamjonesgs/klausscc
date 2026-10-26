@@ -149,8 +149,7 @@ impl Cpu {
     /// word at SP-8, mask the source, acknowledge it, jump to its vector.
     pub(super) fn take_irq(&mut self, src: usize) {
         let ctx = (u64::from(self.int_mask) << 39) | (u64::from(self.flags.to_ctx()) << 32) | u64::from(self.pc);
-        self.sp = self.sp.wrapping_sub(8);
-        self.write64(self.sp, ctx);
+        self.push(ctx);
         self.int_mask &= !(1 << src);
         if src == 0 {
             self.timer_pending = false;
