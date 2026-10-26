@@ -6,11 +6,11 @@ use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::isa::disasm::disassemble_flat_to_pass2;
 use crate::layout::CODE_BASE;
+use crate::link::netload::net_load;
+use crate::link::serial::AUTO_SERIAL;
 use crate::loader::{BinaryInput, load_flat};
-use crate::netload::net_load;
 use crate::output::image::readmemh;
 use crate::output::listing::write_code_output_file;
-use crate::serial::AUTO_SERIAL;
 use std::fs;
 use std::path::PathBuf;
 

@@ -1,3 +1,6 @@
+//! The board's UART: send a program image over it, monitor what the board
+//! prints, and check a test program's output against expected values.
+
 use crate::diag::Diagnostics;
 use crate::num::human_bytes;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};

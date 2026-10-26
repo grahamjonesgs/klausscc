@@ -6,11 +6,11 @@
 
 use crate::emu::DEFAULT_MAX_INSTRUCTIONS;
 use crate::error::Error;
+use crate::link::netload::NETBOOT_DEFAULT_PORT;
+use crate::link::serial::{AUTO_SERIAL, SerialTarget};
 use crate::loader::BinaryInput;
-use crate::netload::NETBOOT_DEFAULT_PORT;
 use crate::num::parse_u32;
 use crate::output::{filename_stem, output_file_name};
-use crate::serial::{AUTO_SERIAL, SerialTarget};
 use clap::Parser;
 use clap::builder::NonEmptyStringValueParser;
 use std::path::{Path, PathBuf};

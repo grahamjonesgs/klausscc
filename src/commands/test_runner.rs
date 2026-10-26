@@ -7,9 +7,9 @@ use crate::asm::macros;
 use crate::diag::{Diagnostics, print_messages};
 use crate::error::Error;
 use crate::isa::Opcode;
+use crate::link::serial::{run_test_monitor, write_to_board_keep_port};
 use crate::output::filename_stem;
 use crate::output::listing::write_code_output_file;
-use crate::serial::{run_test_monitor, write_to_board_keep_port};
 use std::fs;
 use std::path::PathBuf;
 

@@ -27,8 +27,8 @@ pub(crate) use test_runner::{run_test_list, run_test_mode};
 
 use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
+use crate::link::serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port};
 use crate::output::write_binary_output_file;
-use crate::serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port};
 use std::io;
 use std::path::PathBuf;
 
@@ -63,7 +63,7 @@ fn send_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics) -> Error 
 /// Where and how to send a `.kbt` wire image to the board.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SendOpts<'a> {
-    /// Serial port name (`-s`) or [`AUTO_SERIAL`](crate::serial::AUTO_SERIAL); empty means do not send.
+    /// Serial port name (`-s`) or [`AUTO_SERIAL`](crate::link::serial::AUTO_SERIAL); empty means do not send.
     pub(crate) port: &'a str,
     /// Send a break first, so the board resets into its loader (no `-n`).
     pub(crate) send_break: bool,

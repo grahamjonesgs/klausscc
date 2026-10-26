@@ -27,16 +27,14 @@ mod isa;
 mod jtag;
 /// The memory map: heap header, code base, heap start and the MMIO window.
 mod layout;
+/// Loading a program onto the board over the UART or the network.
+mod link;
 /// Loading an ELF or flat binary as a board program.
 mod loader;
-/// Module to stream a flat DDR image to the board over TCP (network boot).
-mod netload;
 /// Integer literal parsing, and byte counts for messages.
 mod num;
 /// The files the tool writes: listing, program image and opcode docs.
 mod output;
-/// Module to write to serial and read response.
-mod serial;
 use asm::Assembly;
 use asm::macros::{Macro, expand_embedded_macros, v2_opcodes_and_macros};
 use clap::{CommandFactory as _, Parser as _};

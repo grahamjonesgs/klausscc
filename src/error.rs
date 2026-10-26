@@ -11,7 +11,7 @@
 use crate::debug::GdbError;
 #[cfg(feature = "board")]
 use crate::debug::board::BoardError;
-use crate::netload::NetbootError;
+use crate::link::netload::NetbootError;
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
