@@ -1,7 +1,7 @@
 use crate::asm::line::SourceLine;
 use crate::diag::Diagnostics;
-use crate::labels::{convert_argument, Label};
-use crate::macros::{macro_from_string, return_macro, Macro};
+use crate::labels::{Label, convert_argument};
+use crate::macros::{Macro, macro_from_string, return_macro};
 use crate::num::{parse_bits64, parse_int};
 use serde::{Deserialize, Serialize};
 use std::fmt::Write as _;

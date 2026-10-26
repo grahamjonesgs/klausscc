@@ -21,23 +21,23 @@
 //! the program run on.
 
 use crate::gdbserver::{
-    accept, access_last_addr, GdbError, KlaussCpuArch, KlaussRegId, KlaussRegs, HW_BREAKPOINTS, HW_WATCHPOINTS, TRAP_WORD, TRIPLE,
+    GdbError, HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD, TRIPLE, accept, access_last_addr,
 };
 use crate::jtag::{DmiReq, Jtag, JtagError};
 use crate::layout::is_mmio;
 use gdbstub::common::{Endianness, Pid, Signal};
 use gdbstub::conn::ConnectionExt;
-use gdbstub::stub::{run_blocking, DisconnectReason, GdbStub, SingleThreadStopReason};
+use gdbstub::stub::{DisconnectReason, GdbStub, SingleThreadStopReason, run_blocking};
+use gdbstub::target::ext::base::BaseOps;
 use gdbstub::target::ext::base::single_register_access::{SingleRegisterAccess, SingleRegisterAccessOps};
 use gdbstub::target::ext::base::singlethread::{
     SingleThreadBase, SingleThreadResume, SingleThreadResumeOps, SingleThreadSingleStep, SingleThreadSingleStepOps,
 };
-use gdbstub::target::ext::base::BaseOps;
 use gdbstub::target::ext::breakpoints::{
     Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps, HwWatchpoint, HwWatchpointOps, SwBreakpoint, SwBreakpointOps, WatchKind,
 };
 use gdbstub::target::ext::host_info::{HostInfo, HostInfoOps, HostInfoResponse};
-use gdbstub::target::ext::monitor_cmd::{outputln, ConsoleOutput, MonitorCmd, MonitorCmdOps};
+use gdbstub::target::ext::monitor_cmd::{ConsoleOutput, MonitorCmd, MonitorCmdOps, outputln};
 use gdbstub::target::ext::process_info::{ProcessInfo, ProcessInfoOps, ProcessInfoResponse};
 use gdbstub::target::{Target, TargetError, TargetResult};
 use std::collections::BTreeMap;

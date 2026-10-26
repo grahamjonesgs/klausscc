@@ -10,9 +10,9 @@ use crate::files::{filename_stem, output_file_name};
 use crate::loader::BinaryInput;
 use crate::netload::NETBOOT_DEFAULT_PORT;
 use crate::num::parse_u32;
-use crate::serial::{SerialTarget, AUTO_SERIAL};
-use clap::builder::NonEmptyStringValueParser;
+use crate::serial::{AUTO_SERIAL, SerialTarget};
 use clap::Parser;
+use clap::builder::NonEmptyStringValueParser;
 use std::path::{Path, PathBuf};
 
 /// Default for `--test-timeout`, in seconds.

@@ -10,7 +10,7 @@
 
 use crate::asm::line::{LineType, Pass2};
 use crate::diag::Diagnostics;
-use crate::layout::{heap_start, CODE_BASE, HEAP_HEADER_WORDS};
+use crate::layout::{CODE_BASE, HEAP_HEADER_WORDS, heap_start};
 use std::fmt::Write as _;
 
 /// A program ready to load: its bytes as they sit in memory from

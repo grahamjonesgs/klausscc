@@ -101,11 +101,7 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
         .filter_map(|seg| {
             let addr = seg.address();
             let bytes = seg.data().ok()?.to_vec();
-            if bytes.is_empty() {
-                None
-            } else {
-                Some((addr, bytes))
-            }
+            if bytes.is_empty() { None } else { Some((addr, bytes)) }
         })
         .collect();
     segments.sort_by_key(|(addr, _)| *addr);
@@ -126,11 +122,7 @@ fn parse_elf_to_flat(data: &[u8]) -> Option<(Vec<u8>, u64, u64)> {
         .scan(None::<u64>, |prev_end, (addr, bytes)| {
             let gap = prev_end.map_or(0, |end| addr.saturating_sub(end));
             *prev_end = Some(addr + bytes.len() as u64);
-            if gap <= MAX_SEGMENT_GAP {
-                Some(Some((addr, bytes)))
-            } else {
-                Some(None)
-            }
+            if gap <= MAX_SEGMENT_GAP { Some(Some((addr, bytes))) } else { Some(None) }
         })
         .take_while(Option::is_some)
         .flatten()

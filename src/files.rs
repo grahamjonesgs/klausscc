@@ -1,6 +1,6 @@
 use crate::asm::line::{LineType, Pass2, SourceLine};
 use crate::diag::Diagnostics;
-use crate::layout::{heap_start, CODE_BASE};
+use crate::layout::{CODE_BASE, heap_start};
 use crate::macros::Macro;
 use crate::opcodes::Opcode;
 use std::io::Error;
@@ -9,7 +9,7 @@ use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::{
     fs::{self, File},
-    io::{prelude::*, BufReader},
+    io::{BufReader, prelude::*},
     path::{Path, PathBuf},
 };
 
@@ -1155,8 +1155,8 @@ mod test {
 
     #[test]
     #[cfg(unix)] // Opening a directory only fails at the first read on Unix
-                 // Regression: a read error (here, including a directory) repeats on every
-                 // read, and the reader reported it forever instead of stopping.
+    // Regression: a read error (here, including a directory) repeats on every
+    // read, and the reader reported it forever instead of stopping.
     fn test_read_file_include_directory() {
         let mut msg_list = Diagnostics::new();
         let tmp_dir = TempDir::new().unwrap();
@@ -1288,6 +1288,9 @@ mod test {
         // 64-bit mode: header offsets are i*8, values are 16-char hex; data words are 16 hex chars each
         // opcode "12345678FFFFFFFFDDDDDDDD" (24 chars) yields 2 data lines, the second a half word
         assert_eq!(buffer.lines().count(), 14);
-        assert_eq!(buffer, "0x00000000: 0000000000000018                  -- heap_start  (set by assembler)\n0x00000008: 0000000000000000                  -- heap_end    (reserved)\n0x00000010: 0000000000000000                  -- (reserved)\n0x00000018: 0000000000000000                  -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678FFFFFFFF                  -- #DATA1 \"HELLO\"\n0x0000000D: DDDDDDDD                          -- #DATA1 \"HELLO\"\nError                         -- xxx\n");
+        assert_eq!(
+            buffer,
+            "0x00000000: 0000000000000018                  -- heap_start  (set by assembler)\n0x00000008: 0000000000000000                  -- heap_end    (reserved)\n0x00000010: 0000000000000000                  -- (reserved)\n0x00000018: 0000000000000000                  -- (reserved)\n0x00000000: x                 -- MOV 0xEEEEEEEE 0xFFFFFFFF\n0x00000001: 000F013           -- DELAY 0x7\n0x00000003: 0000F013          -- PUSH A\n0x00000004: 0000F013          -- RET\n0x00000005: 0000F013          -- RET\n0x00000005:                   -- :ERIC\n                              -- // Comment\n0x00000005: 12345678FFFFFFFF                  -- #DATA1 \"HELLO\"\n0x0000000D: DDDDDDDD                          -- #DATA1 \"HELLO\"\nError                         -- xxx\n"
+        );
     }
 }

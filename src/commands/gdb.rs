@@ -1,13 +1,13 @@
 //! Debugging over the GDB remote protocol, on the emulator or the board.
 
 #[cfg(feature = "board")]
-use super::load::run_elf2serial;
-#[cfg(feature = "board")]
 use super::SendOpts;
+#[cfg(feature = "board")]
+use super::load::run_elf2serial;
 use crate::diag::Diagnostics;
 use crate::error::Error;
 use crate::layout::CODE_BASE;
-use crate::loader::{load_flat, BinaryInput, Loaded};
+use crate::loader::{BinaryInput, Loaded, load_flat};
 use crate::{emulate, gdbserver};
 
 /// Debug an ELF (or flat binary) on the emulator over the GDB remote protocol.

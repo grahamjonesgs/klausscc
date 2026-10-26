@@ -4,8 +4,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::fmt::Write as _;
 use std::io::{self, Error, Read as _, Write as _};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -445,7 +445,7 @@ impl Drop for StdinForwarder {
 fn flush_stdin() {
     #[cfg(unix)]
     {
-        use nix::sys::termios::{tcflush, FlushArg};
+        use nix::sys::termios::{FlushArg, tcflush};
         use std::os::fd::AsFd as _;
         let _ = tcflush(io::stdin().as_fd(), FlushArg::TCIFLUSH);
     }

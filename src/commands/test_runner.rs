@@ -3,7 +3,7 @@
 
 use super::{send_failed, write_binary_file};
 use crate::asm::assemble;
-use crate::diag::{print_messages, Diagnostics};
+use crate::diag::{Diagnostics, print_messages};
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::parse_expected_uart_values;

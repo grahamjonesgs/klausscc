@@ -1,8 +1,8 @@
 use crate::asm::lexer::{data_name_from_string, is_blank, is_comment, is_start, label_name_from_string};
 use crate::asm::line::{LineType, Pass2};
 use crate::diag::Diagnostics;
-use crate::num::{parse_bits64, parse_int, LiteralError};
-use crate::opcodes::{disassemble_word, return_opcode, Opcode};
+use crate::num::{LiteralError, parse_bits64, parse_int};
+use crate::opcodes::{Opcode, disassemble_word, return_opcode};
 use std::fmt;
 use std::fmt::Write as _;
 
@@ -333,7 +333,7 @@ pub(crate) fn trim_newline(input: &mut String) {
 mod tests {
     use super::*;
     use crate::diag::MessageType;
-    use crate::labels::{return_label_value, Label};
+    use crate::labels::{Label, return_label_value};
 
     #[test]
     // Test that line is trimmed of newline
@@ -599,7 +599,7 @@ mod tests {
     fn test_data_as_bytes_zeropad() {
         assert_eq!(data_as_bytes(".zeropad 4"), Some("00000000".to_owned())); // 4 bytes
         assert_eq!(data_as_bytes(".zeropad 12"), Some("0".repeat(24))); // 12 bytes, no rounding to 8
-                                                                        // A part word would misalign the board's word-at-a-time load.
+        // A part word would misalign the board's word-at-a-time load.
         assert_eq!(data_bytes(".zeropad 2"), Err(DataError::NotWordMultiple("2".to_owned())));
         assert_eq!(data_bytes(".zeropad 3"), Err(DataError::NotWordMultiple("3".to_owned())));
         assert_eq!(data_as_bytes(".zeropad 0"), None);

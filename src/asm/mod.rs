@@ -21,9 +21,9 @@ mod pass2;
 
 use crate::diag::Diagnostics;
 use crate::files::{read_file_to_vector, remove_block_comments};
-use crate::image::{create_bin_string, Image};
+use crate::image::{Image, create_bin_string};
 use crate::labels::{find_duplicate_label, get_labels};
-use crate::macros::{apply_source_macros, expand_macros, Macro};
+use crate::macros::{Macro, apply_source_macros, expand_macros};
 use crate::opcodes::Opcode;
 use line::{Pass2, SourceLine};
 use pass1::get_pass1;

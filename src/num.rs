@@ -113,11 +113,7 @@ fn digits_value(digits: impl Iterator<Item = char>, radix: u32) -> Result<u64, L
             .ok_or(LiteralError::Overflow)?;
         any = true;
     }
-    if any {
-        Ok(value)
-    } else {
-        Err(LiteralError::Empty)
-    }
+    if any { Ok(value) } else { Err(LiteralError::Empty) }
 }
 
 #[cfg(test)]

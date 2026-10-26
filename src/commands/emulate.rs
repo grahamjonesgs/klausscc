@@ -3,13 +3,13 @@
 //! output.
 
 use super::test_runner::read_test_list;
-use crate::asm::{assemble, Assembly};
+use crate::asm::{Assembly, assemble};
 use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::filename_stem;
 use crate::helper::{human_bytes, parse_expected_uart_values};
 use crate::image::Image;
-use crate::loader::{load_flat, BinaryInput, Loaded};
+use crate::loader::{BinaryInput, Loaded, load_flat};
 use crate::opcodes::Opcode;
 use crate::{emulate, macros};
 use std::fs;

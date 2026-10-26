@@ -4,11 +4,11 @@
 //! command framing it sends lives in `mpsse`.
 
 use super::mpsse::{
-    dmi_answer, parse_scan, push_dmi, push_scan, DmiReq, IR_IDCODE, IR_LEN, IR_USER3, MPSSE_3PHASE_OFF, MPSSE_ADAPTIVE_OFF, MPSSE_CLK_DIV,
-    MPSSE_DIV5_OFF, MPSSE_LOOPBACK_OFF, MPSSE_SEND_IMMEDIATE, MPSSE_SET_HIGH, MPSSE_SET_LOW, MPSSE_TMS,
+    DmiReq, IR_IDCODE, IR_LEN, IR_USER3, MPSSE_3PHASE_OFF, MPSSE_ADAPTIVE_OFF, MPSSE_CLK_DIV, MPSSE_DIV5_OFF, MPSSE_LOOPBACK_OFF,
+    MPSSE_SEND_IMMEDIATE, MPSSE_SET_HIGH, MPSSE_SET_LOW, MPSSE_TMS, dmi_answer, parse_scan, push_dmi, push_scan,
 };
 use super::{JtagError, Result};
-use std::ffi::{c_char, c_int, c_uchar, c_void, CStr};
+use std::ffi::{CStr, c_char, c_int, c_uchar, c_void};
 
 // ---- libftdi1 (just what MPSSE JTAG needs) ----------------------------------
 
@@ -123,11 +123,7 @@ impl Jtag {
 
     /// Fail with libftdi's error when a call doing `op` returned `rc < 0`.
     fn check(&self, rc: c_int, op: &'static str) -> Result<()> {
-        if rc < 0 {
-            Err(self.ftdi_error(op))
-        } else {
-            Ok(())
-        }
+        if rc < 0 { Err(self.ftdi_error(op)) } else { Ok(()) }
     }
 
     fn write(&mut self, buf: &[u8]) -> Result<()> {

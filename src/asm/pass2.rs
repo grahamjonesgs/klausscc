@@ -5,7 +5,7 @@ use crate::asm::line::{LineType, Pass1, Pass2};
 use crate::diag::Diagnostics;
 use crate::helper::data_as_bytes;
 use crate::labels::Label;
-use crate::opcodes::{add_arguments, add_registers, pc_relative_bits, Opcode};
+use crate::opcodes::{Opcode, add_arguments, add_registers, pc_relative_bits};
 
 /// Returns pass2 from pass1.
 ///

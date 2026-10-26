@@ -52,14 +52,14 @@ use asm::Assembly;
 use clap::{CommandFactory as _, Parser as _};
 use cli::{Cli, Mode};
 use commands::{
-    monitor, run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload, run_test_list,
-    run_test_mode, send_image, write_binary_file, SendOpts,
+    SendOpts, monitor, run_elf2serial, run_emulate, run_emulate_elf, run_emulate_test, run_gdbserver, run_kbt_send, run_mem_out, run_netload,
+    run_test_list, run_test_mode, send_image, write_binary_file,
 };
 use diag::{Diagnostics, MessageType};
 use error::Error;
 use files::write_code_output_file;
-use macros::{expand_embedded_macros, Macro};
-use opcodes::{v2_opcodes_and_macros, Opcode};
+use macros::{Macro, expand_embedded_macros};
+use opcodes::{Opcode, v2_opcodes_and_macros};
 use std::path::PathBuf;
 use std::process::ExitCode;
 

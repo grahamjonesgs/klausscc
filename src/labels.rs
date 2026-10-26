@@ -1,7 +1,7 @@
 use crate::asm::lexer::{data_name_from_string, label_name_from_string, strip_comments};
 use crate::asm::line::Pass1;
 use crate::diag::Diagnostics;
-use crate::num::{fits_imm32, is_hex_literal, parse_bits64, parse_int, LiteralError};
+use crate::num::{LiteralError, fits_imm32, is_hex_literal, parse_bits64, parse_int};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Label struct.

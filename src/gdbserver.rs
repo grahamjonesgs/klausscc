@@ -38,17 +38,17 @@ use crate::layout::is_mmio;
 use gdbstub::arch::{Arch, RegId, Registers};
 use gdbstub::common::{Endianness, Pid, Signal};
 use gdbstub::conn::ConnectionExt;
-use gdbstub::stub::{run_blocking, DisconnectReason, GdbStub, SingleThreadStopReason};
+use gdbstub::stub::{DisconnectReason, GdbStub, SingleThreadStopReason, run_blocking};
+use gdbstub::target::ext::base::BaseOps;
 use gdbstub::target::ext::base::single_register_access::{SingleRegisterAccess, SingleRegisterAccessOps};
 use gdbstub::target::ext::base::singlethread::{
     SingleThreadBase, SingleThreadResume, SingleThreadResumeOps, SingleThreadSingleStep, SingleThreadSingleStepOps,
 };
-use gdbstub::target::ext::base::BaseOps;
 use gdbstub::target::ext::breakpoints::{
     Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps, HwWatchpoint, HwWatchpointOps, SwBreakpoint, SwBreakpointOps, WatchKind,
 };
 use gdbstub::target::ext::host_info::{HostInfo, HostInfoOps, HostInfoResponse};
-use gdbstub::target::ext::monitor_cmd::{outputln, ConsoleOutput, MonitorCmd, MonitorCmdOps};
+use gdbstub::target::ext::monitor_cmd::{ConsoleOutput, MonitorCmd, MonitorCmdOps, outputln};
 use gdbstub::target::ext::process_info::{ProcessInfo, ProcessInfoOps, ProcessInfoResponse};
 use gdbstub::target::{Target, TargetError, TargetResult};
 use std::fmt;
@@ -446,11 +446,7 @@ impl SingleThreadBase for EmuTarget {
         } else {
             self.cpu.debug_write(start_addr, data)
         };
-        if ok {
-            Ok(())
-        } else {
-            Err(TargetError::NonFatal)
-        }
+        if ok { Ok(()) } else { Err(TargetError::NonFatal) }
     }
 
     fn support_resume(&mut self) -> Option<SingleThreadResumeOps<'_, Self>> {

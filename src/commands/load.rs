@@ -1,14 +1,14 @@
 //! Putting a program on the board: net-load, mem-out (boot ROM image),
 //! elf2serial and sending a pre-built `.kbt`.
 
-use super::{send_image, write_binary_file, SendOpts};
+use super::{SendOpts, send_image, write_binary_file};
 use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::write_code_output_file;
 use crate::helper::disassemble_flat_to_pass2;
 use crate::image::readmemh;
 use crate::layout::CODE_BASE;
-use crate::loader::{load_flat, BinaryInput};
+use crate::loader::{BinaryInput, load_flat};
 use crate::netload::net_load;
 use crate::serial::AUTO_SERIAL;
 use std::fs;

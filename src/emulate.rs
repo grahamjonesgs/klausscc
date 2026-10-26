@@ -45,7 +45,7 @@
 //! the assembler's opcode table — so the emulator is a genuine second
 //! implementation, not a re-run of the assembler.
 
-use crate::layout::{is_mmio, CODE_BASE};
+use crate::layout::{CODE_BASE, is_mmio};
 use std::collections::VecDeque;
 
 /// Modelled `i_Clk` cycles per retired instruction (timer, millisecond clock and
@@ -678,11 +678,7 @@ impl Cpu {
             return Some(stop);
         }
         self.advance(allow_irq);
-        if self.halted {
-            Some(StopReason::Halt)
-        } else {
-            self.stop
-        }
+        if self.halted { Some(StopReason::Halt) } else { self.stop }
     }
 
     /// Forget a TRAP / fault stop so execution can resume (the debugger has
@@ -993,11 +989,7 @@ impl Cpu {
         // 2-word forms (and the v3 short form, LEN=01 SGN=1 B=0) take a
         // sign/zero-extended immediate; other 1-word forms use rs2.
         let rhs = if len == 2 || short {
-            if sgn {
-                i64::from(imm32 as i32) as u64
-            } else {
-                u64::from(imm32)
-            }
+            if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) }
         } else {
             self.regs[rs2]
         };
@@ -1471,11 +1463,7 @@ impl Cpu {
         let a = self.regs[rs1];
         let is_imm = len == 2;
         let b = if is_imm {
-            if sgn {
-                i64::from(imm32 as i32) as u64
-            } else {
-                u64::from(imm32)
-            }
+            if sgn { i64::from(imm32 as i32) as u64 } else { u64::from(imm32) }
         } else {
             self.regs[rs2]
         };
