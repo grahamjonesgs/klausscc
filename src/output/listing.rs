@@ -10,7 +10,7 @@ use std::path::Path;
 /// Format a given string, adding spaces between groups of 4.
 ///
 /// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string.
-pub(crate) fn format_opcodes(input: &str) -> String {
+fn format_opcodes(input: &str) -> String {
     if input.len() == 4 {
         return format!("{input}              ");
     }

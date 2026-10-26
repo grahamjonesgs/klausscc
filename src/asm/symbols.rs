@@ -143,7 +143,7 @@ pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut Diagnostics) -> Vec<Lab
 /// Return program counter for label.
 ///
 /// Return option of program counter for label if it exists, or None.
-pub(crate) fn return_label_value(line: &str, labels: &[Label]) -> Option<u32> {
+fn return_label_value(line: &str, labels: &[Label]) -> Option<u32> {
     let line_upper = line.to_uppercase();
     for label in labels {
         if label.name.to_uppercase() == line_upper {

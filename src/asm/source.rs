@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 /// `None` if the line is not an `!include` (the first non-blank text must be
 /// `!include`); otherwise the first word after it, before any `//` comment,
 /// which is empty when the name is missing.
-pub(crate) fn include_target(input_line: &str) -> Option<&str> {
+fn include_target(input_line: &str) -> Option<&str> {
     let rest = input_line.trim_start().strip_prefix("!include")?;
     let rest = rest.find("//").map_or(rest, |comment| &rest[..comment]);
     Some(rest.split_whitespace().next().unwrap_or(""))

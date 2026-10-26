@@ -320,7 +320,7 @@ pub(crate) fn macro_from_string(input_line_full: &str, msg_list: &mut Diagnostic
 /// Extracts macro from string.
 ///
 /// Checks if end of first word is colon if so return macro name as option string.
-pub(crate) fn macro_name_from_string(line: &str) -> Option<String> {
+fn macro_name_from_string(line: &str) -> Option<String> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.starts_with('$') {
@@ -347,7 +347,7 @@ pub(crate) fn return_macro(line: &str, macros: &[Macro]) -> Option<Macro> {
 /// Update variables in a macro.
 ///
 /// Return option all vec string replacing %x with correct value.
-pub(crate) fn return_macro_items_replace(
+fn return_macro_items_replace(
     line: &str,
     macros: &mut [Macro],
     input_line_number: u32,

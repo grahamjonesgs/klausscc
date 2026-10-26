@@ -121,12 +121,7 @@ pub(crate) fn output_macros_opcodes_html(
 ///
 /// Writes all macros and opcodes to JSON files.
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-pub(crate) fn output_macros_opcodes_json(
-    filename_stem: String,
-    opcodes: &[Opcode],
-    macros: &[Macro],
-    msg_list: &mut Diagnostics,
-) -> Result<(), Error> {
+fn output_macros_opcodes_json(filename_stem: String, opcodes: &[Opcode], macros: &[Macro], msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut json_opcode_filename = filename_stem.clone();
     json_opcode_filename.push_str("_opcodes.json");
     let mut json_macro_filename = filename_stem;

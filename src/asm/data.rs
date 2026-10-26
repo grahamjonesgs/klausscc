@@ -11,7 +11,7 @@ const MAX_DATA_BYTES: i128 = 128 * 1024 * 1024;
 
 /// Why a data line could not be turned into bytes.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum DataError {
+enum DataError {
     /// The line is not a complete data definition (missing value, bad string, ...).
     Malformed,
     /// A numeric value is not a valid literal.
@@ -59,7 +59,7 @@ pub(crate) fn data_as_bytes(line: &str) -> Option<String> {
 /// Returns bytes for data element, or why the line is not valid data.
 ///
 /// The bytes are returned as a hex string (two characters per byte).
-pub(crate) fn data_bytes(line: &str) -> Result<String, DataError> {
+fn data_bytes(line: &str) -> Result<String, DataError> {
     let mut words = line.split_whitespace();
     let first_word = words.next().unwrap_or("");
     if first_word.is_empty() {
