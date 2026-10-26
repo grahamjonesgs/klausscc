@@ -1,7 +1,8 @@
 //! The libftdi1 binding and the MPSSE JTAG master on FT2232H channel A.
 //!
-//! Built with the `board` cargo feature (links the system libftdi1).  The
-//! command framing it sends lives in `mpsse`.
+//! Built with the `board` cargo feature (links the system libftdi1, which
+//! `build.rs` looks up with `pkg-config`).  The command framing it sends
+//! lives in `mpsse`.
 
 use super::mpsse::{
     DmiReq, IR_IDCODE, IR_LEN, IR_USER3, MPSSE_3PHASE_OFF, MPSSE_ADAPTIVE_OFF, MPSSE_CLK_DIV, MPSSE_DIV5_OFF, MPSSE_LOOPBACK_OFF,
