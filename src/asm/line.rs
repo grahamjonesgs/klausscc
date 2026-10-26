@@ -102,6 +102,7 @@ impl Emitted {
     /// [`byte_len`](Self::byte_len) long.  Each instruction word is stored
     /// little-endian, as the CPU's 32-bit reads expect.
     pub(crate) fn copy_to(&self, dest: &mut [u8]) {
+        debug_assert_eq!(dest.len(), self.byte_len(), "destination is not the line's length");
         match self {
             Self::None => {}
             Self::Code(words) => {

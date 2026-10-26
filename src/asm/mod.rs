@@ -274,6 +274,27 @@ mod tests {
         assert!(!msg_list.has_errors());
     }
 
+    #[test]
+    // Pass 1 gives every line the address just past the one before, so laying
+    // the lines out by address is the same as laying them end to end: inline
+    // data, the alignment pad and the deferred data section included.
+    fn image_by_address_is_the_lines_end_to_end() {
+        let source = "_start\nSETR A 0x41\n#MSG \"Hello\"\nHALT\n.data\nval:\n.word 0x1122334455667788\n.comm buf, 12\n";
+        let (lines, msg_list) = assemble_text(source);
+        assert_eq!(messages_of(&msg_list, MessageType::Error), vec![]);
+        assert!(lines.iter().any(|line| line.file_name == "<align>"), "no alignment pad");
+        let end_to_end: Vec<u8> = lines
+            .iter()
+            .flat_map(|line| {
+                let mut bytes = vec![0; line.emitted.byte_len()];
+                line.emitted.copy_to(&mut bytes);
+                bytes
+            })
+            .collect();
+        let image = Assembly { lines }.image().unwrap();
+        assert_eq!(image.bytes, end_to_end);
+    }
+
     /// A `Pass2` line of `line_type` at `program_counter` emitting `emitted`.
     fn line(line_type: LineType, program_counter: u32, emitted: Emitted) -> Pass2 {
         Pass2 {
