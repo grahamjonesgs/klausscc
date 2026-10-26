@@ -355,14 +355,18 @@ impl Cpu {
     /// When `trace` is `Some`, one line per retired instruction is written to the
     /// sink in the `doc/EMULATOR_ISA_SEMANTICS.md` "Trace format" layout.  The trace is
     /// streamed as the run proceeds rather than buffered, so a multi-million
-    /// instruction run costs no extra memory.
+    /// instruction run costs no extra memory.  The first failed write (e.g. a
+    /// broken pipe on stdout) stops the trace; the run carries on without it.
     pub fn run(&mut self, max_instructions: u64, mut trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
         let mut count: u64 = 0;
         while self.stop.is_none() && count < max_instructions {
             if let Some((pc, word)) = self.step_inner(true) {
                 count += 1;
-                if let Some(t) = trace.as_deref_mut() {
-                    self.trace_line(t, count, pc, word);
+                if let Some(t) = trace.as_deref_mut()
+                    && self.trace_line(t, count, pc, word).is_err()
+                {
+                    // A failed write (e.g. a broken pipe) ends the trace, not the run.
+                    trace = None;
                 }
             }
         }
@@ -375,28 +379,14 @@ impl Cpu {
     }
 }
 
-/// Emulate a flat DDR image starting at `entry`, buffering the trace into a `String`.
-///
-/// Returns the result and, if `want_trace`, the full trace text.  This buffers the
-/// whole trace in memory — fine for tests and short programs, but the CLI streams
-/// instead via [`emulate_image_to_writer`] to stay bounded on long runs.
-#[must_use]
-pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, want_trace: bool) -> (EmulateResult, Option<String>) {
-    let mut cpu = Cpu::new(image, entry);
-    let mut buf: Option<Vec<u8>> = want_trace.then(Vec::new);
-    let result = cpu.run(max_instructions, buf.as_mut().map(|b| b as &mut dyn std::io::Write));
-    let trace = buf.map(|b| String::from_utf8_lossy(&b).into_owned());
-    (result, trace)
-}
-
 /// Emulate a flat DDR image starting at `entry`, streaming the per-instruction
-/// trace to `trace` (if `Some`) as the run proceeds.
+/// trace to `trace` (if `Some`) as the run proceeds (see [`Cpu::run`]).
 ///
-/// Unlike [`emulate_image`], nothing is buffered: each retired instruction's line
-/// is written straight to the sink, so a multi-million instruction run uses no
-/// extra memory regardless of trace length.
+/// Nothing is buffered: each retired instruction's line is written straight to
+/// the sink, so a multi-million instruction run uses no extra memory
+/// regardless of trace length.
 #[must_use]
-pub fn emulate_image_to_writer(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
+pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
     cpu.run(max_instructions, trace)
 }

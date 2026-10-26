@@ -21,6 +21,13 @@ fn image_from_words(words: &[u32]) -> Vec<u8> {
     build_ddr_image(&code)
 }
 
+/// The trace of running `image` (at most 100 instructions).
+fn trace_of(image: &[u8]) -> String {
+    let mut buf = Vec::new();
+    let _ = emulate_image(image, default_entry(), 100, Some(&mut buf));
+    String::from_utf8(buf).expect("the trace is ASCII")
+}
+
 /// Run words and return the final CPU for assertions.
 fn run_words(words: &[u32]) -> Cpu {
     let img = image_from_words(words);
@@ -56,7 +63,7 @@ fn test_mmio_uart_tx() {
         HALT,
     ];
     let img = image_from_words(&words);
-    let (r, _) = emulate_image(&img, default_entry(), 100, false);
+    let r = emulate_image(&img, default_entry(), 100, None);
     assert_eq!(r.uart, b"Hi");
 }
 
@@ -721,8 +728,7 @@ fn test_setfr_layout() {
 fn test_trace_format() {
     // SETR A 0xFF ; HALT — first trace line reflects A=0xFF after commit.
     let img = image_from_words(&[setr(0, 0xFF)[0], setr(0, 0xFF)[1], HALT]);
-    let (_r, trace) = emulate_image(&img, default_entry(), 100, true);
-    let t = trace.expect("trace");
+    let t = trace_of(&img);
     let first = t.lines().next().expect("a line");
     assert!(first.starts_with("i=1 pc=00000020 op=8bd00000"), "got: {first}");
     assert!(first.contains(" r0=00000000000000ff"), "r0 not updated: {first}");
@@ -737,8 +743,7 @@ fn test_trace_format() {
 fn test_trace_memory_write_annotation() {
     // SETR A 0x200 ; SETR B 0xAA ; MEMSET64RR B A ; HALT — store line has wr=.
     let img = image_from_words(&[0x8BD0_0000, 0x200, 0x8BD0_0100, 0xAA, 0x5F00_0100, HALT]);
-    let (_r, trace) = emulate_image(&img, default_entry(), 100, true);
-    let t = trace.expect("trace");
+    let t = trace_of(&img);
     let store_line = t.lines().nth(2).expect("store line");
     assert!(store_line.contains(" wr=00000200/ff/"), "missing wr: {store_line}");
 }
@@ -751,11 +756,38 @@ fn test_setr64_full_width() {
     assert_eq!(cpu.regs[0], 0xDEAD_BEEF_CAFE_BABE);
 }
 
+/// A trace sink that fails every write, like stdout after its reader quits.
+#[derive(Default)]
+struct BrokenPipe {
+    /// Write calls made.
+    writes: usize,
+}
+
+impl std::io::Write for BrokenPipe {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        self.writes += 1;
+        Err(std::io::ErrorKind::BrokenPipe.into())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn test_trace_stops_at_the_first_write_error_and_the_run_goes_on() {
+    let img = image_from_words(&[setr(0, 1)[0], 1, setr(1, 2)[0], 2, HALT]);
+    let mut sink = BrokenPipe::default();
+    let r = emulate_image(&img, default_entry(), 100, Some(&mut sink));
+    assert_eq!(sink.writes, 1, "nothing is written after the first error");
+    assert_eq!((r.instructions, r.stop), (3, StopReason::Halt));
+}
+
 #[test]
 fn test_stale_v1_binary_traps() {
     // Any v1 word has bits [31:30] = 00 (LEN=00) -> ERR_INV_OPCODE on the first fetch.
     let img = image_from_words(&[0x0000_0800, 0xFF, 0x0000_F011]);
-    let (r, _) = emulate_image(&img, default_entry(), 100, false);
+    let r = emulate_image(&img, default_entry(), 100, None);
     assert!(matches!(r.stop, StopReason::InvalidOpcode(0x0000_0800)));
 }
 

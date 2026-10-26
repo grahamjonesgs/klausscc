@@ -65,7 +65,7 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
 #[cfg(not(tarpaulin_include))]
 fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions: u64, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut trace_writer = open_trace_writer(trace_file, msg_list)?;
-    let result = emu::emulate_image_to_writer(
+    let result = emu::emulate_image(
         &image.to_ddr(),
         image.entry,
         max_instructions,
@@ -279,7 +279,7 @@ pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macro
         return Err("assembly error".to_owned());
     };
 
-    let (result, _) = emu::emulate_image(&image.to_ddr(), image.entry, max_instructions, false);
+    let result = emu::emulate_image(&image.to_ddr(), image.entry, max_instructions, None);
     // Each byte as one `char` (Latin-1): every byte survives into the lines.
     let uart: String = result.uart.iter().copied().map(char::from).collect();
     let got: Vec<&str> = uart.lines().filter_map(hex_token).collect();
