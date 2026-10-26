@@ -183,7 +183,7 @@ pub(crate) struct Cli {
 /// What an `-i` input file holds, judged by its extension (case-insensitive).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum InputKind {
-    /// `.kla` assembly source (and, as before, a file with an empty name).
+    /// `.kla` assembly source.
     Source,
     /// A pre-built board wire-format image (`.kbt`), sent verbatim.
     Kbt,
@@ -197,7 +197,7 @@ impl InputKind {
         let lower = name.to_ascii_lowercase();
         if lower.ends_with(".kbt") {
             Self::Kbt
-        } else if name.is_empty() || lower.ends_with(".kla") {
+        } else if lower.ends_with(".kla") {
             Self::Source
         } else {
             Self::Binary
@@ -585,6 +585,23 @@ mod tests {
     }
 
     #[test]
+    // clap's PathBuf parser rejects an empty file name.  It used to reach the
+    // handlers: an unopenable input, or a file named just .code or .kbt.
+    fn empty_file_names_are_rejected() {
+        assert_rejected(&[
+            &["-i", ""],
+            &["-i", "prog.kla", "-o", ""],
+            &["-i", "prog.kla", "-b", ""],
+            &["-N", "", "--ip", "10.0.0.2"],
+            &["--mem-out", ""],
+            &["--mem-out", "prog.elf", "--mem-file", ""],
+            &["-L", "", "-s", "COM3"],
+            &["--emulate-test", ""],
+            &["-i", "prog.kla", "--emulate", "--trace="],
+        ]);
+    }
+
+    #[test]
     // -s with no value asks for the first USB serial port.
     fn serial_port_is_optional_valued() {
         let serial = |args: &[&str]| parse(args).unwrap().serial;
@@ -684,7 +701,6 @@ mod tests {
     fn input_kind_is_judged_by_extension() {
         assert_eq!(InputKind::of("prog.kla"), InputKind::Source);
         assert_eq!(InputKind::of("dir.v2/PROG.KLA"), InputKind::Source);
-        assert_eq!(InputKind::of(""), InputKind::Source);
         assert_eq!(InputKind::of("prog.kbt"), InputKind::Kbt);
         assert_eq!(InputKind::of("Prog.KBT"), InputKind::Kbt);
         assert_eq!(InputKind::of("prog.elf"), InputKind::Binary);
