@@ -5,7 +5,7 @@ of the FPGA repo's PIPELINE_PLAN.md). Extracted by reading the RTL task files
 (`KlaussCPU.srcs/sources_1/new/*.vh` + `KlaussCPU.v`) — the **silicon is the
 authority**, not `CPU_ARCHITECTURE.md`. The per-opcode *encodings* are the
 **ISA encoding v2** flag-day renumbering (`ISA_ENCODING_V2.md`), built in to the
-assembler's opcode table (`opcodes.rs::v2_opcodes`) — the old `--opcode`
+assembler's opcode table (`isa::table::v2_opcodes`) — the old `--opcode`
 `opcode_select.vh` file is gone. This file records only the EXECUTION semantics
 (identical to the v1 CPU) and the places the RTL **diverges from the
 architecture doc** — the high-value, easy-to-get-wrong cases.
