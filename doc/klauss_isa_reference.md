@@ -524,7 +524,7 @@ MINUR A A B       // A = unsigned min(A, B)
 
 `ADDI` and the in-place forms differ in the extension: `ADDI` sign-extends its immediate, while `ADDV`, `MINUSV`, `ANDV`, `ORV` and `XORV` zero-extend theirs. `ADDV A -1` therefore adds `0xFFFF_FFFF`, not -1; use `ADDI A A -1` or `DECR A`.
 
-The `.S` forms are one word long and take a literal only. The assembler accepts any value from -128 to 255 for every `.S` form, so mind the extension. `SETR.S A 200` sets A to -56, because `SETR.S`, `ADDI.S` and `CMPRV.S` sign-extend. `ADDV.S A -1` adds 255, because the other `.S` forms zero-extend.
+The `.S` forms are one word long and take a literal only. Each takes the values its extension can give: -128 to 127 for `SETR.S`, `ADDI.S` and `CMPRV.S`, which sign-extend, and 0 to 255 for the other `.S` forms, which zero-extend. Any other value is an assembly error, so `SETR.S A 200` and `ADDV.S A -1` do not assemble; use the 2-word form.
 
 ```
 SETR A 0xFF       // A = 0xFF

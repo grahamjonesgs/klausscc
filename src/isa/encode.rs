@@ -5,6 +5,7 @@
 use super::{Opcode, Operand, reg_index};
 use crate::asm::symbols::{OperandError, SymbolTable, resolve_operand};
 use crate::num::{parse_bits64, parse_int};
+use std::ops::RangeInclusive;
 
 /// A line's instruction words, as far as they could be encoded.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +46,9 @@ impl Encoded {
 pub(crate) enum EncodeFault {
     /// A shift/bit count (the token as written) outside the 6-bit field.
     CountRange(String),
+    /// A short-form 8-bit immediate (the token as written) outside the
+    /// values its extension can give.
+    Imm8Range(String, RangeInclusive<i128>),
     /// A register, count or short literal that is missing or malformed.
     Registers,
     /// An immediate or branch target with no value.
@@ -65,6 +69,9 @@ impl EncodeFault {
     pub(crate) fn message(&self, line: &str) -> String {
         match self {
             Self::CountRange(token) => format!("Count {token} out of range 0..=63 - \"{line}\""),
+            Self::Imm8Range(token, range) => {
+                format!("Immediate {token} out of range {}..={} - \"{line}\"", range.start(), range.end())
+            }
             Self::Registers => format!("Incorrect register definition - \"{line}\""),
             Self::Operand(error) => error.to_string(),
             Self::BranchRange { what, delta } => format!("{what} target out of range ({delta:+} bytes) - \"{line}\""),
@@ -133,8 +140,11 @@ fn word0_fields(opcode: &Opcode, tokens: &[&str]) -> Result<u32, EncodeFault> {
         token_idx += 1;
         let value = token.and_then(parse_simm);
         match op {
-            Operand::Imm8 => match value {
-                Some(v) if (-128..=255).contains(&v) => word0 |= ((v as u32) & 0xFF) << 12,
+            // Report a value the byte's extension cannot give rather than
+            // letting it wrap (SETR.S A 200 would set -56).
+            Operand::Imm8 => match (token, value) {
+                (_, Some(v)) if opcode.imm8_range().contains(&v) => word0 |= ((v as u32) & 0xFF) << 12,
+                (Some(token), Some(_)) => return Err(EncodeFault::Imm8Range(token.to_owned(), opcode.imm8_range())),
                 _ => ok = false,
             },
             Operand::Off8(shift) => {
@@ -444,6 +454,49 @@ mod tests {
         // Disassembly round-trips the scaled offset.
         let (text, vars) = Disassembler::new(V2_OPCODES).word(0x5AAF_F310).unwrap();
         assert_eq!((text.as_str(), vars), ("LDIDX32_S.S D B -4", 0));
+    }
+
+    #[test]
+    // Regression: every imm8 .S form took -128..=255, so SETR.S A 200 set -56
+    // and ADDV.S A -1 added 255. Each now takes only the values its
+    // extension can give (pipeline_core.sv:761-762).
+    fn test_v3_imm8_range_follows_extension() {
+        // (form with its register operands, sign-extended, word 0 with those
+        // registers: A is 0, B is 1)
+        let forms = [
+            ("SETR.S A", true, 0x4BD0_0000_u32),
+            ("ADDI.S A B", true, 0x4830_0010),
+            ("ADDV.S A", false, 0x4820_0000),
+            ("MINUSV.S A", false, 0x4860_0000),
+            ("ANDV.S A", false, 0x4900_0000),
+            ("ORV.S A", false, 0x4940_0000),
+            ("XORV.S A", false, 0x4980_0000),
+            ("CMPRV.S B", true, 0x4C10_0010),
+        ];
+        let imm8_forms: Vec<&str> = V2_OPCODES.iter().filter(|o| o.ops.contains(&Operand::Imm8)).map(|o| o.name).collect();
+        let listed: Vec<&str> = forms.iter().map(|(form, _, _)| form.split(' ').next().unwrap()).collect();
+        assert_eq!(imm8_forms, listed, "every imm8 form is checked");
+        for (form, signed, template) in forms {
+            let (lo, hi, below, above) = if signed { (-128, 127, -129, 128) } else { (0, 255, -1, 256) };
+            for (value, byte) in [(lo, lo & 0xFF), (hi, hi & 0xFF)] {
+                let line = format!("{form} {value}");
+                let want = template | ((byte as u32) << 12);
+                assert_eq!(hex(&line), format!("{want:08X}"), "{line}");
+                // And it disassembles to the line it came from.
+                let (text, _) = Disassembler::new(V2_OPCODES).word(want).unwrap();
+                assert_eq!(text, line);
+            }
+            for value in [below, above] {
+                let line = format!("{form} {value}");
+                let (partial, messages) = faults(&line);
+                assert_eq!(partial.hex(), "ERR     ", "{line}");
+                assert_eq!(messages, [format!("Immediate {value} out of range {lo}..={hi} - \"{line}\"")]);
+            }
+        }
+        // The two cases that used to wrap.
+        assert_eq!(faults("SETR.S A 200").1, ["Immediate 200 out of range -128..=127 - \"SETR.S A 200\""]);
+        assert_eq!(faults("ADDV.S A -1").1, ["Immediate -1 out of range 0..=255 - \"ADDV.S A -1\""]);
+        assert_eq!(hex("ADDV.S A 0xFF"), "482FF000");
     }
 
     #[test]

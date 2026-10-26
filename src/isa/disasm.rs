@@ -49,6 +49,8 @@ impl Disassembler {
                 Operand::Rs1 => write!(text, " {}", reg_name(word >> 4)),
                 Operand::Rs2 => write!(text, " {}", reg_name(word)),
                 Operand::Count => write!(text, " {}", (word >> 15) & 0x3F),
+                // As the source would write it, so the line reassembles.
+                Operand::Imm8 if opcode.imm8_signed() => write!(text, " {}", ((word >> 12) & 0xFF) as u8 as i8),
                 Operand::Imm8 => write!(text, " {}", (word >> 12) & 0xFF),
                 Operand::Off8(shift) => write!(text, " {}", i64::from((((word >> 12) & 0xFF) as u8) as i8) << shift),
                 Operand::Frame22 => write!(text, " {}", word & 0x3F_FFFF),
@@ -149,6 +151,8 @@ mod tests {
                     (reg.clone(), reg)
                 }
                 Operand::Count => ("37".to_owned(), "37".to_owned()),
+                // Outside the other extension's range, so a wrong one shows.
+                Operand::Imm8 if opcode.imm8_signed() => ("-100".to_owned(), "-100".to_owned()),
                 Operand::Imm8 => ("200".to_owned(), "200".to_owned()),
                 Operand::Off8(shift) => {
                     let offset = (-5_i64 << shift).to_string();

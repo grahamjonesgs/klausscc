@@ -428,11 +428,12 @@ reports an error if the value does not fit.
 | XORV.S   | `0x4980_0000` | r imm8 | zero-extended |
 | CMPRV.S  | `0x4C10_0000` | rs1 imm8 | sign-extended (always) |
 
-For every imm8 operand the assembler accepts −128..255 and stores the low
-8 bits. The instruction's SGN bit then decides how the CPU extends them, so
-**on a sign-extending form 128..255 become −128..−1** (`SETR.S A 200` sets
-A to −56), and on a zero-extending form −1 becomes 255. Use the 2-word form
-for values outside the form's own range. Flags are as for the 2-word form.
+The CPU extends the byte as the table says (`pipeline_core.sv:761-762`:
+class 3 always sign-extends, class 2 sign-extends when SGN `[20]` is set),
+so the assembler accepts **−128..127 on a sign-extending form and 0..255 on
+a zero-extending form**, and reports any other value as an error at the
+line (`SETR.S A 200` and `ADDV.S A -1` are errors). Use the 2-word form for
+values outside the form's range. Flags are as for the 2-word form.
 
 The short loads and stores take a **byte offset**. The offset must be a
 multiple of the access size, and offset / size must fit in a signed 8-bit

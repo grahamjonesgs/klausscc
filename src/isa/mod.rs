@@ -14,6 +14,7 @@ pub(crate) mod table;
 
 use serde::Serialize;
 use std::collections::HashMap;
+use std::ops::RangeInclusive;
 use table::V2_OPCODES;
 
 /// The register names, by register number (the value of a 4-bit register field).
@@ -48,8 +49,9 @@ pub(crate) enum Operand {
     Imm,
     /// 64-bit immediate appended as lo32@PC+4, hi32@PC+8.
     Imm64,
-    /// ISA v3 short form: literal 8-bit immediate → `word0[19:12]`
-    /// (-128..=255; the instruction's SGN bit picks the extension).
+    /// ISA v3 short form: literal 8-bit immediate → `word0[19:12]`, in
+    /// the range [`Opcode::imm8_range`] gives (the instruction picks sign or
+    /// zero extension).
     Imm8,
     /// ISA v3 short load/store: literal BYTE offset, a multiple of
     /// `1 << shift` whose scaled value fits simm8 → `word0[19:12]`.
@@ -127,6 +129,26 @@ impl Opcode {
     /// (imm32 → 1, imm64 → 2).
     pub(crate) fn imm_words(&self) -> u32 {
         self.ops.iter().map(|op| op.imm_words()).sum()
+    }
+
+    /// Whether this opcode's ISA v3 [`Operand::Imm8`] byte is sign-extended.
+    /// The RTL forms the short immediate in `f_short_imm`
+    /// (`pipeline_core.sv:761-762`): class 3 (`CMPRV.S`) always
+    /// sign-extends, and class 2 sign-extends when SGN `[20]` is set
+    /// (`SETR.S`, `ADDI.S`) and zero-extends otherwise (`ADDV.S`,
+    /// `MINUSV.S`, `ANDV.S`, `ORV.S`, `XORV.S`). The 32-bit value then
+    /// widens to 64 bits by the same SGN bit (`pipeline_core.sv:399,
+    /// 1954, 2007`), so the extension holds for the whole register.
+    pub(crate) const fn imm8_signed(&self) -> bool {
+        let class = (self.template >> 26) & 0xF;
+        class == 3 || self.template & (1 << 20) != 0
+    }
+
+    /// The literal values this opcode's [`Operand::Imm8`] accepts: those the
+    /// extended byte can stand for, -128..=127 when it is sign-extended and
+    /// 0..=255 when it is zero-extended.
+    pub(crate) const fn imm8_range(&self) -> RangeInclusive<i128> {
+        if self.imm8_signed() { -128..=127 } else { 0..=255 }
     }
 }
 
