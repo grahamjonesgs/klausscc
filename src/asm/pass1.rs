@@ -351,6 +351,26 @@ mod tests {
     }
 
     #[test]
+    // A `.zeropad` the source writes itself is never padded: written at 4 mod
+    // 8, it is what aligns the data after it, so no second pad goes in.
+    fn test_get_pass1_keeps_written_zeropad_unaligned() {
+        let mut msg_list = Diagnostics::new();
+        let pass0 = ["RET", ".zeropad 4", "buf:", ".word 0x41"]
+            .into_iter()
+            .zip(1..)
+            .map(|(text, line_counter)| SourceLine {
+                input_text_line: text.to_owned(),
+                file_name: String::new(),
+                line_counter,
+            })
+            .collect();
+        let pass1 = get_pass1(&mut msg_list, pass0, &Isa::v2());
+        let lines: Vec<(&str, u32)> = pass1.iter().map(|p| (p.input_text_line.as_str(), p.program_counter)).collect();
+        assert_eq!(lines, [("RET", 32), (".zeropad 4", 36), ("buf:", 40), (".word 0x41", 40)]);
+        assert!(!msg_list.has_errors());
+    }
+
+    #[test]
     // Test get_pass1 for correct vector returned, with correct program counters
     fn test_get_pass1_2() {
         let mut msg_list = Diagnostics::new();
