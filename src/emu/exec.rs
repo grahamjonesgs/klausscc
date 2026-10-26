@@ -543,7 +543,7 @@ impl Cpu {
     fn exec_store(&mut self, f: Fields) -> Exec {
         mem_legal(f, true)?;
         let size_bytes = 1_usize << f.field(24, 2);
-        let ea = self.ea(f) & store_align_mask(size_bytes, f.field(21, 2), f.bit(20));
+        let ea = self.ea(f) & store_align_mask(size_bytes, f.bit(20));
         let data = self.regs[f.rd];
         if size_bytes == 8 {
             self.write64(ea, data);
@@ -879,44 +879,30 @@ const fn bit_field(desc: u32) -> (u64, u64) {
 }
 
 /// Address-alignment mask for a class-6 **load** of `size_bytes` in addressing
-/// `mode` with the `A` (force-align) bit. Mirrors the per-instruction masking of
-/// the v1 CPU: `MEMGET32` is unaligned-tolerant while `LDIDX32` forces `&~3`;
-/// the register/absolute 64-bit reads align while the indexed ones stay raw
-/// unless `A=1`.
+/// `mode` with the `A` (force-align) bit, as the RTL forms the issue address
+/// (`pipeline_core.sv` :1180-1187): `MEMGET32` (`[rs1]`) is unaligned-tolerant
+/// while the other 32-bit loads align to 4; a 64-bit load aligns only with
+/// `A=1`, and otherwise RAM itself serves the aligned doubleword (see
+/// [`Cpu::read64`]).
 const fn load_align_mask(size_bytes: usize, mode: u32, force_align: bool) -> u32 {
     match size_bytes {
         2 => !1,
-        4 => {
-            if mode == 0 {
-                !0 // MEMGET32 — unaligned-tolerant
-            } else {
-                !3 // LDIDX32
-            }
-        }
-        8 => {
-            if mode == 1 && !force_align {
-                !0 // LDIDX64 — raw (A=0)
-            } else {
-                !7 // MEMREADRR / MEMGET64 / MEMREADR / LDIDX64A / LDIDX64R (aligned, like the store side)
-            }
-        }
-        _ => !0, // byte access: no masking
+        4 if mode == 0 => !0, // MEMGET32 — unaligned-tolerant
+        4 => !3,              // LDIDX32
+        8 if force_align => !7,
+        _ => !0, // byte access, and 64-bit with A=0
     }
 }
 
-/// Address-alignment mask for a class-7 **store**. Sub-word stores always align
-/// to their width; 64-bit stores align except the raw indexed `STIDX64` (A=0).
-const fn store_align_mask(size_bytes: usize, mode: u32, force_align: bool) -> u32 {
+/// Address-alignment mask for a class-7 **store** (`pipeline_core.sv`
+/// :1097-1116): sub-word stores align to their width; a 64-bit store aligns
+/// only with `A=1`, and otherwise RAM itself writes the aligned doubleword
+/// (see [`Cpu::write64`]).
+const fn store_align_mask(size_bytes: usize, force_align: bool) -> u32 {
     match size_bytes {
         2 => !1,
         4 => !3, // MEMSET32 / STIDX32
-        8 => {
-            if mode == 1 && !force_align {
-                !0 // STIDX64 — raw
-            } else {
-                !7 // MEMSET64RR / MEMSET64 / STIDX64A / MEMSETR / STIDX64R
-            }
-        }
+        8 if force_align => !7,
         _ => !0,
     }
 }

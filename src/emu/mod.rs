@@ -236,14 +236,22 @@ impl Cpu {
 
     /// Read a 64-bit little-endian doubleword.
     ///
+    /// A RAM access reaches the aligned doubleword that holds `addr`: the
+    /// RTL's data cache picks the doubleword by `addr[4:3]` and ignores
+    /// `addr[2:0]` (`mem_read_write.sv` :274-277, :569, :672-676, :818-822),
+    /// which is what a 64-bit load, POP, RET or IRET with an unaligned address
+    /// gets.  An MMIO read keeps the address as issued.
+    ///
     /// Takes `&mut self` because an MMIO read (`RX_DATA`) is read-to-consume and
     /// mutates the UART FIFO.  Instruction/immediate fetch uses `read32` instead,
     /// so this never fires on a code fetch.
     fn read64(&mut self, addr: u32) -> u64 {
-        self.note_access(addr, 8, Access::Load);
         if is_mmio(addr) {
+            self.note_access(addr, 8, Access::Load);
             return self.mmio_read(addr);
         }
+        let addr = addr & !7;
+        self.note_access(addr, 8, Access::Load);
         self.bytes(addr).map_or(0, u64::from_le_bytes)
     }
 
@@ -267,12 +275,21 @@ impl Cpu {
     }
 
     /// Write a 64-bit doubleword, record the write for the trace.
+    ///
+    /// As with [`Cpu::read64`], a RAM write lands on the aligned doubleword
+    /// that holds `addr` (all eight byte enables at `addr[4:3]`,
+    /// `mem_read_write.sv` :610-632, :725-745).  The trace records the address
+    /// as issued, as the RTL's `ret_wr_addr` does (`pipeline_core.sv` :1895).
     fn write64(&mut self, addr: u32, val: u64) {
-        self.note_access(addr, 8, Access::Store);
         if is_mmio(addr) {
+            self.note_access(addr, 8, Access::Store);
             self.mmio_write(addr, val);
-        } else if let Some(dst) = self.mem.get_mut(addr as usize..addr as usize + 8) {
-            dst.copy_from_slice(&val.to_le_bytes());
+        } else {
+            let at = (addr & !7) as usize;
+            self.note_access(at as u32, 8, Access::Store);
+            if let Some(dst) = self.mem.get_mut(at..at + 8) {
+                dst.copy_from_slice(&val.to_le_bytes());
+            }
         }
         self.last_write = Some(MemWrite {
             addr,

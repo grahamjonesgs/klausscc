@@ -1321,3 +1321,64 @@ fn lcd_words_are_legal_no_ops() {
     assert_eq!(cpu.stop, Some(StopReason::Halt));
     assert_eq!(cpu.regs, [0; 16]);
 }
+
+// ---- 64-bit accesses reach the aligned doubleword (mem_read_write.sv) -----
+
+/// The 16 RAM bytes at `addr`.
+fn ram16(cpu: &Cpu, addr: u32) -> [u8; 16] {
+    let mut buf = [0; 16];
+    assert_eq!(cpu.debug_read(addr, &mut buf), 16);
+    buf
+}
+
+#[test]
+fn unaligned_64bit_load_and_store_use_the_aligned_doubleword() {
+    // The data cache selects the doubleword by addr[4:3] and ignores
+    // addr[2:0] for reads and writes (mem_read_write.sv:274-277, :610-632,
+    // :672-676), and LDIDX64/STIDX64 (A=0) issue the address unaligned
+    // (pipeline_core.sv:1113, :1185).
+    // SETR A 0x1000 ; SETR64 B v ; STIDX64 B A 3 ; LDIDX64 C A 5 ;
+    // SETR A 0x1006 ; MEMREADRR D A ; MEMSET64RR B A ; HALT
+    let v: u64 = 0x1122_3344_5566_7788;
+    let words = [
+        0x8BD0_0000,
+        0x1000, // SETR A 0x1000
+        0xCBC0_0100,
+        v as u32,
+        (v >> 32) as u32, // SETR64 B v
+        0x9F20_0100,
+        3, // STIDX64 B -> [A + 3]
+        0x9B20_0200,
+        5, // LDIDX64 C <- [A + 5]
+        0x8BD0_0000,
+        0x1006,      // SETR A 0x1006
+        0x5B00_0300, // MEMREADRR D <- [A]
+        0x5F00_0100, // MEMSET64RR B -> [A]
+        HALT,
+    ];
+    let cpu = run_words(&words);
+    assert_eq!(cpu.regs[2], v, "LDIDX64 at 0x1005 reads the doubleword at 0x1000");
+    assert_eq!(cpu.regs[3], v, "MEMREADRR at 0x1006 too");
+    let mut want = [0; 16];
+    want[..8].copy_from_slice(&v.to_le_bytes());
+    assert_eq!(ram16(&cpu, 0x1000), want, "the stores wrote 0x1000..0x1008 only");
+    // The trace shows the address as issued (ret_wr_addr = mem_iaddr,
+    // pipeline_core.sv:1895).
+    let t = trace_of(&image_from_words(&words));
+    let store_line = t.lines().nth(2).expect("store line");
+    assert!(store_line.contains(" wr=00001003/ff/1122334455667788"), "{store_line}");
+}
+
+#[test]
+fn unaligned_sp_pushes_and_pops_the_aligned_doubleword() {
+    // PUSH/POP issue SP-8 / SP unaligned (pipeline_core.sv:1118-1128); RAM
+    // serves the aligned doubleword.  SETR A 0x2004 ; SETSP A ; SETR B 0xAB ;
+    // PUSH B ; POP C ; HALT
+    let words = [0x8BD0_0000, 0x2004, 0x6500_0000, 0x8BD0_0100, 0xAB, 0x6400_0010, 0x6480_0200, HALT];
+    let cpu = run_words(&words);
+    assert_eq!(cpu.regs[2], 0xAB);
+    assert_eq!(cpu.sp, 0x2004);
+    let mut want = [0; 16];
+    want[0] = 0xAB;
+    assert_eq!(ram16(&cpu, 0x1FF8), want, "the push wrote 0x1FF8..0x2000");
+}
