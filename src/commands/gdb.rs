@@ -20,13 +20,13 @@ pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Di
     let binary_path = input.path;
     let Loaded { image, elf } = load_flat(input, msg_list)?;
     let code_base = u64::from(CODE_BASE);
-    if let Some(elf) = &elf {
-        if elf.base != code_base {
-            msg_list.warning(format!(
-                "ELF {binary_path} is linked at 0x{:08X}, not 0x{code_base:08X}: debugger addresses will not match the emulator's",
-                elf.base
-            ));
-        }
+    if let Some(elf) = &elf
+        && elf.base != code_base
+    {
+        msg_list.warning(format!(
+            "ELF {binary_path} is linked at 0x{:08X}, not 0x{code_base:08X}: debugger addresses will not match the emulator's",
+            elf.base
+        ));
     }
     msg_list.print_summary();
 

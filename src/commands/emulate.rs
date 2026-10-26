@@ -48,10 +48,10 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
     if let Some(w) = writer.as_mut() {
         let _ = w.flush();
     }
-    if let Some(path) = trace_file {
-        if path != "-" {
-            msg_list.info(format!("Wrote {instructions} instruction trace lines to {path}"));
-        }
+    if let Some(path) = trace_file
+        && path != "-"
+    {
+        msg_list.info(format!("Wrote {instructions} instruction trace lines to {path}"));
     }
 }
 

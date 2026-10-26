@@ -535,11 +535,9 @@ impl Cpu {
                 self.skip_to_timer_expiry();
             }
         }
-        if allow_irq {
-            if let Some(src) = self.irq_ready() {
-                self.take_irq(src);
-                return None;
-            }
+        if allow_irq && let Some(src) = self.irq_ready() {
+            self.take_irq(src);
+            return None;
         }
         let pc = self.pc;
         if (pc as usize) + 4 > self.mem.len() {

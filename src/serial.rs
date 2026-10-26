@@ -93,10 +93,10 @@ pub(crate) fn find_possible_port() -> Option<String> {
             let mut matching: Vec<String> = ports
                 .into_iter()
                 .filter_map(|port| {
-                    if let SerialPortType::UsbPort(info) = port.port_type {
-                        if check_usb_serial_possible(&info) {
-                            return Some(port.port_name);
-                        }
+                    if let SerialPortType::UsbPort(info) = port.port_type
+                        && check_usb_serial_possible(&info)
+                    {
+                        return Some(port.port_name);
                     }
                     None
                 })
@@ -113,11 +113,11 @@ pub(crate) fn find_possible_port() -> Option<String> {
 #[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
 fn return_port(port_name: &str, msg_list: &mut Diagnostics) -> Result<Box<dyn SerialPort>, Error> {
     let mut local_port_name = port_name.to_owned();
-    if port_name == AUTO_SERIAL {
-        if let Some(suggested_port) = find_possible_port() {
-            msg_list.info(format!("No port name given, using automatic port {suggested_port}"));
-            local_port_name = suggested_port;
-        }
+    if port_name == AUTO_SERIAL
+        && let Some(suggested_port) = find_possible_port()
+    {
+        msg_list.info(format!("No port name given, using automatic port {suggested_port}"));
+        local_port_name = suggested_port;
     }
 
     let port_result = serialport::new(local_port_name.clone(), 3_000_000)
@@ -405,16 +405,16 @@ impl StdinForwarder {
         let handle = thread::spawn(move || {
             while thread_running.load(Ordering::Relaxed) {
                 // Poll with a short timeout so we can check `running` regularly.
-                if let Ok(true) = event::poll(Duration::from_millis(100)) {
-                    if let Ok(Event::Key(key)) = event::read() {
-                        match key_action(&key) {
-                            KeyAction::Stop => {
-                                thread_running.store(false, Ordering::Relaxed);
-                                break;
-                            }
-                            KeyAction::Send(bytes) => drop(write_port.write_all(&bytes)),
-                            KeyAction::Ignore => {}
+                if let Ok(true) = event::poll(Duration::from_millis(100))
+                    && let Ok(Event::Key(key)) = event::read()
+                {
+                    match key_action(&key) {
+                        KeyAction::Stop => {
+                            thread_running.store(false, Ordering::Relaxed);
+                            break;
                         }
+                        KeyAction::Send(bytes) => drop(write_port.write_all(&bytes)),
+                        KeyAction::Ignore => {}
                     }
                 }
             }

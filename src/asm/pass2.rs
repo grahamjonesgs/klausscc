@@ -18,10 +18,10 @@ pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, oplist: &
             let mut opcode = add_registers(oplist, &code, &line.file_name, msg_list, line.line_counter);
             // ISA v3 PC-relative targets need this line's address.
             let rel = pc_relative_bits(oplist, &code, line.program_counter, labels, msg_list, line.line_counter, &line.file_name);
-            if rel != 0 {
-                if let Some(w0) = opcode.get(..8).and_then(|h| u32::from_str_radix(h, 16).ok()) {
-                    opcode = format!("{:08X}{}", w0 | rel, &opcode[8..]);
-                }
+            if rel != 0
+                && let Some(w0) = opcode.get(..8).and_then(|h| u32::from_str_radix(h, 16).ok())
+            {
+                opcode = format!("{:08X}{}", w0 | rel, &opcode[8..]);
             }
             opcode.push_str(&add_arguments(oplist, &code, msg_list, line.line_counter, &line.file_name, labels));
             opcode

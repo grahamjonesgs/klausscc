@@ -101,12 +101,12 @@ pub(crate) fn add_arguments(
     if num_arguments == 2 {
         let words_vec: Vec<&str> = line.split_whitespace().collect();
         let val_idx = num_registers as usize + 1;
-        if words_vec.len() == val_idx + 1 {
-            if let Some(val64) = parse_imm64(words_vec[val_idx]) {
-                let lo32 = (val64 & 0xFFFF_FFFF) as u32;
-                let hi32 = ((val64 >> 32) & 0xFFFF_FFFF) as u32;
-                return format!("{lo32:08X}{hi32:08X}");
-            }
+        if words_vec.len() == val_idx + 1
+            && let Some(val64) = parse_imm64(words_vec[val_idx])
+        {
+            let lo32 = (val64 & 0xFFFF_FFFF) as u32;
+            let hi32 = ((val64 >> 32) & 0xFFFF_FFFF) as u32;
+            return format!("{lo32:08X}{hi32:08X}");
         }
     }
 
@@ -528,10 +528,10 @@ pub(crate) fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     // For 16'h: read XXXX (4 chars), prepend '0000' → 8 hex digits.
     let hex_code: String = if let Some(location) = input_line.find("32'h") {
         // Check if the 32'h marker is preceded by a line comment (i.e. it is commented out)
-        if let Some(comment_loc) = input_line.find("//") {
-            if comment_loc < location {
-                return None;
-            }
+        if let Some(comment_loc) = input_line.find("//")
+            && comment_loc < location
+        {
+            return None;
         }
         let pos = location + 4;
         // Need XXXX_XXXX (9 chars) after "32'h"
@@ -544,10 +544,10 @@ pub(crate) fn opcode_from_string(input_line: &str) -> Option<Opcode> {
     } else {
         let location = input_line.find("16'h")?;
         // Legacy format: check if commented out
-        if let Some(comment_loc) = input_line.find("//") {
-            if comment_loc < location {
-                return None;
-            }
+        if let Some(comment_loc) = input_line.find("//")
+            && comment_loc < location
+        {
+            return None;
         }
         let pos = location + 4;
         // Need XXXX (4 chars) after "16'h"
