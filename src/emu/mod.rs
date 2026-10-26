@@ -47,7 +47,7 @@
 //!
 //! [`Cpu`](crate::emu::Cpu) and the run entry points live here, with the memory helpers.  The
 //! rest of the machine is split by concern: `exec` decodes and executes one
-//! instruction, `mmio` models the UART, interrupt controller / timer and
+//! instruction, `flags` is the `Z S C V` register and its saved layouts, `mmio` models the UART, interrupt controller / timer and
 //! performance counters, `debug` is the debugger's view (registers, memory,
 //! watchpoints, stop reasons) and `trace` writes the per-instruction trace.
 
