@@ -128,168 +128,66 @@ pub(crate) fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::isa::table::v2_opcodes;
 
     #[test]
-    // Test that the correct number of registers is returned
-    fn test_num_registers1() {
-        let input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 1,
-            section: String::default(),
-        });
-        let output = num_registers(opcodes, &input);
-        assert_eq!(output, Some(1));
+    // The register/count operands of an opcode are counted; unknown names are None
+    fn test_num_registers() {
+        let opcodes = v2_opcodes();
+        assert_eq!(num_registers(&opcodes, "PUSH"), Some(1));
+        assert_eq!(num_registers(&opcodes, "ADDR A B C"), Some(3));
+        assert_eq!(num_registers(&opcodes, "RET"), Some(0));
+        assert_eq!(num_registers(&opcodes, "PULL"), None);
+        assert_eq!(num_registers(&opcodes, ""), None);
     }
 
     #[test]
-    // Test that the None is returned if the opcode is not found
-    fn test_num_registers2() {
-        let input = String::from("PULL");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 1,
-            section: String::default(),
-        });
-        let output = num_registers(opcodes, &input);
-        assert_eq!(output, None);
-    }
-    #[test]
-    // Test that the correct number of arguments is returned
+    // An opcode without immediates has no argument words
     fn test_num_arguments1() {
-        let input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 1,
-            section: String::default(),
-        });
-        let output = num_registers(opcodes, &input);
-        assert_eq!(output, Some(1));
+        assert_eq!(num_arguments(&v2_opcodes(), "PUSH A"), Some(0));
     }
+
     #[test]
-    // Test that the correct number of arguments is returned
+    // A 32-bit immediate is one argument word, whatever the case of the mnemonic
     fn test_num_arguments2() {
-        let input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 2,
-            section: String::default(),
-        });
-        let output = num_registers(opcodes, &input);
-        assert_eq!(output, Some(2));
+        let opcodes = v2_opcodes();
+        assert_eq!(num_arguments(&opcodes, "SETR A 5"), Some(1));
+        assert_eq!(num_arguments(&opcodes, "setr A 5"), Some(1));
     }
 
     #[test]
-    // Test that the correct number of arguments is returned 2 variable 2 registers
+    // A 64-bit immediate is two argument words
     fn test_num_arguments3() {
-        let input = String::from("PUSH ddd yyy");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 2,
-            registers: 2,
-            section: String::default(),
-        });
-        let output = num_registers(opcodes, &input);
-        assert_eq!(output, Some(2));
+        let opcodes = v2_opcodes();
+        assert_eq!(num_arguments(&opcodes, "SETR64 A 0x1_0000_0000"), Some(2));
+        assert_eq!(num_arguments(&opcodes, "PUSHV64 1 2"), Some(2));
     }
 
     #[test]
-    // Test that None is returned if the opcode is not found
+    // None is returned if the opcode is not found
     fn test_num_arguments4() {
-        let input = String::from("PUSH2");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 2,
-            section: String::default(),
-        });
-        let output = num_registers(opcodes, &input);
-        assert_eq!(output, None);
+        assert_eq!(num_arguments(&v2_opcodes(), "PUSH2 A B"), None);
     }
 
     #[test]
-    // Test that None is returned if the opcode is blank
+    // None is returned if the line is blank
     fn test_num_arguments5() {
-        let input = String::default();
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 2,
-            section: String::default(),
-        });
-        let output = num_registers(opcodes, &input);
-        assert_eq!(output, None);
+        let opcodes = v2_opcodes();
+        assert_eq!(num_arguments(&opcodes, ""), None);
+        assert_eq!(num_arguments(&opcodes, "   "), None);
     }
 
     #[test]
-    // Test that the correct opcode is returned
+    // The opcode's template is returned as 8 hex digits, whatever the case of the mnemonic
     fn test_return_opcode1() {
-        let input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 2,
-            section: String::default(),
-        });
-        let output = return_opcode(&input, opcodes);
-        assert_eq!(output, Some(String::from("1234")));
+        let opcodes = v2_opcodes();
+        assert_eq!(return_opcode("PUSH A", &opcodes), Some(String::from("64000000")));
+        assert_eq!(return_opcode("halt", &opcodes), Some(String::from("6C010000")));
     }
 
     #[test]
     // Test that None is returned if the opcode is not found
     fn test_return_opcode2() {
-        let input = String::from("PUSH2");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 2,
-            section: String::default(),
-        });
-        let output = return_opcode(&input, opcodes);
-        assert_eq!(output, None);
+        assert_eq!(return_opcode("PUSH2", &v2_opcodes()), None);
     }
-
-    // -------------------------------------------------------------------------
-    // 32-bit format (32'hXXXX_XXXX) tests
-    // -------------------------------------------------------------------------
 }

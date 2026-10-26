@@ -47,88 +47,33 @@ pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, oplist: &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::isa::table::v2_opcodes;
 
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
     fn test_get_pass2_1() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("0000001X"),
-            ops: Vec::new(),
-            comment: String::new(),
-            variables: 0,
-            registers: 1,
-            section: String::new(),
-        });
-        opcodes.push(Opcode {
-            text_name: String::from("MOVR"),
-            hex_code: String::from("0000007X"),
-            ops: Vec::new(),
-            comment: String::new(),
-            variables: 1,
-            registers: 1,
-            section: String::new(),
-        });
-        opcodes.push(Opcode {
-            text_name: String::from("MOV"),
-            hex_code: String::from("00000020"),
-            ops: Vec::new(),
-            comment: String::new(),
-            variables: 2,
-            registers: 0,
-            section: String::new(),
-        });
-        opcodes.push(Opcode {
-            text_name: String::from("RET"),
-            hex_code: String::from("00000030"),
-            ops: Vec::new(),
-            comment: String::new(),
-            variables: 0,
-            registers: 0,
-            section: String::new(),
-        });
-        opcodes.push(Opcode {
-            text_name: String::from("DELAY"),
-            hex_code: String::from("00000040"),
-            ops: Vec::new(),
-            comment: String::new(),
-            variables: 1,
-            registers: 0,
-            section: String::new(),
-        });
-
-        opcodes.push(Opcode {
-            text_name: String::from("DMOV"),
-            hex_code: String::from("00000AXX"),
-            ops: Vec::new(),
-            comment: String::new(),
-            variables: 2,
-            registers: 2,
-            section: String::new(),
-        });
-
+        let opcodes = &v2_opcodes();
         let pass2 = get_pass2(
             &mut msg_list,
             vec![
                 Pass1 {
-                    input_text_line: "MOV 0xEEEEEEEE 0xFFFFFFFF".to_owned(),
+                    input_text_line: "PUSHV64 0xEEEEEEEE 0xFFFFFFFF".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 1,
                     program_counter: 0,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input_text_line: "DELAY 0x7".to_owned(),
+                    input_text_line: "DELAYV 0x7".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 1,
                     program_counter: 1,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input_text_line: "PUSH A".to_owned(),
+                    input_text_line: "PUSH B".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 2,
                     program_counter: 3,
@@ -149,14 +94,14 @@ mod tests {
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input_text_line: "MOVR C 0xAAAA".to_owned(),
+                    input_text_line: "SETR C 0xAAAA".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
                     line_type: LineType::Opcode,
                 },
                 Pass1 {
-                    input_text_line: "DMOV D E 0xA 0xB".to_owned(),
+                    input_text_line: "SETR64 D 0xA 0xB".to_owned(),
                     file_name: String::from("test"),
                     line_counter: 3,
                     program_counter: 5,
@@ -180,13 +125,13 @@ mod tests {
             opcodes,
             &labels,
         );
-        assert_eq!(pass2[0].opcode, "00000020EEEEEEEEFFFFFFFF");
-        assert_eq!(pass2[1].opcode, "0000004000000007");
-        assert_eq!(pass2[2].opcode, "00000010");
-        assert_eq!(pass2[3].opcode, "00000030");
-        assert_eq!(pass2[4].opcode, "00000030");
-        assert_eq!(pass2[5].opcode, "000000720000AAAA");
-        assert_eq!(pass2[6].opcode, "00000A340000000A0000000B");
+        assert_eq!(pass2[0].opcode, "E4400000EEEEEEEEFFFFFFFF");
+        assert_eq!(pass2[1].opcode, "AC05000000000007");
+        assert_eq!(pass2[2].opcode, "64000010");
+        assert_eq!(pass2[3].opcode, "65800000");
+        assert_eq!(pass2[4].opcode, "65800000");
+        assert_eq!(pass2[5].opcode, "8BD002000000AAAA");
+        assert_eq!(pass2[6].opcode, "CBC003000000000A0000000B");
         assert_eq!(pass2[7].opcode, "0000000248454C4C4F00000000000000"); // padded to 2 × 64-bit words
         assert_eq!(pass2[8].opcode, "");
     }
@@ -196,16 +141,7 @@ mod tests {
     fn test_get_pass2_2() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("0000001X"),
-            ops: Vec::new(),
-            comment: String::new(),
-            variables: 0,
-            registers: 1,
-            section: String::new(),
-        });
+        let opcodes = &v2_opcodes();
         let pass2 = get_pass2(
             &mut msg_list,
             vec![Pass1 {
@@ -219,5 +155,7 @@ mod tests {
             &labels,
         );
         assert_eq!(pass2[0].opcode, "ERR     ");
+        assert_eq!(pass2[0].line_type, LineType::Error);
+        assert_eq!(msg_list.messages()[0].text(), "Opcode not found - \"TEST\"");
     }
 }
