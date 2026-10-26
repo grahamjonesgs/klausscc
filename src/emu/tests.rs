@@ -824,10 +824,17 @@ fn bextr_extracts_the_field_and_always_sets_z() {
 }
 
 #[test]
-fn bextr_reads_the_low_32_bits_and_zero_extends() {
+fn bextr_reads_the_full_register_and_zero_extends() {
     // SETR A 0x80000000 sign-extends to 0xFFFFFFFF_80000000 ; BEXTR B A start 28 len 4 -> 8.
     let cpu = run_words(&[0x8BD0_0000, 0x8000_0000, 0x9300_0100, 0x041C, HALT]);
     assert_eq!(cpu.regs[1], 8);
+    // start 28 len 8 crosses bit 32: like the RTL's 64-bit shift, bits [35:32]
+    // come from the upper word -> 0xF8 (not 0x08 from the low word alone).
+    let cpu = run_words(&[0x8BD0_0000, 0x8000_0000, 0x9300_0100, 0x081C, HALT]);
+    assert_eq!(cpu.regs[1], 0xF8);
+    // start 31 len 31 takes rs1[61:31] -> 31 ones.
+    let cpu = run_words(&[0x8BD0_0000, 0x8000_0000, 0x9300_0100, 0x1F1F, HALT]);
+    assert_eq!(cpu.regs[1], 0x7FFF_FFFF);
     // len 31 from start 0 keeps bits [30:0] only.
     let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x9300_0100, 0x1F00, HALT]);
     assert_eq!(cpu.regs[1], 0x7FFF_FFFF);

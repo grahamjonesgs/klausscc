@@ -376,11 +376,13 @@ impl Cpu {
                 }
             }
             12 => {
-                // BEXTR — extract the imm-described field of the low 32 bits.
-                // Z is always set from the result: the RTL writes it back with
-                // set_zero (f_bextr) / fmask.zero (pipeline), although F is clear.
+                // BEXTR — extract the imm-described field of rs1.  The RTL
+                // shifts the full 64-bit register (pipeline_core U_BEXTR), so a
+                // field with start+len > 32 takes bits from rs1[63:32]; the
+                // result is at most 31 bits, zero-extended.  Z is always set
+                // from the result (fmask.zero), although F is clear.
                 let (start, mask) = bit_field(f.imm32);
-                self.write_z(rd, ((a & 0xFFFF_FFFF) >> start) & mask, true);
+                self.write_z(rd, (a >> start) & mask, true);
             }
             13 => {
                 // BDEP — deposit rs2's low field into rs1 (the base) at start;
@@ -680,7 +682,8 @@ const fn ext(imm: u32, signed: bool) -> u64 {
 /// `(start, mask)`, the mask covering `len` low bits.
 ///
 /// Both fields are 5 bits, so a field is 0..=31 bits wide and starts at bit
-/// 0..=31 of the low word.  `len` 0 is an empty field: BEXTR yields 0 (and
+/// 0..=31 (BEXTR may read past bit 31 of rs1; BDEP stays within the low
+/// word).  `len` 0 is an empty field: BEXTR yields 0 (and
 /// sets Z), BDEP deposits nothing and just zero-extends the base's low 32 bits.
 const fn bit_field(desc: u32) -> (u64, u64) {
     let start = (desc & 0x1F) as u64;
