@@ -95,7 +95,7 @@ That is the rate the bitstream fixes for the board UART.
 - `emulator_corpus_passes` (in `src/commands/emulate.rs`) assembles every
   `.kla` here that lists expected values and checks them on the emulator. It
   is the same check as `klausscc --emulate-test tests/fixtures`. It also fails
-  if fewer than 22 files pass, so a test that stops declaring its values is
+  if fewer than 23 files pass, so a test that stops declaring its values is
   noticed.
 - `tests/roundtrip.rs` runs `v2_hello.kla`, `v2_loop.kla` and `v2_math.kla`
   with `--emulate` and checks the exact characters they print.
@@ -121,7 +121,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 09 | `test_stack.kla` | Stack | PUSH, POP, PUSHV, LIFO ordering |
 | 10 | `test_call_ret.kla` | Subroutines | CALL, RET, nested calls, CALLE, CALLNE |
 | 11 | `test_io.kla` | Step sequence | Prints the step numbers 1 to 10, pausing after each; it does not use the LED, 7-segment, switch or RGB registers. No expected values, so it is skipped |
-| 12 | `test_strings.kla` | String data | `#name "string"` data layout, read back with MEMGET32 |
+| 12 | `test_strings.kla` | String data | `#name "string"` data layout, read back a byte at a time with LDIDX8 |
 | 13 | `test_edge_cases.kla` | Edge cases | Zero wrap, max values, sign boundary, all 16 registers |
 | 14 | `test_sign_extend.kla` | Type conversion | SEXTB, SEXTH, ZEXTB, ZEXTH |
 | 15 | `test_indexed_mem.kla` | Indexed memory | STIDX64, LDIDX64, STIDX64R, LDIDX64R |
@@ -131,6 +131,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 19 | `test_compare_ext.kla` | Comparison | Signed/unsigned jumps after CMPRR, MINR, MAXR, MINUR, MAXUR, CALLZ, CALLNZ, JMPR |
 | 20 | `test_algorithms.kla` | Algorithms | Fibonacci, bubble sort, GCD, prime detection |
 | 21 | `test_benchmark.kla` | Stress | Binary search, bit ops, high multiply, carry flags, indexed memory |
+| 22 | `test_txstr.kla` | String data | `#name "string"` printed with `$TXSTR`: several words, `\n`, an empty string |
 
 ### Other fixtures
 
@@ -391,6 +392,14 @@ FFFFFFFE
 00000006
 00000008
 00000013
+```
+
+### test_txstr (22)
+```
+11111111
+2222BBBB
+CAFEF00D
+600DC0DE
 ```
 
 ## Notes

@@ -117,6 +117,51 @@ mod tests {
     }
 
     #[test]
+    // The listing of a real program with a string, as the reference shows it
+    // (doc/klauss_isa_reference.md, "The .code Listing"): the string is its
+    // bytes in memory order, NUL-padded to one 64-bit row.
+    fn test_listing_of_string_program() {
+        use crate::asm::assemble_lines;
+        use crate::asm::line::SourceLine;
+        use crate::asm::macros::{builtin_macros, expand_embedded_macros};
+        use crate::isa::Isa;
+
+        let source = "_start\nSETR A 5\nLOOP:\nDECR A\nJMPNZ LOOP:\nHALT\n#S \"Hello\"\n.word 7";
+        let mut msg_list = Diagnostics::new();
+        let macro_list = expand_embedded_macros(builtin_macros(), &mut msg_list);
+        let lines = source
+            .lines()
+            .zip(1..)
+            .map(|(line, line_counter)| SourceLine {
+                file_name: "test.kla".to_owned(),
+                input_text_line: line.to_owned(),
+                line_counter,
+            })
+            .collect();
+        let assembly = assemble_lines(lines, &Isa::v2(), &macro_list, &mut msg_list);
+        assert!(!msg_list.has_errors());
+        let mut listing = Vec::new();
+        write_listing(&mut listing, &assembly.lines).unwrap();
+        assert_eq!(
+            String::from_utf8(listing).unwrap(),
+            "\
+0x00000000: 0000000000000048                  -- heap_start  (set by assembler)
+0x00000008: 0000000000000000                  -- heap_end    (reserved)
+0x00000010: 0000000000000000                  -- (reserved)
+0x00000018: 0000000000000000                  -- (reserved)
+                              -- _start
+0x00000020: 8BD00000 00000005 -- SETR A 5
+0x00000028:                   -- LOOP:
+0x00000028: 57C80000          -- DECR A
+0x0000002C: A00C0000 00000028 -- JMPNZ LOOP:
+0x00000034: 6C010000          -- HALT
+0x00000038: 6C6C65480000006F                  -- #S \"Hello\"
+0x00000040: 0000000700000000                  -- .word 7
+"
+        );
+    }
+
+    #[test]
     fn test_write_code_output_file() {
         let tmp_dir = TempDir::new().unwrap();
         let mut msg_list = Diagnostics::new();

@@ -314,7 +314,7 @@ Data is placed in memory where it appears in the source, unless it is in a data 
 | Directive | Emits |
 |-----------|-------|
 | `#name N` | `N` zeroed 64-bit words (8 × N bytes), and defines `#name` as their address. `N` is 1 to 16777216 (128 MiB). |
-| `#name "text"` | A length-prefixed string (layout below), and defines `#name` as its address |
+| `#name "text"` | A NUL-terminated string (layout below), and defines `#name` as its address |
 | `.word V` | One 64-bit word holding `V`, little-endian |
 | `.space N` | `N` zero bytes, rounded up to a whole number of 8-byte words. `N` is 1 to 128 MiB. |
 | `.zeropad N` | Exactly `N` zero bytes. `N` must be a multiple of 4. |
@@ -341,15 +341,15 @@ HALT
 
 ### Strings
 
-`#name "text"` stores:
+`#name "text"` stores a C string:
 
-- one 32-bit word holding the number of 32-bit character words that follow, then
-- the characters, packed four to a 32-bit word with the **first character in the most significant byte**, padded with NUL bytes. There is always at least one NUL.
-- zero padding to a whole number of 8-byte words.
+- the characters in memory order, **first character at the lowest address** (`#name` is its address), then
+- a NUL byte, then
+- NUL padding to a whole number of 8-byte words.
 
 `\n` in the text becomes carriage return + line feed (`\r\n`); there are no other escapes. A `//` comment after the closing quote is an error ("Error in data definition"); put the comment on its own line. A `//` inside the quotes is stored as written, but the assembler warns "has no string termination".
 
-Each 32-bit word is stored little-endian, so in memory the characters of each word are in reverse order. `#S "Hello"` is the words `00000002 48656C6C 6F000000 00000000`, which `MEMGET32` reads back four bytes at a time (see `tests/fixtures/test_strings.kla`). This layout is **not** a C string. `$TXSTR` prints NUL-terminated bytes in memory order, so for `#S` it prints only the low byte of the length word (a control character such as `0x02`), then stops at the NUL after it. For text to print with `$TXSTR`, store the bytes in memory order with `.word`, as in [Example 3](#example-3-printing-a-string).
+A byte load (`MEMGET8`, `LDIDX8`) reads the characters back in order, and `$TXSTR` prints the string as written (see `tests/fixtures/test_strings.kla` and `tests/fixtures/test_txstr.kla`). It is the same layout C uses for a string literal, so C code can take the address too. Memory is little-endian, so `MEMGET32` at `#S` for `#S "Hello"` reads `0x6C6C6548` ("lleH"), and the listing shows the string as `6C6C65480000006F`.
 
 ### Sections
 
@@ -1315,7 +1315,8 @@ The `tests/fixtures/` directory holds the test corpus; `cargo test` runs every f
 | `test_indexed_mem.kla` | Base + offset and base + register addressing |
 | `test_stack.kla` | `PUSH`, `POP`, `PUSHV` |
 | `test_call_ret.kla` | `CALL`, `RET`, conditional calls |
-| `test_strings.kla` | The `#name "text"` layout |
+| `test_strings.kla` | The `#name "text"` layout, read a byte at a time |
+| `test_txstr.kla` | Printing `#name "text"` strings with `$TXSTR` |
 | `test_edge_cases.kla`, `test_boundary.kla` | Boundary values and overflow |
 | `test_loop_patterns.kla`, `test_algorithms.kla`, `test_benchmark.kla` | Loops and small algorithms |
 | `test_directives.kla` | `.data`, `.text`, `.word`, `.comm`, `.global` |
@@ -1385,16 +1386,15 @@ HALT
 
 ### Example 3: Printing a String
 
-`$TXSTR` prints bytes in memory order up to a NUL. Each `.word` is stored little-endian, so its lowest byte is the first character:
+`$TXSTR` prints bytes in memory order up to a NUL, which is how `#name "text"` stores a string:
 
 ```
 _start
-SETR A HELLO:
+SETR A #HELLO
 $TXSTR A                 // prints "Hello!" and a newline
 HALT
 
-HELLO:
-.word 0x0A216F6C6C6548   // "Hello!\n", then a NUL in the top byte
+#HELLO "Hello!\n"        // \n is stored as CR LF
 !include uart_stubs.kla
 ```
 
@@ -1473,7 +1473,7 @@ HALT
 the listing is:
 
 ```
-0x00000000: 0000000000000050                  -- heap_start  (set by assembler)
+0x00000000: 0000000000000048                  -- heap_start  (set by assembler)
 0x00000008: 0000000000000000                  -- heap_end    (reserved)
 0x00000010: 0000000000000000                  -- (reserved)
 0x00000018: 0000000000000000                  -- (reserved)
@@ -1483,9 +1483,8 @@ the listing is:
 0x00000028: 57C80000          -- DECR A
 0x0000002C: A00C0000 00000028 -- JMPNZ LOOP:
 0x00000034: 6C010000          -- HALT
-0x00000038: 0000000248656C6C                  -- #S "Hello"
-0x00000040: 6F00000000000000                  -- #S "Hello"
-0x00000048: 0000000700000000                  -- .word 7
+0x00000038: 6C6C65480000006F                  -- #S "Hello"
+0x00000040: 0000000700000000                  -- .word 7
 ```
 
 - An instruction line shows its address, then word 0 and any immediate words, as 8 hex digits each.

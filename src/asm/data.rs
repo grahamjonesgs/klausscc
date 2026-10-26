@@ -64,8 +64,8 @@ enum DataDirective {
     ZeroPad(usize),
     /// `.space N`: `N` zero bytes, rounded up to a whole 64-bit word.
     Space(usize),
-    /// `#name "text"`: a length-prefixed, NUL-terminated string (`\n` in the
-    /// source already turned into CR LF).
+    /// `#name "text"`: a NUL-terminated byte string, as C lays one out
+    /// (`\n` in the source already turned into CR LF).
     Str(String),
     /// `#name N`: `N` zeroed 64-bit words.
     Words(usize),
@@ -110,22 +110,16 @@ impl DataDirective {
         }
     }
 
-    /// The number of 32-bit words holding a string's characters, which
-    /// always include at least one NUL byte: the string's length prefix.
-    const fn char_words(text: &str) -> usize {
-        text.len() / 4 + 1
-    }
-
     /// The number of bytes the definition emits.
     fn size_bytes(&self) -> usize {
         match self {
             Self::Word(_) => 8,
             Self::ZeroPad(bytes) => *bytes,
             Self::Space(bytes) => bytes.div_ceil(8) * 8,
-            // The prefix word and the characters, NUL-padded out to a 64-bit
-            // word like every other data item, so data after a string stays
-            // 8-byte aligned for MEMGET64 / MEMSET64.
-            Self::Str(text) => (4 + Self::char_words(text) * 4).next_multiple_of(8),
+            // The characters and their NUL, NUL-padded out to a 64-bit word
+            // like every other data item, so data after a string stays 8-byte
+            // aligned for MEMGET64 / MEMSET64.
+            Self::Str(text) => (text.len() + 1).next_multiple_of(8),
             Self::Words(count) => count * 8,
         }
     }
@@ -133,20 +127,16 @@ impl DataDirective {
     /// The bytes the definition emits, in memory order.
     ///
     /// The board stores every 32-bit word little-endian, so a `.word` is its
-    /// value's little-endian bytes; a string's characters are packed into
-    /// words first character in the most significant byte, after its prefix
-    /// word.
+    /// value's little-endian bytes. A string is its characters, first
+    /// character at the lowest address, then NULs: the bytes a byte load
+    /// reads back in order (the RTL takes byte `k` of a 64-bit word from
+    /// bits `[8k+7:8k]`, `pipeline_core.sv:1343`), and the layout C gives a
+    /// string literal.
     fn encode(&self) -> Vec<u8> {
         match self {
             Self::Word(value) => value.to_le_bytes().to_vec(),
             Self::Str(text) => {
-                let mut bytes = Vec::with_capacity(self.size_bytes());
-                bytes.extend_from_slice(&(Self::char_words(text) as u32).to_le_bytes());
-                for chars in text.as_bytes().chunks(4) {
-                    let mut word = [0_u8; 4];
-                    word[..chars.len()].copy_from_slice(chars);
-                    bytes.extend_from_slice(&u32::from_be_bytes(word).to_le_bytes());
-                }
+                let mut bytes = text.as_bytes().to_vec();
                 bytes.resize(self.size_bytes(), 0);
                 bytes
             }
@@ -260,23 +250,29 @@ mod tests {
     fn test_data_as_bytes4() {
         let input = String::from("#TEST \"Hello\"");
         let output = data_hex(&input);
-        // Prefix (2 character words), "Hello\0\0\0", then a NUL word so the
-        // item is a whole number of 64-bit words.
-        assert_eq!(output, Some("0000000248656C6C6F00000000000000".to_owned()),);
+        // "Hello" then NULs to a whole 64-bit word, each 32-bit word shown as
+        // its little-endian value: "lleH", then "\0\0\0o".
+        assert_eq!(output, Some("6C6C65480000006F".to_owned()),);
     }
 
     #[test]
-    // Every string is a whole number of 64-bit words, whatever its length
+    // Every string is its characters, at least one NUL, and NULs to a whole
+    // number of 64-bit words, whatever its length
     fn test_data_as_bytes_string_word_aligned() {
-        for (text, prefix) in [("", 1), ("abc", 1), ("abcd", 2), ("Hello", 2), ("abcdefg", 2), ("abcdefgh", 3)] {
-            let output = data_hex(&format!("#S \"{text}\"")).unwrap();
-            assert!(output.len().is_multiple_of(16), "{text:?} -> {output}");
-            assert_eq!(output.get(..8), Some(format!("{prefix:08X}").as_str()), "{text:?}");
+        for (text, size) in [
+            ("", 8),
+            ("abc", 8),
+            ("abcdefg", 8),
+            ("abcdefgh", 16),
+            ("abcdefghijklmno", 16),
+            ("abcdefghijklmnop", 24),
+        ] {
+            let bytes = data_as_bytes(&format!("#S \"{text}\"")).unwrap();
+            assert_eq!(bytes.len(), size, "{text:?}");
+            assert_eq!(&bytes[..text.len()], text.as_bytes(), "{text:?}");
             // Characters are always followed by at least one NUL byte.
-            assert!(output.len() / 2 > 4 + text.len(), "{text:?}");
+            assert!(bytes[text.len()..].iter().all(|&b| b == 0), "{text:?}");
         }
-        // A 3-word string: prefix + 3 words = 16 bytes, no extra padding needed.
-        assert_eq!(data_hex("#S \"abcdefgh\"").unwrap().len(), 32);
     }
 
     #[test]
@@ -438,7 +434,7 @@ mod tests {
             (".word 0x2A", DataDirective::Word(0x2A), 8),
             (".zeropad 12", DataDirective::ZeroPad(12), 12),
             (".space 5", DataDirective::Space(5), 8),
-            ("#S \"Hi\\n\"", DataDirective::Str("Hi\r\n".to_owned()), 16),
+            ("#S \"Hi\\n\"", DataDirective::Str("Hi\r\n".to_owned()), 8),
             ("#S \"abcdefgh\"", DataDirective::Str("abcdefgh".to_owned()), 16),
             ("#BUF 3", DataDirective::Words(3), 24),
         ];
@@ -466,16 +462,13 @@ mod tests {
 
     #[test]
     // Data is held as memory bytes: each 32-bit word little-endian, and a
-    // string's characters packed into words first character highest.
+    // string's characters in order, first character at the lowest address.
     fn test_data_as_bytes_memory_order() {
         assert_eq!(
             data_as_bytes(".word 0x1122334455667788"),
             Some(vec![0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11])
         );
-        assert_eq!(
-            data_as_bytes("#S \"Hello\""),
-            Some(vec![2, 0, 0, 0, b'l', b'l', b'e', b'H', 0, 0, 0, b'o', 0, 0, 0, 0])
-        );
+        assert_eq!(data_as_bytes("#S \"Hello\""), Some(vec![b'H', b'e', b'l', b'l', b'o', 0, 0, 0]));
         assert_eq!(data_as_bytes(".zeropad 4"), Some(vec![0; 4]));
     }
 }

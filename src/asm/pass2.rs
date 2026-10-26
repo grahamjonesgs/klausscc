@@ -148,8 +148,8 @@ mod tests {
         assert_eq!(pass2[4].emitted, Emitted::Code(vec![0x6580_0000]));
         assert_eq!(pass2[5].emitted, Emitted::Code(vec![0x8BD0_0200, 0x0000_AAAA]));
         assert_eq!(pass2[6].emitted, Emitted::Code(vec![0xCBC0_0300, 0x0000_000A, 0x0000_000B]));
-        // Prefix (2 words), "HELLO" packed first character highest, padded to 2 × 64-bit words.
-        let hello = [2, 0, 0, 0, b'L', b'L', b'E', b'H', 0, 0, 0, b'O', 0, 0, 0, 0];
+        // "HELLO" in memory order, NUL-terminated and padded to a 64-bit word.
+        let hello = *b"HELLO\0\0\0";
         assert_eq!(pass2[7].emitted, Emitted::Data(hello.to_vec()));
         assert_eq!(pass2[8].emitted, Emitted::None);
     }

@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(pass1[3].program_counter, 52); // #DATA1 0x2 inline (+4)
         assert_eq!(pass1[4].program_counter, 68); // RET  (2 data words×8=16)
         assert_eq!(pass1[5].program_counter, 72); // #DATA1 "HELLO" inline (+4)
-        assert_eq!(pass1[6].program_counter, 88); // RET  (string=16 bytes: 2 × 64-bit words)
+        assert_eq!(pass1[6].program_counter, 80); // RET  (string="HELLO\0" padded to one 64-bit word)
     }
 
     #[test]

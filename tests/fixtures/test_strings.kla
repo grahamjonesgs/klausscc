@@ -1,69 +1,105 @@
 // Test 12: String Data Storage and Retrieval
-// Tests: #DATA string storage format, MEMGET32 packed-word reads.
-// String data is stored as:
-//   word 0 (4 bytes): number of data words (length prefix)
-//   word 1+:          characters packed 4 per word, big-endian, null-padded
-// The words are 4 bytes apart, so they are read with MEMGET32 (byte-addressed,
-// unaligned-tolerant) advancing the pointer by 4 — NOT MEMREADRR, which is a
-// 64-bit read masked to an 8-byte boundary.
+// Tests: #DATA string storage format, read back a byte at a time (LDIDX8).
+// String data is stored as a C string: the characters in memory order, first
+// character at the lowest address, then a NUL, then NULs to a whole number of
+// 64-bit words. The test reads it back with byte loads, as $TXSTR and C code
+// do, and prints for each string:
+//   - the number of 32-bit words its characters and NUL fill (strlen / 4 + 1),
+//     found by scanning for the NUL, and
+//   - each 4-byte group, first byte in the most significant byte, so a wrong
+//     byte order or a missing NUL shows.
 // Expected UART output:
-//   00000002  (length prefix of "HELLO": 2 data words)
-//   48454C4C  (packed "HELL")
-//   4F000000  (packed "O\0\0\0")
-//   00000002  (length prefix of "ABCDEF": 2 data words)
-//   41424344  (packed "ABCD")
-//   45460000  (packed "EF\0\0")
-//   00000002  (length prefix of "12345": 2 data words)
-//   31323334  (packed "1234")
-//   35000000  (packed "5\0\0\0")
+//   00000002  ("HELLO": 5 characters + NUL fill 2 words)
+//   48454C4C  ("HELL")
+//   4F000000  ("O" then NULs)
+//   00000002  ("ABCDEF": 6 characters + NUL fill 2 words)
+//   41424344  ("ABCD")
+//   45460000  ("EF" then NULs)
+//   00000002  ("12345": 5 characters + NUL fill 2 words)
+//   31323334  ("1234")
+//   35000000  ("5" then NULs)
 
 _start
 DELAYV 0x0500
 $NEWLINE
 
-// Verify packed string data for "HELLO"
+// "HELLO"
 SETR A #STR1
-MEMGET32 B A          // B = length prefix (word @ +0)
+CALL STR_WORDS:       // B = strlen / 4 + 1
 $TXR B  // Expect: 00000002
 $NEWLINE
-ADDV A 4
-MEMGET32 B A          // B = "HELL" packed (word @ +4)
+CALL PACK4:           // B = bytes @ +0..+3
 $TXR B  // Expect: 48454C4C
 $NEWLINE
 ADDV A 4
-MEMGET32 B A          // B = "O\0\0\0" packed (word @ +8)
+CALL PACK4:           // B = bytes @ +4..+7
 $TXR B  // Expect: 4F000000
 $NEWLINE
 
-// Verify packed string data for "ABCDEF"
+// "ABCDEF"
 SETR A #STR2
-MEMGET32 B A          // B = length prefix
+CALL STR_WORDS:
 $TXR B  // Expect: 00000002
 $NEWLINE
-ADDV A 4
-MEMGET32 B A          // B = "ABCD" packed
+CALL PACK4:
 $TXR B  // Expect: 41424344
 $NEWLINE
 ADDV A 4
-MEMGET32 B A          // B = "EF\0\0" packed
+CALL PACK4:
 $TXR B  // Expect: 45460000
 $NEWLINE
 
-// Verify packed string data for "12345"
+// "12345"
 SETR A #STR3
-MEMGET32 B A          // B = length prefix
+CALL STR_WORDS:
 $TXR B  // Expect: 00000002
 $NEWLINE
-ADDV A 4
-MEMGET32 B A          // B = "1234" packed
+CALL PACK4:
 $TXR B  // Expect: 31323334
 $NEWLINE
 ADDV A 4
-MEMGET32 B A          // B = "5\0\0\0" packed
+CALL PACK4:
 $TXR B  // Expect: 35000000
 $NEWLINE
 
 HALT
+
+// --- STR_WORDS: B = strlen(A) / 4 + 1, the 32-bit words the string at A and
+// its NUL fill. Keeps A.
+STR_WORDS:
+PUSH C
+PUSH D
+COPY C A              // C = current byte address
+SETR B 0              // B = characters so far
+STR_WORDS_LOOP:
+LDIDX8 D C 0          // D = mem8[C], zero-extended
+CMPRV D 0             // stop at the NUL terminator
+JMPE STR_WORDS_DONE:
+INCR B
+INCR C
+JMP STR_WORDS_LOOP:
+STR_WORDS_DONE:
+SHRV B 2              // strlen / 4
+INCR B                // + 1
+POP D
+POP C
+RET
+
+// --- PACK4: B = the 4 bytes at A, the byte at A in B[31:24]. Keeps A.
+PACK4:
+PUSH C
+LDIDX8 B A 0          // first byte (lowest address)
+SHLV B 8
+LDIDX8 C A 1
+ORR B B C
+SHLV B 8
+LDIDX8 C A 2
+ORR B B C
+SHLV B 8
+LDIDX8 C A 3          // fourth byte
+ORR B B C
+POP C
+RET
 
 #STR1 "HELLO"
 #STR2 "ABCDEF"

@@ -22,6 +22,7 @@ test_indexed_mem.kla
 // Data types and extensions
 test_sign_extend.kla
 test_strings.kla
+test_txstr.kla
 test_edge_cases.kla
 
 // I/O

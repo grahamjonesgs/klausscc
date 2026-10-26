@@ -1,0 +1,32 @@
+// Test 22: Printing #name Strings with $TXSTR
+// Tests: a #name "text" string is a C string (characters in memory order, then
+// a NUL), so $TXSTR prints it as written: across several 32-bit words, with
+// each \n printed as CR LF, an empty string printing nothing, and printing
+// stopping at the NUL.
+// Expected UART output:
+//   11111111  (#LINES, first line)
+//   2222BBBB  (#LINES, after the first \n)
+//   CAFEF00D  (#LINES, after the second \n)
+//   600DC0DE  (#TAIL, printed straight after the empty #EMPTY)
+
+_start
+DELAYV 0x0500
+$NEWLINE
+
+SETR A #LINES
+$TXSTR A              // three lines; the \n's are in the string
+$NEWLINE
+SETR B #EMPTY
+$TXSTR B              // prints nothing
+SETR C #TAIL
+$TXSTR C
+$NEWLINE
+
+HALT
+
+#LINES "11111111\n2222BBBB\nCAFEF00D"
+#EMPTY ""
+#TAIL "600DC0DE"
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla
