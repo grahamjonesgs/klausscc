@@ -1,6 +1,7 @@
 /* demo_hex.c - Demonstrates compiled C with hex output only
  *
- * Does NOT require .word assembler support — all output via TXR.
+ * Does NOT require .word assembler support — all output via _uart_tx_hex
+ * and _uart_newline.
  * Each result is printed as 8 hex digits followed by newline.
  *
  * Expected UART output:
