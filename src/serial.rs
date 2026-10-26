@@ -12,6 +12,37 @@ use std::time::{Duration, Instant};
 /// Used to define if a port request was not defined so is for auto.
 pub(crate) const AUTO_SERIAL: &str = "auto_serial_requested";
 
+/// The serial port `-s` names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SerialTarget {
+    /// `-s` with no port: use the first USB serial port found.
+    Auto,
+    /// The named port.
+    Port(String),
+}
+
+impl SerialTarget {
+    /// The port name the serial functions take: the port's name, or
+    /// [`AUTO_SERIAL`] to auto-detect.
+    pub(crate) fn port_name(&self) -> &str {
+        match self {
+            Self::Auto => AUTO_SERIAL,
+            Self::Port(name) => name,
+        }
+    }
+}
+
+impl From<&str> for SerialTarget {
+    /// A `-s` value; [`AUTO_SERIAL`], which a bare `-s` stands for, asks for auto-detection.
+    fn from(value: &str) -> Self {
+        if value == AUTO_SERIAL {
+            Self::Auto
+        } else {
+            Self::Port(value.to_owned())
+        }
+    }
+}
+
 /// Return bool if port is possibly correct FDTI port.
 ///
 /// Checks the info to check the VID and PID of known boards.

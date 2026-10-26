@@ -95,7 +95,7 @@ pub(crate) fn include_target(input_line: &str) -> Option<&str> {
 pub(crate) fn output_macros_opcodes_html(
     filename_stem: String,
     opcodes: &[Opcode],
-    macros: Vec<Macro>,
+    macros: &[Macro],
     msg_list: &mut Diagnostics,
     opcodes_flag: bool,
     textmate_flag: bool,
@@ -166,7 +166,7 @@ pub(crate) fn output_macros_opcodes_html(
         html_file.write_all(b"\n</table><h2>Macro Table</h2>\n<table id=\"macros\">\n")?;
         html_file.write_all(b"<tr>\n    <th>Name</th>\n    <th>Variables</th>\n    <th>Description</th>\n    <th>Details</th>\n</tr>\n")?;
 
-        let mut sorted_macros: Vec<Macro> = macros;
+        let mut sorted_macros: Vec<Macro> = macros.to_vec();
         sorted_macros.sort_by(|first, second| first.name.cmp(&second.name));
 
         for macro_item in &sorted_macros {
