@@ -96,7 +96,7 @@ pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut Diagnostics) -> Vec<Lab
                 program_counter: n.program_counter,
                 name: {
                     let this = label_name_from_string(&n.input_text_line);
-                    this.unwrap_or_else(|| data_name_from_string(&n.input_text_line).unwrap_or_default())
+                    this.or_else(|| data_name_from_string(&n.input_text_line)).unwrap_or_default().to_owned()
                 },
             }
         })

@@ -5,97 +5,54 @@
 //! comment.  Classification that needs the opcode table (`line_type`) stays
 //! with the table.  This module has no intra-crate dependencies.
 
-/// Strip trailing comments.
+/// Strip a trailing `//` comment.
 ///
-/// Removes comments and starting and training whitespace.
-pub(crate) fn strip_comments(input: &str) -> String {
-    input.find("//").map_or_else(
-        || input.trim().to_owned(),
-        |location| input.get(0..location).unwrap_or("").trim().to_owned(),
-    )
+/// Returns the text before any `//`, without leading and trailing whitespace.
+pub(crate) fn strip_comments(input: &str) -> &str {
+    input.find("//").map_or(input, |location| &input[..location]).trim()
 }
 
-/// Returns trailing comments.
+/// Return a trailing `//` comment.
 ///
-/// Removes comments and starting and training whitespace.
-pub(crate) fn return_comments(input: &str) -> String {
-    input
-        .find("//")
-        .map_or_else(String::default, |location| input.get(location + 2..).unwrap_or("").trim().to_owned())
+/// Returns the text after the first `//`, without leading and trailing
+/// whitespace, or `""` when the line has no comment.
+pub(crate) fn return_comments(input: &str) -> &str {
+    input.find("//").map_or("", |location| input[location + 2..].trim())
 }
 
 /// Check if line is blank.
 ///
-/// Returns true if line if just whitespace.
+/// Returns true if line is just whitespace.
 pub(crate) fn is_blank(line: &str) -> bool {
-    let words = line.split_whitespace();
-
-    for word in words {
-        if !word.is_empty() {
-            return false;
-        }
-    }
-    true
+    line.trim().is_empty()
 }
 
 /// Check if line is comment.
 ///
-/// Returns true if line if just comment.
+/// Returns true if the first non-blank text on the line is `//`.
 pub(crate) fn is_comment(line: &str) -> bool {
-    let word = line.trim();
-    if word.len() < 2 {
-        return false;
-    }
-
-    let bytes = word.as_bytes();
-    let mut found_first = false;
-
-    for (i, &item) in bytes.iter().enumerate() {
-        if item == b'/' && i == 0 {
-            found_first = true;
-        }
-        if item == b'/' && i == 1 && found_first {
-            return true;
-        }
-    }
-    false
+    line.trim_start().starts_with("//")
 }
 
 /// Check if line is start.
 ///
-/// Returns true if line is start.
+/// Returns true if the first word is `_start`, in any case.
 pub(crate) fn is_start(line: &str) -> bool {
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if i == 0 && word.to_uppercase() == "_START" {
-            return true;
-        }
-    }
-    false
+    line.split_whitespace().next().is_some_and(|word| word.eq_ignore_ascii_case("_start"))
 }
 
 /// Extracts data name from string.
 ///
-/// Checks if start of first word is hash if so return data name as option string.
-pub(crate) fn data_name_from_string(line: &str) -> Option<String> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.starts_with('#') {
-        return Some(first_word.to_owned());
-    }
-    None
+/// Returns the first word when it starts with `#`.
+pub(crate) fn data_name_from_string(line: &str) -> Option<&str> {
+    line.split_whitespace().next().filter(|word| word.starts_with('#'))
 }
 
 /// Extracts label from string.
 ///
-/// Checks if end of first word is colon if so return label as option string.
-pub(crate) fn label_name_from_string(line: &str) -> Option<String> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.ends_with(':') {
-        return Some(first_word.to_owned());
-    }
-    None
+/// Returns the first word when it ends with `:`.
+pub(crate) fn label_name_from_string(line: &str) -> Option<&str> {
+    line.split_whitespace().next().filter(|word| word.ends_with(':'))
 }
 
 #[cfg(test)]
@@ -133,6 +90,16 @@ mod tests {
     }
 
     #[test]
+    // The start marker is the first word `_start`, in any case.
+    fn test_is_start() {
+        assert!(is_start("_start"));
+        assert!(is_start("  _START // entry"));
+        assert!(!is_start("start"));
+        assert!(!is_start("NOP _start"));
+        assert!(!is_start(""));
+    }
+
+    #[test]
     // Test for blank line returns true
     fn test_is_blank1() {
         assert!(is_blank(" "));
@@ -151,7 +118,7 @@ mod tests {
     fn test_label_name_from_string3() {
         let input = String::from("LOOP:");
         let output = label_name_from_string(&input);
-        assert_eq!(output, Some("LOOP:".to_owned()));
+        assert_eq!(output, Some("LOOP:"));
     }
 
     #[test]
@@ -167,7 +134,7 @@ mod tests {
     fn test_data_name_from_string1() {
         let input = String::from("#TEST");
         let output = data_name_from_string(&input);
-        assert_eq!(output, Some("#TEST".to_owned()));
+        assert_eq!(output, Some("#TEST"));
     }
 
     #[test]
@@ -181,11 +148,11 @@ mod tests {
     #[test]
     // Check that labels are correctly extracted from strings test for label
     fn test_label_name_from_string1() {
-        assert_eq!(label_name_from_string("label:"), Some("label:".to_owned()));
-        assert_eq!(label_name_from_string("label: "), Some("label:".to_owned()));
-        assert_eq!(label_name_from_string("label:"), Some("label:".to_owned()));
-        assert_eq!(label_name_from_string("     label:"), Some("label:".to_owned()));
-        assert_eq!(label_name_from_string("     label: dummy words"), Some("label:".to_owned()));
+        assert_eq!(label_name_from_string("label:"), Some("label:"));
+        assert_eq!(label_name_from_string("label: "), Some("label:"));
+        assert_eq!(label_name_from_string("label:"), Some("label:"));
+        assert_eq!(label_name_from_string("     label:"), Some("label:"));
+        assert_eq!(label_name_from_string("     label: dummy words"), Some("label:"));
     }
 
     #[test]

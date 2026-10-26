@@ -16,15 +16,15 @@ pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, oplist: &
     for line in pass1 {
         let new_opcode = if line.line_type == LineType::Opcode {
             let code = strip_comments(&line.input_text_line);
-            let mut opcode = add_registers(oplist, &code, &line.file_name, msg_list, line.line_counter);
+            let mut opcode = add_registers(oplist, code, &line.file_name, msg_list, line.line_counter);
             // ISA v3 PC-relative targets need this line's address.
-            let rel = pc_relative_bits(oplist, &code, line.program_counter, labels, msg_list, line.line_counter, &line.file_name);
+            let rel = pc_relative_bits(oplist, code, line.program_counter, labels, msg_list, line.line_counter, &line.file_name);
             if rel != 0
                 && let Some(w0) = opcode.get(..8).and_then(|h| u32::from_str_radix(h, 16).ok())
             {
                 opcode = format!("{:08X}{}", w0 | rel, &opcode[8..]);
             }
-            opcode.push_str(&add_arguments(oplist, &code, msg_list, line.line_counter, &line.file_name, labels));
+            opcode.push_str(&add_arguments(oplist, code, msg_list, line.line_counter, &line.file_name, labels));
             opcode
         } else if line.line_type == LineType::Data {
             data_as_bytes(line.input_text_line.as_str()).unwrap_or_default()

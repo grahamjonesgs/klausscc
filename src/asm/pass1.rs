@@ -122,11 +122,11 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
             program_counter,
             line_type: lt,
         });
-        if !is_valid_line(oplist, &strip_comments(&upgraded_line)) {
+        if !is_valid_line(oplist, strip_comments(&upgraded_line)) {
             msg_list.error_at(&pass.file_name, pass.line_counter, format!("Error {upgraded_line}"));
         }
         if lt == LineType::Opcode {
-            let num_args = num_arguments(oplist, &strip_comments(&upgraded_line));
+            let num_args = num_arguments(oplist, strip_comments(&upgraded_line));
             if let Some(arguments) = num_args {
                 program_counter += (arguments + 1) * 4; // Each word = 4 bytes
             }

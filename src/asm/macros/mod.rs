@@ -141,7 +141,7 @@ pub(crate) fn expand_macros(msg_list: &mut Diagnostics, input_list: Vec<SourceLi
     for code_line in input_list {
         if let Some(macro_name) = macro_name_from_string(&code_line.input_text_line) {
             let call = strip_comments(&code_line.input_text_line);
-            let items = return_macro_items_replace(&call, macro_list, code_line.line_counter, &code_line.file_name, msg_list);
+            let items = return_macro_items_replace(call, macro_list, code_line.line_counter, &code_line.file_name, msg_list);
             if let Some(items_vec) = items {
                 for item in items_vec {
                     pass0.push(SourceLine {
@@ -254,8 +254,8 @@ pub(crate) fn macro_from_string(input_line_full: &str, msg_list: &mut Diagnostic
     let mut max_variable: u32 = 0;
     let mut all_found_variables: Vec<i64> = Vec::new();
     let mut all_variables: Vec<i64> = Vec::new();
-    let comment = return_comments(input_line_full);
-    let input_line = &strip_comments(input_line_full.trim());
+    let comment = return_comments(input_line_full).to_owned();
+    let input_line = strip_comments(input_line_full);
 
     let words = input_line.split_whitespace();
     for (i, word) in words.enumerate() {
