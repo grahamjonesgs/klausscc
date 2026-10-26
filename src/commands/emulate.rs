@@ -11,8 +11,8 @@ use crate::error::Error;
 use crate::files::filename_stem;
 use crate::helper::{human_bytes, parse_expected_uart_values};
 use crate::image::Image;
+use crate::isa::Opcode;
 use crate::loader::{BinaryInput, Loaded, load_flat};
-use crate::opcodes::Opcode;
 use std::fs;
 use std::path::PathBuf;
 

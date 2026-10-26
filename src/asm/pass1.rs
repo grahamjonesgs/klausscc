@@ -8,9 +8,9 @@ use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, SourceLine};
 use crate::diag::Diagnostics;
 use crate::helper::{is_valid_line, line_type, num_data_bytes};
+use crate::isa::{Opcode, num_arguments};
 use crate::layout::CODE_BASE;
 use crate::num::{fits_imm32, parse_bits64, parse_int, parse_operand};
-use crate::opcodes::{Opcode, num_arguments};
 
 /// Auto-upgrade `SETR R value` to `SETR64 R value` when the immediate doesn't fit in 32 bits.
 ///

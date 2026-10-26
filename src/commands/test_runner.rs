@@ -8,7 +8,7 @@ use crate::diag::{Diagnostics, print_messages};
 use crate::error::Error;
 use crate::files::{filename_stem, write_code_output_file};
 use crate::helper::parse_expected_uart_values;
-use crate::opcodes::Opcode;
+use crate::isa::Opcode;
 use crate::serial::{run_test_monitor, write_to_board_keep_port};
 use std::fs;
 use std::path::PathBuf;

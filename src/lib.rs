@@ -28,6 +28,8 @@ mod gdbserver_board;
 mod helper;
 /// The program image and its `.kbt`, DDR and `$readmemh` formats.
 mod image;
+/// The Klauss instruction set: opcode table, encoder and disassembler.
+mod isa;
 /// JTAG over the board's FT2232H, and the debug module's DMI.  The pure MPSSE
 /// framing is also built for tests, so they run without libftdi.
 #[cfg(any(test, feature = "board"))]
@@ -40,8 +42,6 @@ mod loader;
 mod netload;
 /// Module for integer literal parsing.
 mod num;
-/// Module to manage opcodes.
-mod opcodes;
 /// Module to write to serial and read response.
 mod serial;
 use asm::Assembly;
@@ -55,7 +55,7 @@ use commands::{
 use diag::{Diagnostics, MessageType};
 use error::Error;
 use files::write_code_output_file;
-use opcodes::Opcode;
+use isa::Opcode;
 use std::path::PathBuf;
 use std::process::ExitCode;
 

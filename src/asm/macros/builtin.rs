@@ -2,7 +2,8 @@
 
 use super::{Macro, macro_from_string};
 use crate::diag::Diagnostics;
-use crate::opcodes::{Opcode, v2_opcodes};
+use crate::isa::Opcode;
+use crate::isa::table::v2_opcodes;
 
 /// Standard macro definitions bundled with the assembler (formerly the `.vh`
 /// header's `/* Macro definition */` block).

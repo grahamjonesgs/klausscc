@@ -5,8 +5,8 @@ use super::{SendOpts, send_image, write_binary_file};
 use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::files::write_code_output_file;
-use crate::helper::disassemble_flat_to_pass2;
 use crate::image::readmemh;
+use crate::isa::disasm::disassemble_flat_to_pass2;
 use crate::layout::CODE_BASE;
 use crate::loader::{BinaryInput, load_flat};
 use crate::netload::net_load;
@@ -116,7 +116,7 @@ pub(crate) fn run_elf2serial(input: BinaryInput<'_>, kbt_file_name: &str, send: 
     // Optionally produce a .code disassembly listing alongside the .kbt, using
     // the built-in ISA-v2 opcode table.  (Skipped for a serial load — see above.)
     if send.port.is_empty() {
-        let opcodes = crate::opcodes::v2_opcodes();
+        let opcodes = crate::isa::table::v2_opcodes();
         let code_file_name = {
             let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
             format!("{stem}.code")

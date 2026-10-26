@@ -1,8 +1,8 @@
 use crate::asm::line::{LineType, Pass2, SourceLine};
 use crate::asm::macros::Macro;
 use crate::diag::Diagnostics;
+use crate::isa::Opcode;
 use crate::layout::{CODE_BASE, heap_start};
-use crate::opcodes::Opcode;
 use std::io::Error;
 
 use std::collections::HashSet;

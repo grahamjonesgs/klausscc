@@ -24,7 +24,7 @@ pub(crate) mod symbols;
 use crate::diag::Diagnostics;
 use crate::files::{read_file_to_vector, remove_block_comments};
 use crate::image::{Image, create_bin_string};
-use crate::opcodes::Opcode;
+use crate::isa::Opcode;
 use line::{Pass2, SourceLine};
 use macros::{Macro, apply_source_macros, expand_macros};
 use pass1::get_pass1;

@@ -1,8 +1,8 @@
 use crate::asm::lexer::{data_name_from_string, is_blank, is_comment, is_start, label_name_from_string};
-use crate::asm::line::{LineType, Pass2};
+use crate::asm::line::LineType;
 use crate::diag::Diagnostics;
+use crate::isa::{Opcode, return_opcode};
 use crate::num::{LiteralError, parse_bits64, parse_int};
-use crate::opcodes::{Opcode, disassemble_word, return_opcode};
 use std::fmt;
 use std::fmt::Write as _;
 
@@ -23,72 +23,6 @@ pub(crate) fn human_bytes(n: usize) -> String {
     } else {
         format!("{n} B")
     }
-}
-
-/// Disassemble a flat byte slice into a `Vec<Pass2>` for use with `write_code_output_file`.
-///
-/// Each 4-byte chunk is read as a little-endian 32-bit word (matching the `KlaussCPU` LLVM ELF
-/// byte order) and matched against `opcodes`.  When a match is found, register operands are
-/// extracted and any argument words that follow (determined by `opcode.variables`) are consumed
-/// and appended to the same entry's `opcode` hex string so `write_code_output_file` formats them
-/// correctly.  Unrecognised words produce a `???` fallback line.  When the binary ends before
-/// all of an instruction's argument words, the words that are there are shown once, on that
-/// instruction's line, marked `(truncated)`.
-///
-/// `base_addr` is the board byte address of the first byte in `binary` (normally
-/// [`CODE_BASE`] = 0x20).
-pub(crate) fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: &[Opcode]) -> Vec<Pass2> {
-    let mut result: Vec<Pass2> = Vec::new();
-    let mut i: usize = 0;
-
-    while i + 4 <= binary.len() {
-        let word = u32::from_le_bytes([binary[i], binary[i + 1], binary[i + 2], binary[i + 3]]);
-        let pc = base_addr.saturating_add(i as u32);
-
-        let (base_text, vars) = disassemble_word(word, opcodes).unwrap_or_else(|| (format!("??? (0x{word:08X})"), 0_u32));
-
-        let mut opcode_hex = format!("{word:08X}");
-        let mut display_text = base_text;
-
-        // Consume argument words that immediately follow the instruction word.
-        // vars == 1 → one 32-bit immediate at PC+4.
-        // vars == 2 → two 32-bit words at PC+4 (lo32) and PC+8 (hi32), forming a 64-bit value.
-        let arg_word_count = vars.min(2) as usize;
-        let args: Vec<u32> = (0..arg_word_count)
-            .map_while(|n| {
-                let off = i + 4 + n * 4;
-                binary.get(off..off + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)
-            })
-            .collect();
-        for av in &args {
-            let _ = write!(opcode_hex, "{av:08X}");
-        }
-        match *args.as_slice() {
-            [av] if arg_word_count == 1 => _ = write!(display_text, " 0x{av:X}"),
-            [lo, hi] => _ = write!(display_text, " 0x{:X}", (u64::from(hi) << 32) | u64::from(lo)),
-            [lo] => _ = write!(display_text, " 0x{lo:08X}"),
-            _ => {}
-        }
-        if args.len() < arg_word_count {
-            display_text.push_str(" (truncated)");
-        }
-
-        // Consume exactly the words shown, so none is shown twice.
-        let words_consumed = 1 + args.len();
-
-        result.push(Pass2 {
-            file_name: String::new(),
-            input_text_line: display_text,
-            line_counter: 0,
-            line_type: LineType::Opcode,
-            opcode: opcode_hex,
-            program_counter: pc,
-        });
-
-        i += words_consumed * 4;
-    }
-
-    result
 }
 
 /// Largest single data item, in bytes: the whole of the board's 128 MiB memory.
@@ -355,45 +289,6 @@ mod tests {
         let mut test_string: String = String::from("Hello\n\r");
         trim_newline(&mut test_string);
         assert_eq!(test_string, "Hello");
-    }
-
-    /// Little-endian bytes of `words`, as an ELF or flat binary holds them.
-    fn le_bytes(words: &[u32]) -> Vec<u8> {
-        words.iter().flat_map(|w| w.to_le_bytes()).collect()
-    }
-
-    #[test]
-    // Words are read little-endian; a 64-bit argument is shown as one value
-    fn test_disassemble_flat_to_pass2_le_and_64bit() {
-        let opcodes = crate::opcodes::v2_opcodes();
-        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000, 5, 0xCBC0_0000, 0x5566_7788, 0x1122_3344]), 0x20, &opcodes);
-        assert_eq!(pass2.len(), 2);
-        assert_eq!(pass2[0].program_counter, 0x20);
-        assert_eq!(pass2[0].opcode, "8BD0000000000005");
-        assert!(pass2[0].input_text_line.starts_with("SETR "), "{}", pass2[0].input_text_line);
-        assert!(pass2[0].input_text_line.ends_with(" 0x5"), "{}", pass2[0].input_text_line);
-        assert_eq!(pass2[1].program_counter, 0x28);
-        assert_eq!(pass2[1].opcode, "CBC000005566778811223344");
-        assert!(pass2[1].input_text_line.ends_with(" 0x1122334455667788"), "{}", pass2[1].input_text_line);
-    }
-
-    #[test]
-    // Regression: a 64-bit argument cut off by the end of the binary showed its
-    // lo32 word on the instruction's line and then again as the next line.
-    fn test_disassemble_flat_to_pass2_truncated_argument() {
-        let opcodes = crate::opcodes::v2_opcodes();
-        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0xCBC0_0000, 0x5566_7788]), 0x20, &opcodes);
-        assert_eq!(pass2.len(), 1);
-        assert_eq!(pass2[0].opcode, "CBC0000055667788");
-        assert!(
-            pass2[0].input_text_line.ends_with(" 0x55667788 (truncated)"),
-            "{}",
-            pass2[0].input_text_line
-        );
-
-        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000]), 0x20, &opcodes);
-        assert_eq!(pass2.len(), 1);
-        assert!(pass2[0].input_text_line.ends_with(" (truncated)"), "{}", pass2[0].input_text_line);
     }
 
     #[test]
