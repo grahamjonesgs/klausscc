@@ -89,11 +89,16 @@ fn image_checksum(image: &[u8]) -> u32 {
 /// Build the 12-byte request header: magic, image length, entry PC (all little-endian).
 fn header(image_len: usize, entry_pc: u32) -> Result<[u8; 12], NetbootError> {
     let len = u32::try_from(image_len).map_err(|_| NetbootError::ImageTooLarge(image_len))?;
-    let mut hdr = [0_u8; 12];
-    hdr[0..4].copy_from_slice(&NETBOOT_MAGIC.to_le_bytes());
-    hdr[4..8].copy_from_slice(&len.to_le_bytes());
-    hdr[8..12].copy_from_slice(&entry_pc.to_le_bytes());
+    let mut hdr = [0; 12];
+    hdr.copy_from_slice([NETBOOT_MAGIC, len, entry_pc].map(u32::to_le_bytes).as_flattened());
     Ok(hdr)
+}
+
+/// The little-endian `u32` at `offset` in `bytes`, which must hold 4 bytes there.
+fn read_u32_le(bytes: &[u8], offset: usize) -> u32 {
+    let mut word = [0; 4];
+    word.copy_from_slice(&bytes[offset..offset + 4]);
+    u32::from_le_bytes(word)
 }
 
 /// Check the board's 8-byte acknowledgement (status, checksum; both little-endian).
@@ -101,8 +106,8 @@ fn header(image_len: usize, entry_pc: u32) -> Result<[u8; 12], NetbootError> {
 /// Returns the board's checksum when the board accepted the image and its
 /// checksum matches `host_checksum`.
 fn check_ack(ack: [u8; 8], host_checksum: u32) -> Result<u32, NetbootError> {
-    let status = u32::from_le_bytes([ack[0], ack[1], ack[2], ack[3]]);
-    let board = u32::from_le_bytes([ack[4], ack[5], ack[6], ack[7]]);
+    let status = read_u32_le(&ack, 0);
+    let board = read_u32_le(&ack, 4);
     if status != 0 {
         return Err(NetbootError::Rejected(status));
     }
@@ -179,6 +184,13 @@ mod tests {
         assert_eq!(image_checksum(&[0xFF, 0xFF, 0xFF, 0xFF, 2, 0, 0, 0]), 1);
         // A trailing partial word is not counted.
         assert_eq!(image_checksum(&[1, 0, 0, 0, 9]), 1);
+    }
+
+    #[test]
+    fn read_u32_le_reads_little_endian_words() {
+        let bytes = [0x78, 0x56, 0x34, 0x12, 0xEF, 0xBE, 0xAD, 0xDE];
+        assert_eq!(read_u32_le(&bytes, 0), 0x1234_5678);
+        assert_eq!(read_u32_le(&bytes, 4), 0xDEAD_BEEF);
     }
 
     #[test]
