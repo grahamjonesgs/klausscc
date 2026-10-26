@@ -432,6 +432,26 @@ mod tests {
     }
 
     #[test]
+    fn verify_passes_a_program_whose_first_store_does_not_poll() {
+        // test_regs with its opening DELAYV and polled newline replaced by an
+        // unpolled TX_DATA store: the program starts with the transmitter idle
+        // (KlaussCPU.sv START_WAIT change of 2026-10-26), so that first store
+        // is taken, and the polled stubs then wait for it to go out.
+        let dir = tempfile::tempdir().expect("tempdir");
+        fs::copy(fixture_dir().join("uart_stubs.kla"), dir.path().join("uart_stubs.kla")).expect("copy stubs");
+        let source = fs::read_to_string(fixture_dir().join("test_regs.kla")).expect("read test_regs");
+        let opening = "_start\nDELAYV 0x0500\n$NEWLINE\n";
+        assert!(source.contains(opening), "test_regs opens with a delay and a newline");
+        let source = source.replacen(opening, "_start\nSETR B 0xF0010000\nSETR A 0x0A\nMEMSET8 A B\n", 1);
+        let file = dir.path().join("test_regs.kla");
+        fs::write(&file, source).expect("write test_regs");
+
+        let (isa, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        assert!(matches!(verdict, Ok(Verdict::Pass { matched: 6, .. })), "{verdict:?}");
+    }
+
+    #[test]
     fn verify_fails_a_program_that_stores_to_the_uart_while_busy() {
         // test_regs printing through uart_stubs.kla routines that no longer
         // poll TX_BUSY: the first byte goes out (the transmitter is idle at
