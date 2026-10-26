@@ -41,3 +41,6 @@ tests/fixtures/t.t.xt
 
 # Stray npm lockfile (this is not a Node project)
 package-lock.json
+
+# Personal Claude Code settings
+.claude/settings.local.json

@@ -102,8 +102,7 @@ fixture corpus. [`tests/fixtures/`](tests/fixtures/README.md) holds the CPU
 test programs; each one lists the UART values it should print, and `cargo
 test` assembles every one and checks those values on the emulator (the same
 check as `klausscc --emulate-test tests/fixtures`). The ELF fixtures are
-checked by the loader tests. `tests/fixtures/legacy_v1/` keeps the old v1
-demos, which no longer assemble.
+checked by the loader tests.
 
 The board debugger's tests run against a model of the debug module, so they
 need neither the cable nor libftdi.

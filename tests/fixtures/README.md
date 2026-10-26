@@ -293,4 +293,3 @@ FFFFFFFE
 - Some expected values depend on exact CPU flag behaviour -- if a test fails, check whether the flag semantics match your Verilog implementation
 - All tests can be assembled and verified in batch via `all_tests.txt`
 - `cargo test` checks every file here that lists expected UART values against the emulator, the same check as `klausscc --emulate-test tests/fixtures`
-- `legacy_v1/` holds the old v1-syntax demos; they no longer assemble

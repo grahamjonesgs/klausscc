@@ -1,9 +1,0 @@
-
-_start
-SETR A 0x0
-
-
-LOOP:
-7SEGR A 
-INCR A
-JMP LOOP:
