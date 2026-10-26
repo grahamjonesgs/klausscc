@@ -574,3 +574,37 @@ fn a_lost_link_ends_the_session() {
     let mut regs = KlaussRegs::default();
     assert_eq!(err_kind(&target.read_registers(&mut regs)), "fatal");
 }
+
+#[test]
+fn the_run_state_follows_resume_stop_and_exit() {
+    let (mut target, state) = halted_target(0x100);
+    assert_eq!(target.state, RunState::Halted);
+    assert!(target.resume(None).is_ok());
+    assert_eq!(target.state, RunState::Running { halt_seen: false });
+    // the halt and its "halted since" bit arrive in one read
+    state.borrow_mut().halt(Cause::Breakpoint);
+    assert!(target.poll().ok().flatten().is_some());
+    assert_eq!(target.state, RunState::Halted);
+    state.borrow_mut().set_word(0x100, TRAP_WORD);
+    assert!(target.step(None).is_ok());
+    assert_eq!(target.state, RunState::SkippedTrap);
+    assert!(target.state.is_running(), "detach still halts it");
+    assert!(target.poll().ok().flatten().is_some());
+    assert!(target.resume(None).is_ok());
+    state.borrow_mut().halt(Cause::Halt);
+    assert!(target.poll().ok().flatten().is_some());
+    assert_eq!(target.state, RunState::Exited);
+}
+
+#[test]
+fn a_halt_seen_before_the_core_stops_is_remembered() {
+    let (mut target, state) = halted_target(0x100);
+    assert!(target.resume(None).is_ok());
+    // the core halted and was resumed by something else before the poll
+    state.borrow_mut().halted_seen = true;
+    assert_eq!(target.poll().ok(), Some(None));
+    assert_eq!(target.state, RunState::Running { halt_seen: true });
+    state.borrow_mut().halted = true;
+    state.borrow_mut().cause = Cause::Breakpoint.code();
+    assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::HwBreak(()))));
+}

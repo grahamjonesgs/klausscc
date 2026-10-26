@@ -372,23 +372,40 @@ struct Wp {
     kind: WatchKind,
 }
 
+/// Where the debugger's run of the core stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunState {
+    /// Halted, and any halt reported to the debugger.
+    Halted,
+    /// A resume or step was issued and its halt has not been reported yet.
+    Running {
+        /// DMSTATUS has shown the halt the run is waiting for.
+        halt_seen: bool,
+    },
+    /// A step was consumed by skipping a compiled-in TRAP; it is reported
+    /// as done without the core running.
+    SkippedTrap,
+    /// The program executed HALT: there is nothing more to run.
+    Exited,
+}
+
+impl RunState {
+    /// A resume or step is outstanding.
+    const fn is_running(self) -> bool {
+        matches!(self, Self::Running { .. } | Self::SkippedTrap)
+    }
+}
+
 /// The board plus the debugger's view of it.
-#[allow(clippy::struct_excessive_bools, reason = "independent session flags")]
 pub(crate) struct BoardTarget<D> {
     board: Board<D>,
     hw_breakpoints: [Option<u32>; HW_BREAKPOINTS],
     watches: [Option<Wp>; HW_WATCHPOINTS],
     /// Software breakpoints: address -> the original word under the TRAP.
     sw_breakpoints: BTreeMap<u32, u32>,
-    /// A resume/step was issued and its halt has not been reported yet.
-    running: bool,
-    /// The halt the current run is waiting for has been seen.
-    halt_seen: bool,
-    /// A step consumed by skipping a compiled-in TRAP.
-    skipped_trap_step: bool,
+    state: RunState,
+    /// `monitor mmio on`: let the debugger access device registers.
     allow_mmio: bool,
-    /// The program has halted (HALT): nothing more to run.
-    exited: bool,
 }
 
 impl<D: Dmi> BoardTarget<D> {
@@ -398,11 +415,8 @@ impl<D: Dmi> BoardTarget<D> {
             hw_breakpoints: [None; HW_BREAKPOINTS],
             watches: [None; HW_WATCHPOINTS],
             sw_breakpoints: BTreeMap::new(),
-            running: false,
-            halt_seen: false,
-            skipped_trap_step: false,
+            state: RunState::Halted,
             allow_mmio: false,
-            exited: false,
         }
     }
 
@@ -424,15 +438,13 @@ impl<D: Dmi> BoardTarget<D> {
         if !self.sw_breakpoints.contains_key(&pc) && self.read_word(pc)? == TRAP_WORD {
             self.board.write_reg(KlaussRegId::Pc, u64::from(pc.wrapping_add(4)))?;
             if step {
-                self.skipped_trap_step = true;
-                self.running = true;
+                self.state = RunState::SkippedTrap;
                 return Ok(());
             }
         }
         self.board.status()?; // clear "halted since"
         self.board.control(CTL_ATTACHED | CTL_RESUMEREQ | if step { CTL_STEP } else { 0 })?;
-        self.running = true;
-        self.halt_seen = false;
+        self.state = RunState::Running { halt_seen: false };
         Ok(())
     }
 
@@ -468,7 +480,7 @@ impl<D: Dmi> BoardTarget<D> {
             }
             Cause::Illegal => SingleThreadStopReason::Signal(Signal::SIGILL),
             Cause::Halt => {
-                self.exited = true;
+                self.state = RunState::Exited;
                 SingleThreadStopReason::Exited((self.board.read_reg(KlaussRegId::Gpr(12))? & 0xFF) as u8)
             }
             Cause::Request => SingleThreadStopReason::Signal(Signal::SIGINT),
@@ -476,17 +488,25 @@ impl<D: Dmi> BoardTarget<D> {
         })
     }
 
+    /// Check once whether the run has stopped.  With no run outstanding,
+    /// a halted core reports why it is halted.
     fn poll(&mut self) -> BoardResult<Option<SingleThreadStopReason<u32>>> {
-        if self.skipped_trap_step {
-            self.skipped_trap_step = false;
-            self.running = false;
-            return Ok(Some(SingleThreadStopReason::DoneStep));
-        }
+        let halt_seen = match self.state {
+            RunState::SkippedTrap => {
+                self.state = RunState::Halted;
+                return Ok(Some(SingleThreadStopReason::DoneStep));
+            }
+            RunState::Running { halt_seen } => halt_seen,
+            RunState::Halted | RunState::Exited => true,
+        };
         let st = self.board.status()?;
-        self.halt_seen |= st.halted_seen();
-        if st.halted() && self.halt_seen {
-            self.running = false;
+        let halt_seen = halt_seen || st.halted_seen();
+        if st.halted() && halt_seen {
+            self.state = RunState::Halted;
             return self.stop_reason(st).map(Some);
+        }
+        if let RunState::Running { .. } = self.state {
+            self.state = RunState::Running { halt_seen };
         }
         Ok(None)
     }
@@ -506,7 +526,7 @@ impl<D: Dmi> BoardTarget<D> {
     fn interrupt(&mut self) -> BoardResult<SingleThreadStopReason<u32>> {
         self.board.control(CTL_ATTACHED | CTL_HALTREQ)?;
         let st = self.board.wait_halted(Duration::from_secs(2))?;
-        self.running = false;
+        self.state = RunState::Halted;
         // a breakpoint/step may have won the race against the request
         self.stop_reason(st)
     }
@@ -544,14 +564,14 @@ impl<D: Dmi> BoardTarget<D> {
                 first_err.get_or_insert(e);
             }
         };
-        if self.running {
+        if self.state.is_running() {
             note(self.interrupt().map(drop));
         }
         // a program that executed HALT stays halted (resuming would run on
         // past its end); if the status cannot be read, only clear "attached".
         // Read the halt cause before clear_slots writes DMSTATUS.
         let resume = match self.board.status() {
-            Ok(st) => !self.exited && st.cause() != Cause::Halt,
+            Ok(st) => self.state != RunState::Exited && st.cause() != Cause::Halt,
             Err(e) => {
                 note(Err(e));
                 false
