@@ -22,7 +22,8 @@ mod error;
 /// The Klauss instruction set: opcode table, encoder and disassembler.
 mod isa;
 /// JTAG over the board's FT2232H, and the debug module's DMI.  The pure MPSSE
-/// framing is also built for tests, so they run without libftdi.
+/// framing and the `Dmi` seam are also built for tests, so they (and the
+/// board debugger's tests) run without libftdi.
 #[cfg(any(test, feature = "board"))]
 mod jtag;
 /// The memory map: heap header, code base, heap start and the MMIO window.

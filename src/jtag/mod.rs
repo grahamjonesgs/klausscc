@@ -24,8 +24,8 @@ pub(crate) use ftdi::Jtag;
 pub(crate) use mpsse::DmiReq;
 
 /// A link to the debug module's DMI: what the board debugger needs from the
-/// JTAG master ([`Jtag`](ftdi::Jtag) with the `board` feature), so it can
-/// also run against a model of the debug module in tests.
+/// JTAG master (`Jtag`, with the `board` feature), so it can also run against
+/// a model of the debug module in tests.
 pub(crate) trait Dmi {
     /// Run DMI requests back to back and return each request's data (reads;
     /// writes give 0).  Fails the whole batch if any request fails.

@@ -17,6 +17,7 @@ fn main() {
     }
     println!("cargo::rerun-if-env-changed=PKG_CONFIG");
     println!("cargo::rerun-if-env-changed=PKG_CONFIG_PATH");
+    println!("cargo::rerun-if-env-changed=PKG_CONFIG_LIBDIR");
     match libftdi_dirs() {
         Ok(dirs) => {
             for dir in dirs {

@@ -302,7 +302,7 @@ impl<D: Dmi> Board<D> {
 
     fn write_reg(&mut self, reg: KlaussRegId, v: u64) -> BoardResult<()> {
         self.batch(&[DmiReq::Write(DATA0, v), DmiReq::Write(REG_CMD, reg.regnum() as u64 | REG_CMD_WRITE)])
-            .map(|_| ())
+            .map(drop)
     }
 
     /// Check (and clear) the DM's sticky error after a memory batch.
@@ -573,7 +573,7 @@ impl<D: Dmi> BoardTarget<D> {
 
     fn write_bp(&mut self, slot: usize) -> BoardResult<()> {
         let v = self.hw_breakpoints[slot].map_or(0, |a| u64::from(a) | SLOT_ENABLE);
-        self.board.batch(&[DmiReq::Write(BP0 + slot as u8, v)]).map(|_| ())
+        self.board.batch(&[DmiReq::Write(BP0 + slot as u8, v)]).map(drop)
     }
 
     fn write_wp(&mut self, slot: usize) -> BoardResult<()> {
@@ -589,7 +589,7 @@ impl<D: Dmi> BoardTarget<D> {
             };
             u64::from(w.addr & !7) | SLOT_ENABLE | access | (lanes << WP_LANES_SHIFT)
         });
-        self.board.batch(&[DmiReq::Write(WP0 + slot as u8, v)]).map(|_| ())
+        self.board.batch(&[DmiReq::Write(WP0 + slot as u8, v)]).map(drop)
     }
 
     /// Undo everything the session set and let the program run on.
