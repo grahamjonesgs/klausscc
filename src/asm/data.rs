@@ -1,29 +1,10 @@
-use crate::asm::lexer::{data_name_from_string, is_blank, is_comment, is_start, label_name_from_string};
-use crate::asm::line::LineType;
+//! Data definitions: `#name` strings and reserved words, and the `.word`,
+//! `.space` and `.zeropad` directives, turned into the bytes they emit.
+
 use crate::diag::Diagnostics;
-use crate::isa::{Opcode, return_opcode};
 use crate::num::{LiteralError, parse_bits64, parse_int};
 use std::fmt;
 use std::fmt::Write as _;
-
-/// Format a byte count as a human-readable size (B / KiB / MiB / GiB), e.g.
-/// `9223315` -> `"8.80 MiB"`.  Used for progress/size display.
-#[must_use]
-pub(crate) fn human_bytes(n: usize) -> String {
-    const KIB: f64 = 1024.0;
-    const MIB: f64 = 1_048_576.0;
-    const GIB: f64 = 1_073_741_824.0;
-    let f = n as f64;
-    if f >= GIB {
-        format!("{:.2} GiB", f / GIB)
-    } else if f >= MIB {
-        format!("{:.2} MiB", f / MIB)
-    } else if f >= KIB {
-        format!("{:.1} KiB", f / KIB)
-    } else {
-        format!("{n} B")
-    }
-}
 
 /// Largest single data item, in bytes: the whole of the board's 128 MiB memory.
 const MAX_DATA_BYTES: i128 = 128 * 1024 * 1024;
@@ -161,51 +142,6 @@ pub(crate) fn data_bytes(line: &str) -> Result<String, DataError> {
     }
 }
 
-/// Check if line is valid.
-///
-/// Returns true if line is not error.
-pub(crate) fn is_valid_line(opcodes: &[Opcode], line: &str) -> bool {
-    if line_type(opcodes, line) == LineType::Error {
-        return false;
-    }
-    true
-}
-
-/// Returns enum of type of line.
-///
-/// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error.
-pub(crate) fn line_type(opcodes: &[Opcode], line: &str) -> LineType {
-    if label_name_from_string(line).is_some() {
-        return LineType::Label;
-    }
-    if data_name_from_string(line).is_some() {
-        return LineType::Data;
-    }
-    if return_opcode(line, opcodes).is_some() {
-        return LineType::Opcode;
-    }
-    if is_blank(line) {
-        return LineType::Blank;
-    }
-    if is_start(line) {
-        return LineType::Start;
-    }
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if is_comment(word) && i == 0 {
-            return LineType::Comment;
-        }
-    }
-    // Check for C compiler directives
-    let first_word = line.split_whitespace().next().unwrap_or("");
-    match first_word {
-        ".word" | ".space" | ".zeropad" => return LineType::Data,
-        ".text" | ".data" | ".rodata" | ".bss" | ".global" | ".globl" | ".extern" | ".comm" | ".lcomm" => return LineType::Comment,
-        _ => {}
-    }
-    LineType::Error
-}
-
 /// Return number of bytes of data.
 ///
 /// From instruction name, option of number of bytes of data, or 0 is error.
@@ -224,176 +160,12 @@ pub(crate) fn num_data_bytes(line: &str, msg_list: &mut Diagnostics, line_number
     }
 }
 
-/// Parse expected UART hex values from source file comment headers.
-///
-/// Extracts 8-digit uppercase hex values from lines matching the pattern `//   XXXXXXXX  (`.
-pub(crate) fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
-    let mut expected: Vec<String> = Vec::new();
-    for line in lines {
-        let trimmed = line.trim();
-        if !trimmed.starts_with("//") {
-            continue;
-        }
-        let comment_body = trimmed.get(2..).unwrap_or("").trim();
-        if comment_body.len() >= 8 {
-            let candidate = comment_body.get(..8).unwrap_or("");
-            if candidate.len() == 8 && candidate.chars().all(|c| c.is_ascii_hexdigit()) && candidate == candidate.to_ascii_uppercase() {
-                expected.push(candidate.to_owned());
-            }
-        }
-    }
-    expected
-}
-
-/// Trim newline from string.
-///
-/// Removes newline from end of string.
-pub(crate) fn trim_newline(input: &mut String) {
-    if input.ends_with('\n') {
-        input.pop();
-        if input.ends_with('\r') {
-            input.pop();
-        }
-    }
-    if input.ends_with('\r') {
-        input.pop();
-        if input.ends_with('\n') {
-            input.pop();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asm::symbols::{Label, return_label_value};
+    use crate::asm::classify::line_type;
+    use crate::asm::line::LineType;
     use crate::diag::MessageType;
-
-    #[test]
-    // Test that line is trimmed of newline
-    fn test_trim_newline1() {
-        let mut test_string: String = String::from("Hello\n");
-        trim_newline(&mut test_string);
-        assert_eq!(test_string, "Hello");
-    }
-    #[test]
-    // Test that line is trimmed of newline
-    fn test_trim_newline2() {
-        let mut test_string: String = String::from("Hello\r\n");
-        trim_newline(&mut test_string);
-        assert_eq!(test_string, "Hello");
-    }
-    #[test]
-    // Test that line is trimmed of newline
-    fn test_trim_newline3() {
-        let mut test_string: String = String::from("Hello\n\r");
-        trim_newline(&mut test_string);
-        assert_eq!(test_string, "Hello");
-    }
-
-    #[test]
-    // Test for valid line returns true is opcode is found
-    fn test_is_valid_line1() {
-        let input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 0,
-            section: String::default(),
-        });
-        let output = is_valid_line(opcodes, &input);
-        assert!(output);
-    }
-
-    #[test]
-    fn test_is_valid_line2() {
-        let input = String::from("PUSH");
-        let opcodes = &mut Vec::<Opcode>::new();
-        opcodes.push(Opcode {
-            text_name: String::from("PULL"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 0,
-            section: String::default(),
-        });
-        let output = is_valid_line(opcodes, &input);
-        assert!(!output);
-    }
-
-    #[test]
-    // Test for opcode line type
-    fn test_line_type1() {
-        let input = String::from("PUSH");
-        let opcodes = vec![Opcode {
-            text_name: String::from("PUSH"),
-            hex_code: String::from("1234"),
-            ops: Vec::new(),
-            comment: String::default(),
-            variables: 0,
-            registers: 0,
-            section: String::default(),
-        }];
-        let output = line_type(&opcodes, &input);
-        assert_eq!(output, LineType::Opcode);
-    }
-    #[test]
-    // Test for label line type
-    fn test_line_type2() {
-        let input = String::from("LOOP:");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
-        assert_eq!(output, LineType::Label);
-    }
-    #[test]
-    // Test for data line type
-    fn test_line_type3() {
-        let input = String::from("#Data_name");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
-        assert_eq!(output, LineType::Data);
-    }
-
-    #[test]
-    // Test for blank line type
-    fn test_line_type4() {
-        let input = String::default();
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
-        assert_eq!(output, LineType::Blank);
-    }
-
-    #[test]
-    // Test for comment line type
-    fn test_line_type5() {
-        let input = String::from("//This is a comment");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
-        assert_eq!(output, LineType::Comment);
-    }
-
-    #[test]
-    // Test for start line type
-    fn test_line_type6() {
-        let input = String::from("_start");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
-        assert_eq!(output, LineType::Start);
-    }
-
-    #[test]
-    // Test for error line type
-    fn test_line_type7() {
-        let input = String::from("1234");
-        let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
-        assert_eq!(output, LineType::Error);
-    }
 
     #[test]
     fn test_num_data_bytes1() {
@@ -502,79 +274,6 @@ mod tests {
         // Contrast with .space, which rounds up to a whole 64-bit word.
         assert_eq!(data_as_bytes(".space 4"), Some("0000000000000000".to_owned())); // 8 bytes
         assert_eq!(line_type(&Vec::new(), ".zeropad 4"), LineType::Data);
-    }
-
-    #[test]
-    // Test for correct label returned
-    fn test_return_label_value1() {
-        let labels = &mut Vec::<Label>::new();
-        labels.push(Label {
-            program_counter: 42,
-            name: String::from("LOOP:"),
-        });
-        let input = String::from("LOOP:");
-        let output = return_label_value(&input, labels);
-        assert_eq!(output, Some(42));
-    }
-
-    #[test]
-    // Test for no label returned
-    fn test_return_label_value2() {
-        let labels = &mut Vec::<Label>::new();
-        labels.push(Label {
-            program_counter: 42,
-            name: String::from("LOOP1:"),
-        });
-        let input = String::from("LOOP2:");
-        let output = return_label_value(&input, labels);
-        assert_eq!(output, None);
-    }
-
-    #[test]
-    // Test parsing expected UART values from typical test file header
-    fn test_parse_expected_uart_values1() {
-        let lines = vec![
-            "// Test 05: Bit Manipulation".to_owned(),
-            "// Expected UART output:".to_owned(),
-            "//   00000080  (BSET: set bit 7)".to_owned(),
-            "//   000000FF  (result)".to_owned(),
-            "//   FF000000  (BITREV)".to_owned(),
-            "// Expected 7SEG: 0x05".to_owned(),
-            "_start".to_owned(),
-            "SETR A 0x0".to_owned(),
-        ];
-        let result = parse_expected_uart_values(&lines);
-        assert_eq!(result, vec!["00000080", "000000FF", "FF000000"]);
-    }
-
-    #[test]
-    // Test parsing returns empty vec when no expected values
-    fn test_parse_expected_uart_values2() {
-        let lines = vec!["// This is a comment".to_owned(), "// No hex values here".to_owned(), "_start".to_owned()];
-        let result = parse_expected_uart_values(&lines);
-        assert_eq!(result, Vec::<String>::new());
-    }
-
-    #[test]
-    // Test parsing ignores non-comment lines and short hex values
-    fn test_parse_expected_uart_values3() {
-        let lines = vec![
-            "00000080".to_owned(),                   // not a comment
-            "// 0x05".to_owned(),                    // too short
-            "//   ZZZZZZZZ  (invalid)".to_owned(),   // not hex
-            "//   0000abcd  (lowercase)".to_owned(), // lowercase hex - should not match
-            "//   0000ABCD  (uppercase)".to_owned(), // valid
-        ];
-        let result = parse_expected_uart_values(&lines);
-        assert_eq!(result, vec!["0000ABCD"]);
-    }
-
-    #[test]
-    // Test parsing with empty input
-    fn test_parse_expected_uart_values4() {
-        let lines: Vec<String> = Vec::new();
-        let result = parse_expected_uart_values(&lines);
-        assert_eq!(result, Vec::<String>::new());
     }
 
     #[test]
@@ -696,47 +395,5 @@ mod tests {
             msg.text(),
             "Error in data definition for .word 12abc: invalid value \"12abc\" (invalid digit)"
         );
-    }
-
-    #[test]
-    fn test_line_type_directive_word() {
-        let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".word 42"), LineType::Data);
-    }
-
-    #[test]
-    fn test_line_type_directive_space() {
-        let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".space 16"), LineType::Data);
-    }
-
-    #[test]
-    fn test_line_type_directive_text() {
-        let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".text"), LineType::Comment);
-    }
-
-    #[test]
-    fn test_line_type_directive_data() {
-        let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".data"), LineType::Comment);
-    }
-
-    #[test]
-    fn test_line_type_directive_global() {
-        let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".global main"), LineType::Comment);
-    }
-
-    #[test]
-    fn test_line_type_directive_comm() {
-        let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".comm buffer, 256, 4"), LineType::Comment);
-    }
-
-    #[test]
-    fn test_line_type_directive_lcomm() {
-        let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".lcomm temp 8"), LineType::Comment);
     }
 }

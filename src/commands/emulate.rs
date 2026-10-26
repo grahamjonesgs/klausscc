@@ -2,15 +2,15 @@
 //! program, `--emulate-test` to check a corpus against its expected UART
 //! output.
 
-use super::test_runner::read_test_list;
+use super::test_runner::{parse_expected_uart_values, read_test_list};
 use crate::asm::macros;
 use crate::asm::{Assembly, assemble};
 use crate::diag::{Diagnostics, MessageType};
 use crate::emulate;
 use crate::error::Error;
-use crate::helper::{human_bytes, parse_expected_uart_values};
 use crate::isa::Opcode;
 use crate::loader::{BinaryInput, Loaded, load_flat};
+use crate::num::human_bytes;
 use crate::output::filename_stem;
 use crate::output::image::Image;
 use std::fs;

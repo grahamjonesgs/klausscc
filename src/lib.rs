@@ -22,8 +22,6 @@ mod gdbserver;
 /// GDB remote-protocol server for the board (`--gdbserver --board`).
 #[cfg(feature = "board")]
 mod gdbserver_board;
-/// Module of helper functions.
-mod helper;
 /// The Klauss instruction set: opcode table, encoder and disassembler.
 mod isa;
 /// JTAG over the board's FT2232H, and the debug module's DMI.  The pure MPSSE
@@ -36,7 +34,7 @@ mod layout;
 mod loader;
 /// Module to stream a flat DDR image to the board over TCP (network boot).
 mod netload;
-/// Module for integer literal parsing.
+/// Integer literal parsing, and byte counts for messages.
 mod num;
 /// The files the tool writes: listing, program image and opcode docs.
 mod output;

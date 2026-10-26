@@ -15,8 +15,11 @@
 //! assembler module can depend on them without forming a cycle.
 //!
 //! The other stages each have a module: `source` reads the files, `macros`
-//! expands macros and `symbols` holds the labels.
+//! expands macros, `classify` tells what a line holds, `data` encodes data
+//! definitions and `symbols` holds the labels.
 
+mod classify;
+mod data;
 pub(crate) mod lexer;
 pub(crate) mod line;
 pub(crate) mod macros;

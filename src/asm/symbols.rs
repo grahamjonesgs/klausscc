@@ -471,4 +471,30 @@ mod tests {
         assert_eq!(msglist.messages()[1].text(), "Data #data123 has extra text dummy2");
         assert_eq!(msglist.messages()[2].text(), "Data #data3 has no string termination");
     }
+
+    #[test]
+    // Test for correct label returned
+    fn test_return_label_value_with_colon() {
+        let labels = &mut Vec::<Label>::new();
+        labels.push(Label {
+            program_counter: 42,
+            name: String::from("LOOP:"),
+        });
+        let input = String::from("LOOP:");
+        let output = return_label_value(&input, labels);
+        assert_eq!(output, Some(42));
+    }
+
+    #[test]
+    // Test for no label returned
+    fn test_return_label_value_with_colon_missing() {
+        let labels = &mut Vec::<Label>::new();
+        labels.push(Label {
+            program_counter: 42,
+            name: String::from("LOOP1:"),
+        });
+        let input = String::from("LOOP2:");
+        let output = return_label_value(&input, labels);
+        assert_eq!(output, None);
+    }
 }

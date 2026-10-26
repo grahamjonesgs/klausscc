@@ -6,7 +6,6 @@ use crate::asm::assemble;
 use crate::asm::macros;
 use crate::diag::{Diagnostics, print_messages};
 use crate::error::Error;
-use crate::helper::parse_expected_uart_values;
 use crate::isa::Opcode;
 use crate::output::filename_stem;
 use crate::output::listing::write_code_output_file;
@@ -376,6 +375,27 @@ fn report_batch(results: &[BatchTestResult], list_file: &str) -> Result<(), Erro
     }
 }
 
+/// Parse expected UART hex values from source file comment headers.
+///
+/// Extracts 8-digit uppercase hex values from lines matching the pattern `//   XXXXXXXX  (`.
+pub(super) fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
+    let mut expected: Vec<String> = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        if !trimmed.starts_with("//") {
+            continue;
+        }
+        let comment_body = trimmed.get(2..).unwrap_or("").trim();
+        if comment_body.len() >= 8 {
+            let candidate = comment_body.get(..8).unwrap_or("");
+            if candidate.len() == 8 && candidate.chars().all(|c| c.is_ascii_hexdigit()) && candidate == candidate.to_ascii_uppercase() {
+                expected.push(candidate.to_owned());
+            }
+        }
+    }
+    expected
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,5 +449,52 @@ mod tests {
         let err = report_batch(&results, "list.txt").unwrap_err();
         assert!(matches!(err, Error::NoTests(_)), "{err:?}");
         assert_eq!(err.code(), 1);
+    }
+
+    #[test]
+    // Test parsing expected UART values from typical test file header
+    fn test_parse_expected_uart_values1() {
+        let lines = vec![
+            "// Test 05: Bit Manipulation".to_owned(),
+            "// Expected UART output:".to_owned(),
+            "//   00000080  (BSET: set bit 7)".to_owned(),
+            "//   000000FF  (result)".to_owned(),
+            "//   FF000000  (BITREV)".to_owned(),
+            "// Expected 7SEG: 0x05".to_owned(),
+            "_start".to_owned(),
+            "SETR A 0x0".to_owned(),
+        ];
+        let result = parse_expected_uart_values(&lines);
+        assert_eq!(result, vec!["00000080", "000000FF", "FF000000"]);
+    }
+
+    #[test]
+    // Test parsing returns empty vec when no expected values
+    fn test_parse_expected_uart_values2() {
+        let lines = vec!["// This is a comment".to_owned(), "// No hex values here".to_owned(), "_start".to_owned()];
+        let result = parse_expected_uart_values(&lines);
+        assert_eq!(result, Vec::<String>::new());
+    }
+
+    #[test]
+    // Test parsing ignores non-comment lines and short hex values
+    fn test_parse_expected_uart_values3() {
+        let lines = vec![
+            "00000080".to_owned(),                   // not a comment
+            "// 0x05".to_owned(),                    // too short
+            "//   ZZZZZZZZ  (invalid)".to_owned(),   // not hex
+            "//   0000abcd  (lowercase)".to_owned(), // lowercase hex - should not match
+            "//   0000ABCD  (uppercase)".to_owned(), // valid
+        ];
+        let result = parse_expected_uart_values(&lines);
+        assert_eq!(result, vec!["0000ABCD"]);
+    }
+
+    #[test]
+    // Test parsing with empty input
+    fn test_parse_expected_uart_values4() {
+        let lines: Vec<String> = Vec::new();
+        let result = parse_expected_uart_values(&lines);
+        assert_eq!(result, Vec::<String>::new());
     }
 }

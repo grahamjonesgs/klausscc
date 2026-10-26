@@ -1,5 +1,5 @@
 use crate::diag::Diagnostics;
-use crate::helper::{human_bytes, trim_newline};
+use crate::num::human_bytes;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use serialport::{SerialPort, SerialPortType, UsbPortInfo};
 use std::fmt::Write as _;
@@ -641,6 +641,24 @@ fn match_uart_values<R: io::Read + ?Sized>(reader: &mut R, expected_values: &[St
     })
 }
 
+/// Trim newline from string.
+///
+/// Removes newline from end of string.
+fn trim_newline(input: &mut String) {
+    if input.ends_with('\n') {
+        input.pop();
+        if input.ends_with('\r') {
+            input.pop();
+        }
+    }
+    if input.ends_with('\r') {
+        input.pop();
+        if input.ends_with('\n') {
+            input.pop();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -786,5 +804,29 @@ mod tests {
         let mut reader = Script::new(vec![Ok(b"00000001\n"), Err(io::Error::from(io::ErrorKind::BrokenPipe))]);
         let err = match_uart_values(&mut reader, &expected(&["00000001", "00000002"]), Duration::from_secs(5)).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+    }
+
+    #[test]
+    // Test that line is trimmed of newline
+    fn test_trim_newline1() {
+        let mut test_string: String = String::from("Hello\n");
+        trim_newline(&mut test_string);
+        assert_eq!(test_string, "Hello");
+    }
+
+    #[test]
+    // Test that line is trimmed of newline
+    fn test_trim_newline2() {
+        let mut test_string: String = String::from("Hello\r\n");
+        trim_newline(&mut test_string);
+        assert_eq!(test_string, "Hello");
+    }
+
+    #[test]
+    // Test that line is trimmed of newline
+    fn test_trim_newline3() {
+        let mut test_string: String = String::from("Hello\n\r");
+        trim_newline(&mut test_string);
+        assert_eq!(test_string, "Hello");
     }
 }

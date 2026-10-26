@@ -1,4 +1,5 @@
-//! Integer literal parsing shared by the assembler and the command line.
+//! Integer literal parsing shared by the assembler and the command line,
+//! and [`human_bytes`] for the sizes in progress messages.
 //!
 //! Every numeric operand in the assembler (`.word`, `.space`, `#name N`,
 //! immediates, counts) and the `--entry` address go through [`parse_int`], so
@@ -116,6 +117,25 @@ fn digits_value(digits: impl Iterator<Item = char>, radix: u32) -> Result<u64, L
     if any { Ok(value) } else { Err(LiteralError::Empty) }
 }
 
+/// Format a byte count as a human-readable size (B / KiB / MiB / GiB), e.g.
+/// `9223315` -> `"8.80 MiB"`.  Used for progress/size display.
+#[must_use]
+pub(crate) fn human_bytes(n: usize) -> String {
+    const KIB: f64 = 1024.0;
+    const MIB: f64 = 1_048_576.0;
+    const GIB: f64 = 1_073_741_824.0;
+    let f = n as f64;
+    if f >= GIB {
+        format!("{:.2} GiB", f / GIB)
+    } else if f >= MIB {
+        format!("{:.2} MiB", f / MIB)
+    } else if f >= KIB {
+        format!("{:.1} KiB", f / KIB)
+    } else {
+        format!("{n} B")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -214,5 +234,15 @@ mod tests {
         assert!(parse_u32("0x1_0000_0000").is_err());
         assert!(parse_u32("-1").is_err());
         assert_eq!(parse_u32("0xZZ"), Err("invalid digit in \"0xZZ\"".to_owned()));
+    }
+
+    #[test]
+    fn human_bytes_picks_the_unit() {
+        assert_eq!(human_bytes(0), "0 B");
+        assert_eq!(human_bytes(1023), "1023 B");
+        assert_eq!(human_bytes(1024), "1.0 KiB");
+        assert_eq!(human_bytes(1536), "1.5 KiB");
+        assert_eq!(human_bytes(9_223_315), "8.80 MiB");
+        assert_eq!(human_bytes(1 << 30), "1.00 GiB");
     }
 }

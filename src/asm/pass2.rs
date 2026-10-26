@@ -1,10 +1,10 @@
 //! Pass 2: encode every line's machine code, with the labels resolved.
 
+use crate::asm::data::data_as_bytes;
 use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, Pass2};
 use crate::asm::symbols::Label;
 use crate::diag::Diagnostics;
-use crate::helper::data_as_bytes;
 use crate::isa::Opcode;
 use crate::isa::encode::{add_arguments, add_registers, pc_relative_bits};
 

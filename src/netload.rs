@@ -8,7 +8,7 @@
 //! hand-rolled UDP design would have had to implement.
 
 use crate::diag::Diagnostics;
-use crate::helper::human_bytes;
+use crate::num::human_bytes;
 use std::fmt;
 use std::io::{self, Read as _, Write as _};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs as _};

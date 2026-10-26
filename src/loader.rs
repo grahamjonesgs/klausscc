@@ -8,8 +8,8 @@
 
 use crate::diag::Diagnostics;
 use crate::error::Error;
-use crate::helper::human_bytes;
 use crate::layout::CODE_BASE;
+use crate::num::human_bytes;
 use crate::output::image::Image;
 use std::fmt::Write as _;
 use std::fs;

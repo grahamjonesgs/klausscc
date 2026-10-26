@@ -4,10 +4,11 @@
 //! inside a `.data`/`.rodata`/`.bss` section is moved after the code, starting
 //! 8-byte aligned.  `.comm`/`.lcomm` become a label plus `.space` there too.
 
+use crate::asm::classify::{is_valid_line, line_type};
+use crate::asm::data::num_data_bytes;
 use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, SourceLine};
 use crate::diag::Diagnostics;
-use crate::helper::{is_valid_line, line_type, num_data_bytes};
 use crate::isa::{Opcode, num_arguments};
 use crate::layout::CODE_BASE;
 use crate::num::{fits_imm32, parse_bits64, parse_int, parse_operand};
