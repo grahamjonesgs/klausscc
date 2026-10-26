@@ -64,7 +64,7 @@ fn test_mmio_uart_tx_drops_a_store_while_busy() {
     // SETR B TX_DATA ; SETR A 'H' ; MEMSET8 [B]=A ; SETR A 'i' ; MEMSET8 [B]=A ; HALT
     // MEMSET8 data=rd=A(0), base=rs1=B(1): 0x5C00_0000 | 0<<8 | 1<<4 = 0x5C00_0010.
     // A program starts with the UART idle (as one loaded over the UART does
-    // since the KlaussCPU.sv START_WAIT change of 2026-10-26), so 'H', the
+    // since klaussCPU 04db80e, KlaussCPU.sv START_WAIT), so 'H', the
     // first store, goes out; 'i' is stored two instructions later, while 'H'
     // is still being sent, and is dropped (uart_send_msg.sv :61-76 ignores a
     // send request while busy).

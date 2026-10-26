@@ -10,7 +10,7 @@ verified on hardware (Phase A) and what still needs a board run (Phase B).
 |---|---|
 | Host | Linux, rustc 1.99.1, libftdi1 1.6rc1 (pkg-config) |
 | Board | Nexys A7-100T, FT2232H: `/dev/ttyUSB0` = JTAG (interface A), `/dev/ttyUSB1` = UART (interface B) |
-| Bitstream | KlaussCPU `cf01863`, DEBUG_EN=1, in QSPI flash (survives a power cycle) and loaded over JTAG. Its debug module also clears haltreq on a plain load. |
+| Bitstream | KlaussCPU `04db80e`, DEBUG_EN=1, in QSPI flash (survives a power cycle) and loaded over JTAG. Its debug module also clears haltreq on a plain load. |
 | Old flash image | `~/.cache/klausscpu-debug-build/qspi_backup_2026-10-26.bin` |
 
 ```sh
@@ -53,15 +53,28 @@ Findings, now fixed:
   started. The emulator models TX busy time: 334 cycles per store.
   `--emulate` reports a write while busy, and `--emulate-test` fails the
   file. All fixtures now poll before every write.
-  Since the `KlaussCPU.sv` `START_WAIT` change of 2026-10-26 the CPU waits
+  Since klaussCPU 04db80e (`KlaussCPU.sv` `START_WAIT`) the CPU waits
   for the reply to finish before starting the program, so TX is idle at
   program start and the first store is taken; the emulator now starts with
   TX idle to match. Every store must still poll, because back-to-back
   stores are dropped, and on bitstreams built before that change the first
   store can also be dropped while the reply is still going out. The RX FIFO
-  is not yet flushed at `LOAD_COMPLETE` (proposed, pending approval); the
-  emulator starts with it empty, which matches the board only once that
-  flush lands.
+  is emptied at `LOAD_COMPLETE` (also 04db80e), so a program starts with it
+  empty, as in the emulator.
+
+## Phase C: done (klausscc c29d0e7, bitstream klaussCPU 04db80e)
+
+klaussCPU 04db80e makes `START_WAIT` wait for the loader's reply to finish,
+and empties the RX FIFO at `LOAD_COMPLETE`. The emulator starts programs with
+TX idle and RX empty to match. On the board (DEBUG_EN=1, in QSPI):
+- The unpolled v2_hello copy printed exactly "H", with 'i' and '\n'
+  dropped, as the emulator predicts. On cf01863 it printed nothing.
+- hw_alignment passed 102/102.
+- `-L` gave 25/26 with 1 skipped, the same as `--emulate-test` (25/25).
+- RX flush: the stale "STALE" bytes no longer reach the next program, which
+  printed "E>" where it had printed "E>STALE". Keys typed after the load
+  still echo.
+- `run_board_smoke.sh` passed.
 
 ## Phase B: done (klausscc 8674f21, bitstream cf01863)
 

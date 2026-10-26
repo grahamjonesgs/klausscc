@@ -210,8 +210,8 @@ access reads 0 or is ignored.
   number of times, because instructions take 2 modelled cycles each.
 - A program starts with TX idle (`--emulate`, `--emulate-test` and
   `--gdbserver` alike), as a program loaded over the UART (or by
-  netboot) does since the `KlaussCPU.sv` `START_WAIT` change of
-  2026-10-26. `LOAD_COMPLETE` clears `r_start_wait_counter` and
+  netboot) does since klaussCPU 04db80e (`KlaussCPU.sv` `START_WAIT`).
+  `LOAD_COMPLETE` clears `r_start_wait_counter` and
   `r_start_wait_ack` and starts the `"Load Complete OK\n\r"` reply;
   `START_WAIT` waits for `uart_send_msg` to take it (`w_sending_msg` =
   1, at most 16 cycles), then for `w_sending_msg` = 0. Edge by edge: E0
@@ -228,10 +228,11 @@ access reads 0 or is ignored.
   6000 cycles, 60 µs), so the first store can be dropped too; the
   emulator does not model that.
 - The UART RX FIFO starts empty, so `STATUS.RX_EMPTY` reads 1 until
-  `--gdbserver`'s stdin feeds it. That matches the board only once the
-  RX FIFO is flushed at `LOAD_COMPLETE`, a change proposed but not yet
-  in the RTL; until then a byte left in the FIFO when the load
-  completes is still there when the program starts.
+  `--gdbserver`'s stdin feeds it. That matches the board: since
+  klaussCPU 04db80e the RTL empties the RX FIFO at `LOAD_COMPLETE`
+  (`uart_rx_fifo1` `.i_Reset = w_reset_H | (st.SM == LOAD_COMPLETE)`),
+  so bytes sent before the load ended never reach the program; a byte
+  that arrives during `START_WAIT` is kept.
 - Memory is 128 MiB. Reads past the end return 0 and writes past it are
   dropped.
 

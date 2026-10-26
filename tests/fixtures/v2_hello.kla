@@ -3,7 +3,7 @@
 // UART is memory-mapped (TX_DATA at 0xF0010000, STATUS at 0xF0010010); a byte
 // store to TX_DATA transmits it. A store while STATUS.TX_BUSY (bit 0) is set
 // is dropped, so PUTC polls before each byte, the first included: on bitstreams
-// built before the RTL's START_WAIT change a program loaded over the UART
+// built before the RTL's START_WAIT change (klaussCPU 04db80e) a program loaded over the UART
 // starts while the loader's "Load Complete OK" reply is still being sent.
 _start
 SETR B 0xF0010000    // UART TX_DATA MMIO register

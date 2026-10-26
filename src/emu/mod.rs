@@ -33,7 +33,7 @@
 //! ([`UART_CYCLES_PER_STORE`]), and a store while it is set is dropped, as
 //! the RTL drops it, and recorded ([`EmulateResult::tx_busy_writes`]).  A
 //! program starts with the transmitter idle, as one loaded over the UART does
-//! since the `KlaussCPU.sv` `START_WAIT` change of 2026-10-26 (the pipeline
+//! since klaussCPU 04db80e (`KlaussCPU.sv` `START_WAIT`: the pipeline
 //! waits for the loader's reply to finish), so its first store is taken.
 //!
 //! ## v2 word-0 layout (`doc/ISA_ENCODING_V2.md` §1)

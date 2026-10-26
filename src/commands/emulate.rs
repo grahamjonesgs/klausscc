@@ -435,7 +435,7 @@ mod tests {
     fn verify_passes_a_program_whose_first_store_does_not_poll() {
         // test_regs with its opening DELAYV and polled newline replaced by an
         // unpolled TX_DATA store: the program starts with the transmitter idle
-        // (KlaussCPU.sv START_WAIT change of 2026-10-26), so that first store
+        // (KlaussCPU.sv START_WAIT, klaussCPU 04db80e), so that first store
         // is taken, and the polled stubs then wait for it to go out.
         let dir = tempfile::tempdir().expect("tempdir");
         fs::copy(fixture_dir().join("uart_stubs.kla"), dir.path().join("uart_stubs.kla")).expect("copy stubs");

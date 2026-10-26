@@ -997,11 +997,11 @@ The board has more devices: SD card, cache controller, Ethernet, crypto, a 2D bl
 | `0x08` | `RX_DATA` | R | The oldest received byte in bits 7:0; reading it removes it. Read only while `STATUS.RX_EMPTY` is 0. |
 | `0x10` | `STATUS` | R | Bit 0 `TX_BUSY`, bit 1 `RX_EMPTY`, bit 2 `RX_FULL` |
 
-There is no transmit FIFO. The UART runs at 3,000,000 baud (33 clock cycles a bit at 100 MHz), so each byte keeps `TX_BUSY` set for about 3.3 µs (334 cycles from the write: ten bits of 33 cycles plus four cycles of the transmitter's own). A program loaded over the UART (or by netboot) starts with the transmitter idle: the CPU waits for the loader's 18-byte `Load Complete OK` reply to finish before it starts the program (the `KlaussCPU.sv` `START_WAIT` change of 2026-10-26), so `TX_BUSY` reads 0 and the first write is taken. Every write to `TX_DATA` must still wait for `TX_BUSY` to clear, because a write made while the previous byte is going out is dropped, so back-to-back writes lose bytes. Poll before the first write too: on bitstreams built before the `START_WAIT` change the program starts while the reply is still being sent, which keeps `TX_BUSY` set for about the first 60 µs, and a first write made then is lost as well.
+There is no transmit FIFO. The UART runs at 3,000,000 baud (33 clock cycles a bit at 100 MHz), so each byte keeps `TX_BUSY` set for about 3.3 µs (334 cycles from the write: ten bits of 33 cycles plus four cycles of the transmitter's own). A program loaded over the UART (or by netboot) starts with the transmitter idle: the CPU waits for the loader's 18-byte `Load Complete OK` reply to finish before it starts the program (klaussCPU 04db80e, `KlaussCPU.sv` `START_WAIT`), so `TX_BUSY` reads 0 and the first write is taken. Every write to `TX_DATA` must still wait for `TX_BUSY` to clear, because a write made while the previous byte is going out is dropped, so back-to-back writes lose bytes. Poll before the first write too: on bitstreams built before klaussCPU 04db80e the program starts while the reply is still being sent, which keeps `TX_BUSY` set for about the first 60 µs, and a first write made then is lost as well.
 
-The receive FIFO is not yet cleared when a load completes (a change to flush it at that point is proposed but not in the RTL), so a byte left in it then is still there when the program starts.
+The receive FIFO is emptied when a load completes (also klaussCPU 04db80e), so nothing typed or sent before the load ended reaches the program; a byte that arrives during the short start wait is kept. On older bitstreams a byte left in the FIFO is still there when the program starts.
 
-The emulator models this. A write sets `TX_BUSY` for 334 cycles of its clock (which counts 2 cycles per instruction). A program starts with the transmitter idle, as on the board since the `START_WAIT` change (the emulator does not model older bitstreams, where the first write can be dropped). A write while busy is dropped, as on the board. `--emulate` lists each such write ("UART TX write while busy at PC 0x...") and warns, and `--emulate-test` fails the file; under `--gdbserver` a write while busy is reported on stderr. The emulator collects the transmitted bytes as the program's UART output. Its receive FIFO starts empty, which matches the board only once the FIFO is flushed at load; under `--emulate` it stays empty, so `RX_EMPTY` reads 1, and under `--gdbserver` stdin feeds it.
+The emulator models this. A write sets `TX_BUSY` for 334 cycles of its clock (which counts 2 cycles per instruction). A program starts with the transmitter idle, as on the board since klaussCPU 04db80e (the emulator does not model older bitstreams, where the first write can be dropped). A write while busy is dropped, as on the board. `--emulate` lists each such write ("UART TX write while busy at PC 0x...") and warns, and `--emulate-test` fails the file; under `--gdbserver` a write while busy is reported on stderr. The emulator collects the transmitted bytes as the program's UART output. Its receive FIFO starts empty, as on the board, which empties it when a load completes (klaussCPU 04db80e); under `--emulate` it stays empty, so `RX_EMPTY` reads 1, and under `--gdbserver` stdin feeds it.
 
 Sending and receiving with plain loads and stores:
 
@@ -1161,8 +1161,8 @@ IRET
 |------|----------|----------|
 | `DELAYR`/`DELAYV` | Busy-wait (value × 8192 cycles) | No wait; its clock advances by value × 8192 cycles |
 | LCD instructions | Drive the SPI LCD | No effect |
-| UART transmit | 334 cycles a byte; a write while `TX_BUSY` is dropped; idle when a program starts (on bitstreams built before the `START_WAIT` change, the loader's reply is still being sent then) | The same, on the emulator's clock (2 cycles per instruction), so a polling loop spins a different number of times. Always idle at start. Writes while busy are reported, and fail `--emulate-test` |
-| UART receive | The FIFO is not cleared when a load completes (a flush is proposed, not yet in the RTL) | Starts empty; `--gdbserver`'s stdin feeds it |
+| UART transmit | 334 cycles a byte; a write while `TX_BUSY` is dropped; idle when a program starts (on bitstreams before klaussCPU 04db80e, the loader's reply is still being sent then) | The same, on the emulator's clock (2 cycles per instruction), so a polling loop spins a different number of times. Always idle at start. Writes while busy are reported, and fail `--emulate-test` |
+| UART receive | Emptied when a load completes (klaussCPU 04db80e); a byte arriving during the start wait is kept | Starts empty; `--gdbserver`'s stdin feeds it |
 | Time, timer interrupts | 100 MHz clock | 2 cycles per instruction |
 | Devices other than UART, timer and three perf counters | Present | Read 0, writes ignored |
 | MMIO access at an address that is not a multiple of 8 | Up to the device's address decoder (not checked) | Decodes the exact address; no register is there, so it reads 0 or is ignored |
@@ -1297,7 +1297,7 @@ klausscc -i test_regs.kla -s --test  # on the board
 
 ### Key Conventions
 
-1. **Initial delay**: start with a `DELAYV` so the loader's reply has finished before the program prints. On bitstreams with the `START_WAIT` change the reply has always finished by the time the program starts. (The emulator does not wait.)
+1. **Initial delay**: start with a `DELAYV` so the loader's reply has finished before the program prints. On bitstreams from klaussCPU 04db80e on, the reply has always finished by the time the program starts. (The emulator does not wait.)
 2. **One value per line**: print each result with `$TXR`, then `$NEWLINE`. `$TXR` prints the low 32 bits, so check 64-bit results in two halves (`SHRV` by 32 for the top half).
 3. **Include the UART routines last**: `!include uart_stubs.kla` after `HALT`, so execution never runs into them.
 4. **Data after the code**: put `#NAME` data after `HALT` (or in a `.data` section), so it is never executed.

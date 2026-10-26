@@ -49,10 +49,11 @@ const UART_STATUS: u32 = 0x0010;
 /// Modelled RX FIFO depth.  Only affects the `STATUS.RX_FULL` bit; the RTL depth is
 /// a parameter and the emulator has no external byte source that would fill it.
 ///
-/// The FIFO starts empty.  That matches the board only once the RX FIFO is
-/// flushed at `LOAD_COMPLETE`, a change proposed but not yet in the RTL: until
-/// then a byte left in the FIFO when the load completes is still there when
-/// the program starts.
+/// The FIFO starts empty, as on the board: since klaussCPU 04db80e the RTL
+/// empties it at `LOAD_COMPLETE` (`uart_rx_fifo1` `.i_Reset = w_reset_H |
+/// (st.SM == LOAD_COMPLETE)`), so nothing sent before the load ended reaches
+/// the program.  A byte that arrives during `START_WAIT` (about 6000 cycles,
+/// before the first instruction) is kept; the emulator has no such source.
 const UART_RX_FIFO_DEPTH: usize = 16;
 
 // ---- UART transmit timing ----------------------------------------------------
@@ -66,8 +67,8 @@ const UART_RX_FIFO_DEPTH: usize = 16;
 // frame's `s_CLEANUP` (`uart_send_msg.sv` :61-82).
 //
 // A program loaded over the UART (or by netboot) starts with the transmitter
-// idle, so its first store is taken (`KlaussCPU.sv` `START_WAIT` change of
-// 2026-10-26): `LOAD_COMPLETE` clears `r_start_wait_counter` and
+// idle, so its first store is taken (`KlaussCPU.sv` `START_WAIT`, klaussCPU
+// 04db80e): `LOAD_COMPLETE` clears `r_start_wait_counter` and
 // `r_start_wait_ack` and starts the `"Load Complete OK\n\r"` reply, and
 // `START_WAIT` waits for `uart_send_msg` to take it (`w_sending_msg` = 1, at
 // most 16 cycles) and then for `w_sending_msg` = 0.  The last stop bit ends

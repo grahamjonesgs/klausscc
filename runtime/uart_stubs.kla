@@ -7,7 +7,7 @@
 //   0xF0010010  STATUS   bit 0 TX_BUSY, bit 1 RX_EMPTY, bit 2 RX_FULL
 // A byte must not be written to TX_DATA while TX_BUSY is set (the board drops
 // it), so every transmit waits for it to clear first. TX is idle when a
-// program starts, but on bitstreams built before the RTL's START_WAIT change
+// program starts, but on bitstreams built before the RTL's START_WAIT change (klaussCPU 04db80e)
 // the loader's "Load Complete OK" reply is still going out, so the first
 // transmit waits too.
 //

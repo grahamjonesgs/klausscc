@@ -94,7 +94,7 @@ RET
 // drops a store to TX_DATA made while a byte is still being shifted out, so
 // back-to-back stores lose bytes. TX is idle when a program starts (the RTL
 // waits for the loader's "Load Complete OK" reply to finish), but on
-// bitstreams built before that START_WAIT change the reply is still going out
+// bitstreams built before that START_WAIT change (klaussCPU 04db80e) the reply is still going out
 // and the first store can be dropped too. Preserves every register (A/B saved
 // & restored).
 // The emulator models the same busy time, and reports a store made while busy.
