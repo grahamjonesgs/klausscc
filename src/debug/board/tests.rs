@@ -18,7 +18,8 @@ struct DmState {
     slots: BTreeMap<u8, u64>,
     watch_addr: u64,
     halted: bool,
-    cause: u64,
+    /// The `DBG_CAUSE_*` value of the last halt.
+    cause: u8,
     halted_seen: bool,
     error: bool,
     /// Every DMCONTROL write, in order.
@@ -31,10 +32,10 @@ struct DmState {
 
 impl DmState {
     /// Halt the core for `cause`.
-    const fn halt(&mut self, cause: u64) {
+    const fn halt(&mut self, cause: Cause) {
         self.halted = true;
         self.halted_seen = true;
-        self.cause = cause;
+        self.cause = cause.code();
     }
 
     fn status(&mut self) -> u64 {
@@ -43,7 +44,7 @@ impl DmState {
             | ((HW_BREAKPOINTS as u64) << 16)
             | (1 << 12)
             | (u64::from(self.halted_seen) << 11)
-            | (self.cause << 4)
+            | (u64::from(self.cause) << 4)
             | (u64::from(self.error) << 3)
             | u64::from(self.halted);
         self.halted_seen = false;
@@ -53,13 +54,13 @@ impl DmState {
     fn control(&mut self, v: u64) {
         self.controls.push(v);
         if v & CTL_HALTREQ != 0 && !self.halted {
-            self.halt(CAUSE_REQ);
+            self.halt(Cause::Request);
         }
         if v & CTL_RESUMEREQ != 0 && self.halted {
             self.halted = false;
             if v & CTL_STEP != 0 {
                 self.regs[17] += 4;
-                self.halt(CAUSE_STEP);
+                self.halt(Cause::Step);
             }
         }
     }
@@ -96,7 +97,7 @@ impl DmState {
         match addr {
             DMCONTROL => self.control(v),
             DMSTATUS => self.error = false,
-            REG_CMD if v & (1 << 8) != 0 => self.regs[(v & 0xFF) as usize] = self.data0,
+            REG_CMD if v & REG_CMD_WRITE != 0 => self.regs[(v & 0xFF) as usize] = self.data0,
             REG_CMD => self.data0 = self.regs[(v & 0xFF) as usize],
             DATA0 => self.data0 = v,
             MEM_ADDR => self.mem_addr = v as u32 & !7,
@@ -150,7 +151,7 @@ fn halted_target(pc: u32) -> (BoardTarget<FakeDm>, Rc<RefCell<DmState>>) {
     let dm = FakeDm::default();
     let state = Rc::clone(&dm.0);
     state.borrow_mut().regs[17] = u64::from(pc);
-    state.borrow_mut().halt(CAUSE_REQ);
+    state.borrow_mut().halt(Cause::Request);
     let mut board = Board::new(dm);
     assert_eq!(attach(&mut board, None).ok(), Some(pc));
     state.borrow_mut().controls.clear();
@@ -188,10 +189,20 @@ fn errors_map_to_target_errors_by_kind() {
         TargetError::NonFatal => "nonfatal",
         _ => "other",
     };
-    assert_eq!(kind(BoardError::MemCommand { status: 8 }), "efault");
+    assert_eq!(
+        kind(BoardError::MemCommand {
+            status: DmStatus::from_raw(8)
+        }),
+        "efault"
+    );
     assert_eq!(kind(BoardError::PastTop { addr: 0xFFFF_FFFF, len: 2 }), "efault");
     assert_eq!(kind(BoardError::Jtag(JtagError::ReadTimeout)), "fatal");
-    assert_eq!(kind(BoardError::Lost(Box::new(BoardError::NotHalted { status: 0 }))), "fatal");
+    assert_eq!(
+        kind(BoardError::Lost(Box::new(BoardError::NotHalted {
+            status: DmStatus::from_raw(0)
+        }))),
+        "fatal"
+    );
     assert_eq!(kind(BoardError::Jtag(JtagError::DmiBusy { addr: 5 })), "nonfatal");
     assert_eq!(kind(BoardError::Unsupported("no")), "nonfatal");
 }
@@ -199,7 +210,21 @@ fn errors_map_to_target_errors_by_kind() {
 #[test]
 fn errors_keep_their_messages() {
     assert_eq!(
-        BoardError::HaltRequest(Box::new(BoardError::NotHalted { status: 0x4B00_0000 })).to_string(),
+        BoardError::WrongCause { cause: Cause::Trap }.to_string(),
+        "the core halted for cause 4 instead of at the entry"
+    );
+    assert_eq!(
+        BoardError::MemCommand {
+            status: DmStatus::from_raw(0x4B24_0009)
+        }
+        .to_string(),
+        "debug module memory command failed (DMSTATUS 0x4B240009)"
+    );
+    assert_eq!(
+        BoardError::HaltRequest(Box::new(BoardError::NotHalted {
+            status: DmStatus::from_raw(0x4B00_0000)
+        }))
+        .to_string(),
         "the core did not halt (DMSTATUS 0x4B000000): is a program running on the board? (load one with -s)"
     );
     assert_eq!(
@@ -220,8 +245,8 @@ fn attach_halts_a_running_program_and_clears_stale_slots() {
     let dm = FakeDm::default();
     let state = Rc::clone(&dm.0);
     state.borrow_mut().regs[17] = 0x1234;
-    state.borrow_mut().slots.insert(BP0 + 1, (1 << 32) | 0x40);
-    state.borrow_mut().slots.insert(WP0, 1 << 32);
+    state.borrow_mut().slots.insert(BP0 + 1, SLOT_ENABLE | 0x40);
+    state.borrow_mut().slots.insert(WP0, SLOT_ENABLE);
     let mut board = Board::new(dm);
     assert_eq!(attach(&mut board, None).ok(), Some(0x1234));
     let dm = state.borrow();
@@ -249,7 +274,7 @@ fn attach_with_a_load_waits_for_the_halt_at_the_entry() {
         let mut dm = loader.borrow_mut();
         assert_eq!(dm.controls.last(), Some(&(CTL_ATTACHED | CTL_HALT_ON_LOAD)));
         dm.regs[17] = 0x20;
-        dm.halt(CAUSE_REQ);
+        dm.halt(Cause::Request);
         Ok(())
     };
     assert_eq!(attach(&mut board, Some(&mut load)).ok(), Some(0x20));
@@ -262,11 +287,11 @@ fn attach_with_a_load_rejects_a_halt_for_another_cause() {
     let state = Rc::clone(&dm.0);
     let mut board = Board::new(dm);
     let mut load = move || {
-        state.borrow_mut().halt(CAUSE_BP);
+        state.borrow_mut().halt(Cause::Breakpoint);
         Ok(())
     };
     let err = attach(&mut board, Some(&mut load)).err();
-    assert!(matches!(err, Some(BoardError::WrongCause { cause: CAUSE_BP })), "{err:?}");
+    assert!(matches!(err, Some(BoardError::WrongCause { cause: Cause::Breakpoint })), "{err:?}");
 }
 
 #[test]
@@ -374,12 +399,12 @@ fn hardware_breakpoints_fill_the_slots() {
     }
     assert!(ok(target.add_hw_breakpoint(0x100, 4)), "already set");
     assert!(!ok(target.add_hw_breakpoint(0x200, 4)), "out of slots");
-    assert_eq!(state.borrow().slots.get(&(BP0 + 1)).copied(), Some((1 << 32) | 0x104));
+    assert_eq!(state.borrow().slots.get(&(BP0 + 1)).copied(), Some(SLOT_ENABLE | 0x104));
     assert!(ok(target.remove_hw_breakpoint(0x104, 4)));
     assert!(!ok(target.remove_hw_breakpoint(0x104, 4)));
     assert_eq!(state.borrow().slots.get(&(BP0 + 1)).copied(), Some(0));
     assert!(ok(target.add_hw_breakpoint(0x200, 4)), "the freed slot is reused");
-    assert_eq!(state.borrow().slots.get(&(BP0 + 1)).copied(), Some((1 << 32) | 0x200));
+    assert_eq!(state.borrow().slots.get(&(BP0 + 1)).copied(), Some(SLOT_ENABLE | 0x200));
 }
 
 #[test]
@@ -388,7 +413,7 @@ fn watchpoints_arm_lanes_of_one_doubleword() {
     assert!(ok(target.add_hw_watchpoint(0x102, 2, WatchKind::Read)));
     assert_eq!(
         state.borrow().slots.get(&WP0).copied(),
-        Some(0x100 | (1 << 32) | (1 << 33) | (0b1100 << 40))
+        Some(0x100 | SLOT_ENABLE | WP_READ | (0b1100 << WP_LANES_SHIFT))
     );
     assert!(!ok(target.add_hw_watchpoint(0x106, 4, WatchKind::Write)), "crosses a doubleword");
     assert!(!ok(target.add_hw_watchpoint(0x100, 0, WatchKind::Write)));
@@ -405,7 +430,7 @@ fn a_watchpoint_halt_reports_the_access() {
     assert!(ok(target.add_hw_watchpoint(0x104, 4, WatchKind::Write)));
     assert!(target.resume(None).is_ok());
     state.borrow_mut().watch_addr = 0x106;
-    state.borrow_mut().halt(CAUSE_WATCH);
+    state.borrow_mut().halt(Cause::Watchpoint);
     let stop = target.poll().ok().flatten();
     assert_eq!(
         stop,
@@ -423,7 +448,7 @@ fn resume_runs_until_the_core_halts() {
     assert!(target.resume(None).is_ok());
     assert_eq!(state.borrow().controls, [CTL_ATTACHED | CTL_RESUMEREQ]);
     assert_eq!(target.poll().ok(), Some(None), "still running");
-    state.borrow_mut().halt(CAUSE_BP);
+    state.borrow_mut().halt(Cause::Breakpoint);
     assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::HwBreak(()))));
     assert!(target.resume(Some(Signal::SIGINT)).is_err(), "no signals");
 }
@@ -453,11 +478,11 @@ fn traps_are_breakpoints_only_where_the_debugger_set_them() {
     assert!(ok(target.add_sw_breakpoint(0x108, 4)));
     assert!(target.resume(None).is_ok());
     state.borrow_mut().regs[17] = 0x108;
-    state.borrow_mut().halt(CAUSE_TRAP);
+    state.borrow_mut().halt(Cause::Trap);
     assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::SwBreak(()))));
     assert!(target.resume(None).is_ok(), "resuming over the patched breakpoint");
     state.borrow_mut().regs[17] = 0x200;
-    state.borrow_mut().halt(CAUSE_TRAP);
+    state.borrow_mut().halt(Cause::Trap);
     assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::Signal(Signal::SIGTRAP))));
 }
 
@@ -500,7 +525,7 @@ fn detach_leaves_a_halted_program_halted() {
     let (mut target, state) = halted_target(0x100);
     state.borrow_mut().regs[12] = 0x1_0007;
     assert!(target.resume(None).is_ok());
-    state.borrow_mut().halt(CAUSE_HALT);
+    state.borrow_mut().halt(Cause::Halt);
     assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::Exited(7))));
     assert!(target.detach().is_ok());
     assert_eq!(state.borrow().controls.last(), Some(&0), "only attached cleared");

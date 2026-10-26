@@ -25,6 +25,8 @@
 //! debug module; only opening the cable ([`Board::open`]) and serving a
 //! session need the `board` feature.
 
+mod dm;
+
 use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD};
 #[cfg(feature = "board")]
 use super::{GdbError, accept, run_session, session_summary};
@@ -33,6 +35,10 @@ use super::{RunEvent, Session, access_last_addr, mmio_monitor_cmd};
 use crate::jtag::Jtag;
 use crate::jtag::{Dmi, DmiReq, JtagError};
 use crate::layout::is_mmio;
+use dm::{
+    BP0, CTL_ATTACHED, CTL_HALT_ON_LOAD, CTL_HALTREQ, CTL_RESUMEREQ, CTL_STEP, Cause, DATA0, DMCONTROL, DMSTATUS, DmStatus, MEM_ADDR, MEM_BE_ALL,
+    MEM_CMD, MEM_INC, MEM_WRITE, REG_CMD, REG_CMD_WRITE, SLOT_ENABLE, WATCH_ADDR, WP_LANES_SHIFT, WP_READ, WP_WRITE, WP0,
+};
 use gdbstub::common::Signal;
 use gdbstub::stub::SingleThreadStopReason;
 use gdbstub::target::ext::base::BaseOps;
@@ -50,40 +56,6 @@ use gdbstub::target::{Target, TargetError, TargetResult};
 use std::collections::BTreeMap;
 use std::fmt;
 use std::time::{Duration, Instant};
-
-// ---- debug module registers (debug_module.sv) ------------------------------
-const DMCONTROL: u8 = 0x00;
-const DMSTATUS: u8 = 0x01;
-const REG_CMD: u8 = 0x02;
-const DATA0: u8 = 0x03;
-const MEM_ADDR: u8 = 0x04;
-const MEM_CMD: u8 = 0x05;
-const BP0: u8 = 0x10;
-const WP0: u8 = 0x18;
-const WATCH_ADDR: u8 = 0x1F;
-
-const CTL_HALTREQ: u64 = 1 << 0;
-const CTL_RESUMEREQ: u64 = 1 << 1;
-const CTL_STEP: u64 = 1 << 2;
-const CTL_ATTACHED: u64 = 1 << 3;
-const CTL_HALT_ON_LOAD: u64 = 1 << 4;
-
-const ST_HALTED: u64 = 1 << 0;
-const ST_BUSY: u64 = 1 << 2;
-const ST_ERROR: u64 = 1 << 3;
-const ST_HALTED_SEEN: u64 = 1 << 11;
-
-const MEM_WRITE: u64 = 1 << 8;
-const MEM_INC: u64 = 1 << 9;
-
-/// `klauss_pkg::DBG_CAUSE_*`.
-const CAUSE_REQ: u64 = 0;
-const CAUSE_STEP: u64 = 1;
-const CAUSE_BP: u64 = 2;
-const CAUSE_WATCH: u64 = 3;
-const CAUSE_TRAP: u64 = 4;
-const CAUSE_ILL: u64 = 5;
-const CAUSE_HALT: u64 = 6;
 
 /// How often a running core is polled for a halt.
 const POLL: Duration = Duration::from_millis(5);
@@ -110,14 +82,14 @@ pub(crate) enum BoardError {
     /// The core did not halt in time.
     NotHalted {
         /// The last DMSTATUS read.
-        status: u64,
+        status: DmStatus,
     },
     /// A halt request went unanswered (no program running, most likely).
     HaltRequest(Box<BoardError>),
     /// The debug module reported a failed memory command.
     MemCommand {
         /// The DMSTATUS that reported it.
-        status: u64,
+        status: DmStatus,
     },
     /// A memory access runs past `0xFFFF_FFFF`.
     PastTop {
@@ -137,8 +109,8 @@ pub(crate) enum BoardError {
     },
     /// After the load the core halted for this cause instead of at the entry.
     WrongCause {
-        /// The `DBG_CAUSE_*` value.
-        cause: u64,
+        /// Why it halted.
+        cause: Cause,
     },
     /// The debug module stopped answering while the program ran.
     Lost(Box<BoardError>),
@@ -161,7 +133,7 @@ impl fmt::Display for BoardError {
             Self::MemCommand { status } => write!(f, "debug module memory command failed (DMSTATUS 0x{status:08X})"),
             Self::PastTop { addr, len } => write!(f, "{len} bytes at 0x{addr:08X} run past the end of the address space"),
             Self::Load { path, port, source } => write!(f, "loading {path} over {port} failed ({source})"),
-            Self::WrongCause { cause } => write!(f, "the core halted for cause {cause} instead of at the entry"),
+            Self::WrongCause { cause } => write!(f, "the core halted for cause {} instead of at the entry", cause.code()),
             Self::Lost(e) => write!(f, "lost the debug module ({e})"),
             Self::Unsupported(text) => f.write_str(text),
         }
@@ -230,16 +202,14 @@ impl Board<Jtag> {
         let mut board = Self::new(jtag);
         let no_dm = |detail: String| BoardError::NoDebugModule { idcode, detail };
         let st = board.status().map_err(|e| no_dm(e.to_string()))?;
-        if (st >> 24) & 0xFF != 0x4B {
+        let Some(info) = st.info() else {
             return Err(no_dm(format!("DMSTATUS 0x{st:08X}")));
-        }
+        };
         Ok((
             board,
             format!(
                 "JTAG IDCODE 0x{idcode:08X}, debug module v{} ({} breakpoints, {} watchpoints)",
-                (st >> 12) & 0xF,
-                (st >> 16) & 0xF,
-                (st >> 20) & 0xF
+                info.version, info.breakpoints, info.watchpoints
             ),
         ))
     }
@@ -256,8 +226,8 @@ impl<D: Dmi> Board<D> {
     }
 
     /// DMSTATUS (reading clears the "halted since" bit).
-    pub(crate) fn status(&mut self) -> BoardResult<u64> {
-        self.dmi.dmi_read(DMSTATUS).map_err(BoardError::Jtag)
+    pub(crate) fn status(&mut self) -> BoardResult<DmStatus> {
+        self.dmi.dmi_read(DMSTATUS).map(DmStatus::from_raw).map_err(BoardError::Jtag)
     }
 
     /// Write DMCONTROL.
@@ -266,11 +236,11 @@ impl<D: Dmi> Board<D> {
     }
 
     /// Wait up to `timeout` for the core to be halted.
-    pub(crate) fn wait_halted(&mut self, timeout: Duration) -> BoardResult<u64> {
+    pub(crate) fn wait_halted(&mut self, timeout: Duration) -> BoardResult<DmStatus> {
         let t0 = Instant::now();
         loop {
             let st = self.status()?;
-            if st & ST_HALTED != 0 {
+            if st.halted() {
                 return Ok(st);
             }
             if t0.elapsed() > timeout {
@@ -293,13 +263,13 @@ impl<D: Dmi> Board<D> {
     }
 
     fn write_reg(&mut self, reg: KlaussRegId, v: u64) -> BoardResult<()> {
-        self.batch(&[DmiReq::Write(DATA0, v), DmiReq::Write(REG_CMD, reg.regnum() as u64 | (1 << 8))])
+        self.batch(&[DmiReq::Write(DATA0, v), DmiReq::Write(REG_CMD, reg.regnum() as u64 | REG_CMD_WRITE)])
             .map(|_| ())
     }
 
     /// Check (and clear) the DM's sticky error after a memory batch.
-    fn check_mem(&mut self, st: u64) -> BoardResult<()> {
-        if st & (ST_ERROR | ST_BUSY) != 0 {
+    fn check_mem(&mut self, st: DmStatus) -> BoardResult<()> {
+        if st.error() || st.busy() {
             self.dmi.dmi_write(DMSTATUS, 0)?;
             return Err(BoardError::MemCommand { status: st });
         }
@@ -311,12 +281,12 @@ impl<D: Dmi> Board<D> {
         let mut reqs = Vec::with_capacity(2 * n + 2);
         reqs.push(DmiReq::Write(MEM_ADDR, u64::from(dw_addr & !7)));
         for _ in 0..n {
-            reqs.push(DmiReq::Write(MEM_CMD, 0xFF | MEM_INC));
+            reqs.push(DmiReq::Write(MEM_CMD, MEM_BE_ALL | MEM_INC));
             reqs.push(DmiReq::Read(DATA0));
         }
         reqs.push(DmiReq::Read(DMSTATUS));
         let v = self.batch(&reqs)?;
-        self.check_mem(v[v.len() - 1])?;
+        self.check_mem(DmStatus::from_raw(v[v.len() - 1]))?;
         Ok(v[1..v.len() - 1].iter().skip(1).step_by(2).copied().collect())
     }
 
@@ -372,7 +342,7 @@ impl<D: Dmi> Board<D> {
         }
         reqs.push(DmiReq::Read(DMSTATUS));
         let v = self.batch(&reqs)?;
-        self.check_mem(v[v.len() - 1])
+        self.check_mem(DmStatus::from_raw(v[v.len() - 1]))
     }
 }
 
@@ -473,12 +443,11 @@ impl<D: Dmi> BoardTarget<D> {
     }
 
     /// Why the core is halted, as a stop reply.
-    fn stop_reason(&mut self, st: u64) -> BoardResult<SingleThreadStopReason<u32>> {
-        let cause = (st >> 4) & 7;
-        Ok(match cause {
-            CAUSE_STEP => SingleThreadStopReason::DoneStep,
-            CAUSE_BP => SingleThreadStopReason::HwBreak(()),
-            CAUSE_WATCH => {
+    fn stop_reason(&mut self, st: DmStatus) -> BoardResult<SingleThreadStopReason<u32>> {
+        Ok(match st.cause() {
+            Cause::Step => SingleThreadStopReason::DoneStep,
+            Cause::Breakpoint => SingleThreadStopReason::HwBreak(()),
+            Cause::Watchpoint => {
                 let addr = self.board.batch(&[DmiReq::Read(WATCH_ADDR)])?[0] as u32;
                 let kind = self
                     .watches
@@ -489,7 +458,7 @@ impl<D: Dmi> BoardTarget<D> {
                     .map_or(WatchKind::Write, |w| w.kind);
                 SingleThreadStopReason::Watch { tid: (), kind, addr }
             }
-            CAUSE_TRAP => {
+            Cause::Trap => {
                 let pc = self.board.read_reg(KlaussRegId::Pc)? as u32;
                 if self.sw_breakpoints.contains_key(&pc) {
                     SingleThreadStopReason::SwBreak(())
@@ -497,13 +466,13 @@ impl<D: Dmi> BoardTarget<D> {
                     SingleThreadStopReason::Signal(Signal::SIGTRAP)
                 }
             }
-            CAUSE_ILL => SingleThreadStopReason::Signal(Signal::SIGILL),
-            CAUSE_HALT => {
+            Cause::Illegal => SingleThreadStopReason::Signal(Signal::SIGILL),
+            Cause::Halt => {
                 self.exited = true;
                 SingleThreadStopReason::Exited((self.board.read_reg(KlaussRegId::Gpr(12))? & 0xFF) as u8)
             }
-            CAUSE_REQ => SingleThreadStopReason::Signal(Signal::SIGINT),
-            _ => SingleThreadStopReason::Signal(Signal::SIGTRAP),
+            Cause::Request => SingleThreadStopReason::Signal(Signal::SIGINT),
+            Cause::Unknown(_) => SingleThreadStopReason::Signal(Signal::SIGTRAP),
         })
     }
 
@@ -514,8 +483,8 @@ impl<D: Dmi> BoardTarget<D> {
             return Ok(Some(SingleThreadStopReason::DoneStep));
         }
         let st = self.board.status()?;
-        self.halt_seen |= st & ST_HALTED_SEEN != 0;
-        if st & ST_HALTED != 0 && self.halt_seen {
+        self.halt_seen |= st.halted_seen();
+        if st.halted() && self.halt_seen {
             self.running = false;
             return self.stop_reason(st).map(Some);
         }
@@ -543,7 +512,7 @@ impl<D: Dmi> BoardTarget<D> {
     }
 
     fn write_bp(&mut self, slot: usize) -> BoardResult<()> {
-        let v = self.hw_breakpoints[slot].map_or(0, |a| u64::from(a) | (1 << 32));
+        let v = self.hw_breakpoints[slot].map_or(0, |a| u64::from(a) | SLOT_ENABLE);
         self.board.batch(&[DmiReq::Write(BP0 + slot as u8, v)]).map(|_| ())
     }
 
@@ -553,12 +522,12 @@ impl<D: Dmi> BoardTarget<D> {
             for a in w.addr..w.addr + w.len.max(1) {
                 lanes |= 1 << (a & 7);
             }
-            let (rd, wr) = match w.kind {
-                WatchKind::Write => (0, 1),
-                WatchKind::Read => (1, 0),
-                WatchKind::ReadWrite => (1, 1),
+            let access = match w.kind {
+                WatchKind::Write => WP_WRITE,
+                WatchKind::Read => WP_READ,
+                WatchKind::ReadWrite => WP_READ | WP_WRITE,
             };
-            u64::from(w.addr & !7) | (1 << 32) | (rd << 33) | (wr << 34) | (lanes << 40)
+            u64::from(w.addr & !7) | SLOT_ENABLE | access | (lanes << WP_LANES_SHIFT)
         });
         self.board.batch(&[DmiReq::Write(WP0 + slot as u8, v)]).map(|_| ())
     }
@@ -582,7 +551,7 @@ impl<D: Dmi> BoardTarget<D> {
         // past its end); if the status cannot be read, only clear "attached".
         // Read the halt cause before clear_slots writes DMSTATUS.
         let resume = match self.board.status() {
-            Ok(st) => !self.exited && (st >> 4) & 7 != CAUSE_HALT,
+            Ok(st) => !self.exited && st.cause() != Cause::Halt,
             Err(e) => {
                 note(Err(e));
                 false
@@ -633,9 +602,9 @@ impl<D: Dmi> MonitorCmd for BoardTarget<D> {
                 Ok(st) => outputln!(
                     out,
                     "DMSTATUS 0x{st:08X}: halted {} cause {} park_kind {}",
-                    st & 1,
-                    (st >> 4) & 7,
-                    (st >> 8) & 7
+                    u8::from(st.halted()),
+                    st.cause().code(),
+                    st.park_kind()
                 ),
                 Err(e) => outputln!(out, "DMSTATUS read failed: {e}"),
             },
@@ -846,12 +815,11 @@ pub(crate) fn attach<D: Dmi>(board: &mut Board<D>, load: Option<&mut dyn FnMut()
         load()?;
         let st = board.wait_halted(Duration::from_secs(60))?;
         board.control(CTL_ATTACHED)?;
-        if (st >> 4) & 7 != CAUSE_REQ {
-            return Err(BoardError::WrongCause { cause: (st >> 4) & 7 });
+        if st.cause() != Cause::Request {
+            return Err(BoardError::WrongCause { cause: st.cause() });
         }
     } else {
-        let st = board.status()?;
-        if st & ST_HALTED == 0 {
+        if !board.status()?.halted() {
             board.control(CTL_ATTACHED | CTL_HALTREQ)?;
             board
                 .wait_halted(Duration::from_secs(2))
