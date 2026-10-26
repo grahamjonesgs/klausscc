@@ -724,21 +724,21 @@ impl Cpu {
         match kind {
             0 => {
                 // MUL: the full 128-bit product, signed or unsigned per SGN
-                // (:892-899); rd takes its high or low half.
-                let (lo, hi) = if sgn {
-                    let p = i128::from(a as i64) * i128::from(b as i64);
-                    (p as u64, (p >> 64) as u64)
-                } else {
-                    let p = u128::from(a) * u128::from(b);
-                    (p as u64, (p >> 64) as u64)
+                // (:892-899); rd takes its high or low half.  S is bit 63 of
+                // that half, before any W sign-extension; V is set when the
+                // low half does not hold the whole product, and cleared by the
+                // high-half forms (:1159-1162).
+                let (r, overflow) = match (high, sgn) {
+                    (false, false) => a.overflowing_mul(b),
+                    (false, true) => {
+                        let (lo, v) = (a as i64).overflowing_mul(b as i64);
+                        (lo as u64, v)
+                    }
+                    (true, false) => (((u128::from(a) * u128::from(b)) >> 64) as u64, false),
+                    (true, true) => (((i128::from(a as i64) * i128::from(b as i64)) >> 64) as u64, false),
                 };
-                let r = if high { hi } else { lo };
-                // S is bit 63 of that half, before any W sign-extension; V is
-                // set when the low half does not hold the whole product, and
-                // cleared by the high-half forms (:1159-1162).
                 self.flags.set_sign(r >> 63 == 1);
-                let overflow = if sgn { hi != ((lo as i64) >> 63) as u64 } else { hi != 0 };
-                self.flags.set_overflow(!high && overflow);
+                self.flags.set_overflow(overflow);
                 // v3 D3 MULW: W [19] on the low-half MUL; Z follows the W
                 // result (:649, :1333-1334).
                 let r = if !high && f.bit(19) { sign_extend(r, 4) } else { r };
