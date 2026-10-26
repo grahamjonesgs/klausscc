@@ -162,7 +162,7 @@ impl Diagnostics {
 
     /// Push message to `Diagnostics`.  In live mode the message is also printed
     /// immediately so the user sees progress in real time.
-    pub(crate) fn push(&mut self, text: String, line_number: Option<u32>, file_name: Option<String>, level: MessageType) {
+    fn push(&mut self, text: String, line_number: Option<u32>, file_name: Option<String>, level: MessageType) {
         let msg = Message {
             text,
             line_number,

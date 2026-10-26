@@ -5,7 +5,7 @@
 //! so one run can report all of them.  [`Error`] covers the failures that stop
 //! a command.  By convention a handler reports the failure to the user (to the
 //! streaming `Diagnostics`, or on stderr) before returning the `Error`, so
-//! [`run`](crate::run) only prints the run summary and turns the error into an
+//! [`run`] only prints the run summary and turns the error into an
 //! exit code.
 
 use crate::gdbserver::GdbError;
@@ -45,7 +45,8 @@ pub(crate) enum Error {
     },
     /// An ELF file had no loadable segments.
     Elf(PathBuf),
-    /// Sending to the board over its serial port failed.
+    /// Sending to the board over its serial port, or monitoring its UART
+    /// there, failed.
     Serial {
         /// The serial port name as given (or auto-detected).
         port: String,

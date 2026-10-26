@@ -113,7 +113,6 @@ impl Jtag {
         unsafe { CStr::from_ptr(msg) }.to_string_lossy().into_owned()
     }
 
-    /// Fail with libftdi's error when a call doing `op` returned `rc < 0`.
     /// The error for a failed libftdi call doing `op`.
     fn ftdi_error(&self, op: &'static str) -> JtagError {
         JtagError::Ftdi {
@@ -122,6 +121,7 @@ impl Jtag {
         }
     }
 
+    /// Fail with libftdi's error when a call doing `op` returned `rc < 0`.
     fn check(&self, rc: c_int, op: &'static str) -> Result<()> {
         if rc < 0 {
             Err(self.ftdi_error(op))
