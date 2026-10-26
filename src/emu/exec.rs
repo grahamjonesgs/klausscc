@@ -6,7 +6,7 @@
 //! that becomes [`StopReason::InvalidOpcode`] in one place.
 
 use super::flags::Flags;
-use super::{Cpu, StopReason};
+use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, Cpu, StopReason};
 
 /// The decoded instruction: word 0 plus the fields every class shares
 /// (`doc/ISA_ENCODING_V2.md` §1).  Each handler pulls its own attribute bits
@@ -569,8 +569,8 @@ impl Cpu {
     /// `U`(bit32) bits are ignored and regenerate from `Z/S/C/V` on read.
     fn iret(&mut self) -> Flow {
         let ctx = self.pop();
-        self.flags = Flags::from_ctx((ctx >> 32) as u8 & 0x7F);
-        self.int_mask = ((ctx >> 39) & 0xF) as u8;
+        self.flags = Flags::from_ctx((ctx >> CTX_FLAGS_SHIFT) as u8 & 0x7F);
+        self.int_mask = ((ctx >> CTX_INT_MASK_SHIFT) & 0xF) as u8;
         Flow::Jump(ctx as u32)
     }
 

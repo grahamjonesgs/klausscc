@@ -79,6 +79,11 @@ const TIMER_PERIOD_RESET: u32 = 0x000F_FFFF;
 pub const DEFAULT_MAX_INSTRUCTIONS: u64 = 50_000_000;
 /// Size of the modelled address space (128 MiB DDR2).
 const MEM_SIZE: usize = 128 * 1024 * 1024;
+/// Interrupt context word `{INT_MASK[42:39], flags[38:32], PC[31:0]}`: where
+/// the flags field (the [`Flags::to_ctx`] layout) starts.
+const CTX_FLAGS_SHIFT: u32 = 32;
+/// Interrupt context word: where the 4-bit `INT_MASK` starts.
+const CTX_INT_MASK_SHIFT: u32 = 39;
 /// Initial stack pointer — top of DDR2, grows down. The loader sets SP near the
 /// top of memory; we use a generous value below the 128 MiB ceiling so PUSH
 /// never wraps. Matches the board's full-descending stack convention.

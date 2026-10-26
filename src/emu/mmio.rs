@@ -1,12 +1,36 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
 //! the performance counters.
 
-use super::{CYCLES_PER_MS, Cpu, PerfBase};
+use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CYCLES_PER_MS, Cpu, PerfBase};
 
 /// Interrupt controller / timer device select (`addr[27:16]`).
 const IRQ_DEV_SELECT: u32 = 0x00F;
 /// Performance-counter device select (`addr[27:16]`).
 const PERF_DEV_SELECT: u32 = 0x00D;
+
+// Interrupt controller / timer register offsets (`addr[15:0]`).
+/// `INT_MASK`: per-source enables (4 bits).
+const INT_MASK: u32 = 0x0000;
+/// `INT_PENDING` (read-only): bit 0 = timer (blitter / Ethernet not modelled).
+const INT_PENDING: u32 = 0x0008;
+/// `INT_VEC0`; `INT_VEC1..3` follow at 8-byte steps.
+const INT_VEC0: u32 = 0x0010;
+/// `INT_VEC3`, the last vector register.
+const INT_VEC3: u32 = INT_VEC0 + 3 * 8;
+/// `TIMER_PERIOD`; writing it restarts the count.
+const TIMER_PERIOD: u32 = 0x0030;
+/// `TIMER_COUNT` (read-only).
+const TIMER_COUNT: u32 = 0x0038;
+/// The free-running millisecond clock (read-only).
+const MS_CLOCK: u32 = 0x0040;
+
+// Performance-counter register offsets (`addr[15:0]`).
+/// `PERF_CTRL`: writing bit 0 clears the counters.
+const PERF_CTRL: u32 = 0x0000;
+/// `PERF_CYCLES`: cycles since the last clear.
+const PERF_CYCLES: u32 = 0x0008;
+/// `PERF_INSTR`: retired instructions since the last clear.
+const PERF_INSTR: u32 = 0x0010;
 
 // ---- Memory-mapped I/O (bus_splitter address decode) ------------------------
 // The RTL bus_splitter routes addr[31:28] == 0xF to the MMIO space; within that,
@@ -55,8 +79,8 @@ impl Cpu {
             IRQ_DEV_SELECT => return self.irq_mmio_read(addr & 0xFFFF),
             PERF_DEV_SELECT => {
                 return match addr & 0xFFFF {
-                    0x0008 => self.cycles - self.perf_base.cycles,   // PERF_CYCLES
-                    0x0010 => self.instret - self.perf_base.instret, // PERF_INSTR
+                    PERF_CYCLES => self.cycles - self.perf_base.cycles,
+                    PERF_INSTR => self.instret - self.perf_base.instret,
                     _ => 0,
                 };
             }
@@ -82,7 +106,7 @@ impl Cpu {
         match (addr >> 16) & 0xFFF {
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
             IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
-            PERF_DEV_SELECT if addr as u16 == 0 && data & 1 != 0 => {
+            PERF_DEV_SELECT if addr & 0xFFFF == PERF_CTRL && data & 1 != 0 => {
                 self.perf_base = PerfBase {
                     cycles: self.cycles,
                     instret: self.instret,
@@ -97,12 +121,12 @@ impl Cpu {
     /// Read an interrupt-controller register (RTL `KlaussCPU.sv` read mux).
     fn irq_mmio_read(&self, offset: u32) -> u64 {
         match offset {
-            0x0000 => u64::from(self.int_mask),
-            0x0008 => u64::from(self.timer_pending), // INT_PENDING: [0]=timer (blitter/eth not modelled)
-            0x0010 | 0x0018 | 0x0020 | 0x0028 => u64::from(self.int_vec[((offset - 0x10) / 8) as usize]),
-            0x0030 => u64::from(self.timer_period),
-            0x0038 => u64::from(self.timer_count),
-            0x0040 => self.cycles / CYCLES_PER_MS, // free-running millisecond clock
+            INT_MASK => u64::from(self.int_mask),
+            INT_PENDING => u64::from(self.timer_pending),
+            INT_VEC0..=INT_VEC3 if offset.is_multiple_of(8) => u64::from(self.int_vec[((offset - INT_VEC0) / 8) as usize]),
+            TIMER_PERIOD => u64::from(self.timer_period),
+            TIMER_COUNT => u64::from(self.timer_count),
+            MS_CLOCK => self.cycles / CYCLES_PER_MS,
             _ => 0,
         }
     }
@@ -110,9 +134,9 @@ impl Cpu {
     /// Write an interrupt-controller register; `INT_PENDING` / `TIMER_COUNT` are read-only.
     fn irq_mmio_write(&mut self, offset: u32, data: u64) {
         match offset {
-            0x0000 => self.int_mask = (data & 0xF) as u8,
-            0x0010 | 0x0018 | 0x0020 | 0x0028 => self.int_vec[((offset - 0x10) / 8) as usize] = data as u32,
-            0x0030 => {
+            INT_MASK => self.int_mask = (data & 0xF) as u8,
+            INT_VEC0..=INT_VEC3 if offset.is_multiple_of(8) => self.int_vec[((offset - INT_VEC0) / 8) as usize] = data as u32,
+            TIMER_PERIOD => {
                 self.timer_period = data as u32;
                 self.timer_count = 0; // restart with the new period
             }
@@ -153,7 +177,7 @@ impl Cpu {
     /// Interrupt entry (`pipeline_core.sv` IRQ sequencer): push the context
     /// word at SP-8, mask the source, acknowledge it, jump to its vector.
     pub(super) fn take_irq(&mut self, src: usize) {
-        let ctx = (u64::from(self.int_mask) << 39) | (u64::from(self.flags.to_ctx()) << 32) | u64::from(self.pc);
+        let ctx = (u64::from(self.int_mask) << CTX_INT_MASK_SHIFT) | (u64::from(self.flags.to_ctx()) << CTX_FLAGS_SHIFT) | u64::from(self.pc);
         self.push(ctx);
         self.int_mask &= !(1 << src);
         if src == 0 {

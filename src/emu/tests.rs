@@ -503,6 +503,37 @@ fn test_irq_controller_registers() {
     assert_eq!(cpu.mmio_read(0xF00F_0008), 1, "timer pending after its period");
 }
 
+#[test]
+fn test_perf_counters_count_from_the_last_clear() {
+    const NOP: u32 = 0x6C00_0000;
+    let mut cpu = Cpu::new(&image_from_words(&[NOP, NOP, NOP, HALT]), default_entry());
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.mmio_read(0xF00D_0010), 2, "PERF_INSTR");
+    assert_eq!(cpu.mmio_read(0xF00D_0008), 2 * CYCLES_PER_INSTRUCTION, "PERF_CYCLES");
+    cpu.mmio_write(0xF00D_0000, 0b10); // PERF_CTRL without bit 0
+    cpu.mmio_write(0xF00D_0008, 1); // not PERF_CTRL
+    assert_eq!(cpu.mmio_read(0xF00D_0010), 2, "neither write clears");
+    cpu.mmio_write(0xF00D_0000, 1);
+    assert_eq!(cpu.mmio_read(0xF00D_0010), 0, "PERF_CTRL bit 0 clears");
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.mmio_read(0xF00D_0010), 1);
+    assert_eq!(cpu.mmio_read(0xF00D_0008), CYCLES_PER_INSTRUCTION);
+    assert_eq!(cpu.mmio_read(0xF00D_0018), 0, "unmapped offset");
+}
+
+#[test]
+fn test_irq_vector_registers_are_doubleword_aligned() {
+    let mut cpu = Cpu::new(&image_from_words(&[HALT]), default_entry());
+    for (i, offset) in [0x10_u32, 0x18, 0x20, 0x28].into_iter().enumerate() {
+        cpu.mmio_write(0xF00F_0000 | offset, 0x100 + i as u64);
+    }
+    assert_eq!(cpu.irq_state().vectors, [0x100, 0x101, 0x102, 0x103]);
+    cpu.mmio_write(0xF00F_0014, 0xDEAD);
+    assert_eq!(cpu.mmio_read(0xF00F_0014), 0, "between vector registers");
+    assert_eq!(cpu.irq_state().vectors, [0x100, 0x101, 0x102, 0x103]);
+}
+
 // ---- ISA v3 short 1-word forms (ISA_V3_PROPOSAL.md §3) ----------------
 
 #[test]
