@@ -47,9 +47,9 @@ impl Image {
     /// Lay out assembled lines in memory.
     ///
     /// Each line's machine code is placed at its `program_counter` (relative
-    /// to [`CODE_BASE`]); see [`hex_to_bytes`] for how the hex becomes bytes.
-    /// The entry point is the `_start` line's address.  Returns `None` when the
-    /// program has no `_start`.
+    /// to [`CODE_BASE`]), in memory byte order.  The entry point is the
+    /// `_start` line's address.  Returns `None` when the program has no
+    /// `_start`.
     #[must_use]
     pub(crate) fn from_lines(lines: &[Pass2]) -> Option<Self> {
         let mut code: Vec<u8> = Vec::new();
@@ -60,15 +60,15 @@ impl Image {
                 entry = Some(line.program_counter);
                 continue;
             }
-            if line.opcode.is_empty() {
+            let len = line.emitted.byte_len();
+            if len == 0 {
                 continue;
             }
             let offset = line.program_counter.saturating_sub(CODE_BASE) as usize;
-            let bytes = hex_to_bytes(&line.opcode);
-            if offset + bytes.len() > code.len() {
-                code.resize(offset + bytes.len(), 0);
+            if offset + len > code.len() {
+                code.resize(offset + len, 0);
             }
-            code[offset..offset + bytes.len()].copy_from_slice(&bytes);
+            line.emitted.copy_to(&mut code[offset..offset + len]);
         }
 
         entry.map(|entry| Self::new(code, entry))
@@ -115,28 +115,6 @@ impl Image {
     pub(crate) fn to_ddr(&self) -> Vec<u8> {
         build_ddr_image(&self.bytes)
     }
-}
-
-/// The memory bytes of one assembled line's hex machine code.
-///
-/// Each whole 8-digit group is a 32-bit word, stored little-endian so the
-/// CPU's 32-bit reads see its natural value; data is written as words the
-/// same way.  A trailing group of fewer than 8 digits is taken as raw bytes,
-/// in order.  Groups that are not valid hex are skipped.
-fn hex_to_bytes(hex: &str) -> Vec<u8> {
-    let (words, rest) = hex.as_bytes().as_chunks::<8>();
-    let mut bytes: Vec<u8> = Vec::with_capacity(hex.len() / 2);
-    for word in words {
-        if let Some(w) = std::str::from_utf8(word).ok().and_then(|h| u32::from_str_radix(h, 16).ok()) {
-            bytes.extend_from_slice(&w.to_le_bytes());
-        }
-    }
-    for pair in rest.as_chunks::<2>().0 {
-        if let Some(b) = std::str::from_utf8(pair).ok().and_then(|h| u8::from_str_radix(h, 16).ok()) {
-            bytes.push(b);
-        }
-    }
-    bytes
 }
 
 /// Encode a 32-bit word for the kbt wire format (little-endian byte order).
@@ -204,7 +182,7 @@ fn calc_checksum(input_string: &str, msg_list: &mut Diagnostics) -> Option<Strin
 /// Return String of bit codes with start/stop bytes and CRC.
 ///
 /// Based on the Pass2 vector, create the `.kbt` wire string: the lines' machine
-/// code is laid out one after another (see [`hex_to_bytes`]) and framed by
+/// code is laid out one after another, in memory byte order, and framed by
 /// [`Image::to_kbt`].  The program must have exactly one `_start`, which is
 /// its entry point; otherwise that is reported and `None` returned.
 pub(crate) fn create_bin_string(pass2: &[Pass2], msg_list: &mut Diagnostics) -> Option<String> {
@@ -220,7 +198,12 @@ pub(crate) fn create_bin_string(pass2: &[Pass2], msg_list: &mut Diagnostics) -> 
             return None;
         }
     };
-    let bytes = pass2.iter().flat_map(|pass| hex_to_bytes(&pass.opcode)).collect();
+    let mut bytes: Vec<u8> = Vec::new();
+    for pass in pass2 {
+        let start = bytes.len();
+        bytes.resize(start + pass.emitted.byte_len(), 0);
+        pass.emitted.copy_to(&mut bytes[start..]);
+    }
     Image::new(bytes, entry).to_kbt(msg_list)
 }
 
@@ -269,11 +252,12 @@ pub(crate) fn readmemh(ddr: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asm::line::Emitted;
 
-    /// A `Pass2` line of `line_type` at `program_counter` with machine code `opcode`.
-    fn line(line_type: LineType, program_counter: u32, opcode: &str) -> Pass2 {
+    /// A `Pass2` line of `line_type` at `program_counter` emitting `emitted`.
+    fn line(line_type: LineType, program_counter: u32, emitted: Emitted) -> Pass2 {
         Pass2 {
-            opcode: opcode.to_owned(),
+            emitted,
             file_name: String::from("test"),
             input_text_line: String::default(),
             line_counter: 0,
@@ -283,21 +267,26 @@ mod tests {
     }
 
     #[test]
-    fn hex_to_bytes_stores_words_little_endian() {
-        assert_eq!(hex_to_bytes("400F0000"), vec![0x00, 0x00, 0x0F, 0x40]);
-        assert_eq!(hex_to_bytes("1122334455667788"), vec![0x44, 0x33, 0x22, 0x11, 0x88, 0x77, 0x66, 0x55]);
-        // A part word is kept as raw bytes, in order.
-        assert_eq!(hex_to_bytes("11223344AABB"), vec![0x44, 0x33, 0x22, 0x11, 0xAA, 0xBB]);
-        assert_eq!(hex_to_bytes(""), Vec::<u8>::new());
+    fn emitted_bytes_are_in_memory_order() {
+        let code = Emitted::Code(vec![0x400F_0000, 0x1122_3344]);
+        let mut bytes = vec![0; code.byte_len()];
+        code.copy_to(&mut bytes);
+        assert_eq!(bytes, [0x00, 0x00, 0x0F, 0x40, 0x44, 0x33, 0x22, 0x11]);
+        // Data bytes are already in memory order.
+        let data = Emitted::Data(vec![0xAA, 0xBB]);
+        let mut bytes = vec![0; data.byte_len()];
+        data.copy_to(&mut bytes);
+        assert_eq!(bytes, [0xAA, 0xBB]);
+        assert_eq!(Emitted::None.byte_len(), 0);
     }
 
     #[test]
     fn from_lines_places_code_by_address() {
         let lines = [
-            line(LineType::Start, 0x20, ""),
-            line(LineType::Opcode, 0x20, "8BD0000000000041"),
-            line(LineType::Label, 0x28, ""),
-            line(LineType::Opcode, 0x28, "6C010000"),
+            line(LineType::Start, 0x20, Emitted::None),
+            line(LineType::Opcode, 0x20, Emitted::Code(vec![0x8BD0_0000, 0x41])),
+            line(LineType::Label, 0x28, Emitted::None),
+            line(LineType::Opcode, 0x28, Emitted::Code(vec![0x6C01_0000])),
         ];
         let image = Image::from_lines(&lines).unwrap();
         assert_eq!(image.entry, 0x20);
@@ -325,9 +314,9 @@ mod tests {
     fn to_kbt_matches_the_assembled_kbt() {
         // The same program through create_bin_string and through an Image.
         let lines = [
-            line(LineType::Start, 0x20, ""),
-            line(LineType::Opcode, 0x20, "8BD0000000000041"),
-            line(LineType::Opcode, 0x28, "6C010000"),
+            line(LineType::Start, 0x20, Emitted::None),
+            line(LineType::Opcode, 0x20, Emitted::Code(vec![0x8BD0_0000, 0x41])),
+            line(LineType::Opcode, 0x28, Emitted::Code(vec![0x6C01_0000])),
         ];
         let mut msg_list = Diagnostics::new();
         let image = Image::from_lines(&lines).unwrap();
@@ -388,7 +377,7 @@ mod tests {
     fn test_create_bin_string1() {
         let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
-            opcode: String::default(),
+            emitted: Emitted::None,
             file_name: String::from("test"),
             input_text_line: String::default(),
             line_counter: 0,
@@ -396,7 +385,7 @@ mod tests {
             line_type: LineType::Start,
         });
         pass2.push(Pass2 {
-            opcode: String::from("1234"),
+            emitted: Emitted::Data(vec![0x12, 0x34]),
             file_name: String::from("test"),
             input_text_line: String::default(),
             line_counter: 0,
@@ -404,7 +393,7 @@ mod tests {
             line_type: LineType::Data,
         });
         pass2.push(Pass2 {
-            opcode: String::from("4321"),
+            emitted: Emitted::Data(vec![0x43, 0x21]),
             input_text_line: String::default(),
             file_name: String::from("test"),
             line_counter: 0,
@@ -414,7 +403,7 @@ mod tests {
         let mut msg_list = Diagnostics::new();
         let bin_string = create_bin_string(pass2, &mut msg_list);
         // Word 0: heap_start=0x28 LE → "28000000"; hi32=0 → "00000000".
-        // Entry pc=1 LE → "01000000". 4-char opcodes pass through unchanged.
+        // Entry pc=1 LE → "01000000". 2-byte data passes through unchanged.
         // No "Z0010" — checksum is a 32-bit LE word immediately after Z.
         // 10 × 8-char groups (8 header + "12344321" + entry); count=20.
         // sum: "28000000"→40 (0x28), "12344321"→21845, "01000000"→1 = 21886.
@@ -431,7 +420,7 @@ mod tests {
     fn test_create_bin_string_part_word() {
         let pass2 = vec![
             Pass2 {
-                opcode: String::default(),
+                emitted: Emitted::None,
                 file_name: String::from("test"),
                 input_text_line: String::default(),
                 line_counter: 0,
@@ -439,7 +428,7 @@ mod tests {
                 line_type: LineType::Start,
             },
             Pass2 {
-                opcode: String::from("000000"),
+                emitted: Emitted::Data(vec![0; 3]),
                 file_name: String::from("test"),
                 input_text_line: String::default(),
                 line_counter: 0,
@@ -462,7 +451,7 @@ mod tests {
     fn test_create_bin_string2() {
         let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
-            opcode: String::default(),
+            emitted: Emitted::None,
             file_name: String::from("test"),
             input_text_line: String::default(),
             line_counter: 0,
@@ -470,7 +459,7 @@ mod tests {
             line_type: LineType::Start,
         });
         pass2.push(Pass2 {
-            opcode: String::default(),
+            emitted: Emitted::None,
             file_name: String::from("test"),
             input_text_line: String::default(),
             line_counter: 0,
@@ -478,7 +467,7 @@ mod tests {
             line_type: LineType::Start,
         });
         pass2.push(Pass2 {
-            opcode: String::from("4321"),
+            emitted: Emitted::Data(vec![0x43, 0x21]),
             input_text_line: String::default(),
             file_name: String::from("test"),
             line_counter: 0,
@@ -497,7 +486,7 @@ mod tests {
     fn test_create_bin_string3() {
         let pass2 = &mut Vec::<Pass2>::new();
         pass2.push(Pass2 {
-            opcode: String::default(),
+            emitted: Emitted::None,
             file_name: String::from("test"),
             input_text_line: String::default(),
             line_counter: 0,
@@ -505,7 +494,7 @@ mod tests {
             line_type: LineType::Comment,
         });
         pass2.push(Pass2 {
-            opcode: String::from("1234"),
+            emitted: Emitted::Data(vec![0x12, 0x34]),
             file_name: String::from("test"),
             input_text_line: String::default(),
             line_counter: 0,
@@ -513,7 +502,7 @@ mod tests {
             line_type: LineType::Data,
         });
         pass2.push(Pass2 {
-            opcode: String::from("4321"),
+            emitted: Emitted::Data(vec![0x43, 0x21]),
             input_text_line: String::default(),
             file_name: String::from("test"),
             line_counter: 0,

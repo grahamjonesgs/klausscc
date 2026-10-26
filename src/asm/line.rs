@@ -2,8 +2,9 @@
 //!
 //! Source files are read into [`SourceLine`]s, which macro expansion turns
 //! into more `SourceLine`s; pass 1 adds the [`LineType`] and program counter
-//! ([`Pass1`]) and pass 2 the encoded opcode ([`Pass2`]).  This module has no
-//! intra-crate dependencies.
+//! ([`Pass1`]) and pass 2 the machine code the line emits ([`Pass2`], with
+//! its [`Emitted`] words or bytes).  This module has no intra-crate
+//! dependencies.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Defines the type of line.
@@ -66,8 +67,49 @@ pub(crate) struct Pass2 {
     pub line_counter: u32,
     /// Line type.
     pub line_type: LineType,
-    /// Opcode as string.
-    pub opcode: String,
+    /// The machine code the line emits.
+    pub emitted: Emitted,
     /// Program counter.
     pub program_counter: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// The machine code one line emits, as numbers; hex is only written by the
+/// `.code` listing and the `.kbt` image.
+pub(crate) enum Emitted {
+    /// Nothing: a line that holds no code or data, or one that could not be
+    /// encoded.
+    #[default]
+    None,
+    /// Instruction words: word 0, then its immediate words.
+    Code(Vec<u32>),
+    /// Data bytes, in memory order.
+    Data(Vec<u8>),
+}
+
+impl Emitted {
+    /// The number of bytes the line occupies in memory.
+    #[must_use]
+    pub(crate) const fn byte_len(&self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::Code(words) => words.len() * 4,
+            Self::Data(bytes) => bytes.len(),
+        }
+    }
+
+    /// Write the line's bytes, in memory order, to `dest`, which must be
+    /// [`byte_len`](Self::byte_len) long.  Each instruction word is stored
+    /// little-endian, as the CPU's 32-bit reads expect.
+    pub(crate) fn copy_to(&self, dest: &mut [u8]) {
+        match self {
+            Self::None => {}
+            Self::Code(words) => {
+                for (slot, word) in dest.as_chunks_mut::<4>().0.iter_mut().zip(words) {
+                    *slot = word.to_le_bytes();
+                }
+            }
+            Self::Data(bytes) => dest.copy_from_slice(bytes),
+        }
+    }
 }

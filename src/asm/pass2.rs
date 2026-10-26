@@ -2,7 +2,7 @@
 
 use crate::asm::data::data_as_bytes;
 use crate::asm::lexer::strip_comments;
-use crate::asm::line::{LineType, Pass1, Pass2};
+use crate::asm::line::{Emitted, LineType, Pass1, Pass2};
 use crate::asm::symbols::SymbolTable;
 use crate::diag::Diagnostics;
 use crate::isa::Isa;
@@ -14,18 +14,15 @@ use crate::isa::encode::{EncodeError, Encoded, encode};
 pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, isa: &Isa, labels: &SymbolTable) -> Vec<Pass2> {
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
-        let (new_opcode, line_type) = match line.line_type {
-            LineType::Opcode => {
-                let encoded = encode_line(&line, isa, labels, msg_list);
-                let line_type = if encoded.as_ref().is_some_and(|e| e.word0.is_some()) {
-                    LineType::Opcode
-                } else {
-                    LineType::Error
-                };
-                (encoded.map_or_else(|| "ERR     ".to_owned(), |e| e.hex()), line_type)
-            }
-            LineType::Data => (data_as_bytes(line.input_text_line.as_str()).unwrap_or_default(), LineType::Data),
-            line_type => (String::new(), line_type),
+        let (emitted, line_type) = match line.line_type {
+            // Only a line whose word 0 failed is an error line; one with a
+            // bad immediate keeps its partial words for the listing.
+            LineType::Opcode => match encode_line(&line, isa, labels, msg_list).and_then(Encoded::into_words) {
+                Some(words) => (Emitted::Code(words), LineType::Opcode),
+                None => (Emitted::None, LineType::Error),
+            },
+            LineType::Data => (data_as_bytes(&line.input_text_line).map_or(Emitted::None, Emitted::Data), LineType::Data),
+            line_type => (Emitted::None, line_type),
         };
 
         pass2.push(Pass2 {
@@ -34,7 +31,7 @@ pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, isa: &Isa
             line_counter: line.line_counter,
             program_counter: line.program_counter,
             line_type,
-            opcode: new_opcode,
+            emitted,
         });
     }
     pass2
@@ -144,15 +141,17 @@ mod tests {
             opcodes,
             &labels,
         );
-        assert_eq!(pass2[0].opcode, "E4400000EEEEEEEEFFFFFFFF");
-        assert_eq!(pass2[1].opcode, "AC05000000000007");
-        assert_eq!(pass2[2].opcode, "64000010");
-        assert_eq!(pass2[3].opcode, "65800000");
-        assert_eq!(pass2[4].opcode, "65800000");
-        assert_eq!(pass2[5].opcode, "8BD002000000AAAA");
-        assert_eq!(pass2[6].opcode, "CBC003000000000A0000000B");
-        assert_eq!(pass2[7].opcode, "0000000248454C4C4F00000000000000"); // padded to 2 × 64-bit words
-        assert_eq!(pass2[8].opcode, "");
+        assert_eq!(pass2[0].emitted, Emitted::Code(vec![0xE440_0000, 0xEEEE_EEEE, 0xFFFF_FFFF]));
+        assert_eq!(pass2[1].emitted, Emitted::Code(vec![0xAC05_0000, 0x0000_0007]));
+        assert_eq!(pass2[2].emitted, Emitted::Code(vec![0x6400_0010]));
+        assert_eq!(pass2[3].emitted, Emitted::Code(vec![0x6580_0000]));
+        assert_eq!(pass2[4].emitted, Emitted::Code(vec![0x6580_0000]));
+        assert_eq!(pass2[5].emitted, Emitted::Code(vec![0x8BD0_0200, 0x0000_AAAA]));
+        assert_eq!(pass2[6].emitted, Emitted::Code(vec![0xCBC0_0300, 0x0000_000A, 0x0000_000B]));
+        // Prefix (2 words), "HELLO" packed first character highest, padded to 2 × 64-bit words.
+        let hello = [2, 0, 0, 0, b'L', b'L', b'E', b'H', 0, 0, 0, b'O', 0, 0, 0, 0];
+        assert_eq!(pass2[7].emitted, Emitted::Data(hello.to_vec()));
+        assert_eq!(pass2[8].emitted, Emitted::None);
     }
 
     #[test]
@@ -173,7 +172,7 @@ mod tests {
             opcodes,
             &labels,
         );
-        assert_eq!(pass2[0].opcode, "ERR     ");
+        assert_eq!(pass2[0].emitted, Emitted::None);
         assert_eq!(pass2[0].line_type, LineType::Error);
         assert_eq!(msg_list.messages()[0].text(), "Opcode not found - \"TEST\"");
     }
@@ -197,13 +196,13 @@ mod tests {
             &Isa::v2(),
             &labels,
         );
-        let shown: Vec<(&str, LineType)> = pass2.iter().map(|p| (p.opcode.as_str(), p.line_type)).collect();
+        let shown: Vec<(&Emitted, LineType)> = pass2.iter().map(|p| (&p.emitted, p.line_type)).collect();
         assert_eq!(
             shown,
             [
-                ("8BD0000000000001", LineType::Opcode),
-                ("ERR     ", LineType::Error),
-                ("A440000000000000", LineType::Opcode),
+                (&Emitted::Code(vec![0x8BD0_0000, 1]), LineType::Opcode),
+                (&Emitted::None, LineType::Error),
+                (&Emitted::Code(vec![0xA440_0000, 0]), LineType::Opcode),
             ]
         );
         let messages: Vec<_> = msg_list

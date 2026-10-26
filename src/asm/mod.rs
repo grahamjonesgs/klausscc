@@ -93,6 +93,7 @@ pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, isa: &Isa, macro_list:
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asm::line::Emitted;
     use crate::asm::macros::{builtin_macros, expand_embedded_macros};
     use crate::diag::MessageType;
 
@@ -204,7 +205,10 @@ mod tests {
         let (pass2, msg_list) = assemble_text("_start\nSETR A 18446744073709551615\nHALT\n");
         assert_eq!(messages_of(&msg_list, MessageType::Error), vec![]);
         let setr = pass2.iter().find(|p| p.line_counter == 2).unwrap();
-        assert!(setr.opcode.ends_with("FFFFFFFFFFFFFFFF"), "{}", setr.opcode);
+        let Emitted::Code(words) = &setr.emitted else {
+            panic!("{:?}", setr.emitted)
+        };
+        assert!(words.ends_with(&[0xFFFF_FFFF, 0xFFFF_FFFF]), "{words:X?}");
     }
 
     #[test]

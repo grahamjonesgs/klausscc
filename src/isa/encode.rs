@@ -5,7 +5,6 @@
 use super::{Opcode, Operand, reg_index};
 use crate::asm::symbols::{OperandError, SymbolTable, resolve_operand};
 use crate::num::{parse_bits64, parse_int};
-use std::fmt::Write as _;
 
 /// A line's instruction words, as far as they could be encoded.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,9 +20,18 @@ pub(crate) struct Encoded {
 }
 
 impl Encoded {
-    /// The words as the listing shows them: word 0 as 8 hex digits (`ERR`
-    /// padded to 8 when it failed), then each immediate word.
+    /// The instruction words, word 0 first, or `None` when word 0 could not
+    /// be encoded.
+    pub(crate) fn into_words(self) -> Option<Vec<u32>> {
+        let word0 = self.word0?;
+        Some(std::iter::once(word0).chain(self.imm).collect())
+    }
+
+    /// The words as a listing would show them, for tests: word 0 as 8 hex
+    /// digits (`ERR` padded to 8 when it failed), then each immediate word.
+    #[cfg(test)]
     pub(crate) fn hex(&self) -> String {
+        use std::fmt::Write as _;
         let mut hex = self.word0.map_or_else(|| "ERR     ".to_owned(), |word0| format!("{word0:08X}"));
         for word in &self.imm {
             let _ = write!(hex, "{word:08X}");

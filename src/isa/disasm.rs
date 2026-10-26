@@ -1,7 +1,7 @@
 //! Disassembling instruction words back into assembler text.
 
 use super::{Opcode, Operand, REG_NAMES};
-use crate::asm::line::{LineType, Pass2};
+use crate::asm::line::{Emitted, LineType, Pass2};
 use std::fmt::Write as _;
 
 /// The name of the register in the low nibble of `field`.
@@ -66,8 +66,8 @@ impl Disassembler {
     /// Each 4-byte chunk is read as a little-endian 32-bit word (matching the `KlaussCPU` LLVM ELF
     /// byte order) and matched against the table.  When a match is found, register operands are
     /// extracted and any argument words that follow (determined by [`Opcode::imm_words`]) are consumed
-    /// and appended to the same entry's `opcode` hex string so `write_code_output_file` formats them
-    /// correctly.  Unrecognised words produce a `???` fallback line.  When the binary ends before
+    /// and emitted on the same entry after the instruction word, so `write_code_output_file` shows
+    /// them together.  Unrecognised words produce a `???` fallback line.  When the binary ends before
     /// all of an instruction's argument words, the words that are there are shown once, on that
     /// instruction's line, marked `(truncated)`.
     ///
@@ -83,7 +83,6 @@ impl Disassembler {
 
             let (base_text, vars) = self.word(word).unwrap_or_else(|| (format!("??? (0x{word:08X})"), 0_u32));
 
-            let mut opcode_hex = format!("{word:08X}");
             let mut display_text = base_text;
 
             // Consume argument words that immediately follow the instruction word.
@@ -96,9 +95,6 @@ impl Disassembler {
                     binary.get(off..off + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)
                 })
                 .collect();
-            for av in &args {
-                let _ = write!(opcode_hex, "{av:08X}");
-            }
             match *args.as_slice() {
                 [av] if arg_word_count == 1 => _ = write!(display_text, " 0x{av:X}"),
                 [lo, hi] => _ = write!(display_text, " 0x{:X}", (u64::from(hi) << 32) | u64::from(lo)),
@@ -117,7 +113,7 @@ impl Disassembler {
                 input_text_line: display_text,
                 line_counter: 0,
                 line_type: LineType::Opcode,
-                opcode: opcode_hex,
+                emitted: Emitted::Code(std::iter::once(word).chain(args).collect()),
                 program_counter: pc,
             });
 
@@ -202,11 +198,10 @@ mod tests {
             let line = [opcode.name.to_owned()].into_iter().chain(source).collect::<Vec<_>>().join(" ");
             let encoded = encode(opcode, &line, 0x20, &symbols).unwrap_or_else(|e| panic!("{line}: {e:?}"));
             assert!(!encoded.extra_tokens, "{line}");
-            let hex = encoded.hex();
-            let words: Vec<u32> = encoded.word0.into_iter().chain(encoded.imm).collect();
+            let words = encoded.into_words().unwrap();
             let pass2 = disassembler.flat_to_pass2(&le_bytes(&words), 0x20);
             assert_eq!(pass2.len(), 1, "{line}");
-            assert_eq!(pass2[0].opcode, hex, "{line}");
+            assert_eq!(pass2[0].emitted, Emitted::Code(words.clone()), "{line}");
 
             let name = ALIASES
                 .iter()
@@ -238,11 +233,11 @@ mod tests {
         let pass2 = Disassembler::new(V2_OPCODES).flat_to_pass2(&le_bytes(&[0x8BD0_0000, 5, 0xCBC0_0000, 0x5566_7788, 0x1122_3344]), 0x20);
         assert_eq!(pass2.len(), 2);
         assert_eq!(pass2[0].program_counter, 0x20);
-        assert_eq!(pass2[0].opcode, "8BD0000000000005");
+        assert_eq!(pass2[0].emitted, Emitted::Code(vec![0x8BD0_0000, 5]));
         assert!(pass2[0].input_text_line.starts_with("SETR "), "{}", pass2[0].input_text_line);
         assert!(pass2[0].input_text_line.ends_with(" 0x5"), "{}", pass2[0].input_text_line);
         assert_eq!(pass2[1].program_counter, 0x28);
-        assert_eq!(pass2[1].opcode, "CBC000005566778811223344");
+        assert_eq!(pass2[1].emitted, Emitted::Code(vec![0xCBC0_0000, 0x5566_7788, 0x1122_3344]));
         assert!(pass2[1].input_text_line.ends_with(" 0x1122334455667788"), "{}", pass2[1].input_text_line);
     }
 
@@ -253,7 +248,7 @@ mod tests {
         let disassembler = Disassembler::new(V2_OPCODES);
         let pass2 = disassembler.flat_to_pass2(&le_bytes(&[0xCBC0_0000, 0x5566_7788]), 0x20);
         assert_eq!(pass2.len(), 1);
-        assert_eq!(pass2[0].opcode, "CBC0000055667788");
+        assert_eq!(pass2[0].emitted, Emitted::Code(vec![0xCBC0_0000, 0x5566_7788]));
         assert!(
             pass2[0].input_text_line.ends_with(" 0x55667788 (truncated)"),
             "{}",

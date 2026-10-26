@@ -4,7 +4,6 @@
 use crate::diag::Diagnostics;
 use crate::num::{LiteralError, parse_bits64, parse_int};
 use std::fmt;
-use std::fmt::Write as _;
 
 /// Largest single data item, in bytes: the whole of the board's 128 MiB memory.
 const MAX_DATA_BYTES: i128 = 128 * 1024 * 1024;
@@ -131,42 +130,42 @@ impl DataDirective {
         }
     }
 
-    /// The bytes the definition emits, as hex (two digits per byte, each
-    /// 32-bit word as its value).
-    fn encode(&self) -> String {
+    /// The bytes the definition emits, in memory order.
+    ///
+    /// The board stores every 32-bit word little-endian, so a `.word` is its
+    /// value's little-endian bytes; a string's characters are packed into
+    /// words first character in the most significant byte, after its prefix
+    /// word.
+    fn encode(&self) -> Vec<u8> {
         match self {
-            Self::Word(value) => {
-                let lo32 = (value & 0xFFFF_FFFF) as u32;
-                let hi32 = (value >> 32) as u32;
-                format!("{lo32:08X}{hi32:08X}")
-            }
+            Self::Word(value) => value.to_le_bytes().to_vec(),
             Self::Str(text) => {
-                let mut output_hex = String::with_capacity(self.size_bytes() * 2);
-                let _ = write!(output_hex, "{:08X}", Self::char_words(text));
-                for char in text.as_bytes() {
-                    let _ = write!(output_hex, "{char:02X}");
+                let mut bytes = Vec::with_capacity(self.size_bytes());
+                bytes.extend_from_slice(&(Self::char_words(text) as u32).to_le_bytes());
+                for chars in text.as_bytes().chunks(4) {
+                    let mut word = [0_u8; 4];
+                    word[..chars.len()].copy_from_slice(chars);
+                    bytes.extend_from_slice(&u32::from_be_bytes(word).to_le_bytes());
                 }
-                while output_hex.len() < self.size_bytes() * 2 {
-                    output_hex.push('0');
-                }
-                output_hex
+                bytes.resize(self.size_bytes(), 0);
+                bytes
             }
-            Self::ZeroPad(_) | Self::Space(_) | Self::Words(_) => "0".repeat(self.size_bytes() * 2),
+            Self::ZeroPad(_) | Self::Space(_) | Self::Words(_) => vec![0; self.size_bytes()],
         }
     }
 }
 
 /// Returns bytes for data element.
 ///
-/// Parses data element and returns data as bytes, or None if error.
-pub(crate) fn data_as_bytes(line: &str) -> Option<String> {
+/// Parses data element and returns its bytes in memory order, or None if error.
+pub(crate) fn data_as_bytes(line: &str) -> Option<Vec<u8>> {
     data_bytes(line).ok()
 }
 
 /// Returns bytes for data element, or why the line is not valid data.
 ///
-/// The bytes are returned as a hex string (two characters per byte).
-fn data_bytes(line: &str) -> Result<String, DataError> {
+/// The bytes are in memory order.
+fn data_bytes(line: &str) -> Result<Vec<u8>, DataError> {
     DataDirective::parse(line).map(|data| data.encode())
 }
 
@@ -195,6 +194,26 @@ mod tests {
     use crate::asm::line::LineType;
     use crate::diag::MessageType;
 
+    /// `bytes` as the listing shows them: each 32-bit word as its value, in
+    /// 8 hex digits.
+    fn words_hex(bytes: &[u8]) -> String {
+        bytes
+            .chunks(4)
+            .map(|word| format!("{:08X}", u32::from_le_bytes(word.try_into().unwrap())))
+            .collect::<Vec<_>>()
+            .concat()
+    }
+
+    /// The bytes of the data on `line` as [`words_hex`], or `None` when it is not valid.
+    fn data_hex(line: &str) -> Option<String> {
+        data_as_bytes(line).map(|bytes| words_hex(&bytes))
+    }
+
+    /// The bytes of the data on `line` as [`words_hex`], or why it is not valid.
+    fn data_bytes_hex(line: &str) -> Result<String, DataError> {
+        data_bytes(line).map(|bytes| words_hex(&bytes))
+    }
+
     #[test]
     fn test_num_data_bytes1() {
         let mut msg_list = Diagnostics::new();
@@ -216,7 +235,7 @@ mod tests {
     // Test for correct output from data line
     fn test_data_as_bytes1() {
         let input = String::from("#TEST 3");
-        let output = data_as_bytes(&input);
+        let output = data_hex(&input);
         assert_eq!(output, Some("000000000000000000000000000000000000000000000000".to_owned()));
         // 3 × 16 hex chars per 64-bit word
     }
@@ -225,7 +244,7 @@ mod tests {
     // Test for correct output from invalid data line
     fn test_data_as_bytes2() {
         let input = String::from("#TEST");
-        let output = data_as_bytes(&input);
+        let output = data_hex(&input);
         assert_eq!(output, None);
     }
 
@@ -233,14 +252,14 @@ mod tests {
     // Test for correct output from invalid data line
     fn test_data_as_bytes3() {
         let input = String::default();
-        let output = data_as_bytes(&input);
+        let output = data_hex(&input);
         assert_eq!(output, None);
     }
 
     #[test]
     fn test_data_as_bytes4() {
         let input = String::from("#TEST \"Hello\"");
-        let output = data_as_bytes(&input);
+        let output = data_hex(&input);
         // Prefix (2 character words), "Hello\0\0\0", then a NUL word so the
         // item is a whole number of 64-bit words.
         assert_eq!(output, Some("0000000248656C6C6F00000000000000".to_owned()),);
@@ -250,41 +269,41 @@ mod tests {
     // Every string is a whole number of 64-bit words, whatever its length
     fn test_data_as_bytes_string_word_aligned() {
         for (text, prefix) in [("", 1), ("abc", 1), ("abcd", 2), ("Hello", 2), ("abcdefg", 2), ("abcdefgh", 3)] {
-            let output = data_as_bytes(&format!("#S \"{text}\"")).unwrap();
+            let output = data_hex(&format!("#S \"{text}\"")).unwrap();
             assert!(output.len().is_multiple_of(16), "{text:?} -> {output}");
             assert_eq!(output.get(..8), Some(format!("{prefix:08X}").as_str()), "{text:?}");
             // Characters are always followed by at least one NUL byte.
             assert!(output.len() / 2 > 4 + text.len(), "{text:?}");
         }
         // A 3-word string: prefix + 3 words = 16 bytes, no extra padding needed.
-        assert_eq!(data_as_bytes("#S \"abcdefgh\"").unwrap().len(), 32);
+        assert_eq!(data_hex("#S \"abcdefgh\"").unwrap().len(), 32);
     }
 
     #[test]
     fn test_data_as_bytes5() {
         let input = String::from("#TEST 0x1");
-        let output = data_as_bytes(&input);
+        let output = data_hex(&input);
         assert_eq!(output, Some("0000000000000000".to_owned()),); // 1 × 16 hex chars per 64-bit word
     }
 
     #[test]
     fn test_data_as_bytes6() {
         let input = String::from("#TEST \"Hello");
-        let output = data_as_bytes(&input);
+        let output = data_hex(&input);
         assert_eq!(output, None);
     }
 
     #[test]
     fn test_data_as_bytes7() {
         let input = String::from("#TEST FFFF");
-        let output = data_as_bytes(&input);
+        let output = data_hex(&input);
         assert_eq!(output, None);
     }
 
     #[test]
     fn test_data_as_bytes8() {
         let input = String::from("#TEST FFFF DUMMY");
-        let output = data_as_bytes(&input);
+        let output = data_hex(&input);
         assert_eq!(output, None);
     }
 
@@ -292,94 +311,94 @@ mod tests {
     // .zeropad N emits EXACTLY N bytes of zero (no 8-byte rounding), unlike .space,
     // and N must be a whole number of 32-bit words.
     fn test_data_as_bytes_zeropad() {
-        assert_eq!(data_as_bytes(".zeropad 4"), Some("00000000".to_owned())); // 4 bytes
-        assert_eq!(data_as_bytes(".zeropad 12"), Some("0".repeat(24))); // 12 bytes, no rounding to 8
+        assert_eq!(data_hex(".zeropad 4"), Some("00000000".to_owned())); // 4 bytes
+        assert_eq!(data_hex(".zeropad 12"), Some("0".repeat(24))); // 12 bytes, no rounding to 8
         // A part word would misalign the board's word-at-a-time load.
-        assert_eq!(data_bytes(".zeropad 2"), Err(DataError::NotWordMultiple("2".to_owned())));
-        assert_eq!(data_bytes(".zeropad 3"), Err(DataError::NotWordMultiple("3".to_owned())));
-        assert_eq!(data_as_bytes(".zeropad 0"), None);
-        assert_eq!(data_as_bytes(".zeropad"), None);
+        assert_eq!(data_bytes_hex(".zeropad 2"), Err(DataError::NotWordMultiple("2".to_owned())));
+        assert_eq!(data_bytes_hex(".zeropad 3"), Err(DataError::NotWordMultiple("3".to_owned())));
+        assert_eq!(data_hex(".zeropad 0"), None);
+        assert_eq!(data_hex(".zeropad"), None);
         // Contrast with .space, which rounds up to a whole 64-bit word.
-        assert_eq!(data_as_bytes(".space 4"), Some("0000000000000000".to_owned())); // 8 bytes
+        assert_eq!(data_hex(".space 4"), Some("0000000000000000".to_owned())); // 8 bytes
         assert_eq!(LineType::classify(".zeropad 4", &crate::isa::Isa::v2()), LineType::Data);
     }
 
     #[test]
     fn test_data_as_bytes_word_hex() {
-        let output = data_as_bytes(".word 0x2A");
+        let output = data_hex(".word 0x2A");
         assert_eq!(output, Some("0000002A00000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_word_decimal() {
-        let output = data_as_bytes(".word 42");
+        let output = data_hex(".word 42");
         assert_eq!(output, Some("0000002A00000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_word_zero() {
-        let output = data_as_bytes(".word 0");
+        let output = data_hex(".word 0");
         assert_eq!(output, Some("0000000000000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_word_negative() {
-        let output = data_as_bytes(".word -1");
+        let output = data_hex(".word -1");
         assert_eq!(output, Some("FFFFFFFFFFFFFFFF".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_word_missing_value() {
-        let output = data_as_bytes(".word");
+        let output = data_hex(".word");
         assert_eq!(output, None);
     }
 
     #[test]
     fn test_data_as_bytes_space_4_bytes() {
-        let output = data_as_bytes(".space 4");
+        let output = data_hex(".space 4");
         assert_eq!(output, Some("0000000000000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_space_8_bytes() {
-        let output = data_as_bytes(".space 8");
+        let output = data_hex(".space 8");
         assert_eq!(output, Some("0000000000000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_space_5_bytes_rounds_up() {
-        let output = data_as_bytes(".space 5");
+        let output = data_hex(".space 5");
         assert_eq!(output, Some("0000000000000000".to_owned()));
     }
 
     #[test]
     fn test_data_as_bytes_space_zero() {
-        let output = data_as_bytes(".space 0");
+        let output = data_hex(".space 0");
         assert_eq!(output, None);
     }
 
     #[test]
     // Regression: .word used i64 parsing with unwrap_or(0), so these all emitted 0.
     fn test_data_bytes_word_full_range() {
-        assert_eq!(data_bytes(".word 0x8000000000000000"), Ok("0000000080000000".to_owned()));
-        assert_eq!(data_bytes(".word 0xFFFFFFFFFFFFFFFF"), Ok("FFFFFFFFFFFFFFFF".to_owned()));
-        assert_eq!(data_bytes(".word 0x1_000"), Ok("0000100000000000".to_owned()));
-        assert_eq!(data_bytes(".word -9223372036854775808"), Ok("0000000080000000".to_owned()));
+        assert_eq!(data_bytes_hex(".word 0x8000000000000000"), Ok("0000000080000000".to_owned()));
+        assert_eq!(data_bytes_hex(".word 0xFFFFFFFFFFFFFFFF"), Ok("FFFFFFFFFFFFFFFF".to_owned()));
+        assert_eq!(data_bytes_hex(".word 0x1_000"), Ok("0000100000000000".to_owned()));
+        assert_eq!(data_bytes_hex(".word -9223372036854775808"), Ok("0000000080000000".to_owned()));
     }
 
     #[test]
     // Regression: a malformed .word value is an error, not a silent 0.
     fn test_data_bytes_word_bad_value() {
         assert_eq!(
-            data_bytes(".word 12abc"),
+            data_bytes_hex(".word 12abc"),
             Err(DataError::BadValue("12abc".to_owned(), LiteralError::InvalidDigit))
         );
         assert_eq!(
-            data_bytes(".word 0x1_0000_0000_0000_0000"),
+            data_bytes_hex(".word 0x1_0000_0000_0000_0000"),
             Err(DataError::BadValue("0x1_0000_0000_0000_0000".to_owned(), LiteralError::Overflow))
         );
         assert_eq!(
-            data_bytes(".word label:"),
+            data_bytes_hex(".word label:"),
             Err(DataError::BadValue("label:".to_owned(), LiteralError::InvalidDigit))
         );
     }
@@ -387,28 +406,28 @@ mod tests {
     #[test]
     // Regression: .space sizes were parsed with unwrap_or(0); negative and junk sizes are errors.
     fn test_data_bytes_space_sizes() {
-        assert_eq!(data_bytes(".space 0x10"), Ok("0".repeat(32)));
-        assert_eq!(data_bytes(".space 0x1_0"), Ok("0".repeat(32)));
-        assert_eq!(data_bytes(".space -8"), Err(DataError::NotPositive("-8".to_owned())));
-        assert_eq!(data_bytes(".space 0"), Err(DataError::NotPositive("0".to_owned())));
+        assert_eq!(data_bytes_hex(".space 0x10"), Ok("0".repeat(32)));
+        assert_eq!(data_bytes_hex(".space 0x1_0"), Ok("0".repeat(32)));
+        assert_eq!(data_bytes_hex(".space -8"), Err(DataError::NotPositive("-8".to_owned())));
+        assert_eq!(data_bytes_hex(".space 0"), Err(DataError::NotPositive("0".to_owned())));
         assert_eq!(
-            data_bytes(".space 12abc"),
+            data_bytes_hex(".space 12abc"),
             Err(DataError::BadValue("12abc".to_owned(), LiteralError::InvalidDigit))
         );
-        assert_eq!(data_bytes(".space 0x100000000"), Err(DataError::TooLarge("0x100000000".to_owned())));
+        assert_eq!(data_bytes_hex(".space 0x100000000"), Err(DataError::TooLarge("0x100000000".to_owned())));
     }
 
     #[test]
     // Regression: "#name -5" produced a zero-size item; it is now an error.
     fn test_data_bytes_named_sizes() {
-        assert_eq!(data_bytes("#BUF 0x1_0"), Ok("0".repeat(16 * 16)));
-        assert_eq!(data_bytes("#BUF -5"), Err(DataError::NotPositive("-5".to_owned())));
+        assert_eq!(data_bytes_hex("#BUF 0x1_0"), Ok("0".repeat(16 * 16)));
+        assert_eq!(data_bytes_hex("#BUF -5"), Err(DataError::NotPositive("-5".to_owned())));
         assert_eq!(
-            data_bytes("#BUF 99999999999999999999"),
+            data_bytes_hex("#BUF 99999999999999999999"),
             Err(DataError::BadValue("99999999999999999999".to_owned(), LiteralError::Overflow))
         );
-        assert_eq!(data_bytes("#BUF 0x10000000"), Err(DataError::TooLarge("0x10000000".to_owned())));
-        assert_eq!(data_bytes("#BUF"), Err(DataError::Malformed));
+        assert_eq!(data_bytes_hex("#BUF 0x10000000"), Err(DataError::TooLarge("0x10000000".to_owned())));
+        assert_eq!(data_bytes_hex("#BUF"), Err(DataError::Malformed));
     }
 
     #[test]
@@ -427,7 +446,7 @@ mod tests {
             let data = DataDirective::parse(line).unwrap();
             assert_eq!(data, want, "{line}");
             assert_eq!(data.size_bytes(), size, "{line}");
-            assert_eq!(data.encode().len(), size * 2, "{line}");
+            assert_eq!(data.encode().len(), size, "{line}");
         }
     }
 
@@ -443,5 +462,20 @@ mod tests {
             msg.text(),
             "Error in data definition for .word 12abc: invalid value \"12abc\" (invalid digit)"
         );
+    }
+
+    #[test]
+    // Data is held as memory bytes: each 32-bit word little-endian, and a
+    // string's characters packed into words first character highest.
+    fn test_data_as_bytes_memory_order() {
+        assert_eq!(
+            data_as_bytes(".word 0x1122334455667788"),
+            Some(vec![0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11])
+        );
+        assert_eq!(
+            data_as_bytes("#S \"Hello\""),
+            Some(vec![2, 0, 0, 0, b'l', b'l', b'e', b'H', 0, 0, 0, b'o', 0, 0, 0, 0])
+        );
+        assert_eq!(data_as_bytes(".zeropad 4"), Some(vec![0; 4]));
     }
 }
