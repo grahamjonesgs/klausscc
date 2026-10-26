@@ -144,7 +144,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 |------|------------|
 | `hello_world.kla` | Compiled C: arithmetic, factorial, GCD, Fibonacci and primes. Has expected values, so it is in the emulator corpus |
 | `test_directives.kla` | The directives C compilers emit (`.global`, `.extern`, `.text`, `.word`, `.comm`). In the emulator corpus |
-| `v2_hello.kla`, `v2_loop.kla`, `v2_math.kla` | Minimal programs that store straight to the UART `TX_DATA` register (`0xF0010000`), without `uart_stubs.kla`. Checked by `tests/roundtrip.rs` |
+| `v2_hello.kla`, `v2_loop.kla`, `v2_math.kla` | Minimal programs that store straight to the UART `TX_DATA` register (`0xF0010000`), without `uart_stubs.kla`, polling `STATUS.TX_BUSY` before each byte. Checked by `tests/roundtrip.rs`. They print characters, not hex values, so they list no expected values and are not in `all_tests.txt` |
 | `uart_stubs.kla` | The UART print routines the tests include: `TX_HEX32`, `TX_NL`, `TX_CHAR`, `TX_STR` |
 | `string_print.kla` | A `STRING_PRINT` subroutine for inclusion; not a program by itself |
 | `demo.kla`, `hello_simple.kla` | Compiler output with its own startup code; they run but list no expected values |

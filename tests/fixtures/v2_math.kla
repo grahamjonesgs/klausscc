@@ -1,11 +1,17 @@
 // v2 round-trip fixture: 3-operand ALU + stack round-trip. Prints "0".
-// Computes 0x10 + 0x20 = 0x30 ('0'), pushes/pops it, then transmits it.
+// Computes 0x10 + 0x20 = 0x30 ('0'), pushes/pops it, then transmits it once
+// STATUS.TX_BUSY (bit 0) is clear (a store to TX_DATA while it is set is dropped).
 _start
-SETR B 0xF0010000    // UART TX_DATA
+SETR B 0xF0010000    // UART TX_DATA (STATUS at +0x10)
 SETR C 0x10
 SETR D 0x20
 ADDR A C D           // A = C + D = 0x30 (rd, rs1, rs2)
 PUSH A               // round-trip through the stack
 POP A
+WAIT_TX:
+LDIDX8 E B 0x10      // E = STATUS
+ANDV E 0x1           // TX_BUSY
+CMPRV E 0
+JMPNE WAIT_TX:       // wait for the loader's reply to finish
 MEMSET8 A B          // transmit 0x30 = '0'
 HALT

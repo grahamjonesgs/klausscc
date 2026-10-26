@@ -1,10 +1,16 @@
 // v2 round-trip fixture: loop + compare + conditional branch. Prints "AB".
-// Emits characters from 'A' up to (but not including) 'C' over MMIO UART.
+// Emits characters from 'A' up to (but not including) 'C' over MMIO UART,
+// waiting for STATUS.TX_BUSY (bit 0) to clear before each byte: a store to
+// TX_DATA while it is set is dropped.
 _start
-SETR B 0xF0010000    // UART TX_DATA
+SETR B 0xF0010000    // UART TX_DATA (STATUS at +0x10)
 SETR C 0x41          // current char = 'A'
 SETR E 0x43          // sentinel = 'C'
 LOOP:
+LDIDX8 D B 0x10      // D = STATUS
+ANDV D 0x1           // TX_BUSY
+CMPRV D 0
+JMPNE LOOP:          // wait while the previous byte is being sent
 MEMSET8 C B          // transmit current char
 INCR C               // advance
 CMPRR C E            // sets equal/less/ult from C - E

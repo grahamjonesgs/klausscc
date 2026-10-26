@@ -1,12 +1,27 @@
 // v2 round-trip fixture: assemble with the built-in ISA-encoding-v2 table,
 // emulate, and expect the UART output "Hi\n".
-// UART is memory-mapped (TX_DATA at 0xF0010000); a byte store transmits it.
+// UART is memory-mapped (TX_DATA at 0xF0010000, STATUS at 0xF0010010); a byte
+// store to TX_DATA transmits it. A store while STATUS.TX_BUSY (bit 0) is set
+// is dropped, and a program loaded over the UART starts while the loader's
+// "Load Complete OK" reply is still being sent, so PUTC polls before each byte.
 _start
 SETR B 0xF0010000    // UART TX_DATA MMIO register
 SETR A 0x48          // 'H'
-MEMSET8 A B          // transmit A (data = rd, address = rs1)
+CALL PUTC:
 SETR A 0x69          // 'i'
-MEMSET8 A B
+CALL PUTC:
 SETR A 0x0A          // newline
-MEMSET8 A B
+CALL PUTC:
 HALT
+
+// PUTC: wait until the transmitter is idle, then send A[7:0]. B = UART base.
+PUTC:
+PUSH C
+PUTC_WAIT:
+LDIDX8 C B 0x10      // C = STATUS
+ANDV C 0x1           // TX_BUSY
+CMPRV C 0
+JMPNE PUTC_WAIT:     // still sending the previous byte
+MEMSET8 A B          // transmit A (data = rd, address = rs1)
+POP C
+RET
