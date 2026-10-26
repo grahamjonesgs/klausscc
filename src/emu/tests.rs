@@ -60,9 +60,12 @@ fn test_setr_and_inc_wraps_zero() {
 }
 
 #[test]
-fn test_mmio_uart_tx() {
+fn test_mmio_uart_tx_drops_a_store_while_busy() {
     // SETR B TX_DATA ; SETR A 'H' ; MEMSET8 [B]=A ; SETR A 'i' ; MEMSET8 [B]=A ; HALT
     // MEMSET8 data=rd=A(0), base=rs1=B(1): 0x5C00_0000 | 0<<8 | 1<<4 = 0x5C00_0010.
+    // From reset the UART is idle, so 'H' goes out; 'i' is stored two
+    // instructions later, while 'H' is still being sent, and is dropped
+    // (uart_send_msg.sv :61-76 ignores a send request while busy).
     let words = [
         0x8BD0_0100,
         0xF001_0000, // SETR B, TX_DATA
@@ -71,12 +74,78 @@ fn test_mmio_uart_tx() {
         0x5C00_0010, // MEMSET8 [B] = A
         0x8BD0_0000,
         0x0000_0069, // SETR A, 'i'
-        0x5C00_0010, // MEMSET8 [B] = A
+        0x5C00_0010, // MEMSET8 [B] = A  (at CODE_BASE + 0x1C)
         HALT,
     ];
     let img = image_from_words(&words);
     let r = emulate_image(&img, CODE_BASE, 100, None);
-    assert_eq!(r.uart, b"Hi");
+    assert_eq!(r.uart, b"H");
+    assert_eq!(
+        r.tx_busy_writes,
+        TxBusyWrites {
+            first: vec![TxBusyWrite {
+                pc: CODE_BASE + 0x1C,
+                byte: b'i'
+            }],
+            total: 1,
+        }
+    );
+    assert_eq!(
+        r.tx_busy_writes.to_string(),
+        "UART TX write while busy at PC 0x0000003C (byte 0x69 dropped)"
+    );
+
+    // Started as a UART-loaded program, the loader's reply is still going
+    // out, so neither byte is sent: what the board did with v2_hello.kla.
+    let r = emulate_loaded_image(&img, CODE_BASE, 100, None);
+    assert_eq!(r.uart, b"");
+    assert_eq!(r.tx_busy_writes.total, 2);
+}
+
+#[test]
+fn test_uart_tx_busy_lasts_one_frame() {
+    // STATUS.TX_BUSY (bit 0) is set for UART_CYCLES_PER_BYTE cycles after a
+    // TX_DATA store: 10 bits of 33 clocks (uart_tx.sv :7) plus the IDLE and
+    // CLEANUP cycles.
+    assert_eq!(UART_CYCLES_PER_BYTE, 332);
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 0, "idle at reset");
+    cpu.mmio_write(0xF001_0000, u64::from(b'A'));
+    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 1, "busy once a byte is stored");
+    cpu.tick(UART_CYCLES_PER_BYTE - 1);
+    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 1, "still busy one cycle before the frame ends");
+    cpu.mmio_write(0xF001_0000, u64::from(b'B'));
+    cpu.tick(1);
+    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 0, "idle when the frame ends");
+    cpu.mmio_write(0xF001_0000, u64::from(b'C'));
+    assert_eq!(cpu.take_uart(), b"AC", "B was stored while busy");
+    let busy = cpu.take_tx_busy_writes();
+    assert_eq!((busy.total, busy.first[0].byte), (1, b'B'));
+    assert!(cpu.take_tx_busy_writes().is_empty(), "taken once");
+}
+
+#[test]
+fn test_uart_load_starts_with_the_loader_reply_in_flight() {
+    // "Load Complete OK\n\r" (uart_tasks.vh :519-539) is 18 bytes.
+    assert_eq!(LOADER_MESSAGE_CYCLES, 18 * UART_CYCLES_PER_BYTE);
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.start_after_uart_load();
+    cpu.tick(LOADER_MESSAGE_CYCLES - 1);
+    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 1);
+    cpu.tick(1);
+    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 0);
+}
+
+#[test]
+fn test_uart_busy_writes_keep_the_first_few() {
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.start_after_uart_load();
+    for b in 0..40 {
+        cpu.mmio_write(0xF001_0000, b);
+    }
+    let busy = cpu.take_tx_busy_writes();
+    assert_eq!((busy.first.len(), busy.total), (16, 40));
+    assert!(busy.to_string().ends_with("\n... and 24 more"), "{busy}");
 }
 
 #[test]
@@ -84,6 +153,7 @@ fn test_uart_keeps_raw_bytes() {
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     for b in [0xC3_u8, 0xA9, 0xFF, b'\n'] {
         cpu.mmio_write(0xF001_0000, 0x1200 | u64::from(b));
+        cpu.tick(UART_CYCLES_PER_BYTE);
     }
     assert_eq!(cpu.take_uart(), [0xC3, 0xA9, 0xFF, b'\n'], "the low byte of each store, verbatim");
     assert_eq!(cpu.take_uart(), b"", "taken once");
@@ -107,7 +177,7 @@ fn test_mmio_uart_rx_read_to_consume_and_status() {
     let mut cpu = cpu_with(&img);
     cpu.feed_uart_rx(&[0x41]); // 'A'
     let _ = cpu.run(100, None);
-    assert_eq!(cpu.regs[3], 0b000, "RX_EMPTY clear while a byte is queued, TX never busy");
+    assert_eq!(cpu.regs[3], 0b000, "RX_EMPTY clear while a byte is queued, TX idle");
     assert_eq!(cpu.regs[4], 0x41, "RX_DATA returns and pops the FIFO head");
     assert_eq!(cpu.regs[5], 0b010, "RX_EMPTY set once the byte has been consumed");
 }

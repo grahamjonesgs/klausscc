@@ -50,6 +50,100 @@ const UART_STATUS: u32 = 0x0010;
 /// a parameter and the emulator has no external byte source that would fill it.
 const UART_RX_FIFO_DEPTH: usize = 16;
 
+// ---- UART transmit timing ----------------------------------------------------
+// There is no TX FIFO.  A `TX_DATA` store hands one byte to `uart_send_msg`
+// (`KlaussCPU.sv` :2173-2181: `r_msg[7:0]`, length 1, a one-cycle
+// `r_msg_send_DV`), which starts it only from its idle state
+// (`uart_send_msg.sv` :47-58); while it is sending, `i_msg_send_DV` is not
+// looked at (:61-76), so a store while busy is dropped and the byte in flight
+// goes out unchanged.  `STATUS.TX_BUSY` is that sender's `o_sending_msg`
+// (`KlaussCPU.sv` :911), which stays set until the last frame's stop bit is
+// out (`uart_send_msg.sv` :61-81).
+
+/// `uart_tx` `CLKS_PER_BIT` (`uart_tx.sv` :7, not overridden by the instance in
+/// `uart_send_msg.sv` :29): `i_Clk` cycles per bit.  `i_Clk` is the 100 MHz MIG
+/// `ui_clk` (`KlaussCPU.sv` :88-95), so the line runs at 100 MHz / 33 ≈ 3 Mbaud.
+const UART_CLKS_PER_BIT: u64 = 33;
+/// Bits per 8N1 frame: start, eight data, stop (`uart_tx.sv` :48-99).
+const UART_BITS_PER_FRAME: u64 = 10;
+/// The cycle `uart_tx` spends in `s_IDLE` accepting a byte and the one in
+/// `s_CLEANUP` after the stop bit (`uart_tx.sv` :34-45, :103-106).
+const UART_FRAME_OVERHEAD_CYCLES: u64 = 2;
+/// `i_Clk` cycles `TX_BUSY` stays set for each byte sent (332, about 3.3 µs).
+pub const UART_CYCLES_PER_BYTE: u64 = UART_BITS_PER_FRAME * UART_CLKS_PER_BIT + UART_FRAME_OVERHEAD_CYCLES;
+/// Length of the loader's `"Load Complete OK\n\r"` reply (`t_tx_message(1)`,
+/// `uart_tasks.vh` :519-539), which `LOAD_COMPLETE` starts sending as it hands
+/// over to the program (`KlaussCPU.sv` :1727).  `START_WAIT` does not wait for
+/// it: `r_start_wait_counter` is never loaded, so it is 0 and the pipeline starts
+/// on the next cycle (:1736-1742).  A netboot image goes through the same
+/// `LOAD_COMPLETE` (:1103-1108).
+pub const LOADER_MESSAGE_LEN: u64 = 18;
+/// `i_Clk` cycles the loader's reply keeps `TX_BUSY` set after a program loaded
+/// over the UART starts (5976, about 60 µs): a program must poll `TX_BUSY`
+/// before its first `TX_DATA` store too.
+pub const LOADER_MESSAGE_CYCLES: u64 = LOADER_MESSAGE_LEN * UART_CYCLES_PER_BYTE;
+/// How many write-while-busy events [`TxBusyWrites`] keeps (the total is
+/// always counted), so a program that never polls cannot grow it without bound.
+const TX_BUSY_WRITES_KEPT: usize = 16;
+
+/// A `TX_DATA` store made while `STATUS.TX_BUSY` was set: on the board the
+/// byte is dropped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TxBusyWrite {
+    /// Address of the storing instruction.
+    pub pc: u32,
+    /// The byte that was dropped.
+    pub byte: u8,
+}
+
+impl std::fmt::Display for TxBusyWrite {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "UART TX write while busy at PC 0x{:08X} (byte 0x{:02X} dropped)", self.pc, self.byte)
+    }
+}
+
+/// The `TX_DATA` stores a run made while the transmitter was busy.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TxBusyWrites {
+    /// The first few, in order.
+    pub first: Vec<TxBusyWrite>,
+    /// How many there were in all.
+    pub total: u64,
+}
+
+impl TxBusyWrites {
+    /// True if no store was made while busy.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.total == 0
+    }
+
+    /// Count `write`, keeping it if it is one of the first few.
+    fn record(&mut self, write: TxBusyWrite) {
+        if self.first.len() < TX_BUSY_WRITES_KEPT {
+            self.first.push(write);
+        }
+        self.total += 1;
+    }
+}
+
+impl std::fmt::Display for TxBusyWrites {
+    /// One line per kept write, then how many more there were.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (i, write) in self.first.iter().enumerate() {
+            if i > 0 {
+                writeln!(f)?;
+            }
+            write!(f, "{write}")?;
+        }
+        let more = self.total - self.first.len() as u64;
+        if more > 0 {
+            write!(f, "\n... and {more} more")?;
+        }
+        Ok(())
+    }
+}
+
 /// Interrupt controller and timer state, for a debugger's `monitor irq`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IrqState {
@@ -91,18 +185,19 @@ impl Cpu {
         match addr & 0xFFFF {
             UART_RX_DATA => u64::from(self.uart_rx.pop_front().unwrap_or(0)), // read-to-consume
             UART_STATUS => {
-                // bit0 TX_BUSY (instant-transmit model → always 0),
-                // bit1 RX_EMPTY, bit2 RX_FULL.
+                // bit0 TX_BUSY, bit1 RX_EMPTY, bit2 RX_FULL (`KlaussCPU.sv` :911).
+                let tx_busy = u64::from(self.tx_busy());
                 let rx_empty = u64::from(self.uart_rx.is_empty());
                 let rx_full = u64::from(self.uart_rx.len() >= UART_RX_FIFO_DEPTH);
-                (rx_full << 2) | (rx_empty << 1)
+                (rx_full << 2) | (rx_empty << 1) | tx_busy
             }
             _ => 0, // TX_DATA read-back / unmapped UART offset
         }
     }
 
-    /// Service an MMIO write.  A UART `TX_DATA` store transmits `data[7:0]`; every
-    /// other device/offset is ignored (RTL `default: 0`).
+    /// Service an MMIO write.  A UART `TX_DATA` store transmits `data[7:0]` (or,
+    /// while the transmitter is busy, is dropped); every other device/offset
+    /// is ignored (RTL `default: 0`).
     pub(super) fn mmio_write(&mut self, addr: u32, data: u64) {
         match (addr >> 16) & 0xFFF {
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
@@ -209,9 +304,32 @@ impl Cpu {
 
     // ---- UART output ---------------------------------------------------------
 
-    /// Emit a raw byte to the UART capture (a UART `TX_DATA` MMIO store).
+    /// True while the transmitter is sending (`STATUS.TX_BUSY`).
+    const fn tx_busy(&self) -> bool {
+        self.cycles < self.tx_busy_until
+    }
+
+    /// A UART `TX_DATA` store: start sending `b`, or, if a byte is still being
+    /// sent, drop it as the RTL does and record the store.
     fn tx_byte(&mut self, b: u8) {
+        if self.tx_busy() {
+            self.tx_busy_writes.record(TxBusyWrite { pc: self.pc, byte: b });
+            return;
+        }
         self.uart.push(b);
+        self.tx_busy_until = self.cycles + UART_CYCLES_PER_BYTE;
+    }
+
+    /// Start as a program loaded over the UART (or by netboot) does: with the
+    /// loader's `"Load Complete OK"` reply still going out, so `TX_BUSY` reads 1
+    /// for the first [`LOADER_MESSAGE_CYCLES`].
+    pub const fn start_after_uart_load(&mut self) {
+        self.tx_busy_until = self.cycles + LOADER_MESSAGE_CYCLES;
+    }
+
+    /// Take the `TX_DATA` stores made while busy since the last call.
+    pub fn take_tx_busy_writes(&mut self) -> TxBusyWrites {
+        std::mem::take(&mut self.tx_busy_writes)
     }
 
     /// Take the UART output produced since the last call.

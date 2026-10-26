@@ -59,25 +59,34 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
 
 /// Run `image` on the emulator and report the run (`--emulate`).
 ///
-/// Streams the per-instruction trace to `trace_file` (or, for `"-"`, stdout),
-/// prints the summary, then the instruction count, the stop reason and the
-/// captured UART output on stdout.
+/// The program starts as one loaded onto the board does, with the loader's
+/// reply still going out (see [`emu::emulate_loaded_image`]).  Streams the
+/// per-instruction trace to `trace_file` (or, for `"-"`, stdout), prints the
+/// summary, then the instruction count, the stop reason, any `TX_DATA` store
+/// made while the transmitter was busy, and the captured UART output on stdout.
 #[cfg(not(tarpaulin_include))]
 fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions: u64, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut trace_writer = open_trace_writer(trace_file, msg_list)?;
-    let result = emu::emulate_image(
+    let result = emu::emulate_loaded_image(
         &image.to_ddr(),
         image.entry,
         max_instructions,
         trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
     );
     finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
+    if !result.tx_busy_writes.is_empty() {
+        msg_list.warning(tx_busy_reason(&result.tx_busy_writes));
+    }
 
     msg_list.print_summary();
     println!(
         "--- Emulator finished: {} instructions, stop = {:?} ---",
         result.instructions, result.stop
     );
+    if !result.tx_busy_writes.is_empty() {
+        println!("--- UART TX writes while busy (dropped, as on the board; poll STATUS.TX_BUSY first) ---");
+        println!("{}", result.tx_busy_writes);
+    }
     println!("--- Captured UART output ---");
     {
         use std::io::Write as _;
@@ -279,10 +288,20 @@ pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro
         return Err("assembly error".to_owned());
     };
 
-    let result = emu::emulate_image(&image.to_ddr(), image.entry, max_instructions, None);
+    let result = emu::emulate_loaded_image(&image.to_ddr(), image.entry, max_instructions, None);
     // Each byte as one `char` (Latin-1): every byte survives into the lines.
     let uart: String = result.uart.iter().copied().map(char::from).collect();
     let got: Vec<&str> = uart.lines().filter_map(hex_token).collect();
+
+    // A store while the transmitter is busy loses a byte on the board, even
+    // where the values that survive happen to match.
+    if !result.tx_busy_writes.is_empty() {
+        return Ok(Verdict::Fail {
+            matched: expected.iter().zip(&got).take_while(|(exp, got)| exp == got).count(),
+            expected: expected.len(),
+            diff: tx_busy_reason(&result.tx_busy_writes),
+        });
+    }
 
     // Compare in order; report the first difference.
     for (idx, exp) in expected.iter().enumerate() {
@@ -301,6 +320,17 @@ pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro
         matched: expected.len(),
         instructions: result.instructions,
     })
+}
+
+/// The one-line reason a run with `TX_DATA` stores while busy fails: the first
+/// store, and how many there were.
+fn tx_busy_reason(writes: &emu::TxBusyWrites) -> String {
+    let first = writes.first.first().map_or_else(String::new, ToString::to_string);
+    if writes.total == 1 {
+        format!("{first}; would lose output on hardware")
+    } else {
+        format!("{first} (+{} more); would lose output on hardware", writes.total - 1)
+    }
 }
 
 #[cfg(test)]
@@ -371,6 +401,47 @@ mod tests {
                 diff: "at #1: expected 000000FE, got 000000FF".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn verify_fails_a_program_that_stores_to_the_uart_while_busy() {
+        // test_regs printing through uart_stubs.kla routines that no longer
+        // poll TX_BUSY: on the board the bytes stored while the loader's reply
+        // or the previous character is still going out are lost.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let stubs = fs::read_to_string(fixture_dir().join("uart_stubs.kla")).expect("read stubs");
+        let no_poll: Vec<&str> = stubs.lines().filter(|line| !line.starts_with("CALL TX_WAIT_READY:")).collect();
+        let no_poll = no_poll.join("\n");
+        assert_ne!(no_poll.len(), stubs.len(), "the stubs poll before each byte");
+        fs::write(dir.path().join("uart_stubs.kla"), no_poll).expect("write stubs");
+        let file = dir.path().join("test_regs.kla");
+        fs::copy(fixture_dir().join("test_regs.kla"), &file).expect("copy test_regs");
+
+        let (isa, macro_list) = v2_tables();
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let Ok(Verdict::Fail { expected: 6, diff, .. }) = &verdict else {
+            panic!("{verdict:?}");
+        };
+        assert!(diff.starts_with("UART TX write while busy at PC 0x"), "{diff}");
+        assert!(diff.ends_with("more); would lose output on hardware"), "{diff}");
+    }
+
+    #[test]
+    fn tx_busy_reason_names_the_first_store_and_counts_the_rest() {
+        let write = emu::TxBusyWrite { pc: 0x30, byte: b'H' };
+        let one = emu::TxBusyWrites {
+            first: vec![write],
+            total: 1,
+        };
+        assert_eq!(
+            tx_busy_reason(&one),
+            "UART TX write while busy at PC 0x00000030 (byte 0x48 dropped); would lose output on hardware"
+        );
+        let three = emu::TxBusyWrites {
+            first: vec![write],
+            total: 3,
+        };
+        assert!(tx_busy_reason(&three).contains("dropped) (+2 more);"));
     }
 
     #[test]

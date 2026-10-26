@@ -28,6 +28,13 @@
 //! architectural effects match.  Blitter / Ethernet interrupts (sources 1-2)
 //! are not modelled.
 //!
+//! The UART transmitter is timed on the same clock: a `TX_DATA` store keeps
+//! `STATUS.TX_BUSY` set for one frame ([`UART_CYCLES_PER_BYTE`]), and a store
+//! while it is set is dropped, as the RTL drops it, and recorded
+//! ([`EmulateResult::tx_busy_writes`]).  [`emulate_loaded_image`] starts a
+//! program as the board does after a UART load, with the loader's reply still
+//! being sent for [`LOADER_MESSAGE_CYCLES`].
+//!
 //! ## v2 word-0 layout (`doc/ISA_ENCODING_V2.md` §1)
 //!
 //! ```text
@@ -64,7 +71,7 @@ mod tests;
 mod trace;
 
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
-pub use mmio::IrqState;
+pub use mmio::{IrqState, LOADER_MESSAGE_CYCLES, LOADER_MESSAGE_LEN, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE};
 
 use crate::layout::is_mmio;
 use flags::Flags;
@@ -102,6 +109,9 @@ pub struct EmulateResult {
     pub instructions: u64,
     /// Why execution stopped.
     pub stop: StopReason,
+    /// `TX_DATA` stores made while the transmitter was busy (their bytes are
+    /// dropped, as on the board, and are not in [`EmulateResult::uart`]).
+    pub tx_busy_writes: TxBusyWrites,
 }
 
 /// A memory write, as the trace annotates it.
@@ -140,6 +150,10 @@ pub struct Cpu {
     mem: Vec<u8>,
     /// Captured UART output (`TX_DATA` writes, low byte per store).
     uart: Vec<u8>,
+    /// The cycle the byte being sent finishes (`STATUS.TX_BUSY` reads 1 before it).
+    tx_busy_until: u64,
+    /// `TX_DATA` stores made while busy.
+    tx_busy_writes: TxBusyWrites,
     /// UART receive FIFO — head byte returned (and popped) by an `RX_DATA` read.
     /// Empty unless a caller feeds it via [`Cpu::feed_uart_rx`].
     uart_rx: VecDeque<u8>,
@@ -203,6 +217,8 @@ impl Cpu {
             flags: Flags::default(),
             mem,
             uart: Vec::new(),
+            tx_busy_until: 0,
+            tx_busy_writes: TxBusyWrites::default(),
             uart_rx: VecDeque::new(),
             stop: None,
             last_write: None,
@@ -408,12 +424,14 @@ impl Cpu {
             uart: std::mem::take(&mut self.uart),
             instructions: count,
             stop,
+            tx_busy_writes: std::mem::take(&mut self.tx_busy_writes),
         }
     }
 }
 
-/// Emulate a flat DDR image starting at `entry`, streaming the per-instruction
-/// trace to `trace` (if `Some`) as the run proceeds (see [`Cpu::run`]).
+/// Emulate a flat DDR image starting at `entry` from reset (the UART idle),
+/// streaming the per-instruction trace to `trace` (if `Some`) as the run
+/// proceeds (see [`Cpu::run`]).
 ///
 /// Nothing is buffered: each retired instruction's line is written straight to
 /// the sink, so a multi-million instruction run uses no extra memory
@@ -421,5 +439,16 @@ impl Cpu {
 #[must_use]
 pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
+    cpu.run(max_instructions, trace)
+}
+
+/// As [`emulate_image`], but starting the way a program loaded onto the board
+/// does: with the loader's reply still being sent, so the UART transmitter is
+/// busy for [`LOADER_MESSAGE_CYCLES`] (see [`Cpu::start_after_uart_load`]).
+/// `--emulate` and `--emulate-test` run programs this way.
+#[must_use]
+pub fn emulate_loaded_image(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
+    let mut cpu = Cpu::new(image, entry);
+    cpu.start_after_uart_load();
     cpu.run(max_instructions, trace)
 }

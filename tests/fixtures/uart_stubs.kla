@@ -90,11 +90,11 @@ POP A
 RET
 
 // --- TX_WAIT_READY: spin until the UART transmitter is no longer busy --------
-// Mirrors uart_tx_byte() in the C runtime (mmio.h): poll STATUS (0xF0010010)
-// and loop while TX_BUSY (bit 0) is set, so a store to TX_DATA never clobbers a
-// byte still being shifted out. Preserves every register (A/B saved & restored).
-// The emulator models instant transmit (TX_BUSY always 0), so this returns
-// immediately there and only actually waits on real hardware.
+// Poll STATUS (0xF0010010) and loop while TX_BUSY (bit 0) is set: the board
+// drops a store to TX_DATA made while a byte is still being shifted out, and a
+// program loaded over the UART starts while the loader's "Load Complete OK"
+// reply is still going out. Preserves every register (A/B saved & restored).
+// The emulator models the same busy time, and reports a store made while busy.
 TX_WAIT_READY:
 PUSH A
 PUSH B

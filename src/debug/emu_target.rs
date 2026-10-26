@@ -20,7 +20,12 @@
 //! (like the planned board debug module), so stepping does not fall into a
 //! handler — a pending interrupt is taken on the next continue, and stepping
 //! a `WAIT` completes it as if woken.  UART output streams to stdout and stdin feeds the
-//! UART receive FIFO.  The debugger cannot read or write MMIO (`0xF000_0000+`)
+//! UART receive FIFO.  The program starts with the UART transmitter idle, not
+//! busy with the loader's reply as under `--emulate`: on the board a debugged
+//! program sits at its first instruction for far longer than the reply's
+//! ~60 µs before the debugger resumes it.  A `TX_DATA` store made while the
+//! transmitter is busy is dropped, as on the board, and reported on stderr.
+//! The debugger cannot read or write MMIO (`0xF000_0000+`)
 //! unless `monitor mmio on` is given: some device reads have side effects,
 //! e.g. popping the UART RX FIFO, and debuggers read memory freely.
 
@@ -112,6 +117,10 @@ impl EmuTarget {
         let rx: Vec<u8> = self.uart_rx.try_iter().collect();
         if !rx.is_empty() {
             self.cpu.feed_uart_rx(&rx);
+        }
+        let busy = self.cpu.take_tx_busy_writes();
+        if !busy.is_empty() {
+            eprintln!("klausscc gdbserver: {busy}");
         }
     }
 

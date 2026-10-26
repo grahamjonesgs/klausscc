@@ -4,6 +4,8 @@
 //! golden-model emulator (`--emulate`), and its captured UART output checked.
 //! This proves the assembler and the emulator agree on the v2 encoding across
 //! ALU, immediates, memory (MMIO UART), the stack, and conditional branches.
+//! Each fixture polls `STATUS.TX_BUSY` before every byte, as the board needs,
+//! so the emulator must report no store made while the transmitter was busy.
 //! (The rest of the corpus, which prints through the `uart_stubs.kla` macros,
 //! is checked by `commands::emulate::tests::emulator_corpus_passes`.)
 
@@ -33,5 +35,6 @@ fn v2_fixtures_print_their_expected_uart_output() {
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success(), "{file}: stderr: {}", String::from_utf8_lossy(&out.stderr));
         assert_eq!(captured_uart(&stdout), Some(expected), "UART mismatch for {file}: {stdout}");
+        assert!(!stdout.contains("write while busy"), "{file} stores to TX_DATA while busy: {stdout}");
     }
 }
