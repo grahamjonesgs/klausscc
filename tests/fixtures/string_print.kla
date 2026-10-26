@@ -4,7 +4,7 @@
 // Prints each character with $TXMEMCHAR until a zero byte is found.
 
 STRING_PRINT:
-MEMREADRR B A          // B = mem[A] (read character)
+MEMGET8 B A            // B = mem8[A] (read character)
 CMPRV B 0x0            // compare B to null terminator
 JMPE STRING_DONE:      // if zero, done
 $TXMEMCHAR A  // send character at mem[A]
