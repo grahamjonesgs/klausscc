@@ -1,0 +1,30 @@
+// crt0.kla - Runtime startup for C programs compiled by lcc -target=klacpu
+//
+// A compiled program (build/cpp prog.c | build/rcc -target=klacpu > prog.kla)
+// has no _start of its own. Add one line to it, with the path relative to
+// prog.kla:
+//
+//   !include path/to/runtime/crt0.kla
+//
+// This file supplies _start, which calls main(), prints main's return value
+// as 8 hex digits and a newline over the UART, then halts. It also brings in
+// the C library (libc.kla) and the UART routines it calls (uart_stubs.kla), so
+// the program must not include those itself.
+//
+// SP is the hardware stack pointer (PUSH/POP/GETSP/SETSP/ADDSP); it grows
+// down from the top of the 128 MiB DDR2. P is the C frame pointer.
+
+_start
+SETR A 0x8000000         // initial stack top (also SP's reset value)
+SETSP A
+SETR P 0
+DELAYV 0x0500            // let the UART and board settle
+CALL main:
+COPY A M                 // main's return value
+CALL _uart_tx_hex:
+CALL _uart_newline:
+HALT
+
+// === C library and the UART routines it calls ===
+!include libc.kla
+!include uart_stubs.kla

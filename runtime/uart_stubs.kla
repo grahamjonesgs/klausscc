@@ -1,22 +1,26 @@
-// uart_stubs.kla - Low-level UART routines callable from C
+// uart_stubs.kla - Low-level UART routines callable from C (ISA v2)
 //
-// NOTE: this file is still written in the v1 ISA. Its TXR, NEWLINE,
-// TXCHARMEMR, RXRB and RXRNB instructions do not exist in ISA v2, so the
-// current klausscc rejects it, and libc.kla cannot be linked against it until
-// it is rewritten. On v2 the UART is memory-mapped: TX_DATA at 0xF0010000,
-// RX_DATA at 0xF0010008, STATUS at 0xF0010010. tests/fixtures/uart_stubs.kla
-// has v2 transmit routines (TX_HEX32, TX_NL, TX_CHAR, TX_STR). They use
-// different names and preserve every register, and they have no receive side.
+// The UART is memory-mapped (KlaussCPU.sv's MMIO decode; see the UART
+// section of doc/klauss_isa_reference.md):
+//   0xF0010000  TX_DATA  write: transmits bits 7:0
+//   0xF0010008  RX_DATA  read: the oldest received byte; reading removes it
+//   0xF0010010  STATUS   bit 0 TX_BUSY, bit 1 RX_EMPTY, bit 2 RX_FULL
+// A byte must not be written to TX_DATA while TX_BUSY is set, so every
+// transmit waits for it to clear first.
 //
-// Calling convention: args in A-D, return in M
-// These are leaf functions (no calls), so no frame setup needed.
+// Calling convention (lcc -target=klacpu, see libc.h): the argument is in A,
+// the result in M. Every routine preserves all the other registers (A-P apart
+// from a result in M); the flags are not preserved.
+//
+// Include this file once, after the program's HALT, so it is never reached by
+// fall-through. libc.kla calls these routines; crt0.kla includes both.
 //
 // Functions:
-//   _uart_tx_hex(val)    - print 32-bit value as 8 hex digits
+//   _uart_tx_hex(val)    - print the low 32 bits of val as 8 upper-case hex digits
 //   _uart_newline()      - print CR/LF
-//   _uart_tx_char(ch)    - print single ASCII character
+//   _uart_tx_char(ch)    - print the low 8 bits of ch as one character
 //   _uart_rx_char()      - blocking receive: wait for a byte, return it in M
-//   _uart_rx_char_nb()   - non-blocking receive: return byte if available, -1 if not
+//   _uart_rx_char_nb()   - non-blocking receive: return a byte if one is waiting, -1 if not
 //
 // Usage from C:
 //   extern void _uart_tx_hex(int val);
@@ -26,54 +30,99 @@
 //   extern int  _uart_rx_char_nb(void);
 
 // ----------------------------------------------------------------
-// _uart_tx_hex: print register A as 8 hex digits
+// _uart_tx_hex: print A[31:0] as 8 upper-case hex digits
 // Input: A = value
 // ----------------------------------------------------------------
 _uart_tx_hex:
-TXR A
+PUSH A
+PUSH B
+PUSH C
+COPY B A                 // B = value; A carries each digit to _uart_tx_char
+SETR C 28                // shift for the most significant nibble of the low word
+_uart_tx_hex_loop:
+SHRR A B C               // A = value >> C
+ANDV A 0xF               // A = current nibble
+CMPRV A 10
+JMPLT _uart_tx_hex_digit:
+ADDV A 0x37              // 10-15 -> 'A'..'F'
+JMP _uart_tx_hex_put:
+_uart_tx_hex_digit:
+ADDV A 0x30              // 0-9 -> '0'..'9'
+_uart_tx_hex_put:
+CALL _uart_tx_char:
+MINUSV C 4               // next nibble
+CMPRV C 0
+JMPGE _uart_tx_hex_loop: // repeat while C >= 0
+POP C
+POP B
+POP A
 RET
 
 // ----------------------------------------------------------------
 // _uart_newline: print CR/LF
 // ----------------------------------------------------------------
 _uart_newline:
-NEWLINE
+PUSH A
+SETR A 0x0D              // carriage return
+CALL _uart_tx_char:
+SETR A 0x0A              // line feed
+CALL _uart_tx_char:
+POP A
 RET
 
 // ----------------------------------------------------------------
-// _uart_tx_char: print single ASCII char from A (low 8 bits)
-// We store the value to a scratch word then use TXCHARMEMR
+// _uart_tx_char: print A[7:0] as one character
 // Input: A = character value (low 8 bits used)
 // ----------------------------------------------------------------
 _uart_tx_char:
-SETR N #_CHAR_BUF
-MEMSET8 A N
-TXCHARMEMR N
+PUSH B
+PUSH C
+SETR B 0xF0010010        // STATUS
+_uart_tx_char_wait:
+MEMGET8 C B
+ANDV C 0x1               // TX_BUSY
+CMPRV C 0
+JMPNE _uart_tx_char_wait: // still sending the previous byte
+SETR B 0xF0010000        // TX_DATA
+MEMSET8 A B              // transmit A[7:0]
+POP C
+POP B
 RET
 
 // ----------------------------------------------------------------
 // _uart_rx_char: blocking receive - wait until a byte arrives
-// Return: M = received byte
+// Return: M = received byte (0-255)
 // ----------------------------------------------------------------
 _uart_rx_char:
-RXRB M
+PUSH B
+SETR B 0xF0010010        // STATUS
+_uart_rx_char_wait:
+MEMGET8 M B
+ANDV M 0x2               // RX_EMPTY
+CMPRV M 0
+JMPNE _uart_rx_char_wait: // nothing received yet
+SETR B 0xF0010008        // RX_DATA
+MEMGET8 M B              // M = the byte; reading removes it from the FIFO
+POP B
 RET
 
 // ----------------------------------------------------------------
 // _uart_rx_char_nb: non-blocking receive
-// RXRNB sets zero_flag=1 and leaves M unchanged when FIFO is empty.
-// We test the flag here and return -1 as the no-data sentinel so
-// callers get a plain integer — no flag inspection needed from C.
-// Return: M = received byte, or -1 if no byte available
+// Returns -1 as the no-data sentinel so C callers get a plain integer.
+// Return: M = received byte (0-255), or -1 if no byte is waiting
 // ----------------------------------------------------------------
 _uart_rx_char_nb:
-RXRNB M
-JMPZ _rxrnb_empty:
+PUSH B
+SETR B 0xF0010010        // STATUS
+MEMGET8 M B
+ANDV M 0x2               // RX_EMPTY
+CMPRV M 0
+JMPNE _uart_rx_char_nb_empty:
+SETR B 0xF0010008        // RX_DATA
+MEMGET8 M B              // M = the byte; reading removes it from the FIFO
+POP B
 RET
-_rxrnb_empty:
-SETR M 0
-NOTR M
+_uart_rx_char_nb_empty:
+SETR M -1
+POP B
 RET
-
-// Scratch buffer for putchar (1 word)
-#_CHAR_BUF 1

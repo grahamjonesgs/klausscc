@@ -8,7 +8,8 @@
  *   or paste the externs you need into your .c file
  *
  * Link with: precompiled lib/libc.kla + lib/uart_stubs.kla (in this repo:
- * runtime/; uart_stubs.kla there is still v1 and needs a v2 rewrite)
+ * runtime/). runtime/crt0.kla brings in both, with the _start code: add
+ * "!include path/to/runtime/crt0.kla" to the compiled program's .kla.
  */
 
 #ifndef LIBC_H

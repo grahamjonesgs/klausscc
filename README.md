@@ -132,8 +132,8 @@ src/
   jtag/             FT2232H MPSSE JTAG and the debug module's DMI
   link/             serial (upload, monitor, UART tests) and netload
 tests/              integration tests and the fixture corpus
-runtime/            C runtime library for programs (its uart_stubs.kla is
-                    still v1 code, so libc.kla does not link yet)
+runtime/            C runtime for compiled programs: crt0.kla (startup),
+                    libc.kla and the UART routines it calls (uart_stubs.kla)
 doc/                ISA and emulator documentation
 build.rs            locates libftdi1 for the board feature
 ```
