@@ -66,6 +66,7 @@ fn encode_line(line: &Pass1, isa: &Isa, labels: &SymbolTable, msg_list: &mut Dia
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diag::MessageType;
 
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
@@ -175,5 +176,58 @@ mod tests {
         assert_eq!(pass2[0].opcode, "ERR     ");
         assert_eq!(pass2[0].line_type, LineType::Error);
         assert_eq!(msg_list.messages()[0].text(), "Opcode not found - \"TEST\"");
+    }
+
+    #[test]
+    // Encode faults are errors and extra tokens one warning, each at the
+    // line; only a failed word 0 makes the line an error line.
+    fn test_get_pass2_reports_faults_at_the_line() {
+        let mut msg_list = Diagnostics::new();
+        let labels = SymbolTable::default();
+        let line = |text: &str, line_counter| Pass1 {
+            input_text_line: text.to_owned(),
+            file_name: String::from("prog.kla"),
+            line_counter,
+            program_counter: 0x20,
+            line_type: LineType::Opcode,
+        };
+        let pass2 = get_pass2(
+            &mut msg_list,
+            vec![line("SETR A 1 2 3 // too many", 4), line("SHLV A 64", 5), line("PUSHV nowhere:", 6)],
+            &Isa::v2(),
+            &labels,
+        );
+        let shown: Vec<(&str, LineType)> = pass2.iter().map(|p| (p.opcode.as_str(), p.line_type)).collect();
+        assert_eq!(
+            shown,
+            [
+                ("8BD0000000000001", LineType::Opcode),
+                ("ERR     ", LineType::Error),
+                ("A440000000000000", LineType::Opcode),
+            ]
+        );
+        let messages: Vec<_> = msg_list
+            .messages()
+            .iter()
+            .map(|m| (m.level(), m.file_name(), m.line_number(), m.text()))
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                (
+                    MessageType::Warning,
+                    Some("prog.kla"),
+                    Some(4),
+                    "Too many arguments found - \"SETR A 1 2 3\""
+                ),
+                (
+                    MessageType::Error,
+                    Some("prog.kla"),
+                    Some(5),
+                    "Count 64 out of range 0..=63 - \"SHLV A 64\""
+                ),
+                (MessageType::Error, Some("prog.kla"), Some(6), "Label NOWHERE: not found"),
+            ]
+        );
     }
 }

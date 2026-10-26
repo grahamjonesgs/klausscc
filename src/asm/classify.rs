@@ -50,7 +50,6 @@ impl LineType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::Isa;
 
     #[test]
     fn test_classify_known_opcode_is_valid() {
