@@ -10,7 +10,7 @@ use crate::diag::Diagnostics;
 pub(crate) use builtin::v2_opcodes_and_macros;
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
-use std::fmt::Write as _;
+use std::collections::BTreeSet;
 use std::path::Path;
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -24,6 +24,39 @@ pub(crate) struct Macro {
     pub name: String,
     /// Number of variables.
     pub variables: u32,
+    /// Where a `!macro`/`!macros` definition is in the source; `None` for
+    /// the built-in macros.  Not part of the exported documentation.
+    #[serde(skip)]
+    pub defined_at: Option<DefinedAt>,
+}
+
+/// The source line a macro was defined on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DefinedAt {
+    /// The file holding the definition.
+    pub file_name: String,
+    /// The definition's line in `file_name`.
+    pub line_counter: u32,
+}
+
+impl Macro {
+    /// Report `text` as an error about this macro's definition: at its source
+    /// line when it has one.
+    fn error(&self, msg_list: &mut Diagnostics, text: String) {
+        match &self.defined_at {
+            Some(at) => msg_list.error_at(&at.file_name, at.line_counter, text),
+            None => msg_list.error(text),
+        }
+    }
+
+    /// Report `text` as a warning about this macro's definition: at its
+    /// source line when it has one.
+    fn warning(&self, msg_list: &mut Diagnostics, text: String) {
+        match &self.defined_at {
+            Some(at) => msg_list.warning_at(&at.file_name, at.line_counter, text),
+            None => msg_list.warning(text),
+        }
+    }
 }
 
 /// A `%n` placeholder in a macro item that could not be substituted.
@@ -33,6 +66,12 @@ enum SubstError {
     BadIndex(String),
     /// The call has no argument `n`.
     Missing(usize),
+}
+
+/// The argument number of a `%n` placeholder word, as written: `None` for a
+/// word with no `%`, otherwise the word without its leading `%`s.
+fn placeholder(word: &str) -> Option<&str> {
+    word.contains('%').then(|| word.trim_start_matches('%'))
 }
 
 /// Replace each `%n` word in `item` with argument `n` of `call`.
@@ -45,11 +84,10 @@ fn substitute_args(item: &str, call: &[&str]) -> (String, Vec<SubstError>) {
     let mut errors = Vec::new();
     let mut words: Vec<&str> = Vec::new();
     for word in item.split_whitespace() {
-        if !word.contains('%') {
+        let Some(number) = placeholder(word) else {
             words.push(word);
             continue;
-        }
-        let number = word.trim_start_matches('%');
+        };
         match number.parse::<usize>() {
             Ok(index @ 1..) => match call.get(index) {
                 Some(argument) => words.push(argument),
@@ -64,7 +102,9 @@ fn substitute_args(item: &str, call: &[&str]) -> (String, Vec<SubstError>) {
 /// Multi pass to resolve embedded macros.
 ///
 /// Takes Vector of macros, and embeds macros recursively, up to 10 passes.
-/// Will create errors message for more than 10 passes.
+/// Will create errors message for more than 10 passes.  Problems with an
+/// embedded call are reported at the definition that makes it, when that
+/// definition came from the source.
 pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnostics) -> Vec<Macro> {
     let mut pass: u32 = 0;
     let mut changed = true;
@@ -74,57 +114,60 @@ pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnost
 
     while pass < 10 && changed {
         changed = false;
-        let mut output_macros: Vec<Macro> = Vec::new();
-        for input_macro_line in input_macros.clone() {
+        let mut output_macros: Vec<Macro> = Vec::with_capacity(input_macros.len());
+        for input_macro in &input_macros {
             let mut output_items: Vec<String> = Vec::new();
-            for item in input_macro_line.items {
-                let Some(embedded) = return_macro(&item, &input_macros) else {
-                    output_items.push(item);
+            for item in &input_macro.items {
+                let Some(embedded) = find_macro(item, &input_macros) else {
+                    output_items.push(item.clone());
                     continue;
                 };
                 let call: Vec<&str> = item.split_whitespace().collect();
                 if usize::try_from(embedded.variables).is_ok_and(|variables| variables < call.len() - 1) {
-                    msg_list.warning(format!(
-                        "Too many variables in embedded macro \"{}\" in macro {}",
-                        item, input_macro_line.name
-                    ));
+                    input_macro.warning(
+                        msg_list,
+                        format!("Too many variables in embedded macro \"{item}\" in macro {}", input_macro.name),
+                    );
                 }
-                for new_item in embedded.items {
+                for new_item in &embedded.items {
                     if !new_item.contains('%') {
-                        output_items.push(new_item);
+                        output_items.push(new_item.clone());
                         continue;
                     }
                     // Replace %n in new items with the nth value in item
-                    let (substituted, errors) = substitute_args(&new_item, &call);
+                    let (substituted, errors) = substitute_args(new_item, &call);
                     for error in errors {
                         let text = match error {
                             SubstError::BadIndex(number) => {
                                 format!(
                                     "Invalid macro argument number {number}, in embedded macro \"{item}\" in {}",
-                                    input_macro_line.name
+                                    input_macro.name
                                 )
                             }
                             SubstError::Missing(index) => {
-                                format!("Missing argument {index} for embedded macro \"{item}\" in {}", input_macro_line.name)
+                                format!("Missing argument {index} for embedded macro \"{item}\" in {}", input_macro.name)
                             }
                         };
-                        msg_list.error(text);
+                        input_macro.error(msg_list, text);
                     }
                     output_items.push(substituted);
                 }
-                last_macro.clone_from(&input_macro_line.name);
+                last_macro.clone_from(&input_macro.name);
                 changed = true;
             }
             output_macros.push(Macro {
-                name: input_macro_line.name,
-                variables: input_macro_line.variables,
+                comment: input_macro.comment.clone(),
                 items: output_items,
-                comment: input_macro_line.comment,
+                name: input_macro.name.clone(),
+                variables: input_macro.variables,
+                defined_at: input_macro.defined_at.clone(),
             });
         }
 
         pass += 1;
-        input_macros.clone_from(&output_macros);
+        // Lookups in this pass needed the whole previous list, so it is only
+        // replaced now.
+        input_macros = output_macros;
     }
     if changed {
         msg_list.error(format!("Too many macro passes, check {last_macro}"));
@@ -136,25 +179,24 @@ pub(crate) fn expand_embedded_macros(macros: Vec<Macro>, msg_list: &mut Diagnost
 ///
 /// Takes the input list of all lines and macro vector and expands. A trailing
 /// `//` comment on a macro call is not part of its arguments.
-pub(crate) fn expand_macros(msg_list: &mut Diagnostics, input_list: Vec<SourceLine>, macro_list: &mut [Macro]) -> Vec<SourceLine> {
+pub(crate) fn expand_macros(msg_list: &mut Diagnostics, input_list: Vec<SourceLine>, macro_list: &[Macro]) -> Vec<SourceLine> {
     let mut pass0: Vec<SourceLine> = Vec::new();
     for code_line in input_list {
-        if let Some(macro_name) = macro_name_from_string(&code_line.input_text_line) {
-            let call = strip_comments(&code_line.input_text_line);
-            let items = return_macro_items_replace(call, macro_list, code_line.line_counter, &code_line.file_name, msg_list);
-            if let Some(items_vec) = items {
-                for item in items_vec {
-                    pass0.push(SourceLine {
-                        input_text_line: format!("{item} // Macro expansion from {macro_name}"),
-                        file_name: code_line.file_name.clone(),
-                        line_counter: code_line.line_counter,
-                    });
-                }
-            } else {
-                msg_list.error_at(&code_line.file_name, code_line.line_counter, format!("Macro not found {call}"));
-                pass0.push(code_line);
+        let Some(macro_name) = macro_name_from_string(&code_line.input_text_line) else {
+            pass0.push(code_line);
+            continue;
+        };
+        let call = strip_comments(&code_line.input_text_line);
+        if let Some(items) = return_macro_items_replace(call, macro_list, code_line.line_counter, &code_line.file_name, msg_list) {
+            for item in items {
+                pass0.push(SourceLine {
+                    input_text_line: format!("{item} // Macro expansion from {macro_name}"),
+                    file_name: code_line.file_name.clone(),
+                    line_counter: code_line.line_counter,
+                });
             }
         } else {
+            msg_list.error_at(&code_line.file_name, code_line.line_counter, format!("Macro not found {call}"));
             pass0.push(code_line);
         }
     }
@@ -229,13 +271,17 @@ pub(crate) fn apply_source_macros(input_list: Vec<SourceLine>, macro_list: &mut 
 /// A definition whose name already exists is an error and is not added. Returns
 /// true only when a macro was actually appended.
 fn add_macro_definition(definition: &str, macro_list: &mut Vec<Macro>, line_number: u32, filename: &str, msg_list: &mut Diagnostics) -> bool {
-    let Some(new_macro) = macro_from_string(definition, msg_list) else {
+    let Some(mut new_macro) = macro_from_string(definition, msg_list) else {
         return false;
     };
-    if return_macro(&new_macro.name, macro_list).is_some() {
+    if find_macro(&new_macro.name, macro_list).is_some() {
         msg_list.error_at(filename, line_number, format!("Duplicate macro definition {} found", new_macro.name));
         return false;
     }
+    new_macro.defined_at = Some(DefinedAt {
+        file_name: filename.to_owned(),
+        line_counter: line_number,
+    });
     macro_list.push(new_macro);
     true
 }
@@ -245,67 +291,37 @@ fn add_macro_definition(definition: &str, macro_list: &mut Vec<Macro>, line_numb
 /// Receive a line from the opcode definition file and if possible parse to instance of Some(Macro), or None.
 pub(crate) fn macro_from_string(input_line_full: &str, msg_list: &mut Diagnostics) -> Option<Macro> {
     // Find the macro if it exists
-    if input_line_full.trim().find('$').unwrap_or(usize::MAX) != 0 {
+    if !input_line_full.trim_start().starts_with('$') {
         return None;
     }
-    let mut name = String::default();
-    let mut item = String::default();
-    let mut items: Vec<String> = Vec::new();
-    let mut max_variable: u32 = 0;
-    let mut all_found_variables: Vec<i64> = Vec::new();
-    let mut all_variables: Vec<i64> = Vec::new();
     let comment = return_comments(input_line_full).to_owned();
-    let input_line = strip_comments(input_line_full);
+    let mut words = strip_comments(input_line_full).split_whitespace();
+    let name = words.next().unwrap_or_default().to_owned();
 
-    let words = input_line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if i == 0 {
-            word.clone_into(&mut name);
-        } else if word == "/" {
-            items.push(item);
-            item = String::default();
-        } else {
-            if word.contains('%') {
-                let without_prefix = word.trim_start_matches('%');
-                let int_value = without_prefix.parse::<u32>();
-                if int_value.clone().is_err() || int_value.clone().unwrap_or(0) < 1 {
-                } else {
-                    all_found_variables.push(int_value.clone().unwrap_or(0).into());
-                    if int_value.clone().unwrap_or(0) > max_variable {
-                        max_variable = int_value.unwrap_or(0);
-                    }
-                }
-            }
-
-            if !item.is_empty() {
-                item.push(' ');
-            }
-            item.push_str(word);
+    let mut items: Vec<String> = Vec::new();
+    let mut item: Vec<&str> = Vec::new();
+    let mut found_variables: BTreeSet<u32> = BTreeSet::new();
+    for word in words {
+        if word == "/" {
+            items.push(item.join(" "));
+            item.clear();
+            continue;
         }
+        if let Some(Ok(number @ 1..)) = placeholder(word).map(str::parse::<u32>) {
+            found_variables.insert(number);
+        }
+        item.push(word);
     }
-
     if !item.is_empty() {
-        items.push(item);
+        items.push(item.join(" "));
     }
 
-    if max_variable != TryInto::<u32>::try_into(all_found_variables.clone().into_iter().unique().count()).unwrap_or_default() {
-        for i in 1..max_variable {
-            all_variables.push(i.into());
-        }
-
-        // Find the missing variables and create string
-        let difference_all_variables: Vec<_> = all_variables
-            .into_iter()
-            .filter(|variable| !all_found_variables.contains(variable))
-            .collect();
-        let mut missing = String::default();
-        for i in difference_all_variables {
-            if !missing.is_empty() {
-                missing.push(' ');
-            }
-            write!(missing, "%{i}").ok();
-        }
-
+    let max_variable = found_variables.last().copied().unwrap_or(0);
+    if usize::try_from(max_variable).is_ok_and(|max| max != found_variables.len()) {
+        let missing = (1..max_variable)
+            .filter(|number| !found_variables.contains(number))
+            .map(|number| format!("%{number}"))
+            .join(" ");
         msg_list.warning(format!("Error in macro variable definition for macro {name}, missing {missing:?}"));
     }
 
@@ -314,34 +330,21 @@ pub(crate) fn macro_from_string(input_line_full: &str, msg_list: &mut Diagnostic
         variables: max_variable,
         items,
         comment,
+        defined_at: None,
     })
 }
 
 /// Extracts macro from string.
 ///
-/// Checks if end of first word is colon if so return macro name as option string.
-fn macro_name_from_string(line: &str) -> Option<String> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.starts_with('$') {
-        return Some(first_word.to_owned());
-    }
-    None
+/// Returns the first word when it starts with `$`.
+fn macro_name_from_string(line: &str) -> Option<&str> {
+    line.split_whitespace().next().filter(|word| word.starts_with('$'))
 }
 
-/// Returns Macro from name.
-///
-/// Return option macro if it exists, or none.
-pub(crate) fn return_macro(line: &str, macros: &[Macro]) -> Option<Macro> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-
-    for macro_line in macros {
-        if macro_line.name == first_word {
-            return Some(macro_line.clone());
-        }
-    }
-    None
+/// The macro named by the first word of `line`, if there is one.
+pub(crate) fn find_macro<'a>(line: &str, macros: &'a [Macro]) -> Option<&'a Macro> {
+    let name = line.split_whitespace().next().unwrap_or("");
+    macros.iter().find(|macro_line| macro_line.name == name)
 }
 
 /// Update variables in a macro.
@@ -349,44 +352,31 @@ pub(crate) fn return_macro(line: &str, macros: &[Macro]) -> Option<Macro> {
 /// Return option all vec string replacing %x with correct value.
 fn return_macro_items_replace(
     line: &str,
-    macros: &mut [Macro],
+    macros: &[Macro],
     input_line_number: u32,
     filename: &str,
     msg_list: &mut Diagnostics,
 ) -> Option<Vec<String>> {
-    let mut words = line.split_whitespace();
-    let mut return_items: Vec<String> = Vec::new();
-    let mut found = false;
+    let macro_line = find_macro(line, macros)?;
+    let call: Vec<&str> = line.split_whitespace().collect();
 
-    let input_line_array: Vec<_> = words.clone().collect();
+    if usize::try_from(macro_line.variables).is_ok_and(|variables| call.len() > variables + 1) {
+        msg_list.warning_at(filename, input_line_number, format!("Too many variables for macro {}", macro_line.name));
+    }
 
-    let first_word = words.next().unwrap_or("");
-
-    for macro_line in macros {
-        if macro_line.name == first_word {
-            found = true;
-
-            if input_line_array.len() > (macro_line.variables + 1_u32).try_into().unwrap_or_default() {
-                msg_list.warning_at(filename, input_line_number, format!("Too many variables for macro {}", macro_line.name));
-            }
-
-            for item in &macro_line.items {
-                let (substituted, errors) = substitute_args(item, &input_line_array);
-                for error in errors {
-                    let text = match error {
-                        SubstError::BadIndex(number) => format!("Invalid macro argument number {number}, in macro {}", macro_line.name),
-                        SubstError::Missing(index) => format!("Missing argument {index} for macro {}", macro_line.name),
-                    };
-                    msg_list.error_at(filename, input_line_number, text);
-                }
-                return_items.push(substituted);
-            }
+    let mut return_items: Vec<String> = Vec::with_capacity(macro_line.items.len());
+    for item in &macro_line.items {
+        let (substituted, errors) = substitute_args(item, &call);
+        for error in errors {
+            let text = match error {
+                SubstError::BadIndex(number) => format!("Invalid macro argument number {number}, in macro {}", macro_line.name),
+                SubstError::Missing(index) => format!("Missing argument {index} for macro {}", macro_line.name),
+            };
+            msg_list.error_at(filename, input_line_number, text);
         }
+        return_items.push(substituted);
     }
-    if found {
-        return Some(return_items);
-    }
-    None
+    Some(return_items)
 }
 
 #[cfg(test)]
@@ -434,17 +424,17 @@ mod tests {
         let output = apply_source_macros(input, &mut macro_list, &mut msg_list);
         assert_eq!(output, vec![]);
         assert_eq!(msg_list.count(MessageType::Error), 1);
-        assert_eq!(
-            msg_list.messages().first().unwrap().text(),
-            "Missing argument 1 for embedded macro \"$A\" in $B"
-        );
+        let msg = msg_list.messages().first().unwrap();
+        assert_eq!(msg.text(), "Missing argument 1 for embedded macro \"$A\" in $B");
+        // Reported at the definition of $B, which makes the embedded call.
+        assert_eq!((msg.line_number(), msg.file_name()), (Some(2), Some("test.kla")));
         // The embedded call can still pass its own argument through.
         let mut msg_list = Diagnostics::new();
         let mut macro_list = Vec::new();
         let input = vec![source_line("!macro $A PUSH %1", 1), source_line("!macro $B $A %1", 2)];
         apply_source_macros(input, &mut macro_list, &mut msg_list);
         assert_eq!(msg_list.messages().len(), 0);
-        assert_eq!(return_macro("$B", &macro_list).unwrap().items, vec!["PUSH %1".to_owned()]);
+        assert_eq!(find_macro("$B", &macro_list).unwrap().items, vec!["PUSH %1".to_owned()]);
     }
 
     #[test]
@@ -457,6 +447,7 @@ mod tests {
             variables: 1,
             items: vec![String::from("DELAYV %1")],
             comment: String::default(),
+            defined_at: None,
         }];
         let pass0 = expand_macros(&mut msg_list, vec![source_line("$WAIT 5 // x", 3)], macros);
         assert_eq!(
@@ -473,6 +464,7 @@ mod tests {
             variables: 2,
             items: vec![String::from("COPY %1 %2")],
             comment: String::default(),
+            defined_at: None,
         }];
         let pass0 = expand_macros(&mut msg_list, vec![source_line("$TWO A // B", 4)], macros);
         assert_eq!(msg_list.messages().first().unwrap().text(), "Missing argument 2 for macro $TWO");
@@ -483,7 +475,7 @@ mod tests {
     // "Macro not found" carries the line and file of the call.
     fn test_macro_not_found_has_location() {
         let mut msg_list = Diagnostics::new();
-        expand_macros(&mut msg_list, vec![source_line("$NOPE 1 // why", 7)], &mut []);
+        expand_macros(&mut msg_list, vec![source_line("$NOPE 1 // why", 7)], &[]);
         let msg = msg_list.messages().first().unwrap();
         assert_eq!(msg.level(), MessageType::Error);
         assert_eq!(msg.text(), "Macro not found $NOPE 1");
@@ -495,7 +487,7 @@ mod tests {
     fn test_macro_name_from_string1() {
         let input = String::from("$TEST");
         let output = macro_name_from_string(&input);
-        assert_eq!(output, Some("$TEST".to_owned()));
+        assert_eq!(output, Some("$TEST"));
     }
 
     #[test]
@@ -515,37 +507,40 @@ mod tests {
     }
 
     #[test]
-    fn test_return_macro_value1() {
+    fn test_find_macro1() {
         let macros = &mut Vec::<Macro>::new();
         macros.push(Macro {
             name: String::from("$TEST"),
             variables: 0,
             items: Vec::new(),
             comment: String::default(),
+            defined_at: None,
         });
         let input = String::from("$TEST");
-        let output = return_macro(&input, macros);
+        let output = find_macro(&input, macros);
         assert_eq!(
             output,
-            Some(Macro {
+            Some(&Macro {
                 name: String::from("$TEST"),
                 variables: 0,
                 items: Vec::new(),
-                comment: String::default()
+                comment: String::default(),
+                defined_at: None,
             })
         );
     }
     #[test]
-    fn test_return_macro_value2() {
+    fn test_find_macro2() {
         let macros = &mut Vec::<Macro>::new();
         macros.push(Macro {
             name: String::from("$TEST1"),
             variables: 0,
             items: Vec::new(),
             comment: String::default(),
+            defined_at: None,
         });
         let input = String::from("$TEST2");
-        let output = return_macro(&input, macros);
+        let output = find_macro(&input, macros);
         assert_eq!(output, None);
     }
 
@@ -559,6 +554,7 @@ mod tests {
             variables: 2,
             items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %1")],
             comment: String::default(),
+            defined_at: None,
         });
         let input = String::from("$DELAY ARG_A  ARG_B");
         let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -582,6 +578,7 @@ mod tests {
             variables: 3,
             items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
+            defined_at: None,
         });
         let input = String::from("   $DELAY %MACRO1  ARG_B ARG_C");
         let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -605,6 +602,7 @@ mod tests {
             variables: 3,
             items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
+            defined_at: None,
         });
         let input = String::from("$DELAY2 %MACRO1  ARG_B ARG_C");
         let output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -621,6 +619,7 @@ mod tests {
             variables: 3,
             items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
+            defined_at: None,
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C ARG_D ARG_E");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -637,6 +636,7 @@ mod tests {
             variables: 3,
             items: vec![String::from("DELAYV %xyz"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
+            defined_at: None,
         });
         let input = String::from("$DELAY1 %MACRO1  ARG_B ARG_C");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -656,6 +656,7 @@ mod tests {
             variables: 3,
             items: vec![String::from("DELAYV %1"), String::from("DELAYV %2"), String::from("PUSH %3")],
             comment: String::default(),
+            defined_at: None,
         });
         let input = String::from("$DELAY1  ARG_A");
         let _output = return_macro_items_replace(&input, macros, 0, "test", msg_list);
@@ -672,12 +673,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
             comment: String::default(),
+            defined_at: None,
         });
 
         let output = expand_embedded_macros(macros.clone(), msg_list);
@@ -687,12 +690,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros_result.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("OPCODE1 %2"), String::from("OPCODE2 %1"), String::from("OPCODE3")],
             comment: String::default(),
+            defined_at: None,
         });
 
         assert_eq!(output, *macros_result);
@@ -708,6 +713,7 @@ mod tests {
             variables: 2,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE2 %2")],
             comment: String::default(),
+            defined_at: None,
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
@@ -726,12 +732,14 @@ mod tests {
             variables: 1,
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
             comment: String::default(),
+            defined_at: None,
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
@@ -752,12 +760,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("OPCODE1 %y"), String::from("OPCODE2 %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("$MACRO1 %2 %1"), String::from("OPCODE3")],
             comment: String::default(),
+            defined_at: None,
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
@@ -778,12 +788,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("OPCODE1 %1"), String::from("OPCODE2 %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("$MACRO1 %2"), String::from("OPCODE3")],
             comment: String::default(),
+            defined_at: None,
         });
 
         let _output = expand_embedded_macros(macros.clone(), msg_list);
@@ -804,12 +816,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("OPCODE1"), String::from("OPCODE2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("$MACRO1"), String::from("OPCODE3")],
             comment: String::default(),
+            defined_at: None,
         });
 
         let output = expand_embedded_macros(macros.clone(), msg_list);
@@ -819,12 +833,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("OPCODE1"), String::from("OPCODE2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros_result.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("OPCODE1"), String::from("OPCODE2"), String::from("OPCODE3")],
             comment: String::default(),
+            defined_at: None,
         });
 
         assert_eq!(output, *macros_result);
@@ -841,12 +857,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
             comment: String::default(),
+            defined_at: None,
         });
         //  let mut input: Vec<SourceLine> = Vec::<SourceLine>::new();
 
@@ -882,12 +900,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 2,
             items: vec![String::from("PUSH %2"), String::from("POP %1")],
             comment: String::default(),
+            defined_at: None,
         });
         // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C")];
         let input: Vec<SourceLine> = vec![
@@ -923,12 +943,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
             items: vec![String::from("PUSH %2")],
             comment: String::default(),
+            defined_at: None,
         });
         // let input = vec![String::from("$MACRO1 A B"), String::from("$MACRO2 C D")];
         let input: Vec<SourceLine> = vec![
@@ -963,12 +985,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
             items: vec![String::from("PUSH %2")],
             comment: String::default(),
+            defined_at: None,
         });
         // let input = vec![String::from("$MACRO7 A B"), String::from("$MACRO2 C D")];
         let input: Vec<SourceLine> = vec![
@@ -999,12 +1023,14 @@ mod tests {
             variables: 2,
             items: vec![String::from("MOV %1"), String::from("RET %2")],
             comment: String::default(),
+            defined_at: None,
         });
         macros.push(Macro {
             name: String::from("$MACRO2"),
             variables: 1,
             items: vec![String::from("PUSH %2")],
             comment: String::default(),
+            defined_at: None,
         });
 
         let input: Vec<SourceLine> = vec![SourceLine {
@@ -1057,6 +1083,7 @@ mod tests {
             variables: 0,
             items: vec![String::from("NOP")],
             comment: String::default(),
+            defined_at: None,
         }];
         let input: Vec<SourceLine> = vec![SourceLine {
             input_text_line: String::from("!macro $FOO HALT"),
@@ -1121,7 +1148,8 @@ mod tests {
                 name: String::from("$POPALL"),
                 variables: 0,
                 items: vec!["POP A".to_owned(), "POP B".to_owned()],
-                comment: String::default()
+                comment: String::default(),
+                defined_at: None,
             })
         );
     }
@@ -1138,7 +1166,8 @@ mod tests {
                 name: String::from("$POPALL"),
                 variables: 2,
                 items: vec!["POP %1".to_owned(), "POP %2".to_owned()],
-                comment: String::default()
+                comment: String::default(),
+                defined_at: None,
             })
         );
     }
@@ -1155,7 +1184,8 @@ mod tests {
                 name: String::from("$POPALL"),
                 variables: 2,
                 items: vec!["POP %1".to_owned(), "POP %2".to_owned()],
-                comment: String::from("Test Macro")
+                comment: String::from("Test Macro"),
+                defined_at: None,
             })
         );
     }
@@ -1172,7 +1202,8 @@ mod tests {
                 name: String::from("$POPALL"),
                 variables: 3,
                 items: vec!["POP %3".to_owned(), "POP %2".to_owned()],
-                comment: String::default()
+                comment: String::default(),
+                defined_at: None,
             })
         );
         assert_eq!(

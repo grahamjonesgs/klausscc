@@ -78,7 +78,7 @@ pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, oplist: &[Opcode], mac
     // Fold in any `!macro` / `!macros` definitions from the source, then expand.
     let mut macro_list = macro_list.to_vec();
     let input_list = apply_source_macros(input_list, &mut macro_list, msg_list);
-    let pass0 = expand_macros(msg_list, input_list, &mut macro_list);
+    let pass0 = expand_macros(msg_list, input_list, &macro_list);
 
     // Pass 1 to get line numbers and labels
     let pass1 = get_pass1(msg_list, pass0, oplist);

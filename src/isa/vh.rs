@@ -5,7 +5,7 @@
 
 use super::{Opcode, return_opcode};
 use crate::asm::line::SourceLine;
-use crate::asm::macros::{Macro, macro_from_string, return_macro};
+use crate::asm::macros::{Macro, find_macro, macro_from_string};
 use crate::diag::Diagnostics;
 
 /// Parse opcode definition line to opcode.
@@ -153,7 +153,7 @@ pub(crate) fn parse_vh_file(input_list: Vec<SourceLine>, msg_list: &mut Diagnost
         match macro_from_string(&line.input_text_line, msg_list) {
             None => (),
             Some(found_macro) => {
-                if return_macro(&found_macro.name, &macros).is_some() {
+                if find_macro(&found_macro.name, &macros).is_some() {
                     msg_list.error_at(
                         line.file_name,
                         line.line_counter,
@@ -358,7 +358,8 @@ mod tests {
                 name: "$WAIT".to_owned(),
                 variables: 2,
                 items: ["DELAYV %1".to_owned(), "DELAYV %2".to_owned()].to_vec(),
-                comment: String::default()
+                comment: String::default(),
+                defined_at: None,
             }]
         );
     }
