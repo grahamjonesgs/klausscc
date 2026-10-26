@@ -95,7 +95,7 @@ That is the rate the bitstream fixes for the board UART.
 - `emulator_corpus_passes` (in `src/commands/emulate.rs`) assembles every
   `.kla` here that lists expected values and checks them on the emulator. It
   is the same check as `klausscc --emulate-test tests/fixtures`. It also fails
-  if fewer than 23 files pass, so a test that stops declaring its values is
+  if fewer than 24 files pass, so a test that stops declaring its values is
   noticed.
 - `tests/roundtrip.rs` runs `v2_hello.kla`, `v2_loop.kla` and `v2_math.kla`
   with `--emulate` and checks the exact characters they print.
@@ -143,7 +143,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | `uart_stubs.kla` | The UART print routines the tests include: `TX_HEX32`, `TX_NL`, `TX_CHAR`, `TX_STR` |
 | `string_print.kla` | A `STRING_PRINT` subroutine for inclusion; not a program by itself |
 | `demo.kla`, `hello_simple.kla` | Compiler output with its own startup code; they run but list no expected values |
-| `test2.kla`, `test_64bit.kla` | Compiler output for `test2.c` and `test_64bit.c`; they need the C runtime (`print_str` and friends) to assemble |
+| `test2.kla`, `test_64bit.kla` | Compiler output (lcc `-target=klacpu`) for `test2.c` and `test_64bit.c`, with one added `!include ../../runtime/crt0.kla` line that brings in the startup code, `libc.kla` and the runtime's `uart_stubs.kla`. `test2` prints `Hellow World` and main's return value; `test_64bit` runs 33 checks and is in the emulator corpus, expecting main's return value (the failure count) `00000000` |
 | `memcoherency.kla` | Diagnostic: byte stores followed by a 64-bit read, printed as two 32-bit halves |
 | `test_mem0.kla` | Diagnostic: prints the word at address 0 (the heap header's `heap_start`) |
 | `speed.kla` | An endless `INCR` loop with no output (it never halts) |

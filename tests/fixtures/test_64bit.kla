@@ -1,3 +1,11 @@
+// Compiled from test_64bit.c by lcc -target=klacpu. The C runtime (startup,
+// libc and the UART routines) comes from crt0.kla:
+!include ../../runtime/crt0.kla
+
+// The program prints a PASS or FAIL line per check and a summary, then main
+// returns g_fail, which crt0 prints in hex. Expected UART output:
+//   00000000  (main's return value: no check failed)
+
 check:
 PUSH P
 GETSP P

@@ -347,7 +347,7 @@ mod tests {
         assert!(failures.is_empty(), "emulator corpus failures: {failures:#?}");
         // Guards against the corpus silently shrinking (e.g. a file that stops
         // declaring its expected values).
-        assert!(passed.len() >= 23, "only {} validated files passed: {passed:#?}", passed.len());
+        assert!(passed.len() >= 24, "only {} validated files passed: {passed:#?}", passed.len());
     }
 
     #[test]
