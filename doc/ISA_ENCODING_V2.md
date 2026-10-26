@@ -942,6 +942,10 @@ Details:
   dividend, V is set, and **Z is left as it was**. Signed division
   truncates toward zero, and `INT_MIN / -1` returns INT_MIN with V = 0.
 - **ABSR** sets V only for INT_MIN, whose result is INT_MIN.
+- **F bit**: the table follows the assembler's templates. With F set in a
+  hand-encoded word, COPY, BSWAP, BITREV, CLZ, CTZ, GETF, BSET/BCLR/BTGL
+  and BTSTRR also write Z from their result (for GETF, from the 64-bit
+  word it writes).
 
 ### 7.3 Branch conditions
 

@@ -52,17 +52,28 @@ These are the cases most worth knowing. Each was checked against
   S/C/V from the 64-bit operation.
 - Shifts and rotates write Z only when their F bit is set. Only an
   embedded rotate by N=1 with F (ROLR1/RORR1, `ROLV r 1`, `RORV r 1`) and
-  ROLCR/RORCR write C.
-- SEXTB/SEXTH write Z and S. NEGR, NOTR, ZEXTB/ZEXTH and POPCNT write Z.
-  BTST (embedded N) writes `Z = NOT bit`.
-- AND/OR/XOR **immediate** forms, MIN/MAX, MOV/LEA, the boolean compares,
-  the fused branches, loads, stores and all control flow write no flags.
+  ROLCR/RORCR write C; a register count of 1 does not.
+- With F set, every class-5 op writes Z from its result: COPY, NEG, NOT,
+  ZEXT, BSWAP, BITREV, POPCNT, CLZ, CTZ and GETF (Z = the 64-bit result
+  is 0, so GETF gives Z = NOT (Z | C | V)); SEXT also writes S. So do
+  BSET/BCLR/BTGL and BTSTRR in class 4. BTST (embedded N) writes
+  `Z = NOT bit`. Among these, the assembler's templates set F only on
+  NEGR, NOTR, ABSR, SEXTB/SEXTH, ZEXTB/ZEXTH, POPCNT and INCR/DECR.
+- ABSR writes Z and V, with V = 1 only for `0x8000_0000_0000_0000`.
+- MUL writes Z, S and V: S is bit 63 of the half written (for MULW, of
+  the low half before sign-extension), V is set when the low half does
+  not hold the whole product (signed or unsigned per SGN) and cleared by
+  MULHR/MULHUR, and Z follows the value written (MULW: the W result).
+- DIV and MOD write Z from the result and clear V.
+- AND/OR/XOR (register **and** immediate forms), MIN/MAX, MOV/LEA, the
+  boolean compares, the fused branches, loads, stores and all control
+  flow write no flags.
 
 ### Arithmetic
 
 - **Divide by zero does not trap.** DIV gives `0xFFFF_FFFF_FFFF_FFFF`,
-  MOD (register forms) gives the dividend, V is set and **Z is left as it
-  was**.
+  MOD (every form, MODV included) gives the dividend, V is set and **Z is
+  left as it was**.
 - Signed division truncates toward zero. `INT_MIN / -1` gives INT_MIN with
   no trap; `INT_MIN % -1` gives 0.
 - MULV/DIVV/MODV take a **signed** immediate (their SGN bit is set).
@@ -95,11 +106,14 @@ and `len = 0` is empty.
   align down to 4, 16-bit loads to 2. Sub-word stores align down to their
   size.
 - 64-bit accesses with A=1 (`MEMGET64`, `LDIDX64A`, `MEMSET64`,
-  `STIDX64A`) align down to 8. The other register, absolute and reg+reg
-  64-bit forms (`MEMREADRR`, `MEMREADR`, `LDIDX64R`, `MEMSET64RR`,
-  `MEMSETR`, `STIDX64R`) also access the aligned doubleword, which is what
-  the RTL's data cache does with them. For `LDIDX64`/`STIDX64` see
-  difference 6 below.
+  `STIDX64A`) align the address down to 8. The other 64-bit forms issue it
+  unaligned, as do PUSH, POP, CALL, RET, IRET, ENTER and LEAVE with an
+  unaligned SP or R15, but the data cache selects the doubleword by
+  `addr[4:3]` and ignores `addr[2:0]` (`mem_read_write.sv`), so every
+  64-bit RAM access reaches the aligned doubleword that holds the
+  address. The emulator does the same in `read64`/`write64`. An MMIO
+  access keeps the address as issued, and the trace's `wr` shows the
+  issued address of a 64-bit store, as the RTL's `ret_wr_addr` does.
 - Loads and stores to `addr[31:28] = 0xF` go to MMIO.
 
 ### Control flow, stack and system
@@ -117,6 +131,22 @@ and `len = 0` is empty.
   `SP_RESET` for core 1). Execution starts at the entry address the
   emulator is given (`CODE_BASE` = 0x20 for an assembled program).
 
+### Legality
+
+The emulator traps (`InvalidOpcode`) exactly the words the RTL decoder
+(`f_decode_raw` in `pipeline_core.sv`) marks illegal: reserved bits and
+unused register fields that are not zero, F/SGN/W combinations a class
+does not accept, SEXT/ZEXT with SIZE 11, a shift with SRC=0 and N≠0,
+ROLCR/RORCR other than as SRC=1 N=1 F=1, BEXTR with rs2≠0, a flag CMP
+with PRED, INV or rd non-zero, COND 0 with INV, `MEMGET32` with SGN, a
+store with SGN, A on a sub-word access, and LCD words with reserved
+fields. Unit tests check every opcode in the assembler's table with
+several operand values, so this can never trap assembled code.
+
+An illegal word stops the machine **without retiring**: like the RTL, it
+gets no trace line and is not counted (`PERF_INSTR` counts retirements
+only). HALT and TRAP do retire.
+
 ### GETF and interrupts
 
 - `SETFR rd` (GETF): `rd = {Z, E, C, V}` in bits `[63:60]`, with E = Z.
@@ -132,60 +162,22 @@ and `len = 0` is empty.
 
 ## Differences from the RTL
 
-Each item below was found by reading both `src/emu/` and
-`pipeline_core.sv`. Items 1–6 can affect programs the assembler or LLVM
-produces; items 7–9 need hand-encoded words.
+No difference in the architectural effect of an instruction is known.
+The nine differences this section used to list (logic and MUL/DIV flags,
+ABSR's V, ROLR/RORR's C, the F bit on the unary and bit ops, unaligned
+64-bit accesses, the 2-word MOD by zero, and the encodings the emulator
+did not trap) were fixed against `pipeline_core.sv` on KlaussCPU
+`master`, each with a unit test that cites the RTL lines.
 
-1. **ANDR / ORR / XORR set Z in the emulator. The RTL writes no flags for
-   them.** A branch on Z after a register AND/OR/XOR therefore tests the
-   AND result in the emulator but an older flag value on the board.
-   (`exec_alu_rr`: `with_z(a & b)`; RTL class 1 AND/OR/XOR decode has an
-   empty flag mask.)
-2. **MUL family: the RTL writes Z, S and V; the emulator writes no
-   flags.** In the RTL, S is bit 63 of the 64-bit result (the high half
-   for MULH*; for MULW, the low product before sign-extension). V is set when a
-   low-half product does not fit in 64 bits (signed or unsigned per SGN)
-   and cleared by the high-half forms. MULW's Z follows its W result.
-3. **DIV / MOD with a non-zero divisor: the RTL writes Z from the result
-   and clears V; the emulator leaves both unchanged.** The divide-by-zero
-   case matches (V set, Z kept).
-4. **ABSR of INT_MIN: the RTL sets V = 1; the emulator clears V.** For
-   every other input both clear V. The result (INT_MIN) and Z match.
-5. **ROLR / RORR with a register count of 1: the emulator also writes C
-   (the bit rotated out); the RTL writes only Z.** In the RTL only the
-   embedded N=1 form writes C. (`exec_shift_bit` tests `cnt == 1`
-   whatever SRC is.)
-6. **Unaligned 64-bit accesses with A=0 (`LDIDX64`, `STIDX64`,
-   `LDIDX64.S`, `STIDX64.S`): the emulator reads or writes the 8 bytes at
-   the exact address.** The RTL sends the unaligned address to the data
-   cache, which picks the doubleword by address bits `[4:3]`, so the access
-   goes to the aligned doubleword. Aligned addresses, the normal case,
-   agree.
-7. **2-word MOD by zero with rd ≠ rs1: the RTL writes the dividend to rd;
-   the emulator writes nothing.** The assembler's `MODV` is in place
-   (rd = rs1), so the visible result is the same.
-8. **The F bit is ignored by the emulator on COPY, BSWAP, BITREV, CLZ, CTZ,
-   GETF, BSET/BCLR/BTGL (both forms) and BTSTRR.** The RTL writes Z for
-   them when F = 1. The assembler's templates have F = 0. The emulator's
-   ROLCR/RORCR rotate one bit whatever N and F say; the RTL accepts them
-   only with N = 1, F = 1.
-9. **The emulator traps on fewer encodings than the RTL.** It decodes only
-   the fields it needs, so many reserved encodings that the RTL traps
-   execute in the emulator. Examples:
-   - non-zero unused register fields;
-   - ADD/SUB/ADC/SBC with F = 0, AND/OR/XOR with F = 1, SGN = 1 in class 1;
-   - a flag CMP with PRED, INV or rd non-zero;
-   - SEXT/ZEXT with SIZE = 11 (run as 32-bit), or SIZE ≠ 0 on other unary
-     ops;
-   - a shift with SRC = 0 and N ≠ 0;
-   - BEXTR with rs2 ≠ 0;
-   - `MEMGET32` with SGN = 1, a store with SGN = 1, A = 1 on a sub-word
-     access;
-   - COND 0 with INV (the emulator runs it as never taken);
-   - any class-C (LCD) word, which the emulator runs as a no-op.
-
-   The emulator does trap on LEN = 00, classes 0/E/F, class D with
-   LEN ≠ 01, unassigned OP values, PRED 5–7 and COND 10–15.
+What is left is what the emulator does not model (next section), and
+one corner that was not checked: a 64-bit or sub-word **MMIO** access at
+an address that is not a multiple of 8. The emulator decodes the
+register from the exact address and returns the value in the low bits.
+On the board the device decoder sees the same address, the core picks
+the byte lanes of the reply by `addr[2:0]`, and what a device returns
+for an address that is not a multiple of 8 depends on its decoder. The
+emulator's devices only have registers at multiples of 8, so such an
+access reads 0 or is ignored.
 
 ### Not modelled
 
@@ -193,8 +185,9 @@ produces; items 7–9 need hand-encoded words.
   or memory latency. Time advances by `CYCLES_PER_INSTRUCTION` (2) cycles
   per instruction for the timer, millisecond clock and cycle counter, so
   interrupt timing differs from the board. Architectural effects match.
-- `DELAYR`/`DELAYV` do not wait (the RTL spins for value × 8192 cycles),
-  and LCD instructions do nothing.
+- `DELAYR`/`DELAYV` do not wait, but advance modelled time by the
+  RTL's spin, value × 8192 cycles (value = rs1[31:0] or imm32). LCD
+  instructions do nothing once their encoding has been checked.
 - Interrupt sources 1–2 (blitter, Ethernet) are not modelled; only the
   timer (source 0) fires.
 - MMIO is the UART (`0xF001_0000`: `TX_DATA`, `RX_DATA`, `STATUS`), the

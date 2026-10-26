@@ -490,7 +490,7 @@ The register-register forms take three independent registers, so `ADDR C A B` (C
 
 ¹ The `W` operations write a 32-bit result sign-extended to 64 bits. Z reflects the value written; S, C and V come from the full 64-bit operation.
 
-² The hardware writes no flags for `ANDR`, `ORR` and `XORR`. The emulator sets Z from the result.
+² `ANDR`, `ORR` and `XORR` write no flags, so a branch after them tests the flags of an earlier instruction.
 
 ```
 ADDR C A B        // C = A + B
@@ -624,7 +624,7 @@ BNEI B 0 LOOP:    // loop while B != 0
 
 Counts held in a register use its low 6 bits (`rs2[5:0]`), so a count of 64 shifts by 0.
 
-³ With a register count, the hardware sets only Z. The emulator also sets C when the count is 1.
+³ With a register count, only Z is set, even for a count of 1. Only `ROLR1`/`RORR1` and `ROLV`/`RORV` with n = 1 set C.
 
 ```
 SHLV A 4          // A = A << 4
@@ -682,7 +682,7 @@ BSET A 4                 // A = 0xABDD
 | `DECR r` | 1 | r = r − 1 | Z S C V |
 | `SETFR rd` | 1 | rd = the flags in bits 63:60 as {Z, Z, C, V}, bits 59:0 zero | — |
 
-⁴ The hardware sets V when the operand was `0x8000_0000_0000_0000`, whose absolute value does not fit. The emulator always clears V.
+⁴ V is set when the operand was `0x8000_0000_0000_0000`, whose absolute value does not fit, and cleared otherwise.
 
 All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy first to keep the original: `COPY D C` then `NEGR D`.
 
@@ -738,7 +738,7 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 
 Stores take the value from `rd` and the address from `rs1`: `MEMSET8 D B` stores the low byte of D at the address in B.
 
-Byte accesses use the address as it is. 16- and 32-bit accesses clear the address bits below their size, except `MEMGET32`, which reads four bytes at any address. The `A` forms (`MEMGET64`, `MEMSET64`, `LDIDX64A`, `STIDX64A` and their `.S` forms) clear the low three address bits. On the hardware the other 64-bit forms pass the address on unchanged, but the cache ignores address bits 2:0, so every 64-bit access reaches the aligned doubleword that holds the address. The emulator does an exact unaligned access for `LDIDX64`/`STIDX64` (and their `.S` forms). Keep the address of every 64-bit access 8-byte aligned, or use an `A` form (see [Emulator and Hardware Differences](#emulator-and-hardware-differences)).
+Byte accesses use the address as it is. 16- and 32-bit accesses clear the address bits below their size, except `MEMGET32`, which reads four bytes at any address. The `A` forms (`MEMGET64`, `MEMSET64`, `LDIDX64A`, `STIDX64A` and their `.S` forms) clear the low three address bits. The other 64-bit forms pass the address on unchanged, but the data cache ignores address bits 2:0, so every 64-bit memory access reaches the aligned doubleword that holds the address. The same goes for `PUSH`, `POP`, calls and returns when SP is not a multiple of 8. A device (MMIO) access without `A` keeps the address as it is. Keep the address of every 64-bit access 8-byte aligned, or use an `A` form.
 
 The `.S` forms are one word long and take a literal byte offset, which must be a multiple of the access size. Offsets in `off32` may be negative (`STIDX64 A P -8`).
 
@@ -904,7 +904,7 @@ LEAVERET                 // SP = P; pop P; return
 | `MODUR rd rs1 rs2` | 1 | rd = rs1 mod rs2 (unsigned) | Z V ⁵ |
 | `MODV r imm32` | 2 | r = r mod sext(imm32) (signed) | Z V ⁵ |
 
-⁵ Flags on the hardware: the multiplies set Z, S and V, with V = 1 when the low-half product does not fit in 64 bits (always 0 for `MULHR`/`MULHUR`). Divide and modulo set Z and clear V. Divide by zero does not trap: `DIV..` gives `0xFFFF_FFFF_FFFF_FFFF`, `MOD..` gives the dividend, V = 1 and Z is unchanged. The emulator writes no flags for multiply, divide or modulo, except V = 1 on a divide by zero.
+⁵ The multiplies set Z from the value written, S from bit 63 of the 64-bit half they produce (for `MULW`, of the full low half before sign-extension) and V = 1 when the low-half product does not fit in 64 bits (always 0 for `MULHR`/`MULHUR`). Divide and modulo set Z and clear V. Divide by zero does not trap: `DIV..` gives `0xFFFF_FFFF_FFFF_FFFF`, `MOD..` gives the dividend, V = 1 and Z is unchanged.
 
 `MULV`, `DIVV` and `MODV` sign-extend their immediate.
 
@@ -925,7 +925,7 @@ LEAVERET                 // SP = P; pop P; return
 | `LCDDATAV imm32` | 2 | send imm32 to the LCD as data | — |
 | `LCDRST imm32` | 2 | drive the LCD reset line from imm32 bit 0 | — |
 
-`HALT` stops the CPU for good (the emulator stops with `Halt`). `TRAP` stops it as a software abort (the emulator stops with `Trap`). `RESET` jumps to address `0x4`, which in an assembled image is inside the heap header, not code. `DELAYR`/`DELAYV` busy-wait in the CPU; the emulator treats them as `NOP`. The LCD instructions drive the board's SPI LCD and are no-ops in the emulator.
+`HALT` stops the CPU for good (the emulator stops with `Halt`). `TRAP` stops it as a software abort (the emulator stops with `Trap`). `RESET` jumps to address `0x4`, which in an assembled image is inside the heap header, not code. `DELAYR`/`DELAYV` busy-wait in the CPU; the emulator does not wait, but advances its clock (timer, millisecond clock, cycle counter) by the same number of cycles. The LCD instructions drive the board's SPI LCD and are no-ops in the emulator.
 
 ---
 
@@ -1154,13 +1154,7 @@ IRET
 
 | Area | Hardware | Emulator |
 |------|----------|----------|
-| `ANDR`, `ORR`, `XORR` flags | None | Sets Z |
-| Multiply flags | Z S V | None |
-| Divide / modulo flags | Z V (V = 0); divide by zero: V = 1 | Only V = 1 on divide by zero |
-| `ABSR` of `0x8000_0000_0000_0000` | Sets V | Clears V |
-| `ROLR`/`RORR` with a register count of 1 | Z only | Z and C |
-| Unaligned 64-bit access without the `A` bit | Reaches the aligned doubleword: the cache ignores address bits 2:0 | `LDIDX64`/`STIDX64` (and `.S`) access the 8 bytes at the exact address; the other 64-bit forms align it |
-| `DELAYR`/`DELAYV` | Busy-wait (value × 8192 cycles) | No delay |
+| `DELAYR`/`DELAYV` | Busy-wait (value × 8192 cycles) | No wait; its clock advances by value × 8192 cycles |
 | LCD instructions | Drive the SPI LCD | No effect |
 | UART | Real transmit time, `TX_BUSY` | Instant, `TX_BUSY` always 0 |
 | Time, timer interrupts | 100 MHz clock | 2 cycles per instruction |
@@ -1296,7 +1290,7 @@ klausscc -i test_regs.kla -s --test  # on the board
 
 ### Key Conventions
 
-1. **Initial delay**: start with a `DELAYV` so the loader's reply has finished before the program prints. (The emulator ignores it.)
+1. **Initial delay**: start with a `DELAYV` so the loader's reply has finished before the program prints. (The emulator does not wait.)
 2. **One value per line**: print each result with `$TXR`, then `$NEWLINE`. `$TXR` prints the low 32 bits, so check 64-bit results in two halves (`SHRV` by 32 for the top half).
 3. **Include the UART routines last**: `!include uart_stubs.kla` after `HALT`, so execution never runs into them.
 4. **Data after the code**: put `#NAME` data after `HALT` (or in a `.data` section), so it is never executed.
