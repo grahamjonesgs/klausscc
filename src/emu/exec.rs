@@ -66,6 +66,10 @@ struct Illegal;
 /// What a class handler returns.
 type Exec = Result<Flow, Illegal>;
 
+/// `DELAYR` / `DELAYV` wait `value << DELAY_SHIFT` cycles (`pipeline_core.sv`
+/// :1622: `dly_max = {value, 13'b0}`).
+const DELAY_SHIFT: u32 = 13;
+
 /// `Ok` when the RTL decoder accepts the encoding (`ok`), else [`Illegal`].
 const fn legal(ok: bool) -> Result<(), Illegal> {
     if ok { Ok(()) } else { Err(Illegal) }
@@ -775,8 +779,16 @@ impl Cpu {
         // rs1 is used only by DELAYR (:675-684).
         legal(f.rs1 == 0 || (f.len == 1 && op == 5))?;
         Ok(match (f.len, op) {
-            // NOP, and DELAYR / DELAYV (the wait is not modelled)
-            (1, 0) | (1 | 2, 5) => Flow::Next,
+            (1, 0) => Flow::Next, // NOP
+            (1 | 2, 5) => {
+                // DELAYR / DELAYV busy-wait in EX for {value, 13'b0} cycles,
+                // the value being rs1[31:0] or imm32 (pipeline_core.sv:1619-1626);
+                // modelled time (timer, millisecond clock, cycle counter)
+                // advances by as much.
+                let value = if f.len == 1 { self.regs[f.rs1] as u32 } else { f.imm32 };
+                self.tick(u64::from(value) << DELAY_SHIFT);
+                Flow::Next
+            }
             (1, 1) => Flow::Stop(StopReason::Halt),
             (1, 2) => {
                 // WAIT: sleep until an interrupt source is ready; the IRQ

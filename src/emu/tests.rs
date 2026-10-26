@@ -1382,3 +1382,19 @@ fn unaligned_sp_pushes_and_pops_the_aligned_doubleword() {
     want[0] = 0xAB;
     assert_eq!(ram16(&cpu, 0x1FF8), want, "the push wrote 0x1FF8..0x2000");
 }
+
+#[test]
+fn delay_advances_modelled_time() {
+    // DELAYR / DELAYV spin for {value, 13'b0} cycles (pipeline_core.sv:1622),
+    // value = rs1[31:0] (1 word) or imm32 (2 words).  SETR B 3 ; DELAYR B ;
+    // DELAYV 2 ; HALT: 5 << 13 cycles plus 2 per instruction.
+    let words = [0x8BD0_0100, 3, 0x6C05_0010, 0xAC05_0000, 2, HALT];
+    let mut cpu = cpu_with(&image_from_words(&words));
+    let _ = cpu.run(10, None);
+    assert_eq!(cpu.irq_state().cycles, (5 << 13) + 4 * CYCLES_PER_INSTRUCTION);
+    // Only rs1's low 32 bits count.
+    let words = [0x8BD0_0100, 0, 0xCBC0_0200, 0, 1, 0x6C05_0020, HALT];
+    let mut cpu = cpu_with(&image_from_words(&words));
+    let _ = cpu.run(10, None);
+    assert_eq!(cpu.irq_state().cycles, 4 * CYCLES_PER_INSTRUCTION);
+}
