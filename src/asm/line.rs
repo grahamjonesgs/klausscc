@@ -8,12 +8,21 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Defines the type of line.
 pub(crate) enum LineType {
+    /// Nothing but whitespace.
     Blank,
+    /// Only a `//` comment.
     Comment,
+    /// A `#name` definition or a `.word`/`.space`/`.zeropad` directive.
     Data,
+    /// A directive that emits nothing, such as `.text` or `.global`.
+    Directive,
+    /// Not valid source, or an instruction that could not be encoded.
     Error,
+    /// A `name:` label.
     Label,
+    /// An instruction.
     Opcode,
+    /// The `_start` marker: the program's entry point.
     Start,
 }
 

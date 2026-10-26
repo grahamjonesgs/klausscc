@@ -4,7 +4,6 @@
 //! inside a `.data`/`.rodata`/`.bss` section is moved after the code, starting
 //! 8-byte aligned.  `.comm`/`.lcomm` become a label plus `.space` there too.
 
-use crate::asm::classify::{is_valid_line, line_type};
 use crate::asm::data::num_data_bytes;
 use crate::asm::lexer::strip_comments;
 use crate::asm::line::{LineType, Pass1, SourceLine};
@@ -51,7 +50,8 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
 pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, oplist: &[Opcode]) -> Vec<Pass1> {
     let mut pass1: Vec<Pass1> = Vec::new();
     let mut program_counter: u32 = CODE_BASE; // Byte address: 4 header words × 8 bytes each (64-bit words)
-    let mut data_pass0: Vec<SourceLine> = Vec::new();
+    // Data and its labels, already classified, to be placed after the code.
+    let mut data_pass0: Vec<(SourceLine, LineType)> = Vec::new();
     let mut in_data_section = false;
 
     for pass in pass0 {
@@ -89,17 +89,23 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
                         0
                     }
                 };
-                data_pass0.push(SourceLine {
-                    input_text_line: format!("{name}:"),
-                    file_name: pass.file_name.clone(),
-                    line_counter: pass.line_counter,
-                });
-                if size > 0 {
-                    data_pass0.push(SourceLine {
-                        input_text_line: format!(".space {size}"),
+                data_pass0.push((
+                    SourceLine {
+                        input_text_line: format!("{name}:"),
                         file_name: pass.file_name.clone(),
                         line_counter: pass.line_counter,
-                    });
+                    },
+                    LineType::Label,
+                ));
+                if size > 0 {
+                    data_pass0.push((
+                        SourceLine {
+                            input_text_line: format!(".space {size}"),
+                            file_name: pass.file_name.clone(),
+                            line_counter: pass.line_counter,
+                        },
+                        LineType::Data,
+                    ));
                 }
             }
             continue;
@@ -107,11 +113,11 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
 
         // Rewrite "SETR R val" → "SETR64 R val" before line_type/num_arguments when val > 32 bits.
         let upgraded_line = upgrade_setr_to_setr64(&pass.input_text_line);
-        let lt = line_type(oplist, &upgraded_line);
+        let lt = LineType::classify(&upgraded_line, oplist);
 
         // Defer labels in data section to end of program with data
         if in_data_section && lt == LineType::Label {
-            data_pass0.push(pass);
+            data_pass0.push((pass, lt));
             continue;
         }
 
@@ -122,7 +128,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
             program_counter,
             line_type: lt,
         });
-        if !is_valid_line(oplist, strip_comments(&upgraded_line)) {
+        if lt == LineType::Error {
             msg_list.error_at(&pass.file_name, pass.line_counter, format!("Error {upgraded_line}"));
         }
         if lt == LineType::Opcode {
@@ -134,7 +140,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
 
         if lt == LineType::Data {
             if in_data_section {
-                data_pass0.push(pass);
+                data_pass0.push((pass, lt));
                 pass1.pop();
             } else {
                 // Keep inline data when no explicit .data section is active.
@@ -162,8 +168,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
         });
         program_counter += pad;
     }
-    for data_pass in data_pass0 {
-        let lt = line_type(oplist, &data_pass.input_text_line);
+    for (data_pass, lt) in data_pass0 {
         pass1.push(Pass1 {
             input_text_line: data_pass.input_text_line.clone(),
             file_name: data_pass.file_name.clone(),
@@ -310,5 +315,38 @@ mod tests {
         }];
         let _pass1 = get_pass1(&mut msg_list, pass0, opcodes);
         assert_eq!(msg_list.messages()[0].text(), "Error Test_not_code_line");
+    }
+
+    #[test]
+    // Each line is classified once: directives emit nothing and are not errors,
+    // and every line classified as an error is reported.
+    fn test_get_pass1_classifies_lines() {
+        let mut msg_list = Diagnostics::new();
+        let pass0 = [".text", ".global main", "// note", "", "_start", "_start//x"]
+            .into_iter()
+            .zip(1..)
+            .map(|(text, line_counter)| SourceLine {
+                input_text_line: text.to_owned(),
+                file_name: String::new(),
+                line_counter,
+            })
+            .collect();
+        let pass1 = get_pass1(&mut msg_list, pass0, &[]);
+        let types: Vec<LineType> = pass1.iter().map(|p| p.line_type).collect();
+        assert_eq!(
+            types,
+            [
+                LineType::Directive,
+                LineType::Directive,
+                LineType::Comment,
+                LineType::Blank,
+                LineType::Start,
+                LineType::Error
+            ]
+        );
+        assert!(pass1.iter().all(|p| p.program_counter == CODE_BASE));
+        let errors: Vec<&str> = msg_list.messages().iter().map(crate::diag::Message::text).collect();
+        // It used to be typed an error but checked without its comment, so dropped silently.
+        assert_eq!(errors, ["Error _start//x"]);
     }
 }

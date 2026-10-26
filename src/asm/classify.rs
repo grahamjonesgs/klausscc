@@ -5,49 +5,46 @@ use crate::asm::lexer::{data_name_from_string, is_blank, is_comment, is_start, l
 use crate::asm::line::LineType;
 use crate::isa::{Opcode, return_opcode};
 
-/// Check if line is valid.
-///
-/// Returns true if line is not error.
-pub(crate) fn is_valid_line(opcodes: &[Opcode], line: &str) -> bool {
-    if line_type(opcodes, line) == LineType::Error {
-        return false;
-    }
-    true
-}
+/// Directives that emit data, like a `#name` definition.
+const DATA_DIRECTIVES: [&str; 3] = [".word", ".space", ".zeropad"];
 
-/// Returns enum of type of line.
-///
-/// Given a code line, will returns if line is Label, Opcode, Blank, Comment or Error.
-pub(crate) fn line_type(opcodes: &[Opcode], line: &str) -> LineType {
-    if label_name_from_string(line).is_some() {
-        return LineType::Label;
-    }
-    if data_name_from_string(line).is_some() {
-        return LineType::Data;
-    }
-    if return_opcode(line, opcodes).is_some() {
-        return LineType::Opcode;
-    }
-    if is_blank(line) {
-        return LineType::Blank;
-    }
-    if is_start(line) {
-        return LineType::Start;
-    }
-    let words = line.split_whitespace();
-    for (i, word) in words.enumerate() {
-        if is_comment(word) && i == 0 {
-            return LineType::Comment;
+/// Directives that emit nothing: section switches and symbol declarations
+/// from C compiler output.  Pass 1 tracks the sections and turns
+/// `.comm`/`.lcomm` into a label and `.space`.
+const OTHER_DIRECTIVES: [&str; 9] = [".text", ".data", ".rodata", ".bss", ".global", ".globl", ".extern", ".comm", ".lcomm"];
+
+impl LineType {
+    /// What the source line `line` holds.
+    ///
+    /// Looks at the first word: a label (`name:`), a data definition
+    /// (`#name` or a data directive), an opcode from `opcodes`, the `_start`
+    /// marker, a `//` comment or another directive.  A blank line is
+    /// [`Blank`](Self::Blank) and anything else is [`Error`](Self::Error).
+    pub(crate) fn classify(line: &str, opcodes: &[Opcode]) -> Self {
+        if label_name_from_string(line).is_some() {
+            return Self::Label;
+        }
+        if data_name_from_string(line).is_some() {
+            return Self::Data;
+        }
+        if return_opcode(line, opcodes).is_some() {
+            return Self::Opcode;
+        }
+        if is_blank(line) {
+            return Self::Blank;
+        }
+        if is_start(line) {
+            return Self::Start;
+        }
+        if is_comment(line) {
+            return Self::Comment;
+        }
+        match line.split_whitespace().next() {
+            Some(word) if DATA_DIRECTIVES.contains(&word) => Self::Data,
+            Some(word) if OTHER_DIRECTIVES.contains(&word) => Self::Directive,
+            _ => Self::Error,
         }
     }
-    // Check for C compiler directives
-    let first_word = line.split_whitespace().next().unwrap_or("");
-    match first_word {
-        ".word" | ".space" | ".zeropad" => return LineType::Data,
-        ".text" | ".data" | ".rodata" | ".bss" | ".global" | ".globl" | ".extern" | ".comm" | ".lcomm" => return LineType::Comment,
-        _ => {}
-    }
-    LineType::Error
 }
 
 #[cfg(test)]
@@ -55,8 +52,7 @@ mod tests {
     use super::*;
 
     #[test]
-    // Test for valid line returns true is opcode is found
-    fn test_is_valid_line1() {
+    fn test_classify_known_opcode_is_valid() {
         let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -68,12 +64,11 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = is_valid_line(opcodes, &input);
-        assert!(output);
+        assert_ne!(LineType::classify(&input, opcodes), LineType::Error);
     }
 
     #[test]
-    fn test_is_valid_line2() {
+    fn test_classify_unknown_opcode_is_error() {
         let input = String::from("PUSH");
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
@@ -85,8 +80,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         });
-        let output = is_valid_line(opcodes, &input);
-        assert!(!output);
+        assert_eq!(LineType::classify(&input, opcodes), LineType::Error);
     }
 
     #[test]
@@ -102,7 +96,7 @@ mod tests {
             registers: 0,
             section: String::default(),
         }];
-        let output = line_type(&opcodes, &input);
+        let output = LineType::classify(&input, &opcodes);
         assert_eq!(output, LineType::Opcode);
     }
 
@@ -111,7 +105,7 @@ mod tests {
     fn test_line_type2() {
         let input = String::from("LOOP:");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
+        let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Label);
     }
 
@@ -120,7 +114,7 @@ mod tests {
     fn test_line_type3() {
         let input = String::from("#Data_name");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
+        let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Data);
     }
 
@@ -129,7 +123,7 @@ mod tests {
     fn test_line_type4() {
         let input = String::default();
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
+        let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Blank);
     }
 
@@ -138,7 +132,7 @@ mod tests {
     fn test_line_type5() {
         let input = String::from("//This is a comment");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
+        let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Comment);
     }
 
@@ -147,7 +141,7 @@ mod tests {
     fn test_line_type6() {
         let input = String::from("_start");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
+        let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Start);
     }
 
@@ -156,49 +150,49 @@ mod tests {
     fn test_line_type7() {
         let input = String::from("1234");
         let opcodes = &mut Vec::<Opcode>::new();
-        let output = line_type(opcodes, &input);
+        let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Error);
     }
 
     #[test]
     fn test_line_type_directive_word() {
         let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".word 42"), LineType::Data);
+        assert_eq!(LineType::classify(".word 42", opcodes), LineType::Data);
     }
 
     #[test]
     fn test_line_type_directive_space() {
         let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".space 16"), LineType::Data);
+        assert_eq!(LineType::classify(".space 16", opcodes), LineType::Data);
     }
 
     #[test]
     fn test_line_type_directive_text() {
         let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".text"), LineType::Comment);
+        assert_eq!(LineType::classify(".text", opcodes), LineType::Directive);
     }
 
     #[test]
     fn test_line_type_directive_data() {
         let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".data"), LineType::Comment);
+        assert_eq!(LineType::classify(".data", opcodes), LineType::Directive);
     }
 
     #[test]
     fn test_line_type_directive_global() {
         let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".global main"), LineType::Comment);
+        assert_eq!(LineType::classify(".global main", opcodes), LineType::Directive);
     }
 
     #[test]
     fn test_line_type_directive_comm() {
         let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".comm buffer, 256, 4"), LineType::Comment);
+        assert_eq!(LineType::classify(".comm buffer, 256, 4", opcodes), LineType::Directive);
     }
 
     #[test]
     fn test_line_type_directive_lcomm() {
         let opcodes = &mut Vec::<Opcode>::new();
-        assert_eq!(line_type(opcodes, ".lcomm temp 8"), LineType::Comment);
+        assert_eq!(LineType::classify(".lcomm temp 8", opcodes), LineType::Directive);
     }
 }

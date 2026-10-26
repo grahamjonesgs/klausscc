@@ -2,8 +2,8 @@
 //!
 //! These look only at the text: whether a line is blank, a comment, a label,
 //! a data definition or the start marker, and how to split off a trailing `//`
-//! comment.  Classification that needs the opcode table (`line_type`) stays
-//! with the table.  This module has no intra-crate dependencies.
+//! comment.  Classification that needs the opcode table
+//! (`LineType::classify`) is in the `classify` module.  This module has no intra-crate dependencies.
 
 /// Strip a trailing `//` comment.
 ///

@@ -163,7 +163,6 @@ pub(crate) fn num_data_bytes(line: &str, msg_list: &mut Diagnostics, line_number
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asm::classify::line_type;
     use crate::asm::line::LineType;
     use crate::diag::MessageType;
 
@@ -273,7 +272,7 @@ mod tests {
         assert_eq!(data_as_bytes(".zeropad"), None);
         // Contrast with .space, which rounds up to a whole 64-bit word.
         assert_eq!(data_as_bytes(".space 4"), Some("0000000000000000".to_owned())); // 8 bytes
-        assert_eq!(line_type(&Vec::new(), ".zeropad 4"), LineType::Data);
+        assert_eq!(LineType::classify(".zeropad 4", &[]), LineType::Data);
     }
 
     #[test]
