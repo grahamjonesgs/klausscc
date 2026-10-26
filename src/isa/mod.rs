@@ -53,6 +53,40 @@ pub(crate) enum Operand {
     Rel13,
 }
 
+impl Operand {
+    /// The bits of word 0 this operand's field occupies; 0 for the immediates
+    /// appended after it.
+    pub(crate) const fn mask(self) -> u32 {
+        match self {
+            Self::Rd => 0xF << 8,
+            Self::Rs1 => 0xF << 4,
+            Self::Rs2 | Self::Simm4 => 0xF,
+            Self::RdRs1 => 0xFF << 4,
+            Self::Count => 0x3F << 15,
+            Self::Imm8 | Self::Off8(_) => 0xFF << 12,
+            Self::Frame22 => 0x3F_FFFF,
+            Self::Rel18 => 0x3_FFFF,
+            Self::Rel13 => 0x1FFF << 8,
+            Self::Imm | Self::Imm64 => 0,
+        }
+    }
+
+    /// Whether the operand is a field of word 0, taking one source token,
+    /// rather than an immediate appended after it.
+    pub(crate) const fn is_word0(self) -> bool {
+        !matches!(self, Self::Imm | Self::Imm64)
+    }
+
+    /// The number of 32-bit words appended after word 0 for this operand.
+    pub(crate) const fn imm_words(self) -> u32 {
+        match self {
+            Self::Imm => 1,
+            Self::Imm64 => 2,
+            _ => 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 /// Struct for opcode.
 pub(crate) struct Opcode {
@@ -128,6 +162,39 @@ pub(crate) fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::isa::table::v2_opcodes;
+
+    #[test]
+    // Each operand names the word-0 field it fills; immediates fill none
+    fn test_operand_layout() {
+        assert_eq!(Operand::Rd.mask(), 0x0000_0F00);
+        assert_eq!(Operand::Rs1.mask(), 0x0000_00F0);
+        assert_eq!(Operand::RdRs1.mask(), Operand::Rd.mask() | Operand::Rs1.mask());
+        assert_eq!(Operand::Count.mask(), 0x001F_8000);
+        assert_eq!(Operand::Off8(3).mask(), Operand::Imm8.mask());
+        assert_eq!(Operand::Rel13.mask(), 0x001F_FF00);
+        for op in [Operand::Imm, Operand::Imm64] {
+            assert_eq!((op.mask(), op.is_word0()), (0, false), "{op:?}");
+        }
+        assert_eq!((Operand::Imm.imm_words(), Operand::Imm64.imm_words(), Operand::Rd.imm_words()), (1, 2, 0));
+        assert!(Operand::Rel18.is_word0());
+    }
+
+    #[test]
+    // Every opcode's operand fields are disjoint and clear in its template,
+    // and its immediates come after all of its word-0 operands.
+    fn test_table_operand_fields_are_disjoint() {
+        for opcode in &v2_opcodes() {
+            let template = u32::from_str_radix(&opcode.hex_code, 16).unwrap();
+            let mut fields = 0;
+            for op in &opcode.ops {
+                assert_eq!(fields & op.mask(), 0, "{} {op:?}", opcode.text_name);
+                fields |= op.mask();
+            }
+            assert_eq!(template & fields, 0, "{}", opcode.text_name);
+            let first_imm = opcode.ops.iter().position(|op| !op.is_word0()).unwrap_or(opcode.ops.len());
+            assert!(opcode.ops[first_imm..].iter().all(|op| !op.is_word0()), "{}", opcode.text_name);
+        }
+    }
 
     #[test]
     // The register/count operands of an opcode are counted; unknown names are None

@@ -223,11 +223,12 @@ pub(crate) fn pc_relative_bits(
     };
     let tokens: Vec<&str> = line.split_whitespace().collect();
     for (i, op) in opcode.ops.iter().enumerate() {
-        let (bits, shift, what) = match op {
-            Operand::Rel18 => (18_u32, 0_u32, "short branch"),
-            Operand::Rel13 => (13, 8, "fused branch"),
+        let what = match op {
+            Operand::Rel18 => "short branch",
+            Operand::Rel13 => "fused branch",
             _ => continue,
         };
+        let (bits, shift) = (op.mask().count_ones(), op.mask().trailing_zeros());
         let Some(tok) = tokens.get(i + 1) else { return 0 };
         let Some(target) = convert_argument(tok, msg_list, line_number, filename, labels) else {
             return 0;
@@ -243,7 +244,7 @@ pub(crate) fn pc_relative_bits(
             );
             return 0;
         }
-        return ((words as u32) & ((1 << bits) - 1)) << shift;
+        return ((words as u32) << shift) & op.mask();
     }
     0
 }

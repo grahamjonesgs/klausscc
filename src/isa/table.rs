@@ -5,33 +5,8 @@ use super::{Opcode, Operand};
 /// Build an [`Opcode`] from a v2 template word and its operand layout, deriving
 /// the register/variable counts.
 fn op(name: &str, template: u32, ops: &[Operand]) -> Opcode {
-    let registers = ops
-        .iter()
-        .filter(|o| {
-            matches!(
-                o,
-                Operand::Rd
-                    | Operand::Rs1
-                    | Operand::Rs2
-                    | Operand::RdRs1
-                    | Operand::Count
-                    | Operand::Imm8
-                    | Operand::Off8(_)
-                    | Operand::Frame22
-                    | Operand::Simm4
-                    | Operand::Rel18
-                    | Operand::Rel13
-            )
-        })
-        .count() as u32;
-    let variables = ops
-        .iter()
-        .map(|o| match o {
-            Operand::Imm => 1,
-            Operand::Imm64 => 2,
-            _ => 0,
-        })
-        .sum();
+    let registers = ops.iter().filter(|o| o.is_word0()).count() as u32;
+    let variables = ops.iter().map(|o| o.imm_words()).sum();
     Opcode {
         text_name: name.to_owned(),
         hex_code: format!("{template:08X}"),

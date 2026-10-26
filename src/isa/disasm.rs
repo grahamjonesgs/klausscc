@@ -38,21 +38,7 @@ pub(crate) fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String,
         let Ok(template) = u32::from_str_radix(&opcode.hex_code, 16) else {
             continue;
         };
-        let mut mask = 0xFFFF_FFFF_u32;
-        for op in &opcode.ops {
-            match op {
-                Operand::Rd => mask &= !(0xF << 8),
-                Operand::Rs1 => mask &= !(0xF << 4),
-                Operand::Rs2 | Operand::Simm4 => mask &= !0xF,
-                Operand::RdRs1 => mask &= !((0xF << 8) | (0xF << 4)),
-                Operand::Count => mask &= !(0x3F << 15),
-                Operand::Imm8 | Operand::Off8(_) => mask &= !(0xFF << 12),
-                Operand::Frame22 => mask &= !0x3F_FFFF,
-                Operand::Rel18 => mask &= !0x3_FFFF,
-                Operand::Rel13 => mask &= !(0x1FFF << 8),
-                Operand::Imm | Operand::Imm64 => {}
-            }
-        }
+        let mask = !opcode.ops.iter().fold(0, |fields, op| fields | op.mask());
         if (word & mask) == (template & mask) {
             let mut text = opcode.text_name.clone();
             for op in &opcode.ops {
