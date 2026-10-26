@@ -88,7 +88,10 @@ impl fmt::Display for JtagError {
             ),
             Self::Ftdi { op, message } => write!(f, "ftdi {op}: {message}"),
             Self::ReadTimeout => f.write_str("ftdi read timeout"),
-            Self::DmiBusy { addr } => write!(f, "DMI busy answering 0x{addr:02X} (raise the idle clocks, or lower --jtag-khz)"),
+            Self::DmiBusy { addr } => write!(
+                f,
+                "DMI busy answering 0x{addr:02X}: the debug module did not answer within the idle clocks (lower --jtag-khz)"
+            ),
             Self::DmiMismatch { asked, got } => {
                 write!(
                     f,

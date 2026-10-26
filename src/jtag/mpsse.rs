@@ -394,7 +394,7 @@ mod tests {
         assert!(matches!(err, Some(JtagError::DmiBusy { addr: 0x11 })), "{err:?}");
         assert_eq!(
             err.map(|e| e.to_string()).as_deref(),
-            Some("DMI busy answering 0x11 (raise the idle clocks, or lower --jtag-khz)")
+            Some("DMI busy answering 0x11: the debug module did not answer within the idle clocks (lower --jtag-khz)")
         );
     }
 
