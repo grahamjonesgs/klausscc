@@ -608,3 +608,45 @@ fn a_halt_seen_before_the_core_stops_is_remembered() {
     state.borrow_mut().cause = Cause::Breakpoint.code();
     assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::HwBreak(()))));
 }
+
+#[test]
+fn the_slots_are_sized_from_what_the_debug_module_reports() {
+    let dm = FakeDm::default();
+    let state = Rc::clone(&dm.0);
+    state.borrow_mut().halt(Cause::Request);
+    let mut board = Board::new(dm);
+    board.info = Some(DmInfo {
+        version: 1,
+        breakpoints: 2,
+        watchpoints: 1,
+    });
+    assert!(attach(&mut board, None).is_ok());
+    assert_eq!(
+        state.borrow().slots.keys().copied().collect::<Vec<_>>(),
+        [BP0, BP0 + 1, WP0],
+        "only the reported slots are cleared"
+    );
+    let mut target = BoardTarget::new(board);
+    assert!(ok(target.add_hw_breakpoint(0x100, 4)));
+    assert!(ok(target.add_hw_breakpoint(0x104, 4)));
+    assert!(!ok(target.add_hw_breakpoint(0x108, 4)), "two comparators");
+    assert!(ok(target.add_hw_watchpoint(0x200, 4, WatchKind::Write)));
+    assert!(!ok(target.add_hw_watchpoint(0x208, 4, WatchKind::Write)), "one comparator");
+}
+
+#[test]
+fn reported_slots_are_capped_by_the_register_map() {
+    let mut board = Board::new(FakeDm::default());
+    assert_eq!(
+        (board.breakpoint_slots(), board.watchpoint_slots()),
+        (HW_BREAKPOINTS, HW_WATCHPOINTS),
+        "unreported"
+    );
+    board.info = Some(DmInfo {
+        version: 1,
+        breakpoints: 15,
+        watchpoints: 15,
+    });
+    assert_eq!((board.breakpoint_slots(), board.watchpoint_slots()), (MAX_BREAKPOINTS, MAX_WATCHPOINTS));
+    assert_eq!((MAX_BREAKPOINTS, MAX_WATCHPOINTS), (8, 7));
+}

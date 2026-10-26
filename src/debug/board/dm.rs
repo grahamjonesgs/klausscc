@@ -23,6 +23,10 @@ pub(super) const BP0: u8 = 0x10;
 pub(super) const WP0: u8 = 0x18;
 /// The address of the access that hit a watchpoint.
 pub(super) const WATCH_ADDR: u8 = 0x1F;
+/// The breakpoint comparators the DMI addresses have room for.
+pub(super) const MAX_BREAKPOINTS: usize = (WP0 - BP0) as usize;
+/// The watchpoint comparators the DMI addresses have room for.
+pub(super) const MAX_WATCHPOINTS: usize = (WATCH_ADDR - WP0) as usize;
 
 // ---- DMCONTROL bits ---------------------------------------------------------
 pub(super) const CTL_HALTREQ: u64 = 1 << 0;

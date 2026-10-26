@@ -5,11 +5,13 @@
 //! running a `DEBUG_EN=1` bitstream, reached over the on-board USB-JTAG
 //! (`jtag/`) through the debug module (`klaussCPU/debug_module.sv`).
 //!
-//! * Hardware breakpoints: the debug module's 4 PC comparators (`Z1`).
+//! * Hardware breakpoints: the debug module's PC comparators (`Z1`), as
+//!   many as DMSTATUS reports (4 on the current bitstream).
 //! * Software breakpoints (`Z0`): the word at the address is replaced by
 //!   `TRAP`; memory reads show the original word.  Resume invalidates the
 //!   I-cache, so a patched word is always fetched.
-//! * Watchpoints: the debug module's 2 doubleword comparators.  The halt
+//! * Watchpoints: the debug module's doubleword comparators (2 on the
+//!   current bitstream).  The halt
 //!   comes after the access, up to two instructions late (`DEBUG_PLAN.md`).
 //! * A compiled-in `TRAP` (`__builtin_debugtrap`) reports SIGTRAP; resuming
 //!   skips it.  `HALT` reports "exited" with the low byte of r12.
@@ -36,8 +38,9 @@ use crate::jtag::Jtag;
 use crate::jtag::{Dmi, DmiReq, JtagError};
 use crate::layout::is_mmio;
 use dm::{
-    BP0, CTL_ATTACHED, CTL_HALT_ON_LOAD, CTL_HALTREQ, CTL_RESUMEREQ, CTL_STEP, Cause, DATA0, DMCONTROL, DMSTATUS, DmStatus, MEM_ADDR, MEM_BE_ALL,
-    MEM_CMD, MEM_INC, MEM_WRITE, REG_CMD, REG_CMD_WRITE, SLOT_ENABLE, WATCH_ADDR, WP_LANES_SHIFT, WP_READ, WP_WRITE, WP0,
+    BP0, CTL_ATTACHED, CTL_HALT_ON_LOAD, CTL_HALTREQ, CTL_RESUMEREQ, CTL_STEP, Cause, DATA0, DMCONTROL, DMSTATUS, DmInfo, DmStatus, MAX_BREAKPOINTS,
+    MAX_WATCHPOINTS, MEM_ADDR, MEM_BE_ALL, MEM_CMD, MEM_INC, MEM_WRITE, REG_CMD, REG_CMD_WRITE, SLOT_ENABLE, WATCH_ADDR, WP_LANES_SHIFT, WP_READ,
+    WP_WRITE, WP0,
 };
 use gdbstub::common::Signal;
 use gdbstub::stub::SingleThreadStopReason;
@@ -186,6 +189,8 @@ type BoardResult<T> = Result<T, BoardError>;
 /// The debug module, over its DMI (JTAG on the real board).
 pub(crate) struct Board<D> {
     dmi: D,
+    /// What the debug module reported about itself when it was opened.
+    info: Option<DmInfo>,
 }
 
 #[cfg(feature = "board")]
@@ -205,6 +210,7 @@ impl Board<Jtag> {
         let Some(info) = st.info() else {
             return Err(no_dm(format!("DMSTATUS 0x{st:08X}")));
         };
+        board.info = Some(info);
         Ok((
             board,
             format!(
@@ -216,9 +222,23 @@ impl Board<Jtag> {
 }
 
 impl<D: Dmi> Board<D> {
-    /// The debug module behind `dmi`.
+    /// The debug module behind `dmi`, before it has reported its comparators.
     const fn new(dmi: D) -> Self {
-        Self { dmi }
+        Self { dmi, info: None }
+    }
+
+    /// The hardware breakpoint comparators: as many as the debug module
+    /// reports (at most [`MAX_BREAKPOINTS`]), or [`HW_BREAKPOINTS`] if it
+    /// has not said.
+    fn breakpoint_slots(&self) -> usize {
+        self.info
+            .map_or(HW_BREAKPOINTS, |info| usize::from(info.breakpoints).min(MAX_BREAKPOINTS))
+    }
+
+    /// The watchpoint comparators, as [`breakpoint_slots`](Self::breakpoint_slots).
+    fn watchpoint_slots(&self) -> usize {
+        self.info
+            .map_or(HW_WATCHPOINTS, |info| usize::from(info.watchpoints).min(MAX_WATCHPOINTS))
     }
 
     fn batch(&mut self, reqs: &[DmiReq]) -> BoardResult<Vec<u64>> {
@@ -354,9 +374,9 @@ const fn past_top(addr: u32, len: usize) -> BoardError {
 /// Disarm every hardware breakpoint and watchpoint slot and clear the debug
 /// module's sticky error.
 fn clear_slots<D: Dmi>(board: &mut Board<D>) -> BoardResult<()> {
-    let clear: Vec<DmiReq> = (0..HW_BREAKPOINTS as u8)
+    let clear: Vec<DmiReq> = (0..board.breakpoint_slots() as u8)
         .map(|i| DmiReq::Write(BP0 + i, 0))
-        .chain((0..HW_WATCHPOINTS as u8).map(|i| DmiReq::Write(WP0 + i, 0)))
+        .chain((0..board.watchpoint_slots() as u8).map(|i| DmiReq::Write(WP0 + i, 0)))
         .chain(std::iter::once(DmiReq::Write(DMSTATUS, 0)))
         .collect();
     board.batch(&clear).map(drop)
@@ -399,8 +419,10 @@ impl RunState {
 /// The board plus the debugger's view of it.
 pub(crate) struct BoardTarget<D> {
     board: Board<D>,
-    hw_breakpoints: [Option<u32>; HW_BREAKPOINTS],
-    watches: [Option<Wp>; HW_WATCHPOINTS],
+    /// The hardware breakpoint comparators, one entry per slot.
+    hw_breakpoints: Vec<Option<u32>>,
+    /// The watchpoint comparators, one entry per slot.
+    watches: Vec<Option<Wp>>,
     /// Software breakpoints: address -> the original word under the TRAP.
     sw_breakpoints: BTreeMap<u32, u32>,
     state: RunState,
@@ -409,11 +431,11 @@ pub(crate) struct BoardTarget<D> {
 }
 
 impl<D: Dmi> BoardTarget<D> {
-    const fn new(board: Board<D>) -> Self {
+    fn new(board: Board<D>) -> Self {
         Self {
+            hw_breakpoints: vec![None; board.breakpoint_slots()],
+            watches: vec![None; board.watchpoint_slots()],
             board,
-            hw_breakpoints: [None; HW_BREAKPOINTS],
-            watches: [None; HW_WATCHPOINTS],
             sw_breakpoints: BTreeMap::new(),
             state: RunState::Halted,
             allow_mmio: false,
@@ -580,8 +602,8 @@ impl<D: Dmi> BoardTarget<D> {
         for (addr, orig) in std::mem::take(&mut self.sw_breakpoints) {
             note(self.board.write_mem(addr, &orig.to_le_bytes()));
         }
-        self.hw_breakpoints = [None; HW_BREAKPOINTS];
-        self.watches = [None; HW_WATCHPOINTS];
+        self.hw_breakpoints.fill(None);
+        self.watches.fill(None);
         note(clear_slots(&mut self.board));
         note(self.board.control(if resume { CTL_RESUMEREQ } else { 0 }));
         first_err.map_or(Ok(()), Err)
