@@ -696,13 +696,16 @@ impl<D: Dmi> SingleThreadBase for BoardTarget<D> {
     fn read_addrs(&mut self, start_addr: u32, data: &mut [u8]) -> TargetResult<usize, Self> {
         self.check_access(start_addr, data.len())?;
         self.board.read_mem(start_addr, data)?;
-        // show the original words under software breakpoints
-        let end = u64::from(start_addr) + data.len() as u64;
-        for (&bp, &orig) in &self.sw_breakpoints {
-            for (i, b) in orig.to_le_bytes().iter().enumerate() {
-                let a = u64::from(bp) + i as u64;
-                if a >= u64::from(start_addr) && a < end {
-                    data[(a - u64::from(start_addr)) as usize] = *b;
+        // show the original words under the software breakpoints that overlap the read
+        if let Some(last) = access_last_addr(start_addr, data.len())
+            && !data.is_empty()
+        {
+            for (&bp, &orig) in self.sw_breakpoints.range(start_addr.saturating_sub(3)..=last) {
+                for (i, b) in orig.to_le_bytes().into_iter().enumerate() {
+                    let a = bp.wrapping_add(i as u32);
+                    if (start_addr..=last).contains(&a) {
+                        data[(a - start_addr) as usize] = b;
+                    }
                 }
             }
         }

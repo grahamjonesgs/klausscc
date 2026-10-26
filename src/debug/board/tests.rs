@@ -656,3 +656,21 @@ fn reported_slots_are_capped_by_the_register_map() {
     assert_eq!((board.breakpoint_slots(), board.watchpoint_slots()), (MAX_BREAKPOINTS, MAX_WATCHPOINTS));
     assert_eq!((MAX_BREAKPOINTS, MAX_WATCHPOINTS), (8, 7));
 }
+
+#[test]
+fn reads_show_only_the_breakpoints_they_overlap() {
+    let (mut target, state) = halted_target(0);
+    for (addr, word) in [(0xFC, 0x0403_0201), (0x100, 0x0807_0605), (0x108, 0x0C0B_0A09)] {
+        state.borrow_mut().set_word(addr, word);
+        assert!(ok(target.add_sw_breakpoint(addr, 4)));
+    }
+    let mut buf = [0_u8; 6];
+    ok(target.read_addrs(0xFE, &mut buf));
+    assert_eq!(buf, [0x03, 0x04, 0x05, 0x06, 0x07, 0x08], "the tail of one and all of the next");
+    let mut one = [0_u8; 1];
+    ok(target.read_addrs(0x10B, &mut one));
+    assert_eq!(one, [0x0C]);
+    ok(target.read_addrs(0x104, &mut one));
+    assert_eq!(one, [0], "between breakpoints");
+    assert_eq!(ok(target.read_addrs(0x100, &mut [])), 0);
+}
