@@ -97,15 +97,37 @@ impl Registers for KlaussRegs {
         for (r, chunk) in self.r.iter_mut().zip(gprs.as_chunks::<8>().0) {
             *r = u64::from_le_bytes(*chunk);
         }
-        let words: Vec<u32> = rest.as_chunks::<4>().0.iter().map(|c| u32::from_le_bytes(*c)).collect();
-        if let [sp, pc, flags, int_mask] = words[..] {
-            self.sp = sp;
-            self.pc = pc;
-            self.flags = flags;
-            self.int_mask = int_mask;
-            Ok(())
-        } else {
-            Err(())
+        let (&[sp, pc, flags, int_mask], []) = rest.as_chunks::<4>() else {
+            return Err(());
+        };
+        self.sp = u32::from_le_bytes(sp);
+        self.pc = u32::from_le_bytes(pc);
+        self.flags = u32::from_le_bytes(flags);
+        self.int_mask = u32::from_le_bytes(int_mask);
+        Ok(())
+    }
+}
+
+impl KlaussRegs {
+    /// The value of `reg` (a 32-bit register zero-extended).
+    pub(crate) const fn get(&self, reg: KlaussRegId) -> u64 {
+        match reg {
+            KlaussRegId::Gpr(n) => self.r[n as usize],
+            KlaussRegId::Sp => self.sp as u64,
+            KlaussRegId::Pc => self.pc as u64,
+            KlaussRegId::Flags => self.flags as u64,
+            KlaussRegId::IntMask => self.int_mask as u64,
+        }
+    }
+
+    /// Set `reg` to `value` (a 32-bit register takes the low 32 bits).
+    pub(crate) const fn set(&mut self, reg: KlaussRegId, value: u64) {
+        match reg {
+            KlaussRegId::Gpr(n) => self.r[n as usize] = value,
+            KlaussRegId::Sp => self.sp = value as u32,
+            KlaussRegId::Pc => self.pc = value as u32,
+            KlaussRegId::Flags => self.flags = value as u32,
+            KlaussRegId::IntMask => self.int_mask = value as u32,
         }
     }
 }
@@ -125,17 +147,75 @@ pub(crate) enum KlaussRegId {
     IntMask,
 }
 
+#[cfg_attr(
+    not(any(test, feature = "board")),
+    allow(dead_code, reason = "only the board target addresses registers by number")
+)]
+impl KlaussRegId {
+    /// The number of registers (`regnum` 0 to 19).
+    pub(crate) const COUNT: usize = 20;
+
+    /// The register with GDB `regnum` `n`, which is also its index in the
+    /// board debug module's `REG_CMD`.
+    pub(crate) const fn from_regnum(n: usize) -> Option<Self> {
+        Some(match n {
+            0..=15 => Self::Gpr(n as u8),
+            16 => Self::Sp,
+            17 => Self::Pc,
+            18 => Self::Flags,
+            19 => Self::IntMask,
+            _ => return None,
+        })
+    }
+
+    /// Every register, in `regnum` order.
+    pub(crate) fn all() -> impl Iterator<Item = Self> {
+        (0..Self::COUNT).filter_map(Self::from_regnum)
+    }
+
+    /// The register's GDB `regnum` (and debug module `REG_CMD` index).
+    pub(crate) const fn regnum(self) -> usize {
+        match self {
+            Self::Gpr(n) => n as usize,
+            Self::Sp => 16,
+            Self::Pc => 17,
+            Self::Flags => 18,
+            Self::IntMask => 19,
+        }
+    }
+
+    /// The register's size in bytes.
+    pub(crate) const fn size(self) -> usize {
+        match self {
+            Self::Gpr(_) => 8,
+            Self::Sp | Self::Pc | Self::Flags | Self::IntMask => 4,
+        }
+    }
+
+    /// Write `value` into `buf` as this register's little-endian bytes (a
+    /// `p` packet's reply), truncated to `buf`.  Returns the bytes written.
+    pub(crate) fn encode(self, value: u64, buf: &mut [u8]) -> usize {
+        let n = self.size().min(buf.len());
+        buf[..n].copy_from_slice(&value.to_le_bytes()[..n]);
+        n
+    }
+
+    /// The value of a `P` packet's bytes for this register, or `None` unless
+    /// there are exactly [`size`](Self::size) of them.
+    pub(crate) fn decode(self, bytes: &[u8]) -> Option<u64> {
+        if bytes.len() != self.size() {
+            return None;
+        }
+        let mut b = [0_u8; 8];
+        b[..bytes.len()].copy_from_slice(bytes);
+        Some(u64::from_le_bytes(b))
+    }
+}
+
 impl RegId for KlaussRegId {
     fn from_raw_id(id: usize) -> Option<(Self, Option<NonZeroUsize>)> {
-        let (reg, size) = match id {
-            0..=15 => (Self::Gpr(id as u8), 8),
-            16 => (Self::Sp, 4),
-            17 => (Self::Pc, 4),
-            18 => (Self::Flags, 4),
-            19 => (Self::IntMask, 4),
-            _ => return None,
-        };
-        Some((reg, NonZeroUsize::new(size)))
+        let reg = Self::from_regnum(id)?;
+        Some((reg, NonZeroUsize::new(reg.size())))
     }
 }
 
@@ -174,6 +254,50 @@ mod tests {
         back.gdb_deserialize(&bytes).unwrap();
         assert_eq!(back, regs);
         assert!(back.gdb_deserialize(&bytes[1..]).is_err());
+    }
+
+    #[test]
+    fn register_ids_number_and_size_every_register() {
+        let all: Vec<KlaussRegId> = KlaussRegId::all().collect();
+        assert_eq!(all.len(), KlaussRegId::COUNT);
+        for (n, reg) in all.iter().enumerate() {
+            assert_eq!(reg.regnum(), n);
+            assert_eq!(
+                KlaussRegId::from_raw_id(n).map(|r| (r.0, r.1.map(NonZeroUsize::get))),
+                Some((*reg, Some(reg.size())))
+            );
+        }
+        assert_eq!(KlaussRegId::Gpr(3).size(), 8);
+        assert_eq!(KlaussRegId::IntMask.size(), 4);
+        assert_eq!(KlaussRegId::from_regnum(KlaussRegId::COUNT), None);
+    }
+
+    #[test]
+    fn registers_get_and_set_by_id() {
+        let mut regs = KlaussRegs::default();
+        for reg in KlaussRegId::all() {
+            regs.set(reg, 0x1_0000_0000 + reg.regnum() as u64);
+        }
+        assert_eq!(regs.r[5], 0x1_0000_0005, "GPRs keep 64 bits");
+        assert_eq!((regs.sp, regs.pc, regs.flags, regs.int_mask), (16, 17, 18, 19), "the rest keep 32");
+        for reg in KlaussRegId::all() {
+            let want = if reg.size() == 8 { 0x1_0000_0000 } else { 0 } + reg.regnum() as u64;
+            assert_eq!(regs.get(reg), want, "{reg:?}");
+        }
+    }
+
+    #[test]
+    fn single_register_bytes_round_trip() {
+        let mut buf = [0xEE_u8; 8];
+        assert_eq!(KlaussRegId::Pc.encode(0x1122_3344_5566_7788, &mut buf), 4);
+        assert_eq!(buf, [0x88, 0x77, 0x66, 0x55, 0xEE, 0xEE, 0xEE, 0xEE]);
+        let mut short = [0_u8; 2];
+        assert_eq!(KlaussRegId::Gpr(0).encode(0x0102_0304, &mut short), 2);
+        assert_eq!(short, [0x04, 0x03]);
+        assert_eq!(KlaussRegId::Pc.decode(&[1, 2, 3, 4]), Some(0x0403_0201));
+        assert_eq!(KlaussRegId::Gpr(1).decode(&[1, 0, 0, 0, 0, 0, 0, 2]), Some(0x0200_0000_0000_0001));
+        assert_eq!(KlaussRegId::Pc.decode(&[1, 2, 3, 4, 5, 6, 7, 8]), None, "wrong size");
+        assert_eq!(KlaussRegId::Gpr(1).decode(&[1, 2, 3, 4]), None, "wrong size");
     }
 
     #[test]

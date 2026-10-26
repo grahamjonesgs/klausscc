@@ -76,10 +76,6 @@ const CAUSE_TRAP: u64 = 4;
 const CAUSE_ILL: u64 = 5;
 const CAUSE_HALT: u64 = 6;
 
-/// `REG_CMD` index of the PC (16 = SP, 18 = flags, 19 = `INT_MASK`).
-const REG_PC: u64 = 17;
-const NUM_REGS: u64 = 20;
-
 /// How often a running core is polled for a halt.
 const POLL: Duration = Duration::from_millis(5);
 
@@ -266,17 +262,20 @@ impl Board {
     }
 
     fn read_regs(&mut self) -> BoardResult<Vec<u64>> {
-        let reqs: Vec<DmiReq> = (0..NUM_REGS).flat_map(|i| [DmiReq::Write(REG_CMD, i), DmiReq::Read(DATA0)]).collect();
+        let reqs: Vec<DmiReq> = KlaussRegId::all()
+            .flat_map(|reg| [DmiReq::Write(REG_CMD, reg.regnum() as u64), DmiReq::Read(DATA0)])
+            .collect();
         let v = self.batch(&reqs)?;
         Ok(v.into_iter().skip(1).step_by(2).collect())
     }
 
-    fn read_reg(&mut self, idx: u64) -> BoardResult<u64> {
-        Ok(self.batch(&[DmiReq::Write(REG_CMD, idx), DmiReq::Read(DATA0)])?[1])
+    fn read_reg(&mut self, reg: KlaussRegId) -> BoardResult<u64> {
+        Ok(self.batch(&[DmiReq::Write(REG_CMD, reg.regnum() as u64), DmiReq::Read(DATA0)])?[1])
     }
 
-    fn write_reg(&mut self, idx: u64, v: u64) -> BoardResult<()> {
-        self.batch(&[DmiReq::Write(DATA0, v), DmiReq::Write(REG_CMD, idx | (1 << 8))]).map(|_| ())
+    fn write_reg(&mut self, reg: KlaussRegId, v: u64) -> BoardResult<()> {
+        self.batch(&[DmiReq::Write(DATA0, v), DmiReq::Write(REG_CMD, reg.regnum() as u64 | (1 << 8))])
+            .map(|_| ())
     }
 
     /// Check (and clear) the DM's sticky error after a memory batch.
@@ -432,9 +431,9 @@ impl BoardTarget {
     /// Resume (or step) from the halt.  A compiled-in TRAP at the PC is
     /// skipped (for a step, the skip is the step).
     fn start(&mut self, step: bool) -> BoardResult<()> {
-        let pc = self.board.read_reg(REG_PC)? as u32;
+        let pc = self.board.read_reg(KlaussRegId::Pc)? as u32;
         if !self.sw_breakpoints.contains_key(&pc) && self.read_word(pc)? == TRAP_WORD {
-            self.board.write_reg(REG_PC, u64::from(pc.wrapping_add(4)))?;
+            self.board.write_reg(KlaussRegId::Pc, u64::from(pc.wrapping_add(4)))?;
             if step {
                 self.skipped_trap_step = true;
                 self.running = true;
@@ -472,7 +471,7 @@ impl BoardTarget {
                 SingleThreadStopReason::Watch { tid: (), kind, addr }
             }
             CAUSE_TRAP => {
-                let pc = self.board.read_reg(REG_PC)? as u32;
+                let pc = self.board.read_reg(KlaussRegId::Pc)? as u32;
                 if self.sw_breakpoints.contains_key(&pc) {
                     SingleThreadStopReason::SwBreak(())
                 } else {
@@ -482,7 +481,7 @@ impl BoardTarget {
             CAUSE_ILL => SingleThreadStopReason::Signal(Signal::SIGILL),
             CAUSE_HALT => {
                 self.exited = true;
-                SingleThreadStopReason::Exited((self.board.read_reg(12)? & 0xFF) as u8)
+                SingleThreadStopReason::Exited((self.board.read_reg(KlaussRegId::Gpr(12))? & 0xFF) as u8)
             }
             CAUSE_REQ => SingleThreadStopReason::Signal(Signal::SIGINT),
             _ => SingleThreadStopReason::Signal(Signal::SIGTRAP),
@@ -644,10 +643,8 @@ impl SingleThreadBase for BoardTarget {
     }
 
     fn write_registers(&mut self, regs: &KlaussRegs) -> TargetResult<(), Self> {
-        let mut vals: Vec<u64> = regs.r.to_vec();
-        vals.extend([regs.sp, regs.pc, regs.flags, regs.int_mask].map(u64::from));
-        for (i, v) in vals.into_iter().enumerate() {
-            self.board.write_reg(i as u64, v)?;
+        for reg in KlaussRegId::all() {
+            self.board.write_reg(reg, regs.get(reg))?;
         }
         Ok(())
     }
@@ -684,33 +681,13 @@ impl SingleThreadBase for BoardTarget {
 
 impl SingleRegisterAccess<()> for BoardTarget {
     fn read_register(&mut self, _tid: (), reg_id: KlaussRegId, buf: &mut [u8]) -> TargetResult<usize, Self> {
-        let (idx, size) = reg_index(reg_id);
-        let v = self.board.read_reg(idx)?;
-        let bytes = v.to_le_bytes();
-        let n = size.min(buf.len());
-        buf[..n].copy_from_slice(&bytes[..n]);
-        Ok(n)
+        let v = self.board.read_reg(reg_id)?;
+        Ok(reg_id.encode(v, buf))
     }
 
     fn write_register(&mut self, _tid: (), reg_id: KlaussRegId, val: &[u8]) -> TargetResult<(), Self> {
-        let (idx, size) = reg_index(reg_id);
-        if val.len() != size {
-            return Err(TargetError::NonFatal);
-        }
-        let mut b = [0_u8; 8];
-        b[..size].copy_from_slice(val);
-        self.board.write_reg(idx, u64::from_le_bytes(b)).map_err(Into::into)
-    }
-}
-
-/// `REG_CMD` index and size in bytes of a register.
-const fn reg_index(reg: KlaussRegId) -> (u64, usize) {
-    match reg {
-        KlaussRegId::Gpr(n) => (n as u64, 8),
-        KlaussRegId::Sp => (16, 4),
-        KlaussRegId::Pc => (17, 4),
-        KlaussRegId::Flags => (18, 4),
-        KlaussRegId::IntMask => (19, 4),
+        let value = reg_id.decode(val).ok_or(TargetError::NonFatal)?;
+        self.board.write_reg(reg_id, value).map_err(Into::into)
     }
 }
 
@@ -863,7 +840,7 @@ pub(crate) fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> BoardRe
         }
         board.control(CTL_ATTACHED)?;
     }
-    Ok(board.read_reg(REG_PC)? as u32)
+    Ok(board.read_reg(KlaussRegId::Pc)? as u32)
 }
 
 /// Serve one debugging session for the halted `board` on `127.0.0.1:port`.

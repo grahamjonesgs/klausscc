@@ -236,23 +236,12 @@ impl MonitorCmd for EmuTarget {
 
 impl SingleThreadBase for EmuTarget {
     fn read_registers(&mut self, regs: &mut KlaussRegs) -> TargetResult<(), Self> {
-        let d = self.cpu.debug_regs();
-        regs.r = d.r;
-        regs.sp = d.sp;
-        regs.pc = d.pc;
-        regs.flags = u32::from(d.flags);
-        regs.int_mask = u32::from(d.int_mask);
+        *regs = KlaussRegs::from(&self.cpu.debug_regs());
         Ok(())
     }
 
     fn write_registers(&mut self, regs: &KlaussRegs) -> TargetResult<(), Self> {
-        self.cpu.set_debug_regs(&DebugRegs {
-            r: regs.r,
-            sp: regs.sp,
-            pc: regs.pc,
-            flags: (regs.flags & 0xF) as u8,
-            int_mask: (regs.int_mask & 0xF) as u8,
-        });
+        self.cpu.set_debug_regs(&DebugRegs::from(regs));
         Ok(())
     }
 
@@ -288,33 +277,41 @@ impl SingleThreadBase for EmuTarget {
 
 impl SingleRegisterAccess<()> for EmuTarget {
     fn read_register(&mut self, _tid: (), reg_id: KlaussRegId, buf: &mut [u8]) -> TargetResult<usize, Self> {
-        let d = self.cpu.debug_regs();
-        let bytes: Vec<u8> = match reg_id {
-            KlaussRegId::Gpr(i) => d.r[usize::from(i)].to_le_bytes().to_vec(),
-            KlaussRegId::Sp => d.sp.to_le_bytes().to_vec(),
-            KlaussRegId::Pc => d.pc.to_le_bytes().to_vec(),
-            KlaussRegId::Flags => u32::from(d.flags).to_le_bytes().to_vec(),
-            KlaussRegId::IntMask => u32::from(d.int_mask).to_le_bytes().to_vec(),
-        };
-        let n = bytes.len().min(buf.len());
-        buf[..n].copy_from_slice(&bytes[..n]);
-        Ok(n)
+        let regs = KlaussRegs::from(&self.cpu.debug_regs());
+        Ok(reg_id.encode(regs.get(reg_id), buf))
     }
 
     fn write_register(&mut self, _tid: (), reg_id: KlaussRegId, val: &[u8]) -> TargetResult<(), Self> {
-        let mut d = self.cpu.debug_regs();
-        let word = |v: &[u8]| v.try_into().map(u32::from_le_bytes).map_err(|_| TargetError::NonFatal);
-        match reg_id {
-            KlaussRegId::Gpr(i) => {
-                d.r[usize::from(i)] = val.try_into().map(u64::from_le_bytes).map_err(|_| TargetError::NonFatal)?;
-            }
-            KlaussRegId::Sp => d.sp = word(val)?,
-            KlaussRegId::Pc => d.pc = word(val)?,
-            KlaussRegId::Flags => d.flags = (word(val)? & 0xF) as u8,
-            KlaussRegId::IntMask => d.int_mask = (word(val)? & 0xF) as u8,
-        }
-        self.cpu.set_debug_regs(&d);
+        let value = reg_id.decode(val).ok_or(TargetError::NonFatal)?;
+        let mut regs = KlaussRegs::from(&self.cpu.debug_regs());
+        regs.set(reg_id, value);
+        self.cpu.set_debug_regs(&DebugRegs::from(&regs));
         Ok(())
+    }
+}
+
+impl From<&DebugRegs> for KlaussRegs {
+    fn from(d: &DebugRegs) -> Self {
+        Self {
+            r: d.r,
+            sp: d.sp,
+            pc: d.pc,
+            flags: u32::from(d.flags),
+            int_mask: u32::from(d.int_mask),
+        }
+    }
+}
+
+/// The emulator keeps the low nibble of flags and `int_mask`.
+impl From<&KlaussRegs> for DebugRegs {
+    fn from(regs: &KlaussRegs) -> Self {
+        Self {
+            r: regs.r,
+            sp: regs.sp,
+            pc: regs.pc,
+            flags: (regs.flags & 0xF) as u8,
+            int_mask: (regs.int_mask & 0xF) as u8,
+        }
     }
 }
 
