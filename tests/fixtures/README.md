@@ -4,7 +4,7 @@ Test programs for verifying correct operation of the Klauss FPGA CPU, in ISA v2 
 
 ## Verification Method
 
-Each test uses **UART serial output** as the primary verification method. The built-in `$TXR` macro prints a register as 8 hex digits (through the `TX_HEX32` routine in `uart_stubs.kla`, which every test in the list below `!include`s), giving exact values to compare against expected results. Each test lists those values in its header, under `// Expected UART output:`, which is what `klausscc -T` and `--emulate-test` check.
+Each test uses **UART serial output** as the primary verification method. The built-in `$TXR` macro prints a register as 8 hex digits (through the `TX_HEX32` routine in `uart_stubs.kla`, which every test in the list below `!include`s), giving exact values to compare against expected results. Each test (apart from `test_io.kla`, which is checked by eye) lists those values in its header, under `// Expected UART output:`, which is what `klausscc -T` and `--emulate-test` check.
 
 The tests were written for the v1 CPU, which also showed the test number on the 7-segment display and lit the LEDs at the end. The v2 ISA has no 7-segment instructions, so those lines are commented out (`// v2-removed ...`); the header comments still describe them. The tests end with **HALT**.
 

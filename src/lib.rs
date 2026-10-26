@@ -16,9 +16,10 @@
 //! * [`emu`] is the golden-model emulator; `debug` serves it, or the board
 //!   over `jtag`, to lldb as a GDB remote target.
 //! * `link` puts a program on the board over the UART or the network.
-//! * `diag`, `error`, `layout` and `num` are the leaves everything shares:
-//!   diagnostics, the error type and exit codes, the memory map and integer
-//!   literal parsing.
+//! * `diag`, `layout` and `num` are the leaves everything shares:
+//!   diagnostics, the memory map and integer literal parsing.  `error` is
+//!   the crate error type and exit codes; it wraps the serial, network and
+//!   GDB errors of the modules it reports for.
 
 mod asm;
 mod cli;
