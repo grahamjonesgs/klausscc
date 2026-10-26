@@ -226,7 +226,7 @@ fn immediates(opcode: &Opcode, tokens: &[&str], symbols: &SymbolTable, faults: &
 mod tests {
     use super::*;
     use crate::isa::Isa;
-    use crate::isa::disasm::disassemble_word;
+    use crate::isa::disasm::Disassembler;
     use crate::isa::table::V2_OPCODES;
 
     /// Encode `line` with the v2 table at address 0x20, with no labels.
@@ -370,7 +370,7 @@ mod tests {
             let line = opcode.name;
             let encoded = enc(line).unwrap();
             assert_eq!((encoded.word0, encoded.imm.len()), (Some(opcode.template), 0), "{line}");
-            assert_eq!(disassemble_word(opcode.template, V2_OPCODES), Some((line.to_owned(), 0)), "{line}");
+            assert_eq!(Disassembler::new(V2_OPCODES).word(opcode.template), Some((line.to_owned(), 0)), "{line}");
         }
         // The encodings themselves, as the listing and the emulator see them.
         let words: Vec<String> = ["NOP", "HALT", "WAIT", "RESET", "TRAP", "RET", "IRET", "LEAVE", "LEAVERET", "nop"]
@@ -434,7 +434,7 @@ mod tests {
             assert_eq!(faults(bad).0.hex(), "ERR     ", "{bad}");
         }
         // Disassembly round-trips the scaled offset.
-        let (text, vars) = disassemble_word(0x5AAF_F310, V2_OPCODES).unwrap();
+        let (text, vars) = Disassembler::new(V2_OPCODES).word(0x5AAF_F310).unwrap();
         assert_eq!((text.as_str(), vars), ("LDIDX32_S.S D B -4", 0));
     }
 
@@ -460,6 +460,6 @@ mod tests {
         let error = enc_at("JMP.S NOWHERE:", 0x30, &labels).unwrap_err();
         assert_eq!(error.faults, [EncodeFault::Operand(OperandError::UnknownLabel("NOWHERE:".to_owned()))]);
         assert_eq!(word0("JMP.S", 0x30), Ok(Some(0x6100_0000)));
-        assert_eq!(disassemble_word(0x747F_FE00, V2_OPCODES).unwrap().0, "BNEI A 0 PC-8");
+        assert_eq!(Disassembler::new(V2_OPCODES).word(0x747F_FE00).unwrap().0, "BNEI A 0 PC-8");
     }
 }
