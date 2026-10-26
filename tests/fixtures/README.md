@@ -102,6 +102,8 @@ That is the rate the bitstream fixes for the board UART.
   meant to be included (`uart_stubs.kla`, `string_print.kla` and the runtime
   files) is listed there with a small driver that supplies the `_start` or
   `main` it lacks; a new file of that kind needs an entry.
+  `driven_libraries_print_what_their_drivers_expect` also runs the
+  `string_print.kla` driver on the emulator and checks what it prints.
 - `tests/roundtrip.rs` runs `v2_hello.kla`, `v2_loop.kla` and `v2_math.kla`
   with `--emulate` and checks the exact characters they print.
 - `tests/cli.rs` runs `--emulate-test` on `test_strings.kla` and checks that
