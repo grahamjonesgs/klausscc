@@ -39,3 +39,8 @@ test_benchmark.kla
 test_directives.kla
 hello_world.kla
 test_64bit.kla
+
+// Emulator-vs-hardware check: every behaviour the emulator was aligned
+// with the RTL (flags, divide by zero, unaligned 64-bit, BEXTR/BDEP, .S imm8,
+// strings, inline data)
+hw_alignment.kla

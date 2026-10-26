@@ -1325,6 +1325,7 @@ The `tests/fixtures/` directory holds the test corpus; `cargo test` runs every f
 | `test_loop_patterns.kla`, `test_algorithms.kla`, `test_benchmark.kla` | Loops and small algorithms |
 | `test_directives.kla` | `.data`, `.text`, `.word`, `.comm`, `.global` |
 | `test_io.kla` | A numbered step sequence, checked by eye (no expected values) |
+| `hw_alignment.kla` | The emulator-vs-hardware check: flags, divide by zero, unaligned 64-bit access, `BEXTR`/`BDEP`, `.S` immediates, strings and inline data, each derived from the RTL |
 | `test2.kla`, `test_64bit.kla` | Compiled C linked with the runtime (see [C Programs and the Runtime](#c-programs-and-the-runtime)); `test_64bit` runs 33 64-bit integer checks and expects `00000000`, the failure count |
 | `uart_stubs.kla` | The UART print routines the tests include |
 

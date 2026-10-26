@@ -95,7 +95,7 @@ That is the rate the bitstream fixes for the board UART.
 - `emulator_corpus_passes` (in `src/commands/emulate.rs`) assembles every
   `.kla` here that lists expected values and checks them on the emulator. It
   is the same check as `klausscc --emulate-test tests/fixtures`. It also fails
-  if fewer than 24 files pass, so a test that stops declaring its values is
+  if fewer than 25 files pass, so a test that stops declaring its values is
   noticed.
 - `every_kla_file_assembles` (in `src/asm/corpus_tests.rs`) assembles every
   `.kla` here and in `runtime/` and fails on any error. A file that is only
@@ -139,6 +139,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 20 | `test_algorithms.kla` | Algorithms | Fibonacci, bubble sort, GCD, prime detection |
 | 21 | `test_benchmark.kla` | Stress | Binary search, bit ops, high multiply, carry flags, indexed memory |
 | 22 | `test_txstr.kla` | String data | `#name "string"` printed with `$TXSTR`: several words, `\n`, an empty string |
+| 23 | `hw_alignment.kla` | Emulator vs hardware | Every behaviour the emulator was recently aligned with the RTL; see [The emulator-vs-hardware check](#the-emulator-vs-hardware-check) |
 | — | `test_directives.kla` | Directives | `.global`, `.extern`, `.text`, `.word`, `.comm` |
 | — | `hello_world.kla` | Compiled C | Arithmetic, factorial, GCD, Fibonacci, primes |
 | — | `test_64bit.kla` | Compiled C | 33 64-bit checks; expects main's return value (the failure count) `00000000` |
@@ -164,6 +165,35 @@ board run covers the whole emulator corpus; `all_tests_lists_every_file_with_exp
 | `all_tests.txt` | The test list for `-L` and `--emulate-test` |
 | `*.c` | C sources of the compiled programs and other C samples, for the external C compilers |
 | `*.elf` | Prebuilt ELF images. They are v1-encoded: the loader tests use them only to check ELF parsing, and they do not run on the v2 emulator or CPU |
+
+## The emulator-vs-hardware check
+
+`hw_alignment.kla` checks, in one board run, that the emulator and the CPU
+agree on each behaviour the emulator was changed to match the RTL:
+
+- a) `ANDR`/`ORR`/`XORR`/`XORV` write no flags;
+- b) `MULR`/`MULUR`/`MULHR`/`MULHUR`/`MULV` write Z, S and V (V on a
+  low-half overflow, cleared by the high-half forms) and keep C;
+- c) `DIVR`/`MODR` write Z and clear V; divide by zero gives all ones (DIV)
+  or the dividend (MOD), sets V and keeps Z; `INT_MIN / -1`, `INT_MIN % -1`;
+- d) `ABSR` of `INT_MIN` (result and V);
+- e) `ROLR`/`RORR` by a register count of 1 keep C, `ROLR1`/`RORR1` write it;
+- f) the F-bit Z (and SEXT's S) writes of the unary ops, `COPY` and `CLZ`
+  writing none, `INCR` writing all four;
+- g) 64-bit loads and stores with A=0 at an address 4 past a doubleword
+  reach the aligned doubleword (scratch buffer at `0x0020_0000`);
+- h) `BEXTR` reading `rs1[63:32]` and writing Z; `BDEP` zero-extending;
+- i) the `.S` imm8 forms at -128/127 (sign-extended) and 0/255
+  (zero-extended);
+- j) a `#name` string printed with `$TXSTR` and read with byte loads;
+- k) code after inline data that the assembler padded to 8 bytes.
+
+Flag lines print `0000ZSCV`, one hex digit per flag. Each check sets the
+flags to a known state first, so a flag the instruction does not write
+shows its old value. The comments by each check derive its values from
+`pipeline_core.sv` (with line numbers), so they can be checked without the
+emulator. If `--emulate-test` passes and the board run (`-T`) fails, the
+first wrong line names the behaviour that differs.
 
 ## Expected Output Quick Reference
 
@@ -415,6 +445,9 @@ FFFFFFFE
 CAFEF00D
 600DC0DE
 ```
+
+### hw_alignment (23)
+102 values; see the file's header, which labels each one with its check.
 
 ## Notes
 
