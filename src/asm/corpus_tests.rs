@@ -98,8 +98,8 @@ fn read(file: &str, msg_list: &mut Diagnostics) -> Vec<SourceLine> {
     read_file_to_vector(&path.to_string_lossy(), msg_list).unwrap_or_else(|| panic!("cannot read {file}"))
 }
 
-/// Assemble `lines`, run it on the emulator as a UART-loaded program, and
-/// return what it printed and the stores it made while the UART was busy.
+/// Assemble `lines`, run it on the emulator, and return what it printed and
+/// the stores it made while the UART was busy.
 fn run(lines: Vec<SourceLine>) -> (Vec<u8>, crate::emu::TxBusyWrites) {
     let mut msg_list = Diagnostics::new();
     let isa = Isa::v2();
@@ -107,7 +107,7 @@ fn run(lines: Vec<SourceLine>) -> (Vec<u8>, crate::emu::TxBusyWrites) {
     let assembly = assemble_lines(lines, &isa, &macro_list, &mut msg_list);
     assert!(!msg_list.has_errors(), "{:?}", msg_list.messages());
     let image = assembly.image().expect("the driver has a _start");
-    let result = crate::emu::emulate_loaded_image(&image.to_ddr(), image.entry, 1_000_000, None);
+    let result = crate::emu::emulate_image(&image.to_ddr(), image.entry, 1_000_000, None);
     assert_eq!(result.stop, crate::emu::StopReason::Halt);
     (result.uart, result.tx_busy_writes)
 }

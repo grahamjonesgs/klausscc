@@ -47,12 +47,21 @@ Findings, now fixed:
   DMCONTROL `HALTREQ` set, so the next plain load froze on its first
   instruction. Fixed in klausscc (`ac1bd4d`, a clear "already stopped" error)
   and in the RTL (`cf01863`).
-- **F2:** `v2_hello.kla` wrote TX_DATA without polling TX_BUSY. On hardware the
-  loader's 18-byte "Load Complete OK" reply is still being sent when the
-  program starts, and a write while busy is **dropped**. The emulator now
-  models TX busy time: 334 cycles per store, and the loader reply at start.
+- **F2:** `v2_hello.kla` wrote TX_DATA without polling TX_BUSY. A write while
+  busy is **dropped**, and on the bitstream tested (`cf01863`) the loader's
+  18-byte "Load Complete OK" reply was still being sent when the program
+  started. The emulator models TX busy time: 334 cycles per store.
   `--emulate` reports a write while busy, and `--emulate-test` fails the
-  file. All fixtures now poll before writing.
+  file. All fixtures now poll before every write.
+  Since the `KlaussCPU.sv` `START_WAIT` change of 2026-10-26 the CPU waits
+  for the reply to finish before starting the program, so TX is idle at
+  program start and the first store is taken; the emulator now starts with
+  TX idle to match. Every store must still poll, because back-to-back
+  stores are dropped, and on bitstreams built before that change the first
+  store can also be dropped while the reply is still going out. The RX FIFO
+  is not yet flushed at `LOAD_COMPLETE` (proposed, pending approval); the
+  emulator starts with it empty, which matches the board only once that
+  flush lands.
 
 ## Phase B: done (klausscc 8674f21, bitstream cf01863)
 
@@ -60,7 +69,9 @@ Every item passed and there were **no emulator/hardware mismatches**:
 - hw_alignment passed 102/102 on the board.
 - `-L` matched `--emulate-test` file for file (25/26, with 1 skipped).
 - The busy-write drop matched exactly: the emulator and the board both drop
-  all 3 unpolled bytes.
+  all 3 unpolled bytes. (That was the pre-`START_WAIT`-change bitstream and
+  emulator; the emulator now sends the first unpolled byte and drops the
+  other 2, as the RTL with the change should.)
 - The C runtime, byte strings and the F1/F2 retests all passed.
 - `run_board_smoke.sh` passed.
 
@@ -110,7 +121,7 @@ from the RTL source.
 
 - **Emulator** (`src/emu/`):
   - `exec.rs`: flags and legality.
-  - `mmio.rs`: TX busy (`UART_CYCLES_PER_STORE`, `LOADER_MESSAGE_CYCLES`),
+  - `mmio.rs`: TX busy (`UART_CYCLES_PER_STORE`; TX idle at program start),
     DELAY time and timers.
   - Unaligned 64-bit accesses go to the aligned doubleword.
   - Every behaviour cites `pipeline_core.sv`, `mem_read_write.sv`,

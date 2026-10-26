@@ -205,16 +205,33 @@ access reads 0 or is ignored.
   after the first at the earliest. There is no TX FIFO: a store while
   busy is ignored by `uart_send_msg` (:47-76), so the emulator drops it
   too and records its PC and byte (`EmulateResult::tx_busy_writes`).
-  `--emulate` lists them; `--emulate-test` fails the file. A program
-  run by `--emulate` / `--emulate-test` (`emulate_loaded_image`) starts
-  with TX busy for `LOADER_MESSAGE_CYCLES` = 5976 cycles: the
-  loader's `"Load Complete OK\n\r"` reply (`uart_tasks.vh` :519-539),
-  which `LOAD_COMPLETE` starts as it hands over (`KlaussCPU.sv` :1727;
-  `START_WAIT` does not wait, since `r_start_wait_counter` is never
-  loaded). A store is taken 18 × 332 + 2 cycles after `LOAD_COMPLETE`,
-  and the pipeline starts 2 cycles after it. `--gdbserver` and `emulate_image` start with TX idle. The busy
+  `--emulate` lists them; `--emulate-test` fails the file. The busy
   window is the RTL's in cycles, but polling loops spin a different
   number of times, because instructions take 2 modelled cycles each.
+- A program starts with TX idle (`--emulate`, `--emulate-test` and
+  `--gdbserver` alike), as a program loaded over the UART (or by
+  netboot) does since the `KlaussCPU.sv` `START_WAIT` change of
+  2026-10-26. `LOAD_COMPLETE` clears `r_start_wait_counter` and
+  `r_start_wait_ack` and starts the `"Load Complete OK\n\r"` reply;
+  `START_WAIT` waits for `uart_send_msg` to take it (`w_sending_msg` =
+  1, at most 16 cycles), then for `w_sending_msg` = 0. Edge by edge: E0
+  the last byte's stop bit finishes (`uart_tx.sv` :90-96, `r_Tx_Done` =
+  1, `s_CLEANUP`); E1 `uart_send_msg` sees `w_Tx_Done` and goes
+  `s_TX_MSG` → `s_CLEANUP` (`o_sending_msg` still 1); E2 `s_CLEANUP`
+  clears `o_sending_msg` and goes to `s_IDLE`; E3 `START_WAIT` samples
+  `w_sending_msg` = 0 and sets `r_pip_start` and `PIPE_RUN`. So
+  `STATUS.TX_BUSY` (`w_sending_msg`, `KlaussCPU.sv` :911) reads 0 at
+  the program's first instruction and its first `TX_DATA` store is
+  taken. Every store must still poll `TX_BUSY`, because back-to-back
+  stores are dropped. On bitstreams built before that change the
+  pipeline starts while the 18-byte reply is still going out (about
+  6000 cycles, 60 µs), so the first store can be dropped too; the
+  emulator does not model that.
+- The UART RX FIFO starts empty, so `STATUS.RX_EMPTY` reads 1 until
+  `--gdbserver`'s stdin feeds it. That matches the board only once the
+  RX FIFO is flushed at `LOAD_COMPLETE`, a change proposed but not yet
+  in the RTL; until then a byte left in the FIFO when the load
+  completes is still there when the program starts.
 - Memory is 128 MiB. Reads past the end return 0 and writes past it are
   dropped.
 

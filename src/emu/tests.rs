@@ -63,9 +63,11 @@ fn test_setr_and_inc_wraps_zero() {
 fn test_mmio_uart_tx_drops_a_store_while_busy() {
     // SETR B TX_DATA ; SETR A 'H' ; MEMSET8 [B]=A ; SETR A 'i' ; MEMSET8 [B]=A ; HALT
     // MEMSET8 data=rd=A(0), base=rs1=B(1): 0x5C00_0000 | 0<<8 | 1<<4 = 0x5C00_0010.
-    // From reset the UART is idle, so 'H' goes out; 'i' is stored two
-    // instructions later, while 'H' is still being sent, and is dropped
-    // (uart_send_msg.sv :61-76 ignores a send request while busy).
+    // A program starts with the UART idle (as one loaded over the UART does
+    // since the KlaussCPU.sv START_WAIT change of 2026-10-26), so 'H', the
+    // first store, goes out; 'i' is stored two instructions later, while 'H'
+    // is still being sent, and is dropped (uart_send_msg.sv :61-76 ignores a
+    // send request while busy).
     let words = [
         0x8BD0_0100,
         0xF001_0000, // SETR B, TX_DATA
@@ -94,12 +96,6 @@ fn test_mmio_uart_tx_drops_a_store_while_busy() {
         r.tx_busy_writes.to_string(),
         "UART TX write while busy at PC 0x0000003C (byte 0x69 dropped)"
     );
-
-    // Started as a UART-loaded program, the loader's reply is still going
-    // out, so neither byte is sent: what the board did with v2_hello.kla.
-    let r = emulate_loaded_image(&img, CODE_BASE, 100, None);
-    assert_eq!(r.uart, b"");
-    assert_eq!(r.tx_busy_writes.total, 2);
 }
 
 #[test]
@@ -126,29 +122,32 @@ fn test_uart_tx_busy_lasts_one_frame() {
 }
 
 #[test]
-fn test_uart_load_starts_with_the_loader_reply_in_flight() {
-    // "Load Complete OK\n\r" (uart_tasks.vh :519-539) is 18 bytes; a store
-    // is taken 18 * 332 + 2 cycles after LOAD_COMPLETE, and the program starts
-    // 2 cycles after LOAD_COMPLETE.
-    assert_eq!(LOADER_MESSAGE_CYCLES, 18 * UART_CYCLES_PER_BYTE);
-    assert_eq!(LOADER_MESSAGE_CYCLES, 5976);
+fn test_uart_first_store_at_program_start_is_taken() {
+    // START_WAIT now waits for the loader's reply to finish before starting
+    // the pipeline, so at the program's first cycle TX_BUSY reads 0 and a
+    // store is taken at once; a second one fewer than UART_CYCLES_PER_STORE
+    // cycles later is dropped and recorded.
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
-    cpu.start_after_uart_load();
-    cpu.tick(LOADER_MESSAGE_CYCLES - 1);
-    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 1);
-    cpu.tick(1);
-    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 0);
+    assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 0, "idle at program start");
+    cpu.mmio_write(0xF001_0000, u64::from(b'A'));
+    cpu.tick(UART_CYCLES_PER_STORE - 1);
+    cpu.mmio_write(0xF001_0000, u64::from(b'B'));
+    assert_eq!(cpu.take_uart(), b"A", "the first store is taken");
+    let busy = cpu.take_tx_busy_writes();
+    assert_eq!((busy.total, busy.first[0].byte), (1, b'B'), "the second, within the frame, is dropped");
 }
 
 #[test]
 fn test_uart_busy_writes_keep_the_first_few() {
+    // The first of 41 back-to-back stores goes out; the other 40 are dropped.
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
-    cpu.start_after_uart_load();
-    for b in 0..40 {
+    for b in 0..41 {
         cpu.mmio_write(0xF001_0000, b);
     }
+    assert_eq!(cpu.take_uart(), [0]);
     let busy = cpu.take_tx_busy_writes();
     assert_eq!((busy.first.len(), busy.total), (16, 40));
+    assert_eq!(busy.first[0].byte, 1);
     assert!(busy.to_string().ends_with("\n... and 24 more"), "{busy}");
 }
 

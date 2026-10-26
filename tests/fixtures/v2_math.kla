@@ -12,6 +12,6 @@ WAIT_TX:
 LDIDX8 E B 0x10      // E = STATUS
 ANDV E 0x1           // TX_BUSY
 CMPRV E 0
-JMPNE WAIT_TX:       // wait for the loader's reply to finish
+JMPNE WAIT_TX:       // wait for TX idle (older bitstreams: the loader's reply)
 MEMSET8 A B          // transmit 0x30 = '0'
 HALT

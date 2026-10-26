@@ -48,6 +48,11 @@ const UART_RX_DATA: u32 = 0x0008;
 const UART_STATUS: u32 = 0x0010;
 /// Modelled RX FIFO depth.  Only affects the `STATUS.RX_FULL` bit; the RTL depth is
 /// a parameter and the emulator has no external byte source that would fill it.
+///
+/// The FIFO starts empty.  That matches the board only once the RX FIFO is
+/// flushed at `LOAD_COMPLETE`, a change proposed but not yet in the RTL: until
+/// then a byte left in the FIFO when the load completes is still there when
+/// the program starts.
 const UART_RX_FIFO_DEPTH: usize = 16;
 
 // ---- UART transmit timing ----------------------------------------------------
@@ -59,6 +64,18 @@ const UART_RX_FIFO_DEPTH: usize = 16;
 // goes out unchanged.  `STATUS.TX_BUSY` is that sender's `o_sending_msg`
 // (`KlaussCPU.sv` :911), which stays set until the cycle after the last
 // frame's `s_CLEANUP` (`uart_send_msg.sv` :61-82).
+//
+// A program loaded over the UART (or by netboot) starts with the transmitter
+// idle, so its first store is taken (`KlaussCPU.sv` `START_WAIT` change of
+// 2026-10-26): `LOAD_COMPLETE` clears `r_start_wait_counter` and
+// `r_start_wait_ack` and starts the `"Load Complete OK\n\r"` reply, and
+// `START_WAIT` waits for `uart_send_msg` to take it (`w_sending_msg` = 1, at
+// most 16 cycles) and then for `w_sending_msg` = 0.  The last stop bit ends
+// (`uart_tx.sv` :90-96), `uart_send_msg` goes `s_TX_MSG` -> `s_CLEANUP` on the
+// next edge and `s_CLEANUP` -> `s_IDLE` (clearing `o_sending_msg`) on the one
+// after, and `START_WAIT` then sees 0 and sets `r_pip_start`.  On bitstreams
+// built before that change the pipeline starts while the 18-byte reply is
+// still going out (about 60 µs), and a store made then is dropped too.
 
 /// `uart_tx` `CLKS_PER_BIT` (`uart_tx.sv` :7, not overridden by the instance in
 /// `uart_send_msg.sv` :29): `i_Clk` cycles per bit.  `i_Clk` is the 100 MHz MIG
@@ -84,26 +101,6 @@ const UART_SEND_MSG_OVERHEAD_CYCLES: u64 = 2;
 /// registered address a cycle after its strobe (`KlaussCPU.sv` :411-414), so
 /// a `TX_BUSY` poll issued right after a store already sees 1.
 pub const UART_CYCLES_PER_STORE: u64 = UART_CYCLES_PER_BYTE + UART_SEND_MSG_OVERHEAD_CYCLES;
-/// Length of the loader's `"Load Complete OK\n\r"` reply (`t_tx_message(1)`,
-/// `uart_tasks.vh` :519-539, `r_msg_send_DV` set at :615), which `LOAD_COMPLETE`
-/// starts sending as it hands over to the program (`KlaussCPU.sv` :1727).
-/// `START_WAIT` does not wait for it: `r_start_wait_counter` is never loaded
-/// (declared at :155, only tested and decremented at :1738-1746), so it is 0
-/// and the pipeline is started on the next cycle.  A netboot image goes
-/// through the same `LOAD_COMPLETE` (:1103-1108, :1559).
-pub const LOADER_MESSAGE_LEN: u64 = 18;
-/// `i_Clk` cycles the loader's reply keeps `TX_BUSY` set after a program loaded
-/// over the UART starts (5976, about 60 µs): a program must poll `TX_BUSY`
-/// before its first `TX_DATA` store too.  A store is taken from 18 × 332 + 2
-/// cycles after the `LOAD_COMPLETE` cycle that sets `r_msg_send_DV` (as for
-/// one byte, above), and the program's first cycle is
-/// `LOADER_TO_PIPELINE_CYCLES` after that cycle, so from it the window is at
-/// most 18 × 332 (the first store comes a few fetch cycles later still).
-pub const LOADER_MESSAGE_CYCLES: u64 = LOADER_MESSAGE_LEN * UART_CYCLES_PER_BYTE + UART_SEND_MSG_OVERHEAD_CYCLES - LOADER_TO_PIPELINE_CYCLES;
-/// Cycles from `LOAD_COMPLETE` to the pipeline's first cycle: `START_WAIT`
-/// (one cycle, the counter being 0) sets `r_pip_start`, which the pipeline
-/// sees the cycle after (`KlaussCPU.sv` :1718, :1736-1742).
-const LOADER_TO_PIPELINE_CYCLES: u64 = 2;
 /// How many write-while-busy events [`TxBusyWrites`] keeps (the total is
 /// always counted), so a program that never polls cannot grow it without bound.
 const TX_BUSY_WRITES_KEPT: usize = 16;
@@ -340,13 +337,6 @@ impl Cpu {
         }
         self.uart.push(b);
         self.tx_busy_until = self.cycles + UART_CYCLES_PER_STORE;
-    }
-
-    /// Start as a program loaded over the UART (or by netboot) does: with the
-    /// loader's `"Load Complete OK"` reply still going out, so `TX_BUSY` reads 1
-    /// for the first [`LOADER_MESSAGE_CYCLES`].
-    pub const fn start_after_uart_load(&mut self) {
-        self.tx_busy_until = self.cycles + LOADER_MESSAGE_CYCLES;
     }
 
     /// Take the `TX_DATA` stores made while busy since the last call.

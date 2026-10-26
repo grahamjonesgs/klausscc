@@ -31,9 +31,10 @@
 //! The UART transmitter is timed on the same clock: a `TX_DATA` store keeps
 //! `STATUS.TX_BUSY` set for one frame and the sender's own two cycles
 //! ([`UART_CYCLES_PER_STORE`]), and a store while it is set is dropped, as
-//! the RTL drops it, and recorded ([`EmulateResult::tx_busy_writes`]).  [`emulate_loaded_image`] starts a
-//! program as the board does after a UART load, with the loader's reply still
-//! being sent for [`LOADER_MESSAGE_CYCLES`].
+//! the RTL drops it, and recorded ([`EmulateResult::tx_busy_writes`]).  A
+//! program starts with the transmitter idle, as one loaded over the UART does
+//! since the `KlaussCPU.sv` `START_WAIT` change of 2026-10-26 (the pipeline
+//! waits for the loader's reply to finish), so its first store is taken.
 //!
 //! ## v2 word-0 layout (`doc/ISA_ENCODING_V2.md` §1)
 //!
@@ -71,7 +72,7 @@ mod tests;
 mod trace;
 
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
-pub use mmio::{IrqState, LOADER_MESSAGE_CYCLES, LOADER_MESSAGE_LEN, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE};
+pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE};
 
 use crate::layout::is_mmio;
 use flags::Flags;
@@ -429,9 +430,11 @@ impl Cpu {
     }
 }
 
-/// Emulate a flat DDR image starting at `entry` from reset (the UART idle),
-/// streaming the per-instruction trace to `trace` (if `Some`) as the run
-/// proceeds (see [`Cpu::run`]).
+/// Emulate a flat DDR image starting at `entry` from reset, streaming the
+/// per-instruction trace to `trace` (if `Some`) as the run proceeds (see
+/// [`Cpu::run`]).  The UART transmitter starts idle, as it does when a program
+/// loaded onto the board starts; `--emulate` and `--emulate-test` run
+/// programs this way.
 ///
 /// Nothing is buffered: each retired instruction's line is written straight to
 /// the sink, so a multi-million instruction run uses no extra memory
@@ -439,16 +442,5 @@ impl Cpu {
 #[must_use]
 pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
-    cpu.run(max_instructions, trace)
-}
-
-/// As [`emulate_image`], but starting the way a program loaded onto the board
-/// does: with the loader's reply still being sent, so the UART transmitter is
-/// busy for [`LOADER_MESSAGE_CYCLES`] (see [`Cpu::start_after_uart_load`]).
-/// `--emulate` and `--emulate-test` run programs this way.
-#[must_use]
-pub fn emulate_loaded_image(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
-    let mut cpu = Cpu::new(image, entry);
-    cpu.start_after_uart_load();
     cpu.run(max_instructions, trace)
 }

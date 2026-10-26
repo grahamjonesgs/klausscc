@@ -59,15 +59,15 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
 
 /// Run `image` on the emulator and report the run (`--emulate`).
 ///
-/// The program starts as one loaded onto the board does, with the loader's
-/// reply still going out (see [`emu::emulate_loaded_image`]).  Streams the
+/// The program starts with the UART transmitter idle, as one loaded onto the
+/// board does (see [`emu::emulate_image`]).  Streams the
 /// per-instruction trace to `trace_file` (or, for `"-"`, stdout), prints the
 /// summary, then the instruction count, the stop reason, any `TX_DATA` store
 /// made while the transmitter was busy, and the captured UART output on stdout.
 #[cfg(not(tarpaulin_include))]
 fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions: u64, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut trace_writer = open_trace_writer(trace_file, msg_list)?;
-    let result = emu::emulate_loaded_image(
+    let result = emu::emulate_image(
         &image.to_ddr(),
         image.entry,
         max_instructions,
@@ -288,7 +288,7 @@ pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro
         return Err("assembly error".to_owned());
     };
 
-    let result = emu::emulate_loaded_image(&image.to_ddr(), image.entry, max_instructions, None);
+    let result = emu::emulate_image(&image.to_ddr(), image.entry, max_instructions, None);
     // Each byte as one `char` (Latin-1): every byte survives into the lines.
     let uart: String = result.uart.iter().copied().map(char::from).collect();
     let got: Vec<&str> = uart.lines().filter_map(hex_token).collect();
@@ -434,8 +434,9 @@ mod tests {
     #[test]
     fn verify_fails_a_program_that_stores_to_the_uart_while_busy() {
         // test_regs printing through uart_stubs.kla routines that no longer
-        // poll TX_BUSY: on the board the bytes stored while the loader's reply
-        // or the previous character is still going out are lost.
+        // poll TX_BUSY: the first byte goes out (the transmitter is idle at
+        // program start), but on the board each byte stored while the
+        // previous one is still going out is lost.
         let dir = tempfile::tempdir().expect("tempdir");
         let stubs = fs::read_to_string(fixture_dir().join("uart_stubs.kla")).expect("read stubs");
         let no_poll: Vec<&str> = stubs.lines().filter(|line| !line.starts_with("CALL TX_WAIT_READY:")).collect();
