@@ -62,7 +62,7 @@ mod trace;
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
 pub use mmio::IrqState;
 
-use crate::layout::{CODE_BASE, is_mmio};
+use crate::layout::is_mmio;
 use flags::Flags;
 use std::collections::VecDeque;
 
@@ -172,15 +172,29 @@ impl Cpu {
     /// Build a CPU with a flat DDR image already laid out (heap header + code).
     ///
     /// `image` is the `build_ddr_image` output (header at 0x0, code at 0x20).
-    /// `entry` is the byte address of the first instruction to execute.
+    /// `entry` is the byte address of the first instruction to execute.  An
+    /// image larger than the 128 MiB address space is truncated to it (no
+    /// toolchain image comes near that size).
     #[must_use]
     pub fn new(image: &[u8], entry: u32) -> Self {
-        let mut mem = vec![0_u8; MEM_SIZE];
-        let n = image.len().min(MEM_SIZE);
+        Self::with_memory(image, entry, MEM_SIZE, STACK_TOP)
+    }
+
+    /// A CPU with only `mem_size` bytes of RAM and the stack at its top, so a
+    /// test does not allocate the full 128 MiB.
+    #[cfg(test)]
+    pub(crate) fn with_mem_size(image: &[u8], entry: u32, mem_size: usize) -> Self {
+        Self::with_memory(image, entry, mem_size, u32::try_from(mem_size).unwrap_or(STACK_TOP))
+    }
+
+    /// A CPU at reset with `mem_size` bytes of RAM holding `image`.
+    fn with_memory(image: &[u8], entry: u32, mem_size: usize, stack_top: u32) -> Self {
+        let mut mem = vec![0_u8; mem_size];
+        let n = image.len().min(mem_size);
         mem[..n].copy_from_slice(&image[..n]);
         Self {
             regs: [0; 16],
-            sp: STACK_TOP,
+            sp: stack_top,
             pc: entry,
             flags: Flags::default(),
             mem,
@@ -204,13 +218,16 @@ impl Cpu {
 
     // ---- memory helpers (little-endian) --------------------------------------
 
-    /// Read a 32-bit little-endian word (used for instruction fetch and imm).
-    fn read32(&self, addr: u32) -> u32 {
+    /// The `N` RAM bytes at `addr`, or `None` if any is past the end of RAM.
+    fn bytes<const N: usize>(&self, addr: u32) -> Option<[u8; N]> {
         let a = addr as usize;
-        if a + 4 > self.mem.len() {
-            return 0;
-        }
-        u32::from_le_bytes([self.mem[a], self.mem[a + 1], self.mem[a + 2], self.mem[a + 3]])
+        self.mem.get(a..a + N)?.try_into().ok()
+    }
+
+    /// Read a 32-bit little-endian word (used for instruction fetch and imm);
+    /// 0 past the end of RAM.
+    fn read32(&self, addr: u32) -> u32 {
+        self.bytes(addr).map_or(0, u32::from_le_bytes)
     }
 
     /// Read a 64-bit little-endian doubleword.
@@ -223,13 +240,7 @@ impl Cpu {
         if is_mmio(addr) {
             return self.mmio_read(addr);
         }
-        let a = addr as usize;
-        if a + 8 > self.mem.len() {
-            return 0;
-        }
-        let mut b = [0_u8; 8];
-        b.copy_from_slice(&self.mem[a..a + 8]);
-        u64::from_le_bytes(b)
+        self.bytes(addr).map_or(0, u64::from_le_bytes)
     }
 
     /// Read `n` bytes (1/2/4) zero-extended into a u64, little-endian.
@@ -256,11 +267,8 @@ impl Cpu {
         self.note_access(addr, 8, Access::Store);
         if is_mmio(addr) {
             self.mmio_write(addr, val);
-        } else {
-            let a = addr as usize;
-            if a + 8 <= self.mem.len() {
-                self.mem[a..a + 8].copy_from_slice(&val.to_le_bytes());
-            }
+        } else if let Some(dst) = self.mem.get_mut(addr as usize..addr as usize + 8) {
+            dst.copy_from_slice(&val.to_le_bytes());
         }
         self.last_write = Some(MemWrite {
             addr,
@@ -300,13 +308,10 @@ impl Cpu {
 
     /// Side-effect-free 64-bit RAM read (trace annotation): no MMIO, no watchpoints.
     fn peek64(&self, addr: u32) -> u64 {
-        let a = addr as usize;
-        if is_mmio(addr) || a + 8 > self.mem.len() {
+        if is_mmio(addr) {
             return 0;
         }
-        let mut b = [0_u8; 8];
-        b.copy_from_slice(&self.mem[a..a + 8]);
-        u64::from_le_bytes(b)
+        self.bytes(addr).map_or(0, u64::from_le_bytes)
     }
 
     /// One step of the machine: take a ready interrupt (entry is a step of
@@ -389,10 +394,4 @@ impl Cpu {
 pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
     cpu.run(max_instructions, trace)
-}
-
-/// The default entry point for an assembled `.kla` program (code base 0x20).
-#[must_use]
-pub const fn default_entry() -> u32 {
-    CODE_BASE
 }

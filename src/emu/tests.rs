@@ -1,7 +1,19 @@
 //! Unit tests for the emulator, driven through hand-encoded v2 words.
 
 use super::*;
+use crate::layout::CODE_BASE;
 use crate::output::image::build_ddr_image;
+
+/// RAM for a test CPU: plenty for the hand-written programs, and far less
+/// to allocate than the real 128 MiB.
+const TEST_MEM: usize = 1 << 20;
+/// A test CPU's initial SP: the top of its RAM.
+const TEST_STACK_TOP: u32 = TEST_MEM as u32;
+
+/// A test CPU with `image` loaded and the PC at the code base.
+fn cpu_with(image: &[u8]) -> Cpu {
+    Cpu::with_mem_size(image, CODE_BASE, TEST_MEM)
+}
 
 // ---- v2 instruction encoders (word 0) ------------------------------------
 // Register letters A..P map to nibbles 0..15. `word0 = template | rd<<8 | rs1<<4 | rs2`.
@@ -24,14 +36,14 @@ fn image_from_words(words: &[u32]) -> Vec<u8> {
 /// The trace of running `image` (at most 100 instructions).
 fn trace_of(image: &[u8]) -> String {
     let mut buf = Vec::new();
-    let _ = emulate_image(image, default_entry(), 100, Some(&mut buf));
+    let _ = emulate_image(image, CODE_BASE, 100, Some(&mut buf));
     String::from_utf8(buf).expect("the trace is ASCII")
 }
 
 /// Run words and return the final CPU for assertions.
 fn run_words(words: &[u32]) -> Cpu {
     let img = image_from_words(words);
-    let mut cpu = Cpu::new(&img, default_entry());
+    let mut cpu = cpu_with(&img);
     cpu.run(1000, None);
     cpu
 }
@@ -63,13 +75,13 @@ fn test_mmio_uart_tx() {
         HALT,
     ];
     let img = image_from_words(&words);
-    let r = emulate_image(&img, default_entry(), 100, None);
+    let r = emulate_image(&img, CODE_BASE, 100, None);
     assert_eq!(r.uart, b"Hi");
 }
 
 #[test]
 fn test_uart_keeps_raw_bytes() {
-    let mut cpu = Cpu::new(&image_from_words(&[HALT]), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
     for b in [0xC3_u8, 0xA9, 0xFF, b'\n'] {
         cpu.mmio_write(0xF001_0000, 0x1200 | u64::from(b));
     }
@@ -92,7 +104,7 @@ fn test_mmio_uart_rx_read_to_consume_and_status() {
         HALT,
     ];
     let img = image_from_words(&words);
-    let mut cpu = Cpu::new(&img, default_entry());
+    let mut cpu = cpu_with(&img);
     cpu.feed_uart_rx(&[0x41]); // 'A'
     let _ = cpu.run(100, None);
     assert_eq!(cpu.regs[3], 0b000, "RX_EMPTY clear while a byte is queued, TX never busy");
@@ -322,7 +334,7 @@ fn test_call_and_ret() {
     ];
     let cpu = run_words(&words);
     assert_eq!(cpu.regs[0] as u32, 0x42);
-    assert_eq!(cpu.sp, STACK_TOP, "RET must unwind the pushed return address");
+    assert_eq!(cpu.sp, TEST_STACK_TOP, "RET must unwind the pushed return address");
 }
 
 // ---- debugger interface (--gdbserver) ------------------------------------
@@ -332,7 +344,7 @@ const STORE_THEN_LOAD: [u32; 7] = [0x8BD0_0000, 0x200, 0x8BD0_0100, 0x55, 0x5F00
 
 #[test]
 fn test_debug_step_one_and_regs() {
-    let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&STORE_THEN_LOAD));
     assert_eq!(cpu.step_one(true), None);
     assert_eq!(cpu.debug_regs().r[0], 0x200);
     assert_eq!(cpu.debug_regs().pc, 0x28, "SETR is 2 words");
@@ -351,7 +363,7 @@ fn test_debug_step_one_and_regs() {
 
 #[test]
 fn test_debug_watchpoints_report_after_access() {
-    let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&STORE_THEN_LOAD));
     cpu.add_watch(Watch {
         addr: 0x204,
         len: 4,
@@ -371,7 +383,7 @@ fn test_debug_watchpoints_report_after_access() {
     };
     assert_eq!(hits, vec![(hit, 0x34)]);
 
-    let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&STORE_THEN_LOAD));
     cpu.add_watch(Watch {
         addr: 0x200,
         len: 1,
@@ -386,7 +398,7 @@ fn test_debug_watchpoints_report_after_access() {
 
 #[test]
 fn test_debug_add_and_remove_watch() {
-    let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&STORE_THEN_LOAD));
     let w = Watch {
         addr: 0x200,
         len: 8,
@@ -404,7 +416,7 @@ fn test_debug_add_and_remove_watch() {
 
 #[test]
 fn test_debug_memory_access_skips_mmio_side_effects() {
-    let mut cpu = Cpu::new(&image_from_words(&[HALT]), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
     cpu.feed_uart_rx(b"xy");
     let mut buf = [0_u8; 8];
     assert_eq!(cpu.debug_read(0xF001_0008, &mut buf), 0, "plain debug reads refuse MMIO");
@@ -422,7 +434,7 @@ fn test_debug_memory_access_skips_mmio_side_effects() {
 #[test]
 fn test_debug_trap_stops_on_the_trap_and_clear_stop_resumes() {
     // TRAP ; SETR A 7 ; HALT
-    let mut cpu = Cpu::new(&image_from_words(&[0x6C04_0000, 0x8BD0_0000, 7, HALT]), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&[0x6C04_0000, 0x8BD0_0000, 7, HALT]));
     assert_eq!(cpu.step_one(true), Some(StopReason::Trap));
     assert_eq!(cpu.debug_regs().pc, 0x20, "PC stays on the TRAP");
     assert_eq!(cpu.fetch_word(0x20), 0x6C04_0000);
@@ -467,21 +479,21 @@ fn timer_program() -> Vec<u32> {
 
 #[test]
 fn test_timer_irq_wakes_wait_and_iret_restores() {
-    let mut cpu = Cpu::new(&image_from_words(&timer_program()), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&timer_program()));
     let result = cpu.run(1000, None);
     assert_eq!(result.stop, StopReason::Halt);
     assert_eq!(cpu.regs[2], 0x77, "handler ran");
     assert_eq!(cpu.regs[3], 0x55, "IRET resumed after the WAIT");
     assert_eq!(cpu.int_mask, 1, "IRET restored the mask the entry cleared");
-    assert_eq!(cpu.sp, STACK_TOP, "IRET popped the context word");
-    let ctx = cpu.peek64(STACK_TOP - 8);
+    assert_eq!(cpu.sp, TEST_STACK_TOP, "IRET popped the context word");
+    let ctx = cpu.peek64(TEST_STACK_TOP - 8);
     assert_eq!(ctx as u32, 0x60, "pushed resume PC");
     assert_eq!((ctx >> 39) & 0xF, 1, "pushed INT_MASK");
 }
 
 #[test]
 fn test_irq_entry_is_its_own_step_and_masks_the_source() {
-    let mut cpu = Cpu::new(&image_from_words(&timer_program()), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&timer_program()));
     while cpu.debug_regs().pc != 0x70 {
         assert_eq!(cpu.step_one(true), None);
     }
@@ -492,7 +504,7 @@ fn test_irq_entry_is_its_own_step_and_masks_the_source() {
 
 #[test]
 fn test_single_step_never_takes_an_interrupt() {
-    let mut cpu = Cpu::new(&image_from_words(&timer_program()), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&timer_program()));
     while cpu.step_one(false).is_none() {}
     assert_eq!(cpu.step_one(false), Some(StopReason::Halt));
     assert_eq!(cpu.regs[2], 0, "handler never ran");
@@ -502,13 +514,13 @@ fn test_single_step_never_takes_an_interrupt() {
 
 #[test]
 fn test_wait_with_nothing_to_wake_it_stops() {
-    let mut cpu = Cpu::new(&image_from_words(&[WAIT, HALT]), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&[WAIT, HALT]));
     assert_eq!(cpu.run(100, None).stop, StopReason::WaitForever(0x24));
 }
 
 #[test]
 fn test_irq_controller_registers() {
-    let mut cpu = Cpu::new(&image_from_words(&[HALT]), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
     cpu.mmio_write(0xF00F_0018, 0x1234);
     cpu.mmio_write(0xF00F_0030, 500);
     cpu.mmio_write(0xF00F_0000, 0xFF);
@@ -523,7 +535,7 @@ fn test_irq_controller_registers() {
 #[test]
 fn test_perf_counters_count_from_the_last_clear() {
     const NOP: u32 = 0x6C00_0000;
-    let mut cpu = Cpu::new(&image_from_words(&[NOP, NOP, NOP, HALT]), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&[NOP, NOP, NOP, HALT]));
     assert_eq!(cpu.step_one(true), None);
     assert_eq!(cpu.step_one(true), None);
     assert_eq!(cpu.mmio_read(0xF00D_0010), 2, "PERF_INSTR");
@@ -541,7 +553,7 @@ fn test_perf_counters_count_from_the_last_clear() {
 
 #[test]
 fn test_irq_vector_registers_are_doubleword_aligned() {
-    let mut cpu = Cpu::new(&image_from_words(&[HALT]), default_entry());
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
     for (i, offset) in [0x10_u32, 0x18, 0x20, 0x28].into_iter().enumerate() {
         cpu.mmio_write(0xF00F_0000 | offset, 0x100 + i as u64);
     }
@@ -601,11 +613,11 @@ fn test_v3_enter_leave() {
     // R15 = 0x77; ENTER 3 (0x6600_0003); SETR A,5; LEAVE (0x6640_0000).
     let cpu = run_words(&[0x4BD7_7F00, 0x6600_0003, 0x4BD0_5000, 0x6640_0000, HALT]);
     assert_eq!(cpu.regs[15], 0x77, "LEAVE restores the caller's R15");
-    assert_eq!(cpu.sp, STACK_TOP, "LEAVE unwinds the whole frame");
+    assert_eq!(cpu.sp, TEST_STACK_TOP, "LEAVE unwinds the whole frame");
     // Frame state inside: R15 = SP_entry-8, SP = R15 - 24, [R15] = old R15.
     let cpu = run_words(&[0x4BD7_7F00, 0x6600_0003, HALT]);
-    assert_eq!(cpu.regs[15] as u32, STACK_TOP - 8);
-    assert_eq!(cpu.sp, STACK_TOP - 8 - 24);
+    assert_eq!(cpu.regs[15] as u32, TEST_STACK_TOP - 8);
+    assert_eq!(cpu.sp, TEST_STACK_TOP - 8 - 24);
 }
 
 #[test]
@@ -621,7 +633,7 @@ fn test_v3_leaveret() {
     ]);
     assert_eq!(cpu.regs[0], 9);
     assert_eq!(cpu.regs[15], 0x77);
-    assert_eq!(cpu.sp, STACK_TOP);
+    assert_eq!(cpu.sp, TEST_STACK_TOP);
     assert_eq!(cpu.pc, 0x28);
 }
 
@@ -701,7 +713,7 @@ fn test_v3_short_branch_and_call() {
     ]);
     assert_eq!(cpu.regs[0], 0);
     assert_eq!(cpu.regs[1], 7);
-    assert_eq!(cpu.sp, STACK_TOP);
+    assert_eq!(cpu.sp, TEST_STACK_TOP);
     assert_eq!(cpu.pc, 0x30, "short CALL must return to PC+4");
     // Backward conditional: A=3; loop: DECR A; JMPNZ -1 word.
     let cpu = run_words(&[0x4BD0_3000, 0x57C8_0000, 0x610F_FFFF, HALT]);
@@ -778,7 +790,7 @@ impl std::io::Write for BrokenPipe {
 fn test_trace_stops_at_the_first_write_error_and_the_run_goes_on() {
     let img = image_from_words(&[setr(0, 1)[0], 1, setr(1, 2)[0], 2, HALT]);
     let mut sink = BrokenPipe::default();
-    let r = emulate_image(&img, default_entry(), 100, Some(&mut sink));
+    let r = emulate_image(&img, CODE_BASE, 100, Some(&mut sink));
     assert_eq!(sink.writes, 1, "nothing is written after the first error");
     assert_eq!((r.instructions, r.stop), (3, StopReason::Halt));
 }
@@ -787,7 +799,7 @@ fn test_trace_stops_at_the_first_write_error_and_the_run_goes_on() {
 fn test_stale_v1_binary_traps() {
     // Any v1 word has bits [31:30] = 00 (LEN=00) -> ERR_INV_OPCODE on the first fetch.
     let img = image_from_words(&[0x0000_0800, 0xFF, 0x0000_F011]);
-    let r = emulate_image(&img, default_entry(), 100, None);
+    let r = emulate_image(&img, CODE_BASE, 100, None);
     assert!(matches!(r.stop, StopReason::InvalidOpcode(0x0000_0800)));
 }
 
@@ -846,4 +858,111 @@ fn bdep_deposits_the_low_field_of_rs2_and_leaves_flags() {
     // len 0 deposits nothing: C = low half of the base.
     let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x8BD0_0100, 0xA5, 0x9340_0201, 0x0004, HALT]);
     assert_eq!(cpu.regs[2], 0xFFFF_FFFF);
+}
+
+// ---- table-driven single-instruction checks --------------------------------
+// These encoders build word 0 from the documented fields, independent of the
+// assembler's opcode table: LEN=01 [31:30], CLASS [29:26], OP [25:22],
+// rd [11:8], rs1 [7:4], rs2 [3:0].
+
+/// A 1-word class-1 ALU reg-reg word: `rd = rs1 OP rs2`.
+const fn alu_rr(op: u32, rd: u32, rs1: u32, rs2: u32) -> u32 {
+    0x4400_0000 | (op << 22) | (rd << 8) | (rs1 << 4) | rs2
+}
+
+/// A 1-word class-4 shift word with an embedded count and `F` (bit 14) set.
+const fn shift_imm_f(op: u32, rd: u32, rs1: u32, count: u32) -> u32 {
+    0x5000_0000 | (op << 22) | (1 << 21) | (count << 15) | (1 << 14) | (rd << 8) | (rs1 << 4)
+}
+
+/// Run the one instruction `word` with R0 = `a`, R1 = `b` and the flags
+/// nibble `flags` (Z S C V), returning the CPU after it.
+fn exec_one(word: u32, a: u64, b: u64, flags: u8) -> Cpu {
+    let mut cpu = cpu_with(&image_from_words(&[word, HALT]));
+    let mut regs = cpu.debug_regs();
+    regs.r[0] = a;
+    regs.r[1] = b;
+    regs.flags = flags;
+    cpu.set_debug_regs(&regs);
+    assert_eq!(cpu.step_one(false), None, "{word:08x} executes");
+    cpu
+}
+
+#[test]
+fn add_and_sub_set_zscv() {
+    const MIN: u64 = 1 << 63;
+    // (op, a, b, ZSCV after)
+    let table = [
+        (0, 1, 1, 0b0000),        // ADDR 1 + 1
+        (0, u64::MAX, 1, 0b1010), // wraps to 0: Z, C
+        (0, MIN - 1, 1, 0b0101),  // i64::MAX + 1: S, V
+        (0, MIN, MIN, 0b1011),    // 0: Z, C, V
+        (1, 5, 3, 0b0000),        // SUBR 5 - 3
+        (1, 3, 5, 0b0110),        // -2: S, C (borrow)
+        (1, 7, 7, 0b1000),        // 0: Z
+        (1, MIN, 1, 0b0001),      // i64::MIN - 1: V
+        (1, 0, MIN, 0b0111),      // 0 - i64::MIN: S, C, V
+    ];
+    for (op, a, b, zscv) in table {
+        let cpu = exec_one(alu_rr(op, 2, 0, 1), a, b, 0);
+        assert_eq!(cpu.debug_regs().flags, zscv, "op {op}: {a:#x}, {b:#x}");
+        let want = if op == 0 { a.wrapping_add(b) } else { a.wrapping_sub(b) };
+        assert_eq!(cpu.regs[2], want);
+    }
+}
+
+#[test]
+fn min_max_compare_signed_or_unsigned_and_leave_flags() {
+    let (neg5, three) = (-5_i64 as u64, 3);
+    // (op, result of op(-5, 3))
+    for (op, want) in [(7, neg5), (8, three), (9, three), (10, neg5)] {
+        for flags in [0b0000, 0b1111] {
+            let cpu = exec_one(alu_rr(op, 2, 0, 1), neg5, three, flags);
+            assert_eq!(cpu.regs[2], want, "op {op}");
+            assert_eq!(cpu.debug_regs().flags, flags, "op {op} leaves the flags");
+        }
+    }
+}
+
+#[test]
+fn rcl_and_rcr_rotate_one_bit_through_carry() {
+    const TOP: u64 = 1 << 63;
+    // (op, a, carry in, result, ZSCV after); the count field is ignored.
+    let table = [
+        (5, TOP | 1, false, 0b10, 0b0010),            // RCL: bit 63 -> C
+        (5, TOP | 1, true, 0b11, 0b0010),             // C -> bit 0
+        (5, TOP, false, 0, 0b1010),                   // F sets Z
+        (5, 1, true, 0b11, 0b0000),                   // C cleared
+        (6, TOP | 1, false, TOP >> 1, 0b0010),        // RCR: bit 0 -> C
+        (6, TOP | 1, true, TOP | (TOP >> 1), 0b0010), // C -> bit 63
+        (6, 1, false, 0, 0b1010),
+        (6, TOP, true, TOP | (TOP >> 1), 0b0000),
+    ];
+    for (op, a, carry, want, zscv) in table {
+        let cpu = exec_one(shift_imm_f(op, 2, 0, 7), a, 0, if carry { 0b0010 } else { 0 });
+        assert_eq!(cpu.regs[2], want, "op {op}: {a:#x} carry {carry}");
+        assert_eq!(cpu.debug_regs().flags, zscv, "op {op}: {a:#x} carry {carry}");
+    }
+}
+
+#[test]
+fn reserved_encodings_stop_without_moving_the_pc() {
+    // (word, why it is reserved)
+    let table = [
+        (alu_rr(11, 0, 0, 0), "ALU reg-reg op 11"),
+        (0x4C00_0000 | (1 << 21) | (5 << 23), "boolean compare PRED 5"),
+        (0x5000_0000 | (7 << 22), "shift op 7"),
+        (0x5400_0000 | (11 << 22), "unary op 11"),
+        (0x6000_0000 | (10 << 19), "branch COND 10"),
+        (0x6800_0000 | (3 << 24), "mul/div op 3"),
+        (0x6C00_0000 | (6 << 16), "system op 6"),
+        (0x7400_0000 | (5 << 23), "fused branch PRED 5"),
+        (0x7C00_0000, "class F"),
+        (0xB400_0000, "fused branch is 1 word only"),
+    ];
+    for (word, why) in table {
+        let mut cpu = cpu_with(&image_from_words(&[word, HALT]));
+        assert_eq!(cpu.step_one(false), Some(StopReason::InvalidOpcode(word)), "{why}");
+        assert_eq!(cpu.debug_regs().pc, CODE_BASE, "{why}");
+    }
 }
