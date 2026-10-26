@@ -65,7 +65,7 @@ use std::process::ExitCode;
 
 /// Run the `klausscc` command with the process's command line.
 ///
-/// Parses the command line and resolves its [`Mode`] before doing any work,
+/// Parses the command line and resolves its run mode before doing any work,
 /// runs the mode, prints the run summary (the error and warning counts) once
 /// and turns the outcome into the process exit status: `0` on success, `2`
 /// when tests failed, `3` when a test timed out, `1` otherwise.  Failures are
