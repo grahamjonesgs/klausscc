@@ -8,7 +8,7 @@
 //! ([`Image::to_kbt`]) or as raw DDR bytes ([`Image::to_ddr`]) for the network
 //! boot, the boot ROM ([`readmemh`]) and the emulator.
 
-use crate::asm::line::{LineType, Pass2};
+use crate::asm::line::Pass2;
 use crate::diag::Diagnostics;
 use crate::layout::{CODE_BASE, HEAP_HEADER_WORDS, heap_start};
 use std::fmt::Write as _;
@@ -44,22 +44,15 @@ impl Image {
         heap_start(CODE_BASE + self.bytes.len() as u32)
     }
 
-    /// Lay out assembled lines in memory.
+    /// Lay out assembled lines in memory, to start at `entry`.
     ///
     /// Each line's machine code is placed at its `program_counter` (relative
-    /// to [`CODE_BASE`]), in memory byte order.  The entry point is the
-    /// `_start` line's address.  Returns `None` when the program has no
-    /// `_start`.
+    /// to [`CODE_BASE`]), in memory byte order.  This one layout is what the
+    /// `.kbt`, the DDR image and the emulator all load.
     #[must_use]
-    pub(crate) fn from_lines(lines: &[Pass2]) -> Option<Self> {
+    pub(crate) fn from_lines(lines: &[Pass2], entry: u32) -> Self {
         let mut code: Vec<u8> = Vec::new();
-        let mut entry: Option<u32> = None;
-
         for line in lines {
-            if line.line_type == LineType::Start {
-                entry = Some(line.program_counter);
-                continue;
-            }
             let len = line.emitted.byte_len();
             if len == 0 {
                 continue;
@@ -70,8 +63,7 @@ impl Image {
             }
             line.emitted.copy_to(&mut code[offset..offset + len]);
         }
-
-        entry.map(|entry| Self::new(code, entry))
+        Self::new(code, entry)
     }
 
     /// The `.kbt` serial wire format: `S`, the heap header, the program, the
@@ -149,34 +141,6 @@ fn kbt_checksum(words: &[u32]) -> u32 {
     (sum + count) % 0x1_0000
 }
 
-/// Return String of bit codes with start/stop bytes and CRC.
-///
-/// Based on the Pass2 vector, create the `.kbt` wire string: the lines' machine
-/// code is laid out one after another, in memory byte order, and framed by
-/// [`Image::to_kbt`].  The program must have exactly one `_start`, which is
-/// its entry point; otherwise that is reported and `None` returned.
-pub(crate) fn create_bin_string(pass2: &[Pass2], msg_list: &mut Diagnostics) -> Option<String> {
-    let mut starts = pass2.iter().filter(|x| x.line_type == LineType::Start);
-    let entry = match (starts.next(), starts.next()) {
-        (Some(start), None) => start.program_counter,
-        (None, _) => {
-            msg_list.error("No start address found");
-            return None;
-        }
-        (Some(_), Some(_)) => {
-            msg_list.error("Multiple start addresses found");
-            return None;
-        }
-    };
-    let mut bytes: Vec<u8> = Vec::new();
-    for pass in pass2 {
-        let start = bytes.len();
-        bytes.resize(start + pass.emitted.byte_len(), 0);
-        pass.emitted.copy_to(&mut bytes[start..]);
-    }
-    Image::new(bytes, entry).to_kbt(msg_list)
-}
-
 /// Build the raw DDR image bytes for network loading (TCP netboot).
 ///
 /// Mirrors the `.kbt` memory layout ([`Image::to_kbt`]) but emits **raw
@@ -222,7 +186,7 @@ pub(crate) fn readmemh(ddr: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::asm::line::Emitted;
+    use crate::asm::line::{Emitted, LineType};
 
     /// A `Pass2` line of `line_type` at `program_counter` emitting `emitted`.
     fn line(line_type: LineType, program_counter: u32, emitted: Emitted) -> Pass2 {
@@ -258,11 +222,16 @@ mod tests {
             line(LineType::Label, 0x28, Emitted::None),
             line(LineType::Opcode, 0x28, Emitted::Code(vec![0x6C01_0000])),
         ];
-        let image = Image::from_lines(&lines).unwrap();
+        let image = Image::from_lines(&lines, 0x20);
         assert_eq!(image.entry, 0x20);
         assert_eq!(image.bytes, vec![0x00, 0x00, 0xD0, 0x8B, 0x41, 0, 0, 0, 0x00, 0x00, 0x01, 0x6C]);
-        // No _start: nothing to run.
-        assert_eq!(Image::from_lines(&lines[1..]), None);
+        // Out of source order: still placed by address.
+        let mut reversed = lines.clone();
+        reversed.reverse();
+        assert_eq!(Image::from_lines(&reversed, 0x20), image);
+        // Data is copied as it is.
+        let data = [line(LineType::Data, 0x24, Emitted::Data(vec![1, 2, 3, 4]))];
+        assert_eq!(Image::from_lines(&data, 0x20).bytes, [0, 0, 0, 0, 1, 2, 3, 4]);
     }
 
     #[test]
@@ -277,20 +246,6 @@ mod tests {
         // sum: 0x28 + (0x6C01 + 0x0000) + 0x20 = 0x6C49; count = 2 × 10 words = 20.
         let checksum = "5D6C0000"; // 0x6C49 + 20, little-endian
         assert_eq!(kbt, format!("S{header}{body}{entry}Z{checksum}X"));
-        assert!(msg_list.messages().is_empty());
-    }
-
-    #[test]
-    fn to_kbt_matches_the_assembled_kbt() {
-        // The same program through create_bin_string and through an Image.
-        let lines = [
-            line(LineType::Start, 0x20, Emitted::None),
-            line(LineType::Opcode, 0x20, Emitted::Code(vec![0x8BD0_0000, 0x41])),
-            line(LineType::Opcode, 0x28, Emitted::Code(vec![0x6C01_0000])),
-        ];
-        let mut msg_list = Diagnostics::new();
-        let image = Image::from_lines(&lines).unwrap();
-        assert_eq!(image.to_kbt(&mut msg_list), create_bin_string(&lines, &mut msg_list));
         assert!(msg_list.messages().is_empty());
     }
 
@@ -339,149 +294,6 @@ mod tests {
         assert_eq!(lines.len(), 5);
         assert_eq!(lines[0], "0000000000000028");
         assert_eq!(lines[4], "000000006C010000");
-    }
-
-    #[test]
-    // Test that the bin_string is created correctly with start value
-
-    fn test_create_bin_string1() {
-        let pass2 = &mut Vec::<Pass2>::new();
-        pass2.push(Pass2 {
-            emitted: Emitted::None,
-            file_name: String::from("test"),
-            input_text_line: String::default(),
-            line_counter: 0,
-            program_counter: 1,
-            line_type: LineType::Start,
-        });
-        pass2.push(Pass2 {
-            emitted: Emitted::Data(vec![0x12, 0x34]),
-            file_name: String::from("test"),
-            input_text_line: String::default(),
-            line_counter: 0,
-            program_counter: 3,
-            line_type: LineType::Data,
-        });
-        pass2.push(Pass2 {
-            emitted: Emitted::Data(vec![0x43, 0x21]),
-            input_text_line: String::default(),
-            file_name: String::from("test"),
-            line_counter: 0,
-            program_counter: 5,
-            line_type: LineType::Data,
-        });
-        let mut msg_list = Diagnostics::new();
-        let bin_string = create_bin_string(pass2, &mut msg_list);
-        // Word 0: heap_start=0x28 LE → "28000000"; hi32=0 → "00000000".
-        // Entry pc=1 LE → "01000000". 2-byte data passes through unchanged.
-        // No "Z0010" — checksum is a 32-bit LE word immediately after Z.
-        // 10 × 8-char groups (8 header + "12344321" + entry); count=20.
-        // sum: "28000000"→40 (0x28), "12344321"→21845, "01000000"→1 = 21886.
-        // chk = (21886+20)%65536 = 21906 = 0x5592; LE → "92550000".
-        assert_eq!(
-            bin_string,
-            Some("S28000000000000000000000000000000000000000000000000000000000000001234432101000000Z92550000X".to_owned())
-        );
-    }
-
-    #[test]
-    // A stream that is not whole 32-bit words gets no .kbt at all, rather than
-    // one with a zero checksum
-    fn test_create_bin_string_part_word() {
-        let pass2 = vec![
-            Pass2 {
-                emitted: Emitted::None,
-                file_name: String::from("test"),
-                input_text_line: String::default(),
-                line_counter: 0,
-                program_counter: 0x20,
-                line_type: LineType::Start,
-            },
-            Pass2 {
-                emitted: Emitted::Data(vec![0; 3]),
-                file_name: String::from("test"),
-                input_text_line: String::default(),
-                line_counter: 0,
-                program_counter: 0x20,
-                line_type: LineType::Data,
-            },
-        ];
-        let mut msg_list = Diagnostics::new();
-        assert_eq!(create_bin_string(&pass2, &mut msg_list), None);
-        assert_eq!(
-            msg_list.messages()[0].text(),
-            "Program image is not a whole number of 32-bit words, length is 78 hex characters"
-        );
-    }
-
-    #[test]
-    // Test that the bin_string is null if duplicate starts
-
-    fn test_create_bin_string2() {
-        let pass2 = &mut Vec::<Pass2>::new();
-        pass2.push(Pass2 {
-            emitted: Emitted::None,
-            file_name: String::from("test"),
-            input_text_line: String::default(),
-            line_counter: 0,
-            program_counter: 1,
-            line_type: LineType::Start,
-        });
-        pass2.push(Pass2 {
-            emitted: Emitted::None,
-            file_name: String::from("test"),
-            input_text_line: String::default(),
-            line_counter: 0,
-            program_counter: 3,
-            line_type: LineType::Start,
-        });
-        pass2.push(Pass2 {
-            emitted: Emitted::Data(vec![0x43, 0x21]),
-            input_text_line: String::default(),
-            file_name: String::from("test"),
-            line_counter: 0,
-            program_counter: 5,
-            line_type: LineType::Data,
-        });
-        let mut msg_list = Diagnostics::new();
-        let bin_string = create_bin_string(pass2, &mut msg_list);
-        assert_eq!(bin_string, None);
-        assert_eq!(msg_list.messages()[0].text(), "Multiple start addresses found");
-    }
-
-    #[test]
-    // Test that the bin_string is null if no starts
-
-    fn test_create_bin_string3() {
-        let pass2 = &mut Vec::<Pass2>::new();
-        pass2.push(Pass2 {
-            emitted: Emitted::None,
-            file_name: String::from("test"),
-            input_text_line: String::default(),
-            line_counter: 0,
-            program_counter: 1,
-            line_type: LineType::Comment,
-        });
-        pass2.push(Pass2 {
-            emitted: Emitted::Data(vec![0x12, 0x34]),
-            file_name: String::from("test"),
-            input_text_line: String::default(),
-            line_counter: 0,
-            program_counter: 3,
-            line_type: LineType::Data,
-        });
-        pass2.push(Pass2 {
-            emitted: Emitted::Data(vec![0x43, 0x21]),
-            input_text_line: String::default(),
-            file_name: String::from("test"),
-            line_counter: 0,
-            program_counter: 5,
-            line_type: LineType::Data,
-        });
-        let mut msg_list = Diagnostics::new();
-        let bin_string = create_bin_string(pass2, &mut msg_list);
-        assert_eq!(bin_string, None);
-        assert_eq!(msg_list.messages()[0].text(), "No start address found");
     }
 
     #[test]

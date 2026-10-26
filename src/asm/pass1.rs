@@ -155,8 +155,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, isa:
     // so a .word read from a 4-aligned address returns the preceding word instead.
     // Code is 4-byte-granular, data elements are 8-byte multiples, so aligning the
     // section start once keeps every label and .word in it aligned. The pad is a
-    // real stream entry, so the sequential .kbt, the offset-based image, and label
-    // addresses all stay consistent.
+    // real data line, so the image and the listing hold it like any other data.
     if !data_pass0.is_empty() && !program_counter.is_multiple_of(8) {
         let pad = 8 - (program_counter % 8);
         pass1.push(Pass1 {

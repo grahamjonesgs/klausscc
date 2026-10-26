@@ -30,8 +30,8 @@ pub(crate) mod symbols;
 
 use crate::diag::Diagnostics;
 use crate::isa::Isa;
-use crate::output::image::{Image, create_bin_string};
-use line::{Pass2, SourceLine};
+use crate::output::image::Image;
+use line::{LineType, Pass2, SourceLine};
 use macros::{Macro, apply_source_macros, expand_macros};
 use pass1::get_pass1;
 use pass2::get_pass2;
@@ -46,15 +46,38 @@ pub(crate) struct Assembly {
 }
 
 impl Assembly {
+    /// The addresses of the `_start` lines, in source order.
+    fn starts(&self) -> impl Iterator<Item = u32> + '_ {
+        self.lines
+            .iter()
+            .filter(|line| line.line_type == LineType::Start)
+            .map(|line| line.program_counter)
+    }
+
     /// The `.kbt` wire-format image of the program, or `None` (reported) when
     /// it does not have exactly one `_start` or is not whole 32-bit words.
     pub(crate) fn to_kbt(&self, msg_list: &mut Diagnostics) -> Option<String> {
-        create_bin_string(&self.lines, msg_list)
+        let mut starts = self.starts();
+        let entry = match (starts.next(), starts.next()) {
+            (Some(entry), None) => entry,
+            (None, _) => {
+                msg_list.error("No start address found");
+                return None;
+            }
+            (Some(_), Some(_)) => {
+                msg_list.error("Multiple start addresses found");
+                return None;
+            }
+        };
+        Image::from_lines(&self.lines, entry).to_kbt(msg_list)
     }
 
     /// The program laid out in memory, or `None` when it has no `_start`.
+    ///
+    /// It starts at the last `_start`; only [`to_kbt`](Self::to_kbt) insists
+    /// on exactly one.
     pub(crate) fn image(&self) -> Option<Image> {
-        Image::from_lines(&self.lines)
+        self.starts().last().map(|entry| Image::from_lines(&self.lines, entry))
     }
 }
 
@@ -150,9 +173,9 @@ mod tests {
                 "Error in data definition for .zeropad 3: size \"3\" must be a multiple of 4 bytes".to_owned()
             )]
         );
-        let (pass2, mut msg_list) = assemble_text("_start\nHALT\n.zeropad 4\n");
+        let (lines, mut msg_list) = assemble_text("_start\nHALT\n.zeropad 4\n");
         assert_eq!(msg_list.count(MessageType::Error), 0);
-        assert!(create_bin_string(&pass2, &mut msg_list).is_some());
+        assert!(Assembly { lines }.to_kbt(&mut msg_list).is_some());
     }
 
     #[test]
@@ -243,5 +266,107 @@ mod tests {
         assert_eq!(image.entry, 0x20);
         assert_eq!(image.to_kbt(&mut msg_list), assembly.to_kbt(&mut msg_list));
         assert!(!msg_list.has_errors());
+    }
+
+    /// A `Pass2` line of `line_type` at `program_counter` emitting `emitted`.
+    fn line(line_type: LineType, program_counter: u32, emitted: Emitted) -> Pass2 {
+        Pass2 {
+            emitted,
+            file_name: String::from("test"),
+            input_text_line: String::default(),
+            line_counter: 0,
+            program_counter,
+            line_type,
+        }
+    }
+
+    #[test]
+    // The .kbt frames the lines laid out by address, starting at _start
+    fn test_to_kbt_with_start() {
+        let assembly = Assembly {
+            lines: vec![
+                line(LineType::Start, 1, Emitted::None),
+                line(LineType::Data, 0x20, Emitted::Data(vec![0x12, 0x34])),
+                line(LineType::Data, 0x22, Emitted::Data(vec![0x43, 0x21])),
+            ],
+        };
+        let mut msg_list = Diagnostics::new();
+        // Word 0: heap_start=0x28 LE → "28000000"; hi32=0 → "00000000".
+        // Entry pc=1 LE → "01000000".  The data bytes are sent in memory order.
+        // No "Z0010" — checksum is a 32-bit LE word immediately after Z.
+        // 10 × 8-char groups (8 header + "12344321" + entry); count=20.
+        // sum: 0x28 → 40, bytes 12 34 43 21 → 0x21433412 → 0x2143 + 0x3412 = 21845, entry → 1: 21886.
+        // chk = (21886+20)%65536 = 21906 = 0x5592; LE → "92550000".
+        assert_eq!(
+            assembly.to_kbt(&mut msg_list),
+            Some("S28000000000000000000000000000000000000000000000000000000000000001234432101000000Z92550000X".to_owned())
+        );
+        assert!(msg_list.messages().is_empty());
+    }
+
+    #[test]
+    // A stream that is not whole 32-bit words gets no .kbt at all, rather than
+    // one with a zero checksum
+    fn test_to_kbt_part_word() {
+        let assembly = Assembly {
+            lines: vec![
+                line(LineType::Start, 0x20, Emitted::None),
+                line(LineType::Data, 0x20, Emitted::Data(vec![0; 3])),
+            ],
+        };
+        let mut msg_list = Diagnostics::new();
+        assert_eq!(assembly.to_kbt(&mut msg_list), None);
+        assert_eq!(
+            msg_list.messages()[0].text(),
+            "Program image is not a whole number of 32-bit words, length is 78 hex characters"
+        );
+    }
+
+    #[test]
+    // No .kbt with more than one _start; the image runs from the last
+    fn test_to_kbt_multiple_starts() {
+        let assembly = Assembly {
+            lines: vec![
+                line(LineType::Start, 0x20, Emitted::None),
+                line(LineType::Start, 0x24, Emitted::None),
+                line(LineType::Data, 0x20, Emitted::Data(vec![0x43, 0x21, 0, 0])),
+            ],
+        };
+        let mut msg_list = Diagnostics::new();
+        assert_eq!(assembly.to_kbt(&mut msg_list), None);
+        assert_eq!(msg_list.messages()[0].text(), "Multiple start addresses found");
+        assert_eq!(assembly.image().map(|image| image.entry), Some(0x24));
+    }
+
+    #[test]
+    // No .kbt and no image without a _start
+    fn test_to_kbt_no_start() {
+        let assembly = Assembly {
+            lines: vec![
+                line(LineType::Comment, 0x20, Emitted::None),
+                line(LineType::Data, 0x20, Emitted::Data(vec![0x12, 0x34, 0, 0])),
+            ],
+        };
+        let mut msg_list = Diagnostics::new();
+        assert_eq!(assembly.to_kbt(&mut msg_list), None);
+        assert_eq!(msg_list.messages()[0].text(), "No start address found");
+        assert_eq!(assembly.image(), None);
+    }
+
+    #[test]
+    // The .kbt is the kbt of the same image the emulator and DDR load
+    fn test_to_kbt_is_the_image_kbt() {
+        let assembly = Assembly {
+            lines: vec![
+                line(LineType::Start, 0x20, Emitted::None),
+                line(LineType::Opcode, 0x20, Emitted::Code(vec![0x8BD0_0000, 0x41])),
+                line(LineType::Opcode, 0x28, Emitted::Code(vec![0x6C01_0000])),
+            ],
+        };
+        let mut msg_list = Diagnostics::new();
+        let image = assembly.image().unwrap();
+        assert_eq!(image.bytes, [0x00, 0x00, 0xD0, 0x8B, 0x41, 0, 0, 0, 0x00, 0x00, 0x01, 0x6C]);
+        assert_eq!(image.to_kbt(&mut msg_list), assembly.to_kbt(&mut msg_list));
+        assert!(msg_list.messages().is_empty());
     }
 }
