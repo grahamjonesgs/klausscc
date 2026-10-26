@@ -110,7 +110,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
     };
     match *mode {
         // Monitor-only mode: `-m` on its own (optionally with `-s`) just opens
-        // the serial monitor.  With no `-s` the first USB serial port is
+        // the serial monitor.  With no `-s` the board's FTDI USB-UART is
         // auto-detected.
         Mode::Monitor(port) => monitor(port, cli.debug, msg_list),
         // net-load mode: flatten an ELF (or take a flat binary) and stream it
@@ -125,7 +125,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
             /* After a successful net-load, optionally monitor the board's UART
              * (and forward keystrokes), exactly like -s -m.  The load itself is
              * over TCP, so the monitor needs its own serial port: honour -s if
-             * given, otherwise auto-detect the first USB serial port (same as
+             * given, otherwise auto-detect the board's FTDI USB-UART (same as
              * -s with no value).  The load's summary comes first, as the
              * monitor runs until the user quits. */
             if let Some(port) = monitor_port {
