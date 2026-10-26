@@ -33,6 +33,24 @@ pub enum WatchKind {
     Access,
 }
 
+/// Which kind of data access an instruction made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Access {
+    /// A load.
+    Load,
+    /// A store.
+    Store,
+}
+
+/// The first watchpoint an instruction's data access hit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WatchHit {
+    /// The watchpoint's address ([`Watch::addr`]).
+    pub addr: u32,
+    /// The access that hit it.
+    pub access: Access,
+}
+
 /// A debugger watchpoint over `[addr, addr + len)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Watch {
@@ -61,19 +79,19 @@ pub struct DebugRegs {
 
 impl Cpu {
     /// Record the first watchpoint the current instruction's data access hits.
-    pub(super) fn note_access(&mut self, addr: u32, n: u32, is_store: bool) {
+    pub(super) fn note_access(&mut self, addr: u32, n: u32, access: Access) {
         if self.watches.is_empty() || self.watch_hit.is_some() {
             return;
         }
         let end = u64::from(addr) + u64::from(n);
         for w in &self.watches {
             let kind_matches = match w.kind {
-                WatchKind::Read => !is_store,
-                WatchKind::Write => is_store,
+                WatchKind::Read => access == Access::Load,
+                WatchKind::Write => access == Access::Store,
                 WatchKind::Access => true,
             };
             if kind_matches && u64::from(addr) < u64::from(w.addr) + u64::from(w.len) && u64::from(w.addr) < end {
-                self.watch_hit = Some((w.addr, is_store));
+                self.watch_hit = Some(WatchHit { addr: w.addr, access });
                 return;
             }
         }
@@ -186,14 +204,28 @@ impl Cpu {
         }
     }
 
-    /// Replace the watchpoint list.
-    pub fn set_watches(&mut self, watches: Vec<Watch>) {
-        self.watches = watches;
+    /// The watchpoints set, in the order they were added.
+    #[must_use]
+    pub fn watches(&self) -> &[Watch] {
+        &self.watches
     }
 
-    /// Take the watchpoint hit recorded by the last instruction, if any:
-    /// (watch address, was a store).
-    pub fn take_watch_hit(&mut self) -> Option<(u32, bool)> {
+    /// Add a watchpoint.
+    pub fn add_watch(&mut self, watch: Watch) {
+        self.watches.push(watch);
+    }
+
+    /// Remove a watchpoint equal to `watch`; false if there was none.
+    pub fn remove_watch(&mut self, watch: &Watch) -> bool {
+        let Some(pos) = self.watches.iter().position(|w| w == watch) else {
+            return false;
+        };
+        self.watches.remove(pos);
+        true
+    }
+
+    /// Take the watchpoint hit recorded by the last instruction, if any.
+    pub fn take_watch_hit(&mut self) -> Option<WatchHit> {
         self.watch_hit.take()
     }
 }

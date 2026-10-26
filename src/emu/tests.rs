@@ -335,11 +335,11 @@ fn test_debug_step_one_and_regs() {
 #[test]
 fn test_debug_watchpoints_report_after_access() {
     let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
-    cpu.set_watches(vec![Watch {
+    cpu.add_watch(Watch {
         addr: 0x204,
         len: 4,
         kind: WatchKind::Write,
-    }]);
+    });
     let mut hits = Vec::new();
     while cpu.step_one(true).is_none() {
         if let Some(hit) = cpu.take_watch_hit() {
@@ -348,19 +348,41 @@ fn test_debug_watchpoints_report_after_access() {
     }
     // Only the 8-byte store overlaps [0x204, 0x208); the load does not
     // trigger a write watch, and the store's trace read-back is silent.
-    assert_eq!(hits, vec![((0x204, true), 0x34)]);
+    let hit = WatchHit {
+        addr: 0x204,
+        access: Access::Store,
+    };
+    assert_eq!(hits, vec![(hit, 0x34)]);
 
     let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
-    cpu.set_watches(vec![Watch {
+    cpu.add_watch(Watch {
         addr: 0x200,
         len: 1,
         kind: WatchKind::Read,
-    }]);
+    });
     let mut reads = 0;
     while cpu.step_one(true).is_none() {
         reads += usize::from(cpu.take_watch_hit().is_some());
     }
     assert_eq!(reads, 1, "only MEMREADRR reads 0x200");
+}
+
+#[test]
+fn test_debug_add_and_remove_watch() {
+    let mut cpu = Cpu::new(&image_from_words(&STORE_THEN_LOAD), default_entry());
+    let w = Watch {
+        addr: 0x200,
+        len: 8,
+        kind: WatchKind::Access,
+    };
+    cpu.add_watch(w);
+    assert_eq!(cpu.watches(), [w]);
+    assert!(!cpu.remove_watch(&Watch { len: 4, ..w }), "only an equal watch is removed");
+    assert!(cpu.remove_watch(&w));
+    assert_eq!(cpu.watches(), []);
+    while cpu.step_one(true).is_none() {
+        assert_eq!(cpu.take_watch_hit(), None, "a removed watch never fires");
+    }
 }
 
 #[test]

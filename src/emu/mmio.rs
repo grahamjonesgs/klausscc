@@ -1,7 +1,7 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
 //! the performance counters.
 
-use super::{CYCLES_PER_MS, Cpu};
+use super::{CYCLES_PER_MS, Cpu, PerfBase};
 
 /// Interrupt controller / timer device select (`addr[27:16]`).
 const IRQ_DEV_SELECT: u32 = 0x00F;
@@ -55,8 +55,8 @@ impl Cpu {
             IRQ_DEV_SELECT => return self.irq_mmio_read(addr & 0xFFFF),
             PERF_DEV_SELECT => {
                 return match addr & 0xFFFF {
-                    0x0008 => self.cycles - self.perf_base.0,  // PERF_CYCLES
-                    0x0010 => self.instret - self.perf_base.1, // PERF_INSTR
+                    0x0008 => self.cycles - self.perf_base.cycles,   // PERF_CYCLES
+                    0x0010 => self.instret - self.perf_base.instret, // PERF_INSTR
                     _ => 0,
                 };
             }
@@ -82,7 +82,12 @@ impl Cpu {
         match (addr >> 16) & 0xFFF {
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
             IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
-            PERF_DEV_SELECT if addr as u16 == 0 && data & 1 != 0 => self.perf_base = (self.cycles, self.instret),
+            PERF_DEV_SELECT if addr as u16 == 0 && data & 1 != 0 => {
+                self.perf_base = PerfBase {
+                    cycles: self.cycles,
+                    instret: self.instret,
+                };
+            }
             _ => {}
         }
     }

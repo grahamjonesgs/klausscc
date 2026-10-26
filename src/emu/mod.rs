@@ -59,7 +59,7 @@ mod mmio;
 mod tests;
 mod trace;
 
-pub use debug::{DebugRegs, StopReason, Watch, WatchKind};
+pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
 pub use mmio::IrqState;
 
 use crate::layout::{CODE_BASE, is_mmio};
@@ -102,6 +102,27 @@ pub fn uart_bytes(uart: &str) -> Vec<u8> {
     uart.chars().map(|c| c as u32 as u8).collect()
 }
 
+/// A memory write, as the trace annotates it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MemWrite {
+    /// The doubleword address (the byte address for a 64-bit store, which
+    /// need not be aligned).
+    addr: u32,
+    /// Byte enables within the doubleword (bit `n` = byte lane `n`).
+    byte_enable: u8,
+    /// The doubleword after the write (for MMIO, the value stored).
+    data: u64,
+}
+
+/// The performance-counter values at the last `PERF_CTRL` clear.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct PerfBase {
+    /// Cycle counter.
+    cycles: u64,
+    /// Retired-instruction counter.
+    instret: u64,
+}
+
 /// The architectural machine state.
 pub struct Cpu {
     /// General-purpose registers R0..R15 (64-bit).
@@ -123,12 +144,12 @@ pub struct Cpu {
     /// Why execution stopped, once it has.  A HALT is final; the other
     /// reasons can be cleared by a debugger ([`Cpu::clear_stop`]).
     stop: Option<StopReason>,
-    /// Pending memory write for trace annotation (addr, `byte_enable`, data).
-    last_write: Option<(u32, u8, u64)>,
+    /// The current instruction's memory write, for the trace annotation.
+    last_write: Option<MemWrite>,
     /// Debugger watchpoints checked on every data access.
     watches: Vec<Watch>,
-    /// First watchpoint hit by the current instruction: (watch address, was a store).
-    watch_hit: Option<(u32, bool)>,
+    /// First watchpoint hit by the current instruction.
+    watch_hit: Option<WatchHit>,
     /// `INT_MASK`: per-source interrupt enables (4 bits).
     int_mask: u8,
     /// `INT_VEC0..3`: handler addresses (0 disables a source).
@@ -143,8 +164,8 @@ pub struct Cpu {
     cycles: u64,
     /// Retired instructions since reset (the `PERF_INSTR` counter).
     instret: u64,
-    /// Cycle / instruction values at the last `PERF_CTRL` clear.
-    perf_base: (u64, u64),
+    /// Counter values at the last `PERF_CTRL` clear.
+    perf_base: PerfBase,
     /// Parked in `WAIT` until an interrupt source is ready.
     waiting: bool,
 }
@@ -178,7 +199,7 @@ impl Cpu {
             timer_count: 0,
             cycles: 0,
             instret: 0,
-            perf_base: (0, 0),
+            perf_base: PerfBase::default(),
             waiting: false,
         }
     }
@@ -200,7 +221,7 @@ impl Cpu {
     /// mutates the UART FIFO.  Instruction/immediate fetch uses `read32` instead,
     /// so this never fires on a code fetch.
     fn read64(&mut self, addr: u32) -> u64 {
-        self.note_access(addr, 8, false);
+        self.note_access(addr, 8, Access::Load);
         if is_mmio(addr) {
             return self.mmio_read(addr);
         }
@@ -215,7 +236,7 @@ impl Cpu {
 
     /// Read `n` bytes (1/2/4) zero-extended into a u64, little-endian.
     fn read_sub(&mut self, addr: u32, n: usize) -> u64 {
-        self.note_access(addr, n as u32, false);
+        self.note_access(addr, n as u32, Access::Load);
         if is_mmio(addr) {
             // MMIO presents its value in the low bits; a sub-word load takes the
             // low `n` bytes (addr[2]==0 lands the value in [31:0]).
@@ -234,7 +255,7 @@ impl Cpu {
 
     /// Write a 64-bit doubleword, record the write for the trace.
     fn write64(&mut self, addr: u32, val: u64) {
-        self.note_access(addr, 8, true);
+        self.note_access(addr, 8, Access::Store);
         if is_mmio(addr) {
             self.mmio_write(addr, val);
         } else {
@@ -243,19 +264,27 @@ impl Cpu {
                 self.mem[a..a + 8].copy_from_slice(&val.to_le_bytes());
             }
         }
-        self.last_write = Some((addr, 0xFF, val));
+        self.last_write = Some(MemWrite {
+            addr,
+            byte_enable: 0xFF,
+            data: val,
+        });
     }
 
     /// Write the low `n` bytes (1/2/4) at `addr`, little-endian; record write.
     fn write_sub(&mut self, addr: u32, val: u64, n: usize) {
         // Byte-enable mask placed at the byte-lane within the doubleword, matching
         // the RTL's byte-enable semantics for the trace `be` field.
-        self.note_access(addr, n as u32, true);
+        self.note_access(addr, n as u32, Access::Store);
         let lane = (addr & 7) as usize;
         let be_bits: u8 = ((1_u16 << n) - 1).rotate_left(lane as u32) as u8;
         if is_mmio(addr) {
             self.mmio_write(addr, val);
-            self.last_write = Some((addr & !7, be_bits, val));
+            self.last_write = Some(MemWrite {
+                addr: addr & !7,
+                byte_enable: be_bits,
+                data: val,
+            });
             return;
         }
         let a = addr as usize;
@@ -264,7 +293,11 @@ impl Cpu {
                 self.mem[a + i] = (val >> (8 * i)) as u8;
             }
         }
-        self.last_write = Some((addr & !7, be_bits, self.peek64(addr & !7)));
+        self.last_write = Some(MemWrite {
+            addr: addr & !7,
+            byte_enable: be_bits,
+            data: self.peek64(addr & !7),
+        });
     }
 
     /// Side-effect-free 64-bit RAM read (trace annotation): no MMIO, no watchpoints.

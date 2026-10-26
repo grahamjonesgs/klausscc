@@ -26,7 +26,7 @@
 
 use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD};
 use super::{GdbError, RunEvent, Session, accept, mmio_monitor_cmd, run_session, session_summary};
-use crate::emu::{CYCLES_PER_MS, Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
+use crate::emu::{Access, CYCLES_PER_MS, Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
 use crate::layout::is_mmio;
 use gdbstub::common::Signal;
 use gdbstub::stub::SingleThreadStopReason;
@@ -66,7 +66,6 @@ pub(crate) struct EmuTarget {
     exec: ExecMode,
     sw_breakpoints: Vec<u32>,
     hw_breakpoints: Vec<u32>,
-    watches: Vec<Watch>,
     /// Set by resume/step: don't stop on a breakpoint at the resume PC.
     resuming: bool,
     /// `monitor mmio on`: let the debugger access device registers.
@@ -81,7 +80,6 @@ impl EmuTarget {
             exec: ExecMode::Continue,
             sw_breakpoints: Vec::new(),
             hw_breakpoints: Vec::new(),
-            watches: Vec::new(),
             resuming: false,
             allow_mmio: false,
             uart_rx,
@@ -132,11 +130,14 @@ impl EmuTarget {
         }
         self.resuming = false;
         let stop = self.cpu.step_one(allow_irq);
-        if let Some((addr, is_store)) = self.cpu.take_watch_hit() {
+        if let Some(hit) = self.cpu.take_watch_hit() {
             return Some(SingleThreadStopReason::Watch {
                 tid: (),
-                kind: if is_store { WatchKind::Write } else { WatchKind::Read },
-                addr,
+                kind: match hit.access {
+                    Access::Load => WatchKind::Read,
+                    Access::Store => WatchKind::Write,
+                },
+                addr: hit.addr,
             });
         }
         stop.map(|s| match s {
@@ -405,30 +406,23 @@ const fn emu_watch_kind(kind: WatchKind) -> EmuWatchKind {
 
 impl HwWatchpoint for EmuTarget {
     fn add_hw_watchpoint(&mut self, addr: u32, len: u32, kind: WatchKind) -> TargetResult<bool, Self> {
-        if self.watches.len() >= HW_WATCHPOINTS {
+        if self.cpu.watches().len() >= HW_WATCHPOINTS {
             return Ok(false);
         }
-        self.watches.push(Watch {
+        self.cpu.add_watch(Watch {
             addr,
             len,
             kind: emu_watch_kind(kind),
         });
-        self.cpu.set_watches(self.watches.clone());
         Ok(true)
     }
 
     fn remove_hw_watchpoint(&mut self, addr: u32, len: u32, kind: WatchKind) -> TargetResult<bool, Self> {
-        let target = Watch {
+        Ok(self.cpu.remove_watch(&Watch {
             addr,
             len,
             kind: emu_watch_kind(kind),
-        };
-        let Some(pos) = self.watches.iter().position(|w| *w == target) else {
-            return Ok(false);
-        };
-        self.watches.remove(pos);
-        self.cpu.set_watches(self.watches.clone());
-        Ok(true)
+        }))
     }
 }
 

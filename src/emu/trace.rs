@@ -17,8 +17,8 @@ impl Cpu {
         // RTL self-trace which now presents the same derived word.
         let _ = write!(out, " sp={:08x} f=", self.sp);
         let _ = out.write_all(&self.flags.trace_field());
-        if let Some((addr, be, data)) = self.last_write {
-            let _ = write!(out, " wr={addr:08x}/{be:02x}/{data:016x}");
+        if let Some(w) = self.last_write {
+            let _ = write!(out, " wr={:08x}/{:02x}/{:016x}", w.addr, w.byte_enable, w.data);
         }
         let _ = out.write_all(b"\n");
     }
