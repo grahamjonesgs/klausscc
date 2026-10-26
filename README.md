@@ -87,6 +87,12 @@ klausscc --opcodes
 klausscc --textmate
 ```
 
+A C program compiled with lcc `-target=klacpu` links with the runtime in
+`runtime/` by one line added to the compiled `.kla`,
+`!include path/to/runtime/crt0.kla`, which supplies `_start`, the C library
+and its UART routines (see "C Programs and the Runtime" in
+[the reference](doc/klauss_isa_reference.md#c-programs-and-the-runtime)).
+
 Exit status: `0` success, `1` error (including assembly errors), `2` tests
 failed, `3` a test timed out.
 
@@ -104,8 +110,11 @@ assembler-to-emulator round trip in `tests/roundtrip.rs` and the fixture
 corpus. [`tests/fixtures/`](tests/fixtures/README.md) holds the CPU test
 programs. Most of them list the UART values they should print, and `cargo
 test` assembles each of those and checks the values on the emulator (the same
-check as `klausscc --emulate-test tests/fixtures`). The ELF fixtures are
-v1-era builds, used only by the loader's ELF-parsing tests.
+check as `klausscc --emulate-test tests/fixtures`). Every `.kla` file in
+`tests/fixtures/` and `runtime/` must also assemble without errors; the files
+that are only meant to be included are built with a small driver that supplies
+their `_start` or `main`. The ELF fixtures are v1-era builds, used only by the
+loader's ELF-parsing tests.
 
 The board debugger's tests run against a model of the debug module, so they
 need neither the cable nor libftdi.

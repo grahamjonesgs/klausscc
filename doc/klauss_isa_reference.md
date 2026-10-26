@@ -42,6 +42,7 @@ Where the built-in emulator and the hardware disagree, this document describes t
   - [Monitoring UART Output](#monitoring-uart-output)
   - [Automated Test Mode](#automated-test-mode)
 - [Writing Test Programs](#writing-test-programs)
+- [C Programs and the Runtime](#c-programs-and-the-runtime)
 - [Complete Examples](#complete-examples)
 - [Output Files](#output-files)
 - [Assembly Process](#assembly-process)
@@ -1320,9 +1321,54 @@ The `tests/fixtures/` directory holds the test corpus; `cargo test` runs every f
 | `test_edge_cases.kla`, `test_boundary.kla` | Boundary values and overflow |
 | `test_loop_patterns.kla`, `test_algorithms.kla`, `test_benchmark.kla` | Loops and small algorithms |
 | `test_directives.kla` | `.data`, `.text`, `.word`, `.comm`, `.global` |
-| `test_io.kla` | Board I/O, checked by eye |
-| `test_64bit.kla` | 64-bit integer code (no expected values) |
+| `test_io.kla` | A numbered step sequence, checked by eye (no expected values) |
+| `test2.kla`, `test_64bit.kla` | Compiled C linked with the runtime (see [C Programs and the Runtime](#c-programs-and-the-runtime)); `test_64bit` runs 33 64-bit integer checks and expects `00000000`, the failure count |
 | `uart_stubs.kla` | The UART print routines the tests include |
+
+---
+
+## C Programs and the Runtime
+
+`runtime/` holds the C runtime for programs compiled with lcc `-target=klacpu`:
+
+| File | What it is |
+|------|------------|
+| `crt0.kla` | Startup code: `_start` sets SP to `0x0800_0000`, calls `main`, prints `main`'s return value as 8 hex digits and a newline, then halts. It includes `libc.kla` and `uart_stubs.kla`. |
+| `libc.kla` | The C library (`libc.c` compiled with lcc): character, string and number output, `strlen`/`strcmp`/`strcpy`, `memset`/`memcpy`, and a `malloc`/`free`/`calloc`/`realloc` heap. `libc.h` declares it. |
+| `uart_stubs.kla` | The UART routines `libc.kla` calls: `_uart_tx_hex`, `_uart_newline`, `_uart_tx_char`, `_uart_rx_char` and `_uart_rx_char_nb`. |
+
+`runtime/uart_stubs.kla` is not the same file as `tests/fixtures/uart_stubs.kla`: the runtime's routines have the C names above, and the fixtures' file holds the `TX_...` routines the `$TX...` macros call.
+
+A compiled program has no `_start` of its own. Add one line to the compiled `.kla`, with the path relative to that file, and assemble it as usual:
+
+```
+!include path/to/runtime/crt0.kla
+```
+
+```sh
+build/cpp prog.c | build/rcc -target=klacpu > prog.kla    # in the lcc tree
+klausscc -i prog.kla --emulate
+```
+
+Do not include `libc.kla` or `uart_stubs.kla` as well: `crt0.kla` brings them in. Because `crt0.kla` prints `main`'s return value, a program can return a result or a failure count and list it as its expected value. `tests/fixtures/test2.kla` and `tests/fixtures/test_64bit.kla` are built this way.
+
+The calling convention is lcc's: arguments in A, B, C, ..., the result in M, and P is the frame pointer. Assembly code can call the library too. Include both runtime files after `HALT`, and assume a call changes the flags and every register except SP and P:
+
+```
+_start
+SETR A #MSG
+CALL print_str:          // print the string at A
+SETR A -1234
+CALL print_int:          // signed decimal
+CALL newline:
+HALT
+
+#MSG "libc says "
+!include libc.kla        // copies of runtime/libc.kla and runtime/uart_stubs.kla
+!include uart_stubs.kla
+```
+
+This prints `libc says -1234`.
 
 ---
 
