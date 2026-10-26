@@ -1,72 +1,163 @@
-# Klauss ISA CPU Test Suite
+# Klauss CPU Test Suite
 
-Test programs for verifying correct operation of the Klauss FPGA CPU, in ISA v2 syntax (see [`doc/ISA_ENCODING_V2.md`](../../doc/ISA_ENCODING_V2.md)). They are also the corpus `cargo test` runs on the built-in emulator.
+Test programs for the Klauss FPGA CPU, written in the current assembly syntax
+(ISA encoding v2; see [`doc/ISA_ENCODING_V2.md`](../../doc/ISA_ENCODING_V2.md)).
+They run on the board, and they are also the corpus `cargo test` runs on the
+built-in emulator.
 
 ## Verification Method
 
-Each test uses **UART serial output** as the primary verification method. The built-in `$TXR` macro prints a register as 8 hex digits (through the `TX_HEX32` routine in `uart_stubs.kla`, which every test in the list below `!include`s), giving exact values to compare against expected results. Each test (apart from `test_io.kla`, which is checked by eye) lists those values in its header, under `// Expected UART output:`, which is what `klausscc -T` and `--emulate-test` check.
+Each test prints its results over the **UART**. The built-in `$TXR` macro
+prints the low 32 bits of a register as 8 upper-case hex digits, and
+`$NEWLINE` ends the line. Both call routines in `uart_stubs.kla` (in this
+directory), which every test `!include`s after its `HALT`.
 
-The tests were written for the v1 CPU, which also showed the test number on the 7-segment display and lit the LEDs at the end. The v2 ISA has no 7-segment instructions, so those lines are commented out (`// v2-removed ...`); the header comments still describe them. The tests end with **HALT**.
+The values a test should print are listed in its header comments, one per
+line:
 
-### Reading Results
+```
+// Expected UART output:
+//   0000002A  (SETR A 0x2A)
+//   0000002B  (ADDV A 1)
+```
 
-Connect a serial terminal (e.g. `minicom`, `screen`, `picocom`) to the FPGA's UART output, or let klausscc monitor it with `-m`. Each test prints its expected values one per line. Compare against the expected output listed in the test file header comments.
+The test runners (`-T`, `-L`, `--emulate-test` and `cargo test`) take every
+comment line (a line that starts with `//`) whose text starts with 8
+upper-case hex digits, anywhere in the file, as the next expected value. A
+`//` comment after an instruction on the same line does not count. They then
+match those values in order against each line of UART output that starts
+with 8 upper-case hex digits; other lines, blank ones included, are skipped.
+A file with no such comments has nothing to check: `-L` reports it as
+`SKIP`, and `--emulate-test` leaves it out.
 
-```sh
-# Example: monitor serial output
-picocom /dev/ttyUSB0 -b 115200
+The registers are 64 bits wide, but `$TXR` prints only the low 32 bits.
+Results that land in the upper half therefore print as `00000000`; for
+example, `BSWAP` and `BITREV` reverse all 64 bits. The expected values allow
+for this.
+
+The tests were first written for the v1 CPU, which also showed progress on the
+7-segment display and LEDs. The v2 ISA has no such instructions, so those lines
+are commented out (`// v2-removed ...`), and some headers still mention them.
+
+A minimal test (assemble it next to a copy of `uart_stubs.kla`):
+
+```
+// Test: my feature
+// Expected UART output:
+//   0000002A  (SETR A 0x2A)
+//   0000002B  (ADDV A 1)
+
+_start
+SETR A 0x2A
+$TXR A
+$NEWLINE
+ADDV A 1
+$TXR A
+$NEWLINE
+HALT
+
+!include uart_stubs.kla
 ```
 
 ## Running Tests
 
-Assemble and upload each test individually (the ISA v2 opcode table is built in, so no opcode file is needed):
+Run these from this directory. The opcode table and the macros are built
+into `klausscc`, so no opcode file is needed.
 
 ```sh
-klausscc -i test_regs.kla -s /dev/ttyUSB0
-```
+# Assemble only (writes test_regs.code and test_regs.kbt), to check for errors
+klausscc -i test_regs.kla
 
-Upload and check the output against the expected values automatically (`-T`), or check every test in a list in turn (`-L`):
+# Run on the emulator and print the captured UART output
+klausscc -i test_regs.kla --emulate
 
-```sh
-klausscc -i test_regs.kla -s /dev/ttyUSB0 -T
+# Check every file with expected values, or every file in a list, on the emulator
+klausscc --emulate-test .
+klausscc --emulate-test all_tests.txt
+
+# On the board: send one test and check its output (-T), or run a whole list (-L)
+klausscc -i test_regs.kla -s /dev/ttyUSB0 -T [--test-timeout 20]
 klausscc -L all_tests.txt -s /dev/ttyUSB0
 ```
 
-Or assemble without uploading to check for assembly errors, or run on the emulator instead of the board:
+With a bare `-s` (no port), the board's FTDI USB-UART is found automatically.
+`-T` waits up to `--test-timeout` seconds (default 10) for the expected
+values. `-L` assembles each listed file, writing its `.code` listing and
+`.kbt` image beside it, and then sends and checks it. Paths in a list are relative to the list
+file. Lines that are blank or start with `//` or `#` are ignored.
 
-```sh
-klausscc -i test_regs.kla
-klausscc -i test_regs.kla --emulate
-klausscc --emulate-test .
-```
+Exit status: `0` all passed, `2` a test failed, `3` a `-T` test timed out,
+and `1` any other error. In a `-L` run a timeout counts as a failure (`2`).
+A `-L` or `--emulate-test` run in which no file could be checked exits `1`.
+
+To watch the board's output by eye, send with `-m` (`klausscc -i
+test_io.kla -s -m`), or connect any serial terminal at 3000000 baud (8N1).
+That is the rate the bitstream fixes for the board UART.
+
+### In `cargo test`
+
+- `emulator_corpus_passes` (in `src/commands/emulate.rs`) assembles every
+  `.kla` here that lists expected values and checks them on the emulator. It
+  is the same check as `klausscc --emulate-test tests/fixtures`. It also fails
+  if fewer than 22 files pass, so a test that stops declaring its values is
+  noticed.
+- `tests/roundtrip.rs` runs `v2_hello.kla`, `v2_loop.kla` and `v2_math.kla`
+  with `--emulate` and checks the exact characters they print.
+- `tests/cli.rs` runs `--emulate-test` on `test_strings.kla` and checks that
+  it exits `0`.
+- The loader tests in `src/loader.rs` parse `hello.elf` and `test_64bit.elf`.
 
 ## Test List
+
+These are the tests in `all_tests.txt`. The number is the one in each file's
+header; `test_indexed_mem.kla` has none and fills the gap at 15.
 
 | # | File | Category | What it tests |
 |---|------|----------|---------------|
 | 01 | `test_regs.kla` | Register ops | SETR, COPY, INCR, DECR, NEGR, ABSR |
-| 02 | `test_arithmetic.kla` | Arithmetic | ADDRR, MINUSRR, ADDV, MINUSV, overflow wrap |
-| 03 | `test_logic.kla` | Logic/Bitwise | AND, OR, XOR (register and value variants), BSWAP |
-| 04 | `test_shifts.kla` | Shifts/Rotates | SHLR, SHRR, SHLAR, SHRAR, SHLV, SHRV, SHRAV, ROLR, RORR |
+| 02 | `test_arithmetic.kla` | Arithmetic | ADDR, SUBR, ADDV, MINUSV, overflow wrap |
+| 03 | `test_logic.kla` | Logic/Bitwise | ANDR, ORR, XORR, ANDV, ORV, XORV, BSWAP |
+| 04 | `test_shifts.kla` | Shifts/Rotates | SHLR1, SHRR1, SHLAR, SHRAR, SHLV, SHRV, SHRAV, ROLR1, RORR1 |
 | 05 | `test_bits.kla` | Bit manipulation | BSET, BCLR, BTGL, POPCNT, CLZ, CTZ, BITREV |
-| 06 | `test_muldiv.kla` | Multiply/Divide | MULRR, MULURR, DIVRR, DIVURR, MODRR, MODURR, MULV, DIVV, MODV |
+| 06 | `test_muldiv.kla` | Multiply/Divide | MULR, MULUR, DIVR, DIVUR, MODR, MODUR, MULV, DIVV, MODV |
 | 07 | `test_compare_jump.kla` | Comparison/Jumps | CMPRR, JMPZ, JMPNZ, JMPE, JMPNE, JMPS, JMPNS, JMPLT, JMPGT |
-| 08 | `test_memory.kla` | Memory access | MEMSETRR, MEMREADRR, MEMSETR, MEMREADR, sequential access |
+| 08 | `test_memory.kla` | Memory access | MEMSET64RR, MEMREADRR, MEMSETR, MEMREADR |
 | 09 | `test_stack.kla` | Stack | PUSH, POP, PUSHV, LIFO ordering |
-| 10 | `test_call_ret.kla` | Subroutines | CALL, RET, nested calls, conditional CALLE/CALLNE |
-| 11 | `test_io.kla` | I/O peripherals | LEDV, LEDR, 7SEG, 7SEGBLANK, SWR, RGB (visual inspection) |
-| 12 | `test_strings.kla` | String/Data | #DATA strings, TXSTRMEMR, string_print subroutine |
+| 10 | `test_call_ret.kla` | Subroutines | CALL, RET, nested calls, CALLE, CALLNE |
+| 11 | `test_io.kla` | I/O | Prints step numbers only (its LED, 7-segment, switch and RGB instructions are v1-only); no expected values, so it is skipped |
+| 12 | `test_strings.kla` | String data | `#name "string"` data layout, read back with MEMGET32 |
 | 13 | `test_edge_cases.kla` | Edge cases | Zero wrap, max values, sign boundary, all 16 registers |
 | 14 | `test_sign_extend.kla` | Type conversion | SEXTB, SEXTH, ZEXTB, ZEXTH |
-| 15 | `test_indexed_mem.kla` | Indexed memory | LDIDX, STIDX, LDIDXR, STIDXR |
-| 16 | `test_loop_patterns.kla` | Algorithms | Countdown, sum, factorial, find-max (integration test) |
-| 17 | `test_boundary.kla` | Stress | Boundary conditions, max values, overflow, MULHRR |
-| 18 | `test_rotate.kla` | Shifts/Rotates | ROLV, RORV, ROLRR, RORRR edge cases |
-| 19 | `test_compare_ext.kla` | Comparison | CMPLERR, CMPGERR, CMPULTRR, CMPUGTRR, MINRR, MAXRR, MINURR, MAXURR |
+| 15 | `test_indexed_mem.kla` | Indexed memory | STIDX64, LDIDX64, STIDX64R, LDIDX64R |
+| 16 | `test_loop_patterns.kla` | Algorithms | Countdown, sum, factorial, find-max |
+| 17 | `test_boundary.kla` | Stress | Boundary values, overflow, MULHR, MULHUR |
+| 18 | `test_rotate.kla` | Shifts/Rotates | ROLR1, RORR1, ROLV, RORV, ROLR, RORR |
+| 19 | `test_compare_ext.kla` | Comparison | Signed/unsigned jumps after CMPRR, MINR, MAXR, MINUR, MAXUR, CALLZ, CALLNZ, JMPR |
 | 20 | `test_algorithms.kla` | Algorithms | Fibonacci, bubble sort, GCD, prime detection |
-| 21 | `test_benchmark.kla` | Stress | Binary search, bit ops, extended multiply, carry flags, indexed memory |
+| 21 | `test_benchmark.kla` | Stress | Binary search, bit ops, high multiply, carry flags, indexed memory |
+
+### Other fixtures
+
+| File | What it is |
+|------|------------|
+| `hello_world.kla` | Compiled C: arithmetic, factorial, GCD, Fibonacci and primes. Has expected values, so it is in the emulator corpus |
+| `test_directives.kla` | The directives C compilers emit (`.global`, `.extern`, `.text`, `.word`, `.comm`). In the emulator corpus |
+| `v2_hello.kla`, `v2_loop.kla`, `v2_math.kla` | Minimal programs that store straight to the UART `TX_DATA` register (`0xF0010000`), without `uart_stubs.kla`. Checked by `tests/roundtrip.rs` |
+| `uart_stubs.kla` | The UART print routines the tests include: `TX_HEX32`, `TX_NL`, `TX_CHAR`, `TX_STR` |
+| `string_print.kla` | A `STRING_PRINT` subroutine for inclusion; not a program by itself |
+| `demo.kla`, `hello_simple.kla` | Compiler output with its own startup code; they run but list no expected values |
+| `test2.kla`, `test_64bit.kla` | Compiler output for `test2.c` and `test_64bit.c`; they need the C runtime (`print_str` and friends) to assemble |
+| `memcoherency.kla` | Diagnostic: byte stores followed by a 64-bit read, printed as two 32-bit halves |
+| `test_mem0.kla` | Diagnostic: prints the word at address 0 (the heap header's `heap_start`) |
+| `speed.kla` | An endless `INCR` loop with no output (it never halts) |
+| `all_tests.txt` | The test list for `-L` and `--emulate-test` |
+| `*.c` | C sources of the compiled programs and other C samples, for the external C compilers |
+| `*.elf` | Prebuilt ELF images. They are v1-encoded: the loader tests use them only to check ELF parsing, and they do not run on the v2 emulator or CPU |
 
 ## Expected Output Quick Reference
+
+These are copied from the test headers, which are what the runners check.
+`test_io` (11) has no expected values.
 
 ### test_regs (01)
 ```
@@ -95,7 +186,7 @@ FFFFFFFE
 000000F0
 000000FF
 000000F0
-78563412
+00000000
 ```
 
 ### test_shifts (04)
@@ -108,7 +199,7 @@ FFFFFFFF
 0000000F
 FFFFFF80
 00000003
-80000000
+00000000
 ```
 
 ### test_bits (05)
@@ -118,9 +209,9 @@ FFFFFF80
 00000001
 00000000
 00000008
-00000018
+00000038
 00000008
-FF000000
+00000000
 ```
 
 ### test_muldiv (06)
@@ -147,7 +238,7 @@ FF000000
 00000007
 00000008
 ```
-Any value of `FFFFFFFF` indicates a failed branch test.
+A wrong branch prints `FFFFFFFF` in place of its value.
 
 ### test_memory (08)
 ```
@@ -177,14 +268,17 @@ DEADBEEF
 00000099
 ```
 
-### test_sign_extend (14)
+### test_strings (12)
 ```
-FFFFFF80
-0000007F
-FFFF8000
-00007FFF
-000000AB
-0000CDEF
+00000002
+48454C4C
+4F000000
+00000002
+41424344
+45460000
+00000002
+31323334
+35000000
 ```
 
 ### test_edge_cases (13)
@@ -196,6 +290,24 @@ FFFFFFFF
 00000001
 00000010
 00000079
+```
+
+### test_sign_extend (14)
+```
+FFFFFF80
+0000007F
+FFFF8000
+00007FFF
+000000AB
+0000CDEF
+```
+
+### test_indexed_mem (15)
+```
+000000AA
+000000BB
+000000CC
+000000BB
 ```
 
 ### test_loop_patterns (16)
@@ -217,18 +329,18 @@ FFFFFFFF
 80000000
 00000001
 FFFFFFFE
-00000004
+00000000
 00000000
 ```
 
 ### test_rotate (18)
 ```
 00000002
-80000000
+00000000
 00000100
-01000000
+00000000
 00000010
-10000000
+00000000
 FFFFFFFF
 00000003
 C0000000
@@ -273,10 +385,10 @@ FFFFFFFF
 0000ABCD
 0000000B
 00000055
-B3D50000
+00000000
 00000008
 0000000A
-00000010
+00000030
 FFFFFFFE
 00000001
 00000002
@@ -287,9 +399,13 @@ FFFFFFFE
 
 ## Notes
 
-- Tests 11 (I/O) and 12 (strings) require visual/terminal inspection rather than fixed hex comparison
-- Like the other tests, test 12 only needs `uart_stubs.kla`, which lives in this directory
-- Two-register instructions (MULRR, DIVRR, MODRR, CMPGTRR, CMPLERR, MINRR, BSETRR, ROLRR, etc.) require both registers to be specified, e.g. `MULRR A B`, `CMPGTRR A B`
-- Some expected values depend on exact CPU flag behaviour -- if a test fails, check whether the flag semantics match your Verilog implementation
-- All tests can be assembled and verified in batch via `all_tests.txt`
-- `cargo test` checks every file here that lists expected UART values against the emulator, the same check as `klausscc --emulate-test tests/fixtures`
+- Register-register ALU instructions take three registers, `rd rs1 rs2`
+  (`MULR C A B` sets `C = A * B`). The immediate and single-register forms
+  (`ADDV A 1`, `NEGR A`, `SHLV A 4`) work in place. `klausscc --opcodes` lists
+  every mnemonic and its operands.
+- Some expected values depend on exact flag behaviour. If a test passes on the
+  emulator but fails on the board, compare the flag rules in
+  [`doc/EMULATOR_ISA_SEMANTICS.md`](../../doc/EMULATOR_ISA_SEMANTICS.md) with
+  the RTL.
+- The `.code` and `.kbt` files that assembling writes here are build outputs
+  and are ignored by git.

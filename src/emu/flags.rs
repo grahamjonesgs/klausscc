@@ -50,7 +50,7 @@ impl Flags {
         self.sign() != self.overflow()
     }
 
-    /// Derived unsigned-less flag: `U = C` (the x86 borrow convention, §1.3).
+    /// Derived unsigned-less flag: `U = C` (the x86 borrow convention, `doc/ISA_ENCODING_V2.md` §7.1).
     pub(super) const fn unsigned_less(self) -> bool {
         self.carry()
     }
@@ -113,7 +113,7 @@ impl Flags {
     }
 
     /// From an interrupt-context field ([`Flags::to_ctx`]).  Only `Z/S/C/V`
-    /// are consumed (§1.5); the derived `E`/`L`/`U` bits are ignored.
+    /// are consumed (`doc/ISA_ENCODING_V2.md` §7.4); the derived `E`/`L`/`U` bits are ignored.
     pub(super) const fn from_ctx(ctx: u8) -> Self {
         let mut f = Self(0);
         f.set_zero(ctx & (1 << 6) != 0);

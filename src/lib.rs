@@ -139,7 +139,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
             Ok(())
         }
         // mem-out mode: flatten an ELF (or take a flat binary) and write a
-        // $readmemh image for the resident boot ROM (boot_rom.v). See
+        // $readmemh image for the resident boot ROM (boot_rom.sv). See
         // NETBOOT_PLAN.md Phase 2.
         Mode::MemOut { input, ref mem_file } => run_mem_out(input, Path::new(mem_file), msg_list),
         // ELF / flat binary input: debug, emulate, or convert directly to the

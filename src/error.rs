@@ -65,7 +65,7 @@ pub(crate) enum Error {
     Netboot(NetbootError),
     /// Serving a debugger failed.
     Gdb(GdbError),
-    /// The opcode and macro list (`-O`, `-t`) could not be written.
+    /// The opcode and macro list (`--opcodes`, `-t`) could not be written.
     OpcodeList(io::Error),
     /// Tests ran, and some of them failed or timed out.
     TestsFailed {

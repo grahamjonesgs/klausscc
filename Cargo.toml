@@ -14,8 +14,8 @@ categories = ["development-tools"]
 # Ship the sources, docs, runtime library, test fixtures and lockfile only.
 # The globs name file types rather than whole directories, because an
 # explicit include list ignores .gitignore: generated .code/.kbt outputs,
-# scratch copies and Finder metadata in the working tree stay out.  The
-# crate-root modules are listed by name for the same reason.
+# scratch copies and Finder metadata in the working tree stay out.  (Only
+# the `*.rs` glob guards src/: a stray `.rs` copy there would be shipped.)
 include = [
     "Cargo.toml",
     "Cargo.lock",
@@ -25,7 +25,6 @@ include = [
     "rustfmt.toml",
     "src/**/*.rs",
     "doc/*.md",
-    "doc/FLAG_UNIFICATION_CHANGES",
     "runtime/*.c",
     "runtime/*.h",
     "runtime/*.kla",
@@ -34,10 +33,7 @@ include = [
     "tests/fixtures/all_tests.txt",
     "tests/fixtures/*.kla",
     "tests/fixtures/*.c",
-    "tests/fixtures/adventure.elf",
     "tests/fixtures/hello.elf",
-    "tests/fixtures/hello1.elf",
-    "tests/fixtures/hello2.elf",
     "tests/fixtures/test_64bit.elf",
 ]
 

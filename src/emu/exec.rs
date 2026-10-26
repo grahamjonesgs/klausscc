@@ -218,7 +218,7 @@ impl Cpu {
 
     /// CMPRR / CMPRV flag computation.
     ///
-    /// `CMP` is now `SUB` without writeback (§1.2): it computes `a - b` and sets
+    /// `CMP` is now `SUB` without writeback (`doc/ISA_ENCODING_V2.md` §7.2): it computes `a - b` and sets
     /// the **full** `Z/S/C/V` exactly like `SUB`, discarding the result.  The
     /// retired `E/L/U` regenerate from these on read.
     fn cmp(&mut self, a: u64, b: u64) {
@@ -430,7 +430,7 @@ impl Cpu {
             9 => self.regs[rd] = u64::from(a.leading_zeros()),        // CLZ; CLZ(0)=64
             10 => self.regs[rd] = u64::from(a.trailing_zeros()),      // CTZ; CTZ(0)=64
             // GETF / SETFR: rd = {zero,equal,carry,overflow} in the top nibble [63:60].
-            // `equal` is DERIVED (E = Z) — retired as storage per §1.5.
+            // `equal` is DERIVED (E = Z) — retired as storage (doc/ISA_ENCODING_V2.md §7.1).
             12 => self.regs[rd] = u64::from(self.flags.to_getf()) << 60,
             14 => self.regs[rd] = self.add_flags(a, 1, 0), // INC
             15 => self.regs[rd] = self.sub_flags(a, 1, 0), // DEC
@@ -501,7 +501,7 @@ impl Cpu {
 
     /// Evaluate a class-8 COND code against the flags. `None` = reserved/illegal.
     ///
-    /// Every relation is DERIVED from the unified `Z/S/C/V` register (§1.4); the
+    /// Every relation is DERIVED from the unified `Z/S/C/V` register (`doc/ISA_ENCODING_V2.md` §7.3); the
     /// retired `E/L/U` no longer exist as storage.  `INV` (applied by the caller)
     /// gives the negations (`NE`, `GE`, `GT`, `UGE`, `UGT`).
     pub(super) const fn eval_cond(&self, cond: u32) -> Option<bool> {
@@ -564,7 +564,7 @@ impl Cpu {
     /// and `INT_MASK` `[42:39]`.
     ///
     /// The 7-bit saved word is `{Z,E,C,V,S,L,U}` (bit38→Z … bit32→U), but only the
-    /// unified `Z/S/C/V` are consumed (§1.5); the derived `E`(bit37)/`L`(bit33)/
+    /// unified `Z/S/C/V` are consumed (`doc/ISA_ENCODING_V2.md` §7.4); the derived `E`(bit37)/`L`(bit33)/
     /// `U`(bit32) bits are ignored and regenerate from `Z/S/C/V` on read.
     fn iret(&mut self) -> Flow {
         let ctx = self.pop();

@@ -5,9 +5,11 @@
 //! trace.  Semantics follow `doc/EMULATOR_ISA_SEMANTICS.md` (RTL-verified corner
 //! cases, which OVERRIDE `CPU_ARCHITECTURE.md`); the per-opcode *encodings* are
 //! the **ISA encoding v2** flag-day re-numbering documented in
-//! `doc/ISA_ENCODING_V2.md`.  Execution semantics are identical to the v1 CPU (the
-//! "no benefit taken" checkpoint build) — only the instruction word layout has
-//! changed.
+//! `doc/ISA_ENCODING_V2.md`, plus the ISA v3 additions (short one-word forms,
+//! fused compare-and-branch, `ENTER`/`LEAVE`/`LEAVERET`, the 32-bit `W`
+//! operations).  Most instructions come from the v1 CPU; v2 changed the
+//! instruction word layout and gave the register forms independent `rd`,
+//! `rs1` and `rs2` fields.
 //!
 //! The model is intentionally cycle-agnostic: each instruction commits
 //! atomically.  Cache, IFB, timing and the DDR multi-cycle pipeline are not

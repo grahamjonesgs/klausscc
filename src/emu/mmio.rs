@@ -35,7 +35,8 @@ const PERF_INSTR: u32 = 0x0010;
 // ---- Memory-mapped I/O (bus_splitter address decode) ------------------------
 // The RTL bus_splitter routes addr[31:28] == 0xF to the MMIO space; within that,
 // addr[27:16] selects the device (0x001 == UART) and addr[15:0] is the register
-// offset.  See KlaussCPU.sv:843 (default read 0) and 2796-2800 (TX fire).
+// offset.  See the MMIO read mux in `KlaussCPU.sv` (`default` reads 0) and its
+// UART TX write.
 
 /// UART device select value found in `addr[27:16]` of an MMIO access.
 const UART_DEV_SELECT: u32 = 0x001;

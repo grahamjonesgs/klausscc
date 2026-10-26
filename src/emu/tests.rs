@@ -191,12 +191,12 @@ fn test_compare_and_branch() {
     assert_eq!(cpu.eval_cond(5), Some(true), "signed-less (LT) must hold for A<B");
 }
 
-// ---- flag-unification model (doc/FLAG_UNIFICATION_CHANGES) ---------------
+// ---- unified Z S C V flag model (doc/ISA_ENCODING_V2.md §7) ----------------------------
 
 #[test]
 fn test_cmp_sets_full_zscv() {
     // CMP ≡ SUB without writeback: equal operands must set zero and clear the
-    // borrow (previously CMP left Z/C/V stale — the whole point of §1.2).
+    // borrow (previously CMP left Z/C/V stale — see doc/ISA_ENCODING_V2.md §7.2).
     // SETR A 7 ; SETR B 7 ; CMPRR A B ; HALT.
     let cpu = run_words(&[0x8BD0_0000, 7, 0x8BD0_0100, 7, 0x4C00_0001, HALT]);
     assert!(cpu.flags.zero(), "CMP of equal operands sets zero");
@@ -254,7 +254,7 @@ fn test_signed_branch_after_plain_sub() {
 
 #[test]
 fn test_borrow_polarity_ult_is_carry() {
-    // §1.3 x86 borrow convention: after CMP, C = 1 ⟺ a < b (unsigned).
+    // doc/ISA_ENCODING_V2.md §7.1, x86 borrow convention: after CMP, C = 1 ⟺ a < b (unsigned).
     // A=5, B=0x10 ⇒ a < b ⇒ carry (borrow) set, ULT/ULE derive true.
     let cpu = run_words(&[0x8BD0_0000, 5, 0x8BD0_0100, 0x10, 0x4C00_0001, HALT]);
     assert!(cpu.flags.carry(), "borrow set when a < b (unsigned)");

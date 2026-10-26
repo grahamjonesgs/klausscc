@@ -8,8 +8,8 @@
  *   T2  64-bit multiplication (product crosses 32-bit boundary)
  *   T3  64-bit addition crosses 0x80000000 without overflow
  *   T4  Bitwise NOT (NOTR) operates on all 64 bits
- *   T5  Arithmetic right shift of negative value (SHRA)
- *   T6  Logical right shift of unsigned value (SHRL)
+ *   T5  Arithmetic right shift of negative value (SHRAV)
+ *   T6  Logical right shift of unsigned value (SHRV)
  *   T7  Signed/unsigned comparisons with large 64-bit values
  *   T8  Recursion: factorial (10! and 12!)
  *   T9  Recursion: fibonacci (fib(10) and fib(15))
@@ -186,9 +186,9 @@ int main(void) {
     }
 
     /* ============================================================
-     * T5: Arithmetic right shift of negative value (SHRA)
+     * T5: Arithmetic right shift of negative value (SHRAV)
      *
-     * T5a: -1 >> 63 — shift count > 31 requires 64-bit SHRA.
+     * T5a: -1 >> 63 — shift count > 31 requires 64-bit SHRAV.
      * T5b: -1 >> 1  — must sign-extend (not logical shift).
      * T5c: -256 >> 4 = -16.
      * ============================================================ */
@@ -207,7 +207,7 @@ int main(void) {
     }
 
     /* ============================================================
-     * T6: Logical right shift of unsigned value (SHRL)
+     * T6: Logical right shift of unsigned value (SHRV)
      *
      * T6a: (unsigned)(-1) >> 63 must give 1.
      *      If SHRV is 32-bit only, 0xFFFFFFFF >> 63 = 0 (count >= width).

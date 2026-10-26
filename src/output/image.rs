@@ -170,7 +170,7 @@ pub(crate) fn build_ddr_image(binary_data: &[u8]) -> Vec<u8> {
 /// Format a DDR image as a `$readmemh` boot-ROM file.
 ///
 /// One 64-bit little-endian doubleword per line, as 16 upper-case hex digits,
-/// matching `boot_rom.v` (`DEPTH_DW` × 64-bit).  A DDR image is always a whole
+/// matching `boot_rom.sv` (`DEPTH_DW` × 64-bit).  A DDR image is always a whole
 /// number of doublewords; a trailing part doubleword would be zero-filled.
 #[must_use]
 pub(crate) fn readmemh(ddr: &[u8]) -> String {

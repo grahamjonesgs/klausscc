@@ -1,11 +1,13 @@
 # klausscc
 
-The toolchain for **Klauss**, a custom 32-bit CPU implemented on an FPGA.
+The toolchain for **Klauss**, a custom 64-bit CPU implemented on an FPGA
+(64-bit registers; 32-bit instruction words and byte addresses).
 One binary, `klausscc`, does everything needed to get a program onto the CPU:
 
 - **Assembler**: `.kla` assembly source to a `.code` listing and a `.kbt`
-  board image. The ISA encoding v2 opcode table and the standard macros are
-  built in.
+  board image. The opcode table (ISA encoding v2, with the v3 additions:
+  short one-word forms, fused compare-and-branch, `ENTER`/`LEAVE` and the
+  32-bit `W` operations) and the standard macros are built in.
 - **Loaders**: send a `.kbt`, an ELF or a flat binary to the board over the
   UART, stream one over TCP to the board's network boot server, or write a
   `$readmemh` boot-ROM image.
@@ -63,7 +65,7 @@ klausscc -i prog.elf -s -m
 # Network boot: stream an ELF to the board's netboot server over TCP
 klausscc -N prog.elf --ip 192.168.68.50 [--port 5000] [-m]
 
-# Boot ROM: write a $readmemh image (prog.mem) for boot_rom.v
+# Boot ROM: write a $readmemh image (prog.mem) for boot_rom.sv
 klausscc --mem-out prog.elf [--mem-file boot.mem]
 
 # Run on the emulator, optionally tracing every instruction
@@ -97,12 +99,13 @@ errors are; the `.kbt` is not written.
 cargo test
 ```
 
-This runs the unit tests, the command-line tests in `tests/cli.rs` and the
-fixture corpus. [`tests/fixtures/`](tests/fixtures/README.md) holds the CPU
-test programs; each one lists the UART values it should print, and `cargo
-test` assembles every one and checks those values on the emulator (the same
+This runs the unit tests, the command-line tests in `tests/cli.rs`, the
+assembler-to-emulator round trip in `tests/roundtrip.rs` and the fixture
+corpus. [`tests/fixtures/`](tests/fixtures/README.md) holds the CPU test
+programs. Most of them list the UART values they should print, and `cargo
+test` assembles each of those and checks the values on the emulator (the same
 check as `klausscc --emulate-test tests/fixtures`). The ELF fixtures are
-checked by the loader tests.
+v1-era builds, used only by the loader's ELF-parsing tests.
 
 The board debugger's tests run against a model of the debug module, so they
 need neither the cable nor libftdi.
@@ -121,7 +124,7 @@ src/
   num.rs            integer literal parsing
   asm/              the assembler: source, lexer, classify, macros, symbols,
                     data, pass1, pass2, line
-  isa/              the v2 opcode table, encoder and disassembler
+  isa/              the opcode table (v2 + v3), encoder and disassembler
   output/           the .code listing, program image formats, opcode docs
   loader.rs         ELF / flat binary to a board program
   emu/              the golden-model emulator: exec, mmio, flags, debug, trace
@@ -129,7 +132,8 @@ src/
   jtag/             FT2232H MPSSE JTAG and the debug module's DMI
   link/             serial (upload, monitor, UART tests) and netload
 tests/              integration tests and the fixture corpus
-runtime/            C runtime and assembler support library for programs
+runtime/            C runtime library for programs (its uart_stubs.kla is
+                    still v1 code, so libc.kla does not link yet)
 doc/                ISA and emulator documentation
 build.rs            locates libftdi1 for the board feature
 ```
@@ -139,11 +143,10 @@ build.rs            locates libftdi1 for the board feature
 - [doc/ISA_ENCODING_V2.md](doc/ISA_ENCODING_V2.md): the current instruction
   set and its encodings.
 - [doc/EMULATOR_ISA_SEMANTICS.md](doc/EMULATOR_ISA_SEMANTICS.md): the
-  emulator's execution semantics and trace format.
+  emulator's execution semantics (including the unified `Z S C V` flags) and
+  trace format.
 - [doc/klauss_isa_reference.md](doc/klauss_isa_reference.md): the assembly
-  language and command-line reference (its instruction tables are v1).
-- [doc/FLAG_UNIFICATION_CHANGES](doc/FLAG_UNIFICATION_CHANGES): the move to
-  the unified `Z S C V` flags.
+  language and command-line reference.
 - `cargo doc --no-deps --document-private-items --open`: the code's own docs.
 
 ## License

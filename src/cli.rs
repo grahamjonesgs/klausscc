@@ -66,7 +66,7 @@ pub(crate) struct Cli {
     #[arg(long, value_name = "PORT", default_value_t = NETBOOT_DEFAULT_PORT)]
     pub(crate) port: u16,
 
-    /// ELF or flat binary: write a $readmemh boot-ROM image for boot_rom.v (resident netboot).
+    /// ELF or flat binary: write a $readmemh boot-ROM image for boot_rom.sv (resident netboot).
     #[arg(long, value_name = "FILE", conflicts_with_all = ["input", "test_list", "emulate_test", "opcodes", "textmate"])]
     pub(crate) mem_out: Option<PathBuf>,
 
@@ -104,7 +104,7 @@ pub(crate) struct Cli {
     #[arg(short = 't', long)]
     pub(crate) textmate: bool,
 
-    /// Serial port for output. With no value, the first USB serial port found
+    /// Serial port for output. With no value, the FTDI USB serial port is auto-detected
     #[arg(
         short = 's',
         long,

@@ -37,7 +37,7 @@ pub(crate) fn run_netload(input: BinaryInput<'_>, board_ip: &str, board_port: u1
 ///
 /// The image is the same `build_ddr_image` DDR layout used for net-load, emitted
 /// as one 64-bit little-endian doubleword per line (16 hex chars) — matching
-/// `boot_rom.v` (`DEPTH_DW` × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
+/// `boot_rom.sv` (`DEPTH_DW` × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
 /// word 0 (`heap_start` = image byte length) to know how much to copy to DDR.
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &Path, msg_list: &mut Diagnostics) -> Result<(), Error> {

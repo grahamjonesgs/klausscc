@@ -1,5 +1,13 @@
 // uart_stubs.kla - Low-level UART routines callable from C
 //
+// NOTE: this file is still written in the v1 ISA. Its TXR, NEWLINE,
+// TXCHARMEMR, RXRB and RXRNB instructions do not exist in ISA v2, so the
+// current klausscc rejects it, and libc.kla cannot be linked against it until
+// it is rewritten. On v2 the UART is memory-mapped: TX_DATA at 0xF0010000,
+// RX_DATA at 0xF0010008, STATUS at 0xF0010010. tests/fixtures/uart_stubs.kla
+// has v2 transmit routines (TX_HEX32, TX_NL, TX_CHAR, TX_STR). They use
+// different names and preserve every register, and they have no receive side.
+//
 // Calling convention: args in A-D, return in M
 // These are leaf functions (no calls), so no frame setup needed.
 //

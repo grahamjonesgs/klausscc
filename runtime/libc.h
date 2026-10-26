@@ -7,7 +7,8 @@
  *   #include "libc.h"      (if using a preprocessor)
  *   or paste the externs you need into your .c file
  *
- * Link with: precompiled lib/libc.kla + lib/uart_stubs.kla
+ * Link with: precompiled lib/libc.kla + lib/uart_stubs.kla (in this repo:
+ * runtime/; uart_stubs.kla there is still v1 and needs a v2 rewrite)
  */
 
 #ifndef LIBC_H
@@ -22,7 +23,7 @@ extern void newline(void);             /* Print CR/LF */
 /* === Number output === */
 extern void print_int(int n);         /* Print signed decimal */
 extern void print_unsigned(unsigned n); /* Print unsigned decimal */
-extern void print_hex(int val);       /* Print as 8 hex digits (via TXR) */
+extern void print_hex(int val);       /* Print as 8 hex digits */
 extern void print_hex_prefix(int val); /* Print 0xNNNNNNNN */
 
 /* === String operations === */
@@ -62,8 +63,8 @@ extern int   heap_words_free(void);         /* 8-byte words in free blocks    */
 extern int   heap_get_top(void);            /* current heap_top as byte addr  */
 
 /* === Low-level UART (also available directly) === */
-extern void _uart_tx_hex(int val);     /* TXR wrapper */
-extern void _uart_newline(void);       /* NEWLINE wrapper */
-extern void _uart_tx_char(int ch);     /* Single char via TXCHARMEMR */
+extern void _uart_tx_hex(int val);     /* Print as 8 hex digits */
+extern void _uart_newline(void);       /* Print CR/LF */
+extern void _uart_tx_char(int ch);     /* Print one character */
 
 #endif /* LIBC_H */
