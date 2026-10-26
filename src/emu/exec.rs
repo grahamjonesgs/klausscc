@@ -144,10 +144,7 @@ impl Cpu {
 
     /// Write `res` to `rd`, setting Z from it when `set_z` (the `F` bit).
     const fn write_z(&mut self, rd: usize, res: u64, set_z: bool) {
-        if set_z {
-            self.flags.set_zero(res == 0);
-        }
-        self.regs[rd] = res;
+        self.regs[rd] = if set_z { self.with_z(res) } else { res };
     }
 
     /// The 64-bit immediate of a 3-word form: lo32 at PC+4, hi32 at PC+8.

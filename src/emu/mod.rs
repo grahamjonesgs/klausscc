@@ -45,11 +45,13 @@
 //! the assembler's opcode table — so the emulator is a genuine second
 //! implementation, not a re-run of the assembler.
 //!
-//! [`Cpu`](crate::emu::Cpu) and the run entry points live here, with the memory helpers.  The
-//! rest of the machine is split by concern: `exec` decodes and executes one
-//! instruction, `flags` is the `Z S C V` register and its saved layouts, `mmio` models the UART, interrupt controller / timer and
-//! performance counters, `debug` is the debugger's view (registers, memory,
-//! watchpoints, stop reasons) and `trace` writes the per-instruction trace.
+//! [`Cpu`](crate::emu::Cpu) and the run entry points live here, with the
+//! memory helpers.  The rest of the machine is split by concern: `exec`
+//! decodes and executes one instruction, `flags` is the `Z S C V` register
+//! and its saved layouts, `mmio` models the UART, interrupt controller /
+//! timer and performance counters, `debug` is the debugger's view (registers,
+//! memory, watchpoints, stop reasons) and `trace` writes the per-instruction
+//! trace.
 
 mod debug;
 mod exec;
@@ -183,7 +185,7 @@ impl Cpu {
     /// A CPU with only `mem_size` bytes of RAM and the stack at its top, so a
     /// test does not allocate the full 128 MiB.
     #[cfg(test)]
-    pub(crate) fn with_mem_size(image: &[u8], entry: u32, mem_size: usize) -> Self {
+    fn with_mem_size(image: &[u8], entry: u32, mem_size: usize) -> Self {
         Self::with_memory(image, entry, mem_size, u32::try_from(mem_size).unwrap_or(STACK_TOP))
     }
 
