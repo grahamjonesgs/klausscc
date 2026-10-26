@@ -77,34 +77,39 @@ impl Image {
     /// The `.kbt` serial wire format: `S`, the heap header, the program, the
     /// entry point, `Z`, the checksum and `X`.
     ///
-    /// Every byte is sent as two hex digits in memory order, so each 32-bit
-    /// word goes least significant byte first, as the board's serial loader
-    /// stores bytes in the order they arrive.  Returns `None` (reported) when
-    /// the program is not a whole number of 32-bit words, which the board
-    /// cannot load; see [`calc_checksum`].
+    /// Every 32-bit word is sent as 8 hex digits in memory order, least
+    /// significant byte first, as the board's serial loader stores bytes in
+    /// the order they arrive.  Returns `None` (reported) when the program is
+    /// not a whole number of 32-bit words, which the board cannot load.
     #[must_use]
     pub(crate) fn to_kbt(&self, msg_list: &mut Diagnostics) -> Option<String> {
-        let mut out = String::with_capacity(1 + (CODE_BASE as usize + self.bytes.len() + 4) * 2 + 10);
+        let (words, rest) = self.bytes.as_chunks::<4>();
+        if !rest.is_empty() {
+            // The length of the hex stream between `S` and `Z`.
+            let hex_len = (CODE_BASE as usize + self.bytes.len() + 4) * 2;
+            msg_list.error(format!(
+                "Program image is not a whole number of 32-bit words, length is {hex_len} hex characters"
+            ));
+            return None;
+        }
+
+        // Word 0: heap_start in lo32, hi32 zero.  Words 1-3 are reserved.
+        let header = [self.heap_start()]
+            .into_iter()
+            .chain(std::iter::repeat_n(0, HEAP_HEADER_WORDS as usize * 2 - 1));
+        let stream: Vec<u32> = header
+            .chain(words.iter().map(|&word| u32::from_le_bytes(word)))
+            .chain([self.entry])
+            .collect();
+
+        let mut out = String::with_capacity((stream.len() + 1) * 8 + 3);
         out.push('S');
-
-        // Word 0: heap_start in lo32 (LE), hi32 zero.  Words 1-3 are reserved.
-        out.push_str(&encode_word_kbt(self.heap_start()));
-        out.push_str("00000000");
-        for _ in 1..HEAP_HEADER_WORDS {
-            out.push_str("0000000000000000");
+        for &word in &stream {
+            push_word_kbt(&mut out, word);
         }
-
-        for byte in &self.bytes {
-            let _ = write!(out, "{byte:02X}");
-        }
-
-        // Entry point, LE-encoded like every other 32-bit word.
-        out.push_str(&encode_word_kbt(self.entry));
-
-        // The checksum covers everything before the Z delimiter.
-        let checksum = calc_checksum(&out, msg_list)?;
+        // The checksum covers every word before the Z delimiter.
         out.push('Z');
-        out.push_str(&checksum);
+        push_word_kbt(&mut out, kbt_checksum(&stream));
         out.push('X');
         Some(out)
     }
@@ -117,66 +122,31 @@ impl Image {
     }
 }
 
-/// Encode a 32-bit word for the kbt wire format (little-endian byte order).
+/// Append a 32-bit word to a kbt wire string, as 8 hex digits in
+/// little-endian byte order.
 ///
 /// The board's serial loader stores bytes in the order they arrive, so a 32-bit
 /// value must be transmitted LSByte-first so the CPU reads the correct value.
 /// e.g. instruction 0x400F0000 → "00000F40", entry 0x20 → "20000000".
-#[must_use]
-fn encode_word_kbt(w: u32) -> String {
-    format!("{:02X}{:02X}{:02X}{:02X}", w & 0xFF, (w >> 8) & 0xFF, (w >> 16) & 0xFF, (w >> 24) & 0xFF)
+fn push_word_kbt(out: &mut String, word: u32) {
+    let _ = write!(out, "{:08X}", word.swap_bytes());
 }
 
-/// Compute the kbt checksum for a LE-encoded wire string.
+/// The kbt checksum of the 32-bit words between `S` and `Z`.
 ///
-/// For each 8-char (32-bit) chunk in the data stream the LE bytes are decoded back to
-/// the natural 32-bit word V, and `V[31:16] + V[15:0]` is accumulated.  The checksum
-/// formula is:
+/// For each word V, `V[31:16] + V[15:0]` is accumulated, and the checksum is
 ///
 ///   `chk = (running_sum + count) % 65536`.
 ///
 /// where `count` is the number of 16-bit half-word groups accumulated (= 2 × number
 /// of 32-bit words).  This matches the FPGA formula `chk = running_sum + last_addr×2`.
-///
-/// The result is a 32-bit word emitted in LE byte order (8 hex chars), exactly like
-/// every other word in the stream.  The caller is responsible for writing the `Z`
-/// delimiter; this function must be called **before** appending `Z` so that `Z` is
-/// not included in the sum.
-///
-/// The board loads whole 32-bit words, so a stream that is not a whole number of
-/// them cannot be loaded: that is reported as an error and `None` is returned,
-/// rather than a checksum the board would reject.
+/// It is sent like every other word in the stream.
 #[must_use]
-fn calc_checksum(input_string: &str, msg_list: &mut Diagnostics) -> Option<String> {
-    // Strip S framing char only (Z/X are not present — caller hasn't appended them yet).
-    let stripped: String = input_string.chars().filter(|&c| c != 'S').collect();
-
-    if !stripped.len().is_multiple_of(8) {
-        msg_list.error(format!(
-            "Program image is not a whole number of 32-bit words, length is {} hex characters",
-            stripped.len()
-        ));
-        return None;
-    }
-
-    let mut sum: u32 = 0;
-    let mut count: u32 = 0;
-
-    // Process 8-char groups as LE-encoded 32-bit words.
-    // Decode each word to its natural value V, accumulate V[31:16] + V[15:0].
-    for chunk in stripped.as_bytes().as_chunks::<8>().0 {
-        let le = std::str::from_utf8(chunk)
-            .ok()
-            .and_then(|hex| u32::from_str_radix(hex, 16).ok())
-            .unwrap_or(0);
-        let v = le.swap_bytes(); // natural V = b0 | b1<<8 | b2<<16 | b3<<24
-        sum = (sum + (v >> 16) + (v & 0xFFFF)) % 0x1_0000;
-        count += 2;
-    }
-
+fn kbt_checksum(words: &[u32]) -> u32 {
+    let sum = words.iter().fold(0, |sum, &v| (sum + (v >> 16) + (v & 0xFFFF)) % 0x1_0000);
     // chk = running_sum + last_addr×2 (FPGA formula, adj=0)
-    let chk = (sum + count) % 0x1_0000;
-    Some(encode_word_kbt(chk))
+    let count = (words.len() * 2 % 0x1_0000) as u32;
+    (sum + count) % 0x1_0000
 }
 
 /// Return String of bit codes with start/stop bytes and CRC.
@@ -305,7 +275,7 @@ mod tests {
         let body = "0000016C";
         let entry = "20000000";
         // sum: 0x28 + (0x6C01 + 0x0000) + 0x20 = 0x6C49; count = 2 × 10 words = 20.
-        let checksum = encode_word_kbt(0x6C49 + 20);
+        let checksum = "5D6C0000"; // 0x6C49 + 20, little-endian
         assert_eq!(kbt, format!("S{header}{body}{entry}Z{checksum}X"));
         assert!(msg_list.messages().is_empty());
     }
@@ -442,7 +412,6 @@ mod tests {
             msg_list.messages()[0].text(),
             "Program image is not a whole number of 32-bit words, length is 78 hex characters"
         );
-        assert_eq!(calc_checksum("S0000", &mut Diagnostics::new()), None);
     }
 
     #[test]
@@ -513,5 +482,16 @@ mod tests {
         let bin_string = create_bin_string(pass2, &mut msg_list);
         assert_eq!(bin_string, None);
         assert_eq!(msg_list.messages()[0].text(), "No start address found");
+    }
+
+    #[test]
+    // The checksum sums each word's half words, plus two per word, mod 2^16
+    fn kbt_checksum_sums_half_words_and_count() {
+        assert_eq!(kbt_checksum(&[]), 0);
+        assert_eq!(kbt_checksum(&[0x0001_0002]), 3 + 2);
+        assert_eq!(kbt_checksum(&[0xFFFF_FFFF, 0xFFFF_FFFF]), (4 * 0xFFFF + 4) % 0x1_0000);
+        let mut out = String::new();
+        push_word_kbt(&mut out, 0x400F_0000);
+        assert_eq!(out, "00000F40");
     }
 }
