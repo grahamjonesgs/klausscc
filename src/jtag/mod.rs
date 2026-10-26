@@ -21,8 +21,26 @@ mod mpsse;
 
 #[cfg(feature = "board")]
 pub(crate) use ftdi::Jtag;
-#[cfg(feature = "board")]
 pub(crate) use mpsse::DmiReq;
+
+/// A link to the debug module's DMI: what the board debugger needs from the
+/// JTAG master ([`Jtag`](ftdi::Jtag) with the `board` feature), so it can
+/// also run against a model of the debug module in tests.
+pub(crate) trait Dmi {
+    /// Run DMI requests back to back and return each request's data (reads;
+    /// writes give 0).  Fails the whole batch if any request fails.
+    fn dmi_batch(&mut self, reqs: &[DmiReq]) -> Result<Vec<u64>>;
+
+    /// DMI register read.
+    fn dmi_read(&mut self, addr: u8) -> Result<u64> {
+        Ok(self.dmi_batch(&[DmiReq::Read(addr)])?[0])
+    }
+
+    /// DMI register write.
+    fn dmi_write(&mut self, addr: u8, data: u64) -> Result<()> {
+        self.dmi_batch(&[DmiReq::Write(addr, data)]).map(drop)
+    }
+}
 
 /// A JTAG / DMI error.
 #[derive(Debug)]
@@ -87,7 +105,6 @@ impl JtagError {
     /// True if the link to the debug module is gone or never worked (the
     /// cable failed, or the scans reach no debug module), as opposed to a
     /// busy debug module, which may answer a retry.
-    #[cfg_attr(not(feature = "board"), allow(dead_code, reason = "only the board debugger asks"))]
     pub(crate) const fn is_link_lost(&self) -> bool {
         !matches!(self, Self::DmiBusy { .. })
     }

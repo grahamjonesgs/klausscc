@@ -14,9 +14,12 @@
 /// Implement `HostInfo` and `ProcessInfo` for a target, identically for
 /// both: a little-endian [`TRIPLE`](arch::TRIPLE) with 4-byte pointers,
 /// running as pid 1.
+///
+/// A generic target lists its generics in brackets first:
+/// `impl_host_process_info!([D: Dmi] BoardTarget<D>)`.
 macro_rules! impl_host_process_info {
-    ($target:ty) => {
-        impl gdbstub::target::ext::host_info::HostInfo for $target {
+    ([$($generics:tt)*] $target:ty) => {
+        impl<$($generics)*> gdbstub::target::ext::host_info::HostInfo for $target {
             fn host_info(&self, write_item: &mut dyn FnMut(&gdbstub::target::ext::host_info::HostInfoResponse<'_>)) -> Result<(), Self::Error> {
                 use gdbstub::common::Endianness;
                 use gdbstub::target::ext::host_info::HostInfoResponse;
@@ -27,7 +30,7 @@ macro_rules! impl_host_process_info {
             }
         }
 
-        impl gdbstub::target::ext::process_info::ProcessInfo for $target {
+        impl<$($generics)*> gdbstub::target::ext::process_info::ProcessInfo for $target {
             fn process_info(
                 &self,
                 write_item: &mut dyn FnMut(&gdbstub::target::ext::process_info::ProcessInfoResponse<'_>),
@@ -44,10 +47,13 @@ macro_rules! impl_host_process_info {
             }
         }
     };
+    ($target:ty) => {
+        impl_host_process_info!([] $target);
+    };
 }
 
 pub(crate) mod arch;
-#[cfg(feature = "board")]
+#[cfg(any(test, feature = "board"))]
 pub(crate) mod board;
 pub(crate) mod emu_target;
 

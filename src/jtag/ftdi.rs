@@ -7,7 +7,7 @@ use super::mpsse::{
     DmiReq, IR_IDCODE, IR_LEN, IR_USER3, MPSSE_3PHASE_OFF, MPSSE_ADAPTIVE_OFF, MPSSE_CLK_DIV, MPSSE_DIV5_OFF, MPSSE_LOOPBACK_OFF,
     MPSSE_SEND_IMMEDIATE, MPSSE_SET_HIGH, MPSSE_SET_LOW, MPSSE_TMS, dmi_answer, parse_scan, push_dmi, push_scan,
 };
-use super::{JtagError, Result};
+use super::{Dmi, JtagError, Result};
 use std::ffi::{CStr, c_char, c_int, c_uchar, c_void};
 
 // ---- libftdi1 (just what MPSSE JTAG needs) ----------------------------------
@@ -185,7 +185,9 @@ impl Jtag {
     pub(crate) fn select_user3(&mut self) -> Result<()> {
         self.ir(IR_USER3)
     }
+}
 
+impl Dmi for Jtag {
     /// Run DMI requests back to back: each 74-bit DR scan
     /// (`{op[1:0], addr[7:0], data[63:0]}` in, `{status, addr, data}` out)
     /// returns the answer to the PREVIOUS request, so `reqs` plus one no-op
@@ -193,7 +195,7 @@ impl Jtag {
     /// data (reads; writes give 0).  The idle clocks after each scan give
     /// the DM time to answer, memory commands included; a busy status means
     /// they did not, and fails the batch (the request after it was dropped).
-    pub(crate) fn dmi_batch(&mut self, reqs: &[DmiReq]) -> Result<Vec<u64>> {
+    fn dmi_batch(&mut self, reqs: &[DmiReq]) -> Result<Vec<u64>> {
         let mut answers = Vec::with_capacity(reqs.len());
         // keep each transfer's response well inside the FT2232H's 4 KiB buffer
         for chunk in reqs.chunks(200) {
@@ -216,16 +218,6 @@ impl Jtag {
             }
         }
         Ok(answers)
-    }
-
-    /// DMI register read.
-    pub(crate) fn dmi_read(&mut self, addr: u8) -> Result<u64> {
-        Ok(self.dmi_batch(&[DmiReq::Read(addr)])?[0])
-    }
-
-    /// DMI register write.
-    pub(crate) fn dmi_write(&mut self, addr: u8, data: u64) -> Result<()> {
-        self.dmi_batch(&[DmiReq::Write(addr, data)]).map(|_| ())
     }
 }
 

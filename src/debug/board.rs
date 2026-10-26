@@ -19,10 +19,19 @@
 //!
 //! On detach the server removes its breakpoints, clears "attached" and lets
 //! the program run on.
+//!
+//! The debugger logic reaches the debug module only through the [`Dmi`]
+//! seam, so it is also built for tests, which run it against a model of the
+//! debug module; only opening the cable ([`Board::open`]) and serving a
+//! session need the `board` feature.
 
 use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD};
-use super::{GdbError, RunEvent, Session, accept, access_last_addr, mmio_monitor_cmd, run_session, session_summary};
-use crate::jtag::{DmiReq, Jtag, JtagError};
+#[cfg(feature = "board")]
+use super::{GdbError, accept, run_session, session_summary};
+use super::{RunEvent, Session, access_last_addr, mmio_monitor_cmd};
+#[cfg(feature = "board")]
+use crate::jtag::Jtag;
+use crate::jtag::{Dmi, DmiReq, JtagError};
 use crate::layout::is_mmio;
 use gdbstub::common::Signal;
 use gdbstub::stub::SingleThreadStopReason;
@@ -85,11 +94,13 @@ pub(crate) enum BoardError {
     /// JTAG or the DMI on top of it failed.
     Jtag(JtagError),
     /// The JTAG chain answered with this IDCODE: there is no FPGA on it.
+    #[cfg_attr(not(feature = "board"), allow(dead_code, reason = "only opening the cable finds no FPGA"))]
     NoFpga {
         /// The IDCODE read (all zeros or all ones).
         idcode: u32,
     },
     /// The FPGA has no `KlaussCPU` debug module on USER3.
+    #[cfg_attr(not(feature = "board"), allow(dead_code, reason = "only opening the cable finds no debug module"))]
     NoDebugModule {
         /// The FPGA's IDCODE.
         idcode: u32,
@@ -200,12 +211,13 @@ impl From<BoardError> for TargetError<BoardError> {
 /// Result of a debug module operation.
 type BoardResult<T> = Result<T, BoardError>;
 
-/// The debug module, over JTAG.
-pub(crate) struct Board {
-    jtag: Jtag,
+/// The debug module, over its DMI (JTAG on the real board).
+pub(crate) struct Board<D> {
+    dmi: D,
 }
 
-impl Board {
+#[cfg(feature = "board")]
+impl Board<Jtag> {
     /// Open the JTAG cable at `khz`, select the debug module and check it is
     /// there.  Returns the board and a one-line description.
     pub(crate) fn open(khz: u32) -> BoardResult<(Self, String)> {
@@ -215,7 +227,7 @@ impl Board {
             return Err(BoardError::NoFpga { idcode });
         }
         jtag.select_user3()?;
-        let mut board = Self { jtag };
+        let mut board = Self::new(jtag);
         let no_dm = |detail: String| BoardError::NoDebugModule { idcode, detail };
         let st = board.status().map_err(|e| no_dm(e.to_string()))?;
         if (st >> 24) & 0xFF != 0x4B {
@@ -231,19 +243,26 @@ impl Board {
             ),
         ))
     }
+}
+
+impl<D: Dmi> Board<D> {
+    /// The debug module behind `dmi`.
+    const fn new(dmi: D) -> Self {
+        Self { dmi }
+    }
 
     fn batch(&mut self, reqs: &[DmiReq]) -> BoardResult<Vec<u64>> {
-        self.jtag.dmi_batch(reqs).map_err(BoardError::Jtag)
+        self.dmi.dmi_batch(reqs).map_err(BoardError::Jtag)
     }
 
     /// DMSTATUS (reading clears the "halted since" bit).
     pub(crate) fn status(&mut self) -> BoardResult<u64> {
-        self.jtag.dmi_read(DMSTATUS).map_err(BoardError::Jtag)
+        self.dmi.dmi_read(DMSTATUS).map_err(BoardError::Jtag)
     }
 
     /// Write DMCONTROL.
     pub(crate) fn control(&mut self, v: u64) -> BoardResult<()> {
-        self.jtag.dmi_write(DMCONTROL, v).map_err(BoardError::Jtag)
+        self.dmi.dmi_write(DMCONTROL, v).map_err(BoardError::Jtag)
     }
 
     /// Wait up to `timeout` for the core to be halted.
@@ -281,7 +300,7 @@ impl Board {
     /// Check (and clear) the DM's sticky error after a memory batch.
     fn check_mem(&mut self, st: u64) -> BoardResult<()> {
         if st & (ST_ERROR | ST_BUSY) != 0 {
-            self.jtag.dmi_write(DMSTATUS, 0)?;
+            self.dmi.dmi_write(DMSTATUS, 0)?;
             return Err(BoardError::MemCommand { status: st });
         }
         Ok(())
@@ -364,7 +383,7 @@ const fn past_top(addr: u32, len: usize) -> BoardError {
 
 /// Disarm every hardware breakpoint and watchpoint slot and clear the debug
 /// module's sticky error.
-fn clear_slots(board: &mut Board) -> BoardResult<()> {
+fn clear_slots<D: Dmi>(board: &mut Board<D>) -> BoardResult<()> {
     let clear: Vec<DmiReq> = (0..HW_BREAKPOINTS as u8)
         .map(|i| DmiReq::Write(BP0 + i, 0))
         .chain((0..HW_WATCHPOINTS as u8).map(|i| DmiReq::Write(WP0 + i, 0)))
@@ -385,8 +404,8 @@ struct Wp {
 
 /// The board plus the debugger's view of it.
 #[allow(clippy::struct_excessive_bools, reason = "independent session flags")]
-pub(crate) struct BoardTarget {
-    board: Board,
+pub(crate) struct BoardTarget<D> {
+    board: Board<D>,
     hw_breakpoints: [Option<u32>; HW_BREAKPOINTS],
     watches: [Option<Wp>; HW_WATCHPOINTS],
     /// Software breakpoints: address -> the original word under the TRAP.
@@ -402,8 +421,8 @@ pub(crate) struct BoardTarget {
     exited: bool,
 }
 
-impl BoardTarget {
-    const fn new(board: Board) -> Self {
+impl<D: Dmi> BoardTarget<D> {
+    const fn new(board: Board<D>) -> Self {
         Self {
             board,
             hw_breakpoints: [None; HW_BREAKPOINTS],
@@ -580,7 +599,7 @@ impl BoardTarget {
     }
 }
 
-impl Target for BoardTarget {
+impl<D: Dmi> Target for BoardTarget<D> {
     type Arch = KlaussCpuArch;
     type Error = BoardError;
 
@@ -605,7 +624,7 @@ impl Target for BoardTarget {
     }
 }
 
-impl MonitorCmd for BoardTarget {
+impl<D: Dmi> MonitorCmd for BoardTarget<D> {
     fn handle_monitor_cmd(&mut self, cmd: &[u8], mut out: ConsoleOutput<'_>) -> Result<(), Self::Error> {
         // Not UTF-8: no command, so the help.
         let cmd = std::str::from_utf8(cmd).map_or("", str::trim);
@@ -631,7 +650,7 @@ impl MonitorCmd for BoardTarget {
     }
 }
 
-impl SingleThreadBase for BoardTarget {
+impl<D: Dmi> SingleThreadBase for BoardTarget<D> {
     fn read_registers(&mut self, regs: &mut KlaussRegs) -> TargetResult<(), Self> {
         let v = self.board.read_regs()?;
         regs.r.copy_from_slice(&v[..16]);
@@ -679,7 +698,7 @@ impl SingleThreadBase for BoardTarget {
     }
 }
 
-impl SingleRegisterAccess<()> for BoardTarget {
+impl<D: Dmi> SingleRegisterAccess<()> for BoardTarget<D> {
     fn read_register(&mut self, _tid: (), reg_id: KlaussRegId, buf: &mut [u8]) -> TargetResult<usize, Self> {
         let v = self.board.read_reg(reg_id)?;
         Ok(reg_id.encode(v, buf))
@@ -691,7 +710,7 @@ impl SingleRegisterAccess<()> for BoardTarget {
     }
 }
 
-impl SingleThreadResume for BoardTarget {
+impl<D: Dmi> SingleThreadResume for BoardTarget<D> {
     fn resume(&mut self, signal: Option<Signal>) -> Result<(), Self::Error> {
         if signal.is_some() {
             return Err(BoardError::Unsupported("no support for continuing with a signal"));
@@ -704,7 +723,7 @@ impl SingleThreadResume for BoardTarget {
     }
 }
 
-impl SingleThreadSingleStep for BoardTarget {
+impl<D: Dmi> SingleThreadSingleStep for BoardTarget<D> {
     fn step(&mut self, signal: Option<Signal>) -> Result<(), Self::Error> {
         if signal.is_some() {
             return Err(BoardError::Unsupported("no support for stepping with a signal"));
@@ -713,7 +732,7 @@ impl SingleThreadSingleStep for BoardTarget {
     }
 }
 
-impl Breakpoints for BoardTarget {
+impl<D: Dmi> Breakpoints for BoardTarget<D> {
     fn support_sw_breakpoint(&mut self) -> Option<SwBreakpointOps<'_, Self>> {
         Some(self)
     }
@@ -727,7 +746,7 @@ impl Breakpoints for BoardTarget {
     }
 }
 
-impl SwBreakpoint for BoardTarget {
+impl<D: Dmi> SwBreakpoint for BoardTarget<D> {
     fn add_sw_breakpoint(&mut self, addr: u32, _kind: usize) -> TargetResult<bool, Self> {
         if addr & 3 != 0 || is_mmio(addr) {
             return Ok(false);
@@ -750,7 +769,7 @@ impl SwBreakpoint for BoardTarget {
     }
 }
 
-impl HwBreakpoint for BoardTarget {
+impl<D: Dmi> HwBreakpoint for BoardTarget<D> {
     fn add_hw_breakpoint(&mut self, addr: u32, _kind: usize) -> TargetResult<bool, Self> {
         if self.hw_breakpoints.contains(&Some(addr)) {
             return Ok(true);
@@ -773,7 +792,7 @@ impl HwBreakpoint for BoardTarget {
     }
 }
 
-impl HwWatchpoint for BoardTarget {
+impl<D: Dmi> HwWatchpoint for BoardTarget<D> {
     fn add_hw_watchpoint(&mut self, addr: u32, len: u32, kind: WatchKind) -> TargetResult<bool, Self> {
         // one slot covers lanes of a single doubleword
         if len == 0 || len > 8 || (addr & 7) + len > 8 {
@@ -799,9 +818,9 @@ impl HwWatchpoint for BoardTarget {
     }
 }
 
-impl_host_process_info!(BoardTarget);
+impl_host_process_info!([D: Dmi] BoardTarget<D>);
 
-impl Session for BoardTarget {
+impl<D: Dmi> Session for BoardTarget<D> {
     /// A debug module that stops answering while the program runs ends the
     /// session ([`BoardError::Lost`]).
     fn run_until_event(&mut self, incoming_data: impl FnMut() -> bool) -> BoardResult<RunEvent> {
@@ -818,7 +837,7 @@ impl Session for BoardTarget {
 /// With `load`, `load()` sends the program over the UART with halt-on-load
 /// set, and the core halts on the program's first instruction; otherwise the
 /// running program is halted where it is.
-pub(crate) fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> BoardResult<()>>) -> BoardResult<u32> {
+pub(crate) fn attach<D: Dmi>(board: &mut Board<D>, load: Option<&mut dyn FnMut() -> BoardResult<()>>) -> BoardResult<u32> {
     // start clean: a server that was killed leaves its slots armed
     clear_slots(board)?;
     if let Some(load) = load {
@@ -844,7 +863,8 @@ pub(crate) fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> BoardRe
 }
 
 /// Serve one debugging session for the halted `board` on `127.0.0.1:port`.
-pub(crate) fn serve(board: Board, port: u16) -> Result<String, GdbError> {
+#[cfg(feature = "board")]
+pub(crate) fn serve<D: Dmi>(board: Board<D>, port: u16) -> Result<String, GdbError> {
     let conn = accept(port)?;
     let mut target = BoardTarget::new(board);
     let result = run_session(conn, &mut target);
@@ -856,41 +876,4 @@ pub(crate) fn serve(board: Board, port: u16) -> Result<String, GdbError> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn errors_map_to_target_errors_by_kind() {
-        let kind = |e: BoardError| match TargetError::from(e) {
-            TargetError::Fatal(_) => "fatal",
-            TargetError::Errno(14) => "efault",
-            TargetError::NonFatal => "nonfatal",
-            _ => "other",
-        };
-        assert_eq!(kind(BoardError::MemCommand { status: 8 }), "efault");
-        assert_eq!(kind(BoardError::PastTop { addr: 0xFFFF_FFFF, len: 2 }), "efault");
-        assert_eq!(kind(BoardError::Jtag(JtagError::ReadTimeout)), "fatal");
-        assert_eq!(kind(BoardError::Lost(Box::new(BoardError::NotHalted { status: 0 }))), "fatal");
-        assert_eq!(kind(BoardError::Jtag(JtagError::DmiBusy { addr: 5 })), "nonfatal");
-        assert_eq!(kind(BoardError::Unsupported("no")), "nonfatal");
-    }
-
-    #[test]
-    fn errors_keep_their_messages() {
-        assert_eq!(
-            BoardError::HaltRequest(Box::new(BoardError::NotHalted { status: 0x4B00_0000 })).to_string(),
-            "the core did not halt (DMSTATUS 0x4B000000): is a program running on the board? (load one with -s)"
-        );
-        assert_eq!(
-            past_top(0xFFFF_FFFE, 4).to_string(),
-            "4 bytes at 0xFFFFFFFE run past the end of the address space"
-        );
-        assert_eq!(BoardError::from(JtagError::ReadTimeout).to_string(), "ftdi read timeout");
-        let load = BoardError::Load {
-            path: "prog.elf".to_owned(),
-            port: "/dev/ttyUSB1".to_owned(),
-            source: Box::new(crate::error::Error::Assembly(1)),
-        };
-        assert_eq!(load.to_string(), "loading prog.elf over /dev/ttyUSB1 failed (completed with 1 error)");
-    }
-}
+mod tests;
