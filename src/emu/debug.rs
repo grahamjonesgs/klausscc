@@ -2,6 +2,7 @@
 //! access, watchpoints and why execution stopped.
 
 use super::Cpu;
+use super::flags::Flags;
 use crate::layout::is_mmio;
 
 /// Reason the emulator stopped executing.
@@ -85,7 +86,7 @@ impl Cpu {
             r: self.regs,
             sp: self.sp,
             pc: self.pc,
-            flags: (u8::from(self.zero) << 3) | (u8::from(self.sign) << 2) | (u8::from(self.carry) << 1) | u8::from(self.overflow),
+            flags: self.flags.to_nibble(),
             int_mask: self.int_mask,
         }
     }
@@ -95,10 +96,7 @@ impl Cpu {
         self.regs = regs.r;
         self.sp = regs.sp;
         self.pc = regs.pc;
-        self.zero = regs.flags & 8 != 0;
-        self.sign = regs.flags & 4 != 0;
-        self.carry = regs.flags & 2 != 0;
-        self.overflow = regs.flags & 1 != 0;
+        self.flags = Flags::from_nibble(regs.flags);
         self.int_mask = regs.int_mask & 0xF;
     }
 

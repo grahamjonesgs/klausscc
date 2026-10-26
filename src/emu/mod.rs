@@ -53,6 +53,7 @@
 
 mod debug;
 mod exec;
+mod flags;
 mod mmio;
 #[cfg(test)]
 mod tests;
@@ -62,6 +63,7 @@ pub use debug::{DebugRegs, StopReason, Watch, WatchKind};
 pub use mmio::IrqState;
 
 use crate::layout::{CODE_BASE, is_mmio};
+use flags::Flags;
 use std::collections::VecDeque;
 
 /// Modelled `i_Clk` cycles per retired instruction (timer, millisecond clock and
@@ -101,10 +103,6 @@ pub fn uart_bytes(uart: &str) -> Vec<u8> {
 }
 
 /// The architectural machine state.
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "each bool is a distinct hardware condition flag (zero/sign/carry/overflow)"
-)]
 pub struct Cpu {
     /// General-purpose registers R0..R15 (64-bit).
     regs: [u64; 16],
@@ -112,18 +110,9 @@ pub struct Cpu {
     sp: u32,
     /// Program counter (32-bit byte address).
     pc: u32,
-    // The unified 4-bit flags register `Z S C V` (sticky — only written by the
-    // documented producers).  The old compare flags `E`/`L`/`U` are RETIRED as
-    // storage; they are DERIVED on read (`E = Z`, `L = S ^ V`, `U = C`) — see
-    // [`Cpu::flag_e`] / [`Cpu::flag_l`] / [`Cpu::flag_u`].
-    /// Zero flag.
-    zero: bool,
-    /// Sign flag (MSB of an arithmetic result).
-    sign: bool,
-    /// Carry / borrow out of bit 63 (x86 borrow convention: `C = 1` ⟺ `a < b`).
-    carry: bool,
-    /// Signed overflow.
-    overflow: bool,
+    /// The unified 4-bit flags register `Z S C V` (sticky — only written by the
+    /// documented producers); `E`/`L`/`U` are derived on read.
+    flags: Flags,
     /// Flat little-endian memory image (128 MiB).
     mem: Vec<u8>,
     /// Captured UART output (`TX_DATA` writes, low byte per store).
@@ -175,10 +164,7 @@ impl Cpu {
             regs: [0; 16],
             sp: STACK_TOP,
             pc: entry,
-            zero: false,
-            sign: false,
-            carry: false,
-            overflow: false,
+            flags: Flags::default(),
             mem,
             uart: String::new(),
             uart_rx: VecDeque::new(),
@@ -292,28 +278,6 @@ impl Cpu {
         let mut b = [0_u8; 8];
         b.copy_from_slice(&self.mem[a..a + 8]);
         u64::from_le_bytes(b)
-    }
-
-    // ---- flag helpers --------------------------------------------------------
-
-    // Derived compare flags (`E`/`L`/`U`).  The flag-unification model retires
-    // these as storage; they are computed on read from the unified `Z/S/C/V`
-    // register.  The derivations are bit-identical to the retired flags for every
-    // operand pair (proven RTL-side by `tb_flags.sv`).
-
-    /// Derived equal flag: `E = Z`.
-    const fn flag_e(&self) -> bool {
-        self.zero
-    }
-
-    /// Derived signed-less flag: `L = S ^ V`.
-    const fn flag_l(&self) -> bool {
-        self.sign ^ self.overflow
-    }
-
-    /// Derived unsigned-less flag: `U = C` (the x86 borrow convention, §1.3).
-    const fn flag_u(&self) -> bool {
-        self.carry
     }
 
     /// One step of the machine: take a ready interrupt (entry is a step of

@@ -1,24 +1,25 @@
 //! Instruction decode and execute: one handler per v2 CLASS.
 
+use super::flags::Flags;
 use super::{Cpu, StopReason};
 
 impl Cpu {
     /// Set zero/sign from a 64-bit result (the arithmetic producers).
     fn set_zs(&mut self, res: u64) {
-        self.zero = res == 0;
-        self.sign = (res >> 63) & 1 == 1;
+        self.flags.set_zero(res == 0);
+        self.flags.set_sign((res >> 63) & 1 == 1);
     }
 
     /// Add with full ADD-family flag effects (zero/sign/carry/overflow).
     fn add_flags(&mut self, a: u64, b: u64, carry_in: u64) -> u64 {
         let (s1, c1) = a.overflowing_add(b);
         let (res, c2) = s1.overflowing_add(carry_in);
-        self.carry = c1 || c2;
+        self.flags.set_carry(c1 || c2);
         // signed overflow: operands same sign, result differs.
         let sa = (a >> 63) & 1;
         let sb = (b >> 63) & 1;
         let sr = (res >> 63) & 1;
-        self.overflow = (sa == sb) && (sr != sa);
+        self.flags.set_overflow((sa == sb) && (sr != sa));
         self.set_zs(res);
         res
     }
@@ -28,12 +29,12 @@ impl Cpu {
         // a - b - borrow_in.  carry_flag = borrow out (a < b + borrow_in).
         let (s1, b1) = a.overflowing_sub(b);
         let (res, b2) = s1.overflowing_sub(borrow_in);
-        self.carry = b1 || b2;
+        self.flags.set_carry(b1 || b2);
         let sa = (a >> 63) & 1;
         let sb = (b >> 63) & 1;
         let sr = (res >> 63) & 1;
         // signed overflow on subtraction: operands differ in sign and result sign != a.
-        self.overflow = (sa != sb) && (sr != sa);
+        self.flags.set_overflow((sa != sb) && (sr != sa));
         self.set_zs(res);
         res
     }
@@ -101,26 +102,26 @@ impl Cpu {
         let a = self.regs[rs1];
         let b = self.regs[rs2];
         let res = match op {
-            0 => self.add_flags(a, b, 0),                     // ADDR
-            1 => self.sub_flags(a, b, 0),                     // SUBR
-            2 => self.add_flags(a, b, u64::from(self.carry)), // ADDC
-            3 => self.sub_flags(a, b, u64::from(self.carry)), // SUBC
+            0 => self.add_flags(a, b, 0),                             // ADDR
+            1 => self.sub_flags(a, b, 0),                             // SUBR
+            2 => self.add_flags(a, b, u64::from(self.flags.carry())), // ADDC
+            3 => self.sub_flags(a, b, u64::from(self.flags.carry())), // SUBC
             4 => {
                 // ANDR — RRR logic sets zero
                 let r = a & b;
-                self.zero = r == 0;
+                self.flags.set_zero(r == 0);
                 r
             }
             5 => {
                 // ORR
                 let r = a | b;
-                self.zero = r == 0;
+                self.flags.set_zero(r == 0);
                 r
             }
             6 => {
                 // XORR
                 let r = a ^ b;
-                self.zero = r == 0;
+                self.flags.set_zero(r == 0);
                 r
             }
             7 => (a as i64).min(b as i64) as u64, // MINR (signed)
@@ -142,7 +143,7 @@ impl Cpu {
     /// ISA v3 D3 W result: sign-extend the low 32 bits; Z from the W value.
     fn w32(&mut self, res: u64) -> u64 {
         let w = i64::from(res as i32) as u64;
-        self.zero = w == 0;
+        self.flags.set_zero(w == 0);
         w
     }
 
@@ -159,13 +160,13 @@ impl Cpu {
                 let r = self.add_flags(a, ext, 0);
                 self.regs[rd] = if len == 2 && (word >> 19) & 1 == 1 { self.w32(r) } else { r };
             }
-            1 => self.regs[rd] = self.sub_flags(a, ext, 0),                     // MINUSV
-            2 => self.regs[rd] = self.add_flags(a, ext, u64::from(self.carry)), // ADC-imm
-            3 => self.regs[rd] = self.sub_flags(a, ext, u64::from(self.carry)), // SBC-imm
-            4 => self.regs[rd] = a & ext,                                       // ANDV — no flags
-            5 => self.regs[rd] = a | ext,                                       // ORV
-            6 => self.regs[rd] = a ^ ext,                                       // XORV
-            14 => self.regs[rd] = u64::from(self.pc.wrapping_add(imm32)),       // LEAPC: rd = PC + imm32
+            1 => self.regs[rd] = self.sub_flags(a, ext, 0),                             // MINUSV
+            2 => self.regs[rd] = self.add_flags(a, ext, u64::from(self.flags.carry())), // ADC-imm
+            3 => self.regs[rd] = self.sub_flags(a, ext, u64::from(self.flags.carry())), // SBC-imm
+            4 => self.regs[rd] = a & ext,                                               // ANDV — no flags
+            5 => self.regs[rd] = a | ext,                                               // ORV
+            6 => self.regs[rd] = a ^ ext,                                               // XORV
+            14 => self.regs[rd] = u64::from(self.pc.wrapping_add(imm32)),               // LEAPC: rd = PC + imm32
             15 => {
                 // MOV: SETR (2-word, sign-extended) or SETR64 (3-word, full 64-bit).
                 self.regs[rd] = if len == 3 {
@@ -273,7 +274,7 @@ impl Cpu {
                 // SHL
                 let r = a << cnt;
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
@@ -281,7 +282,7 @@ impl Cpu {
                 // SHR
                 let r = a >> cnt;
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
@@ -289,16 +290,16 @@ impl Cpu {
                 // SAR
                 let r = ((a as i64) >> cnt) as u64;
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
             3 => {
                 let r = a.rotate_left(cnt); // ROL
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                     if cnt == 1 {
-                        self.carry = (a >> 63) & 1 == 1;
+                        self.flags.set_carry((a >> 63) & 1 == 1);
                     }
                 }
                 self.regs[rd] = r;
@@ -306,9 +307,9 @@ impl Cpu {
             4 => {
                 let r = a.rotate_right(cnt); // ROR
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                     if cnt == 1 {
-                        self.carry = a & 1 == 1;
+                        self.flags.set_carry(a & 1 == 1);
                     }
                 }
                 self.regs[rd] = r;
@@ -316,20 +317,20 @@ impl Cpu {
             5 => {
                 // RCL — rotate left through carry (ROLCR).
                 let new_carry = (a >> 63) & 1 == 1;
-                let r = (a << 1) | u64::from(self.carry);
-                self.carry = new_carry;
+                let r = (a << 1) | u64::from(self.flags.carry());
+                self.flags.set_carry(new_carry);
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
             6 => {
                 // RCR — rotate right through carry (RORCR).
                 let new_carry = a & 1 == 1;
-                let r = (a >> 1) | (u64::from(self.carry) << 63);
-                self.carry = new_carry;
+                let r = (a >> 1) | (u64::from(self.flags.carry()) << 63);
+                self.flags.set_carry(new_carry);
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
@@ -342,7 +343,7 @@ impl Cpu {
                 if src == 0 {
                     self.regs[rd] = bit;
                 } else {
-                    self.zero = bit == 0;
+                    self.flags.set_zero(bit == 0);
                 }
             }
             12 => {
@@ -354,7 +355,7 @@ impl Cpu {
                 let l = u64::from((imm32 >> 8) & 0x1F);
                 let mask = (1_u64 << l) - 1;
                 let field = ((a & 0xFFFF_FFFF) >> start) & mask;
-                self.zero = field == 0;
+                self.flags.set_zero(field == 0);
                 self.regs[rd] = field;
             }
             13 => {
@@ -387,7 +388,7 @@ impl Cpu {
                 // NEG
                 let r = a.wrapping_neg();
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
@@ -395,7 +396,7 @@ impl Cpu {
                 // NOT
                 let r = !a;
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
@@ -403,8 +404,8 @@ impl Cpu {
                 // ABS — INT_MIN wraps (result INT_MIN, overflow cleared); matches v1.
                 let r = (a as i64).wrapping_abs() as u64;
                 if f {
-                    self.zero = r == 0;
-                    self.overflow = false;
+                    self.flags.set_zero(r == 0);
+                    self.flags.set_overflow(false);
                 }
                 self.regs[rd] = r;
             }
@@ -426,7 +427,7 @@ impl Cpu {
                     _ => a & 0xFFFF_FFFF,
                 };
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
@@ -436,7 +437,7 @@ impl Cpu {
                 // POPCNT
                 let r = u64::from(a.count_ones());
                 if f {
-                    self.zero = r == 0;
+                    self.flags.set_zero(r == 0);
                 }
                 self.regs[rd] = r;
             }
@@ -445,20 +446,7 @@ impl Cpu {
             12 => {
                 // GETF / SETFR: rd = {zero,equal,carry,overflow} in the top nibble [63:60].
                 // `equal` is DERIVED (E = Z) — retired as storage per §1.5.
-                let mut v = 0_u64;
-                if self.zero {
-                    v |= 1 << 63;
-                }
-                if self.flag_e() {
-                    v |= 1 << 62;
-                }
-                if self.carry {
-                    v |= 1 << 61;
-                }
-                if self.overflow {
-                    v |= 1 << 60;
-                }
-                self.regs[rd] = v;
+                self.regs[rd] = u64::from(self.flags.to_getf()) << 60;
             }
             14 => self.regs[rd] = self.add_flags(a, 1, 0), // INC
             15 => self.regs[rd] = self.sub_flags(a, 1, 0), // DEC
@@ -552,16 +540,16 @@ impl Cpu {
     /// gives the negations (`NE`, `GE`, `GT`, `UGE`, `UGT`).
     pub(super) fn eval_cond(&self, cond: u32) -> Option<bool> {
         Some(match cond {
-            0 => true,                       // always
-            1 => self.zero,                  // Z
-            2 => self.carry,                 // C (raw carry / borrow)
-            3 => self.overflow,              // V
-            4 => self.sign,                  // S
-            5 => self.flag_l(),              // LT  = S ^ V
-            6 => self.zero || self.flag_l(), // LE  = Z | (S ^ V)
-            7 => self.flag_u(),              // ULT = C
-            8 => self.flag_u() || self.zero, // ULE = C | Z
-            9 => self.flag_e(),              // E   = Z (alias of COND 1)
+            0 => true,                                            // always
+            1 => self.flags.zero(),                               // Z
+            2 => self.flags.carry(),                              // C (raw carry / borrow)
+            3 => self.flags.overflow(),                           // V
+            4 => self.flags.sign(),                               // S
+            5 => self.flags.less(),                               // LT  = S ^ V
+            6 => self.flags.zero() || self.flags.less(),          // LE  = Z | (S ^ V)
+            7 => self.flags.unsigned_less(),                      // ULT = C
+            8 => self.flags.unsigned_less() || self.flags.zero(), // ULE = C | Z
+            9 => self.flags.equal(),                              // E   = Z (alias of COND 1)
             _ => return None,
         })
     }
@@ -654,10 +642,7 @@ impl Cpu {
         let ctx = self.read64(self.sp);
         self.sp = self.sp.wrapping_add(8);
         self.pc = ctx as u32;
-        self.zero = (ctx >> 38) & 1 == 1;
-        self.carry = (ctx >> 36) & 1 == 1;
-        self.overflow = (ctx >> 35) & 1 == 1;
-        self.sign = (ctx >> 34) & 1 == 1;
+        self.flags = Flags::from_ctx((ctx >> 32) as u8 & 0x7F);
         self.int_mask = ((ctx >> 39) & 0xF) as u8;
     }
 
@@ -697,7 +682,7 @@ impl Cpu {
                 // DIV — divide-by-zero → all-ones result, overflow set, zero untouched.
                 if b == 0 {
                     self.regs[rd] = 0xFFFF_FFFF_FFFF_FFFF;
-                    self.overflow = true;
+                    self.flags.set_overflow(true);
                 } else if sgn {
                     self.regs[rd] = (a as i64).wrapping_div(b as i64) as u64;
                 } else {
@@ -708,7 +693,7 @@ impl Cpu {
                 // MOD — mod-by-zero: reg forms write the dividend, MODV writes nothing;
                 // overflow set either way, zero untouched.
                 if b == 0 {
-                    self.overflow = true;
+                    self.flags.set_overflow(true);
                     if !is_imm {
                         self.regs[rd] = a;
                     }

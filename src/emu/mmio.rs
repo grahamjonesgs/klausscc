@@ -148,16 +148,7 @@ impl Cpu {
     /// Interrupt entry (`pipeline_core.sv` IRQ sequencer): push the context
     /// word at SP-8, mask the source, acknowledge it, jump to its vector.
     pub(super) fn take_irq(&mut self, src: usize) {
-        let b = |f: bool| u64::from(f);
-        let ctx = (u64::from(self.int_mask) << 39)
-            | (b(self.zero) << 38)
-            | (b(self.flag_e()) << 37)
-            | (b(self.carry) << 36)
-            | (b(self.overflow) << 35)
-            | (b(self.sign) << 34)
-            | (b(self.flag_l()) << 33)
-            | (b(self.flag_u()) << 32)
-            | u64::from(self.pc);
+        let ctx = (u64::from(self.int_mask) << 39) | (u64::from(self.flags.to_ctx()) << 32) | u64::from(self.pc);
         self.sp = self.sp.wrapping_sub(8);
         self.write64(self.sp, ctx);
         self.int_mask &= !(1 << src);

@@ -36,8 +36,8 @@ fn test_setr_and_inc_wraps_zero() {
     let words = [0x8BD0_0000, 0xFFFF_FFFF, 0x5788_0000, HALT];
     let cpu = run_words(&words);
     assert_eq!(cpu.regs[0], 0);
-    assert!(cpu.zero);
-    assert!(cpu.carry);
+    assert!(cpu.flags.zero());
+    assert!(cpu.flags.carry());
 }
 
 #[test]
@@ -90,7 +90,7 @@ fn test_div_by_zero() {
     let words = [0x8BD0_0000, 5, 0xA980_0000, 0, HALT];
     let cpu = run_words(&words);
     assert_eq!(cpu.regs[0], 0xFFFF_FFFF_FFFF_FFFF);
-    assert!(cpu.overflow);
+    assert!(cpu.flags.overflow());
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn test_muldiv_family() {
     // MODV by 0 -> NO writeback (A stays 17), overflow set.
     let cpu = run_words(&[0x8BD0_0000, 17, 0xAA80_0000, 0, HALT]);
     assert_eq!(cpu.regs[0] as u32, 17);
-    assert!(cpu.overflow);
+    assert!(cpu.flags.overflow());
 }
 
 #[test]
@@ -170,10 +170,10 @@ fn test_cmp_sets_full_zscv() {
     // borrow (previously CMP left Z/C/V stale — the whole point of §1.2).
     // SETR A 7 ; SETR B 7 ; CMPRR A B ; HALT.
     let cpu = run_words(&[0x8BD0_0000, 7, 0x8BD0_0100, 7, 0x4C00_0001, HALT]);
-    assert!(cpu.zero, "CMP of equal operands sets zero");
-    assert!(!cpu.carry, "no borrow when a == b");
-    assert!(!cpu.sign, "a - b == 0 is non-negative");
-    assert!(!cpu.overflow, "no signed overflow for 7 - 7");
+    assert!(cpu.flags.zero(), "CMP of equal operands sets zero");
+    assert!(!cpu.flags.carry(), "no borrow when a == b");
+    assert!(!cpu.flags.sign(), "a - b == 0 is non-negative");
+    assert!(!cpu.flags.overflow(), "no signed overflow for 7 - 7");
 }
 
 #[test]
@@ -228,15 +228,15 @@ fn test_borrow_polarity_ult_is_carry() {
     // §1.3 x86 borrow convention: after CMP, C = 1 ⟺ a < b (unsigned).
     // A=5, B=0x10 ⇒ a < b ⇒ carry (borrow) set, ULT/ULE derive true.
     let cpu = run_words(&[0x8BD0_0000, 5, 0x8BD0_0100, 0x10, 0x4C00_0001, HALT]);
-    assert!(cpu.carry, "borrow set when a < b (unsigned)");
+    assert!(cpu.flags.carry(), "borrow set when a < b (unsigned)");
     assert_eq!(cpu.eval_cond(2), Some(true), "COND C reads raw carry");
     assert_eq!(cpu.eval_cond(7), Some(true), "ULT = C");
     assert_eq!(cpu.eval_cond(8), Some(true), "ULE = C | Z");
-    assert!(cpu.flag_u(), "derived U = C");
+    assert!(cpu.flags.unsigned_less(), "derived U = C");
 
     // Reverse: A=0x10, B=5 ⇒ a > b ⇒ no borrow ⇒ ULT false (so UGE, ¬C, holds).
     let cpu = run_words(&[0x8BD0_0000, 0x10, 0x8BD0_0100, 5, 0x4C00_0001, HALT]);
-    assert!(!cpu.carry, "no borrow when a > b (unsigned)");
+    assert!(!cpu.flags.carry(), "no borrow when a > b (unsigned)");
     assert_eq!(cpu.eval_cond(7), Some(false), "ULT false ⇒ UGE (¬C) taken");
 }
 
@@ -498,9 +498,9 @@ fn test_v3_short_alu_and_setr() {
 fn test_v3_short_cmprv_negative() {
     // The short CMPRV immediate is sign-extended (Fix 6 regression guard).
     let cpu = run_words(&[0x4BDF_D000, 0x4C1F_D000, HALT]); // A=-3; CMPRV A,-3
-    assert!(cpu.zero, "A == -3 must set Z");
+    assert!(cpu.flags.zero(), "A == -3 must set Z");
     let cpu = run_words(&[0x4BDF_D000, 0x4C1F_C000, HALT]); // A=-3; CMPRV A,-4
-    assert!(!cpu.zero && !cpu.sign, "-3 - (-4) = 1");
+    assert!(!cpu.flags.zero() && !cpu.flags.sign(), "-3 - (-4) = 1");
 }
 
 #[test]
@@ -567,7 +567,7 @@ fn test_v3_fused_branch() {
     let unsigned_lt = 0x7400_0000 | (3 << 23) | (2 << 8) | 0x01;
     let cpu = run_words(&[0x4BD0_1000, 0x4BDF_E100, unsigned_lt, 0x4BD0_7200, HALT]);
     assert_eq!(cpu.regs[2], 0, "taken -> SETR C,7 skipped");
-    assert!(!cpu.zero && !cpu.carry, "fused branch leaves the flags alone");
+    assert!(!cpu.flags.zero() && !cpu.flags.carry(), "fused branch leaves the flags alone");
 }
 
 #[test]
@@ -589,7 +589,7 @@ fn test_v3_d3_w_alu() {
     // Z follows the W result: 0x1_0000_0000 + 0 -> W result 0 -> Z set.
     let cpu = run_words(&[0xCBC0_0000, 0, 1, 0x4BD0_0100, 0x4428_0201, HALT]);
     assert_eq!(cpu.regs[2], 0);
-    assert!(cpu.zero);
+    assert!(cpu.flags.zero());
 }
 
 #[test]
@@ -601,17 +601,17 @@ fn test_v3_w_compare() {
     w.extend_from_slice(&[0x4BD0_5100]); // SETR B, 5
     w.extend_from_slice(&[0x4C08_0001, HALT]); // CMPRRW A, B
     let cpu = run_words(&w);
-    assert!(cpu.zero, "low halves equal");
+    assert!(cpu.flags.zero(), "low halves equal");
     // Signed 32-bit order: A = 0x0000_0000_8000_0000 (negative as i32) < B = 1.
     let mut w = Vec::new();
     w.extend_from_slice(&setr(0, 0x8000_0000));
     w.extend_from_slice(&[0x5560_0000]); // ZEXTW A (clear sext upper half)
     w.extend_from_slice(&[0x4BD0_1100, 0x4C08_0001, HALT]); // SETR B,1; CMPRRW A,B
     let cpu = run_words(&w);
-    assert!(cpu.flag_l(), "i32 0x8000_0000 < 1 (signed)");
+    assert!(cpu.flags.less(), "i32 0x8000_0000 < 1 (signed)");
     // CMPRVW (2-word, 0x8C18_0000): A=0xFFFF_FFFF_0000_0007 vs 7 -> equal.
     let cpu = run_words(&[0xCBC0_0000, 7, 0xFFFF_FFFF, 0x8C18_0000, 7, HALT]);
-    assert!(cpu.zero);
+    assert!(cpu.flags.zero());
 }
 
 #[test]
@@ -701,15 +701,15 @@ fn bextr_extracts_the_field_and_always_sets_z() {
     // SETR A 0x12345678 ; BEXTR B A start 8 len 8 -> 0x56, Z clear.
     let cpu = run_words(&[0x8BD0_0000, 0x1234_5678, 0x9300_0100, 0x0808, HALT]);
     assert_eq!(cpu.regs[1], 0x56);
-    assert!(!cpu.zero);
+    assert!(!cpu.flags.zero());
     // SETR A 0xFFFFFF0F ; BEXTR B A start 4 len 4 -> 0: Z set although F is clear.
     let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FF0F, 0x9300_0100, 0x0404, HALT]);
     assert_eq!(cpu.regs[1], 0);
-    assert!(cpu.zero, "a zero field sets Z");
+    assert!(cpu.flags.zero(), "a zero field sets Z");
     // INCR A from all ones sets Z ; SETR B 0x30 ; BEXTR C B start 4 len 2 -> 3 clears it.
     let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x5788_0000, 0x8BD0_0100, 0x30, 0x9300_0210, 0x0204, HALT]);
     assert_eq!(cpu.regs[2], 3);
-    assert!(!cpu.zero, "a non-zero field clears Z");
+    assert!(!cpu.flags.zero(), "a non-zero field clears Z");
 }
 
 #[test]
@@ -723,7 +723,7 @@ fn bextr_reads_the_low_32_bits_and_zero_extends() {
     // len 0 extracts nothing.
     let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x9300_0100, 0x0003, HALT]);
     assert_eq!(cpu.regs[1], 0);
-    assert!(cpu.zero);
+    assert!(cpu.flags.zero());
 }
 
 #[test]
@@ -743,7 +743,7 @@ fn bdep_deposits_the_low_field_of_rs2_and_leaves_flags() {
         HALT,
     ]);
     assert_eq!(cpu.regs[2], 0x0000_0000_FFFF_FF5F, "low 32 bits only, zero-extended");
-    assert!(cpu.zero, "BDEP leaves the flags alone");
+    assert!(cpu.flags.zero(), "BDEP leaves the flags alone");
     // len 0 deposits nothing: C = low half of the base.
     let cpu = run_words(&[0x8BD0_0000, 0xFFFF_FFFF, 0x8BD0_0100, 0xA5, 0x9340_0201, 0x0004, HALT]);
     assert_eq!(cpu.regs[2], 0xFFFF_FFFF);
