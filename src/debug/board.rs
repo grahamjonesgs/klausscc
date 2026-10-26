@@ -11,8 +11,8 @@
 //!   `TRAP`; memory reads show the original word.  Resume invalidates the
 //!   I-cache, so a patched word is always fetched.
 //! * Watchpoints: the debug module's doubleword comparators (2 on the
-//!   current bitstream).  The halt
-//!   comes after the access, up to two instructions late (`DEBUG_PLAN.md`).
+//!   current bitstream).  The halt comes after the access, up to two
+//!   instructions late (`DEBUG_PLAN.md`).
 //! * A compiled-in `TRAP` (`__builtin_debugtrap`) reports SIGTRAP; resuming
 //!   skips it.  `HALT` reports "exited" with the low byte of r12.
 //! * Single steps run with interrupts masked; the timer, millisecond clock
@@ -270,12 +270,30 @@ impl<D: Dmi> Board<D> {
         }
     }
 
-    fn read_regs(&mut self) -> BoardResult<Vec<u64>> {
-        let reqs: Vec<DmiReq> = KlaussRegId::all()
+    /// Read every register in one batch.
+    fn read_regs(&mut self) -> BoardResult<KlaussRegs> {
+        let requests: Vec<DmiReq> = KlaussRegId::all()
             .flat_map(|reg| [DmiReq::Write(REG_CMD, reg.regnum() as u64), DmiReq::Read(DATA0)])
             .collect();
-        let v = self.batch(&reqs)?;
-        Ok(v.into_iter().skip(1).step_by(2).collect())
+        let v = self.batch(&requests)?;
+        let mut regs = KlaussRegs::default();
+        for (reg, value) in KlaussRegId::all().zip(v.into_iter().skip(1).step_by(2)) {
+            regs.set(reg, value);
+        }
+        Ok(regs)
+    }
+
+    /// Write every register in one batch.
+    fn write_regs(&mut self, regs: &KlaussRegs) -> BoardResult<()> {
+        let requests: Vec<DmiReq> = KlaussRegId::all()
+            .flat_map(|reg| {
+                [
+                    DmiReq::Write(DATA0, regs.get(reg)),
+                    DmiReq::Write(REG_CMD, reg.regnum() as u64 | REG_CMD_WRITE),
+                ]
+            })
+            .collect();
+        self.batch(&requests).map(drop)
     }
 
     fn read_reg(&mut self, reg: KlaussRegId) -> BoardResult<u64> {
@@ -663,20 +681,12 @@ impl<D: Dmi> MonitorCmd for BoardTarget<D> {
 
 impl<D: Dmi> SingleThreadBase for BoardTarget<D> {
     fn read_registers(&mut self, regs: &mut KlaussRegs) -> TargetResult<(), Self> {
-        let v = self.board.read_regs()?;
-        regs.r.copy_from_slice(&v[..16]);
-        regs.sp = v[16] as u32;
-        regs.pc = v[17] as u32;
-        regs.flags = v[18] as u32;
-        regs.int_mask = v[19] as u32;
+        *regs = self.board.read_regs()?;
         Ok(())
     }
 
     fn write_registers(&mut self, regs: &KlaussRegs) -> TargetResult<(), Self> {
-        for reg in KlaussRegId::all() {
-            self.board.write_reg(reg, regs.get(reg))?;
-        }
-        Ok(())
+        self.board.write_regs(regs).map_err(Into::into)
     }
 
     fn support_single_register_access(&mut self) -> Option<SingleRegisterAccessOps<'_, (), Self>> {

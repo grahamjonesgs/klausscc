@@ -28,6 +28,8 @@ struct DmState {
     bad_mem_from: Option<u32>,
     /// A batch this matches fails as if the cable had been pulled.
     lost: Option<fn(&[DmiReq]) -> bool>,
+    /// DMI batches run (USB round trips on the real cable).
+    batches: usize,
 }
 
 impl DmState {
@@ -132,6 +134,7 @@ impl Dmi for FakeDm {
         if dm.lost.is_some_and(|lost| lost(reqs)) {
             return Err(JtagError::ReadTimeout);
         }
+        dm.batches += 1;
         Ok(reqs
             .iter()
             .map(|req| match *req {
@@ -309,13 +312,16 @@ fn registers_read_and_write_through_reg_cmd() {
         *r = 0x1111 * i as u64;
     }
     let mut regs = KlaussRegs::default();
+    let batches = state.borrow().batches;
     ok(target.read_registers(&mut regs));
+    assert_eq!(state.borrow().batches, batches + 1, "one round trip");
     assert_eq!(regs.r[3], 0x3333);
     assert_eq!((regs.sp, regs.pc, regs.flags, regs.int_mask), (0x11110, 0x12221, 0x13332, 0x14443));
 
     regs.r[0] = 0xDEAD_BEEF_0000_0001;
     regs.pc = 0x200;
     ok(target.write_registers(&regs));
+    assert_eq!(state.borrow().batches, batches + 2, "one round trip");
     assert_eq!(state.borrow().regs[0], 0xDEAD_BEEF_0000_0001);
     assert_eq!(state.borrow().regs[17], 0x200);
     assert_eq!(state.borrow().regs[19], 0x14443);
