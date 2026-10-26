@@ -6,7 +6,7 @@ use crate::asm::line::{LineType, Pass1, Pass2};
 use crate::asm::symbols::SymbolTable;
 use crate::diag::Diagnostics;
 use crate::isa::Isa;
-use crate::isa::encode::{add_arguments, add_registers, pc_relative_bits};
+use crate::isa::encode::{EncodeError, Encoded, encode};
 
 /// Returns pass2 from pass1.
 ///
@@ -14,27 +14,18 @@ use crate::isa::encode::{add_arguments, add_registers, pc_relative_bits};
 pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, isa: &Isa, labels: &SymbolTable) -> Vec<Pass2> {
     let mut pass2: Vec<Pass2> = Vec::new();
     for line in pass1 {
-        let new_opcode = if line.line_type == LineType::Opcode {
-            let code = strip_comments(&line.input_text_line);
-            if let Some(op) = isa.find(code) {
-                let mut opcode = add_registers(op, code, &line.file_name, msg_list, line.line_counter);
-                // ISA v3 PC-relative targets need this line's address.
-                let rel = pc_relative_bits(op, code, line.program_counter, labels, msg_list, line.line_counter, &line.file_name);
-                if rel != 0
-                    && let Some(w0) = opcode.get(..8).and_then(|h| u32::from_str_radix(h, 16).ok())
-                {
-                    opcode = format!("{:08X}{}", w0 | rel, &opcode[8..]);
-                }
-                opcode.push_str(&add_arguments(op, code, msg_list, line.line_counter, &line.file_name, labels));
-                opcode
-            } else {
-                msg_list.error_at(&line.file_name, line.line_counter, format!("Opcode not found - \"{code}\""));
-                "ERR     ".to_owned()
+        let (new_opcode, line_type) = match line.line_type {
+            LineType::Opcode => {
+                let encoded = encode_line(&line, isa, labels, msg_list);
+                let line_type = if encoded.as_ref().is_some_and(|e| e.word0.is_some()) {
+                    LineType::Opcode
+                } else {
+                    LineType::Error
+                };
+                (encoded.map_or_else(|| "ERR     ".to_owned(), |e| e.hex()), line_type)
             }
-        } else if line.line_type == LineType::Data {
-            data_as_bytes(line.input_text_line.as_str()).unwrap_or_default()
-        } else {
-            String::new()
+            LineType::Data => (data_as_bytes(line.input_text_line.as_str()).unwrap_or_default(), LineType::Data),
+            line_type => (String::new(), line_type),
         };
 
         pass2.push(Pass2 {
@@ -42,11 +33,34 @@ pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, isa: &Isa
             file_name: line.file_name,
             line_counter: line.line_counter,
             program_counter: line.program_counter,
-            line_type: if new_opcode.contains("ERR") { LineType::Error } else { line.line_type },
+            line_type,
             opcode: new_opcode,
         });
     }
     pass2
+}
+
+/// Encode the instruction on `line`, reporting what is wrong with it.
+///
+/// The words come back even when they are partly wrong, for the listing;
+/// `None` means the line names no opcode.
+fn encode_line(line: &Pass1, isa: &Isa, labels: &SymbolTable, msg_list: &mut Diagnostics) -> Option<Encoded> {
+    let code = strip_comments(&line.input_text_line);
+    let Some(opcode) = isa.find(code) else {
+        msg_list.error_at(&line.file_name, line.line_counter, format!("Opcode not found - \"{code}\""));
+        return None;
+    };
+    let encoded = encode(opcode, code, line.program_counter, labels).unwrap_or_else(|EncodeError { faults, partial }| {
+        for fault in faults {
+            msg_list.error_at(&line.file_name, line.line_counter, fault.message(code));
+        }
+        partial
+    });
+    // One warning for the line, however many extra tokens it has.
+    if encoded.extra_tokens {
+        msg_list.warning_at(&line.file_name, line.line_counter, format!("Too many arguments found - \"{code}\""));
+    }
+    Some(encoded)
 }
 
 #[cfg(test)]

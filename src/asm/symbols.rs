@@ -7,6 +7,7 @@ use crate::diag::Diagnostics;
 use crate::num::{LiteralError, fits_imm32, is_hex_literal, parse_bits64, parse_int};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::fmt;
 
 /// Where a label or data name was defined, and its address.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,21 +68,53 @@ impl SymbolTable {
     }
 }
 
-/// Gets address from label or absolute values.
+/// Why an operand has no value: an undefined name, or a literal that is
+/// malformed or does not fit the 32-bit word the instruction holds.
 ///
-/// Converts argument to its label's address or its literal value, as the
-/// 32-bit word the instruction holds. An undefined label or a malformed or
-/// out-of-range literal is reported as an error at the line and returns `None`.
-pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_number: u32, filename: &str, symbols: &SymbolTable) -> Option<u32> {
+/// Each keeps the operand as written, for its message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum OperandError {
+    /// A label (`name:`) or data name (`#name`) that is not defined.
+    UnknownLabel(String),
+    /// A hex literal whose 64-bit pattern is outside the 32-bit range.
+    HexOutOfBounds(u64),
+    /// A hex literal too long for 64 bits.
+    HexTooLong(String),
+    /// A malformed hex literal.
+    BadHex(String),
+    /// A decimal literal outside the 32-bit range.
+    DecimalOutOfBounds(i128),
+    /// A decimal literal too long for the parser.
+    DecimalTooLong(String),
+    /// Neither a decimal literal nor a defined name.
+    BadDecimal(String),
+}
+
+impl fmt::Display for OperandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownLabel(argument) => write!(f, "Label {argument} not found"),
+            Self::HexOutOfBounds(bits) => write!(f, "Hex value 0x{bits:016X} out of bounds"),
+            Self::HexTooLong(argument) => write!(f, "Hex value {argument} out of bounds"),
+            Self::BadHex(argument) => write!(f, "Hex value {argument} incorrect"),
+            Self::DecimalOutOfBounds(n) => write!(f, "Decimal value {n} out of bounds"),
+            Self::DecimalTooLong(argument) => write!(f, "Decimal value {argument} out of bounds"),
+            Self::BadDecimal(argument) => write!(f, "Decimal value {argument} incorrect"),
+        }
+    }
+}
+
+/// The value of an operand: its label's address or its literal value, as
+/// the 32-bit word the instruction holds.
+///
+/// A name without a trailing `:` is tried as a label when it is not a number.
+pub(crate) fn resolve_operand(argument: &str, symbols: &SymbolTable) -> Result<u32, OperandError> {
     let argument_trim = argument.trim();
-    let mut error = |text: String| msg_list.error_at(filename, line_number, text);
 
     if label_name_from_string(argument_trim).is_some() || data_name_from_string(argument_trim).is_some() {
-        if let Some(n) = symbols.address(argument_trim) {
-            return Some(n);
-        }
-        error(format!("Label {argument} not found"));
-        return None;
+        return symbols
+            .address(argument_trim)
+            .ok_or_else(|| OperandError::UnknownLabel(argument.to_owned()));
     }
 
     if is_hex_literal(argument_trim) {
@@ -90,37 +123,29 @@ pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_
         // decimal path. Values like 0xFFFFFFFFFFFFFFFF (-1) are in [i32::MIN, 0xFFFF_FFFF]
         // and emit FFFFFFFF; the CPU sign-extends the 32-bit immediate to 64 bits,
         // giving the correct 64-bit value.
-        match parse_bits64(argument_trim) {
+        return match parse_bits64(argument_trim) {
             Ok(bits) => {
                 let value = bits as i64;
                 if fits_imm32(i128::from(value)) {
-                    return Some(value as u32);
+                    Ok(value as u32)
+                } else {
+                    Err(OperandError::HexOutOfBounds(bits))
                 }
-                error(format!("Hex value 0x{bits:016X} out of bounds"));
             }
-            Err(LiteralError::Overflow) => error(format!("Hex value {argument} out of bounds")),
-            Err(_) => error(format!("Hex value {argument} incorrect")),
-        }
-        return None;
+            Err(LiteralError::Overflow) => Err(OperandError::HexTooLong(argument.to_owned())),
+            Err(_) => Err(OperandError::BadHex(argument.to_owned())),
+        };
     }
 
     match parse_int(argument_trim) {
-        Ok(n) => {
-            if fits_imm32(n) {
-                return Some(n as u32);
-            }
-            error(format!("Decimal value {n} out of bounds"));
-        }
-        Err(LiteralError::Overflow) => error(format!("Decimal value {argument} out of bounds")),
-        Err(_) => {
-            // Try resolving as a label name without colon suffix
-            if let Some(n) = symbols.address(argument_trim) {
-                return Some(n);
-            }
-            error(format!("Decimal value {argument} incorrect"));
-        }
+        Ok(n) if fits_imm32(n) => Ok(n as u32),
+        Ok(n) => Err(OperandError::DecimalOutOfBounds(n)),
+        Err(LiteralError::Overflow) => Err(OperandError::DecimalTooLong(argument.to_owned())),
+        // Try resolving as a label name without colon suffix
+        Err(_) => symbols
+            .address(argument_trim)
+            .ok_or_else(|| OperandError::BadDecimal(argument.to_owned())),
     }
-    None
 }
 
 /// Build the symbol table from pass 1.
@@ -247,64 +272,59 @@ mod tests {
 
     #[test]
     // Test conversion is correct for value arguments
-    fn test_convert_argument1() {
+    fn test_resolve_operand1() {
         let labels = SymbolTable::from_pairs(&[("label1:", 1), ("label2:", 2), ("#data1", 30)]);
-        let mut msg_list = Diagnostics::new();
-        assert_eq!(convert_argument("0x1234", &mut msg_list, 3, "test", &labels), Some(0x1234));
-        assert_eq!(convert_argument("1234", &mut msg_list, 5, "test", &labels), Some(0x4D2));
-        assert_eq!(convert_argument("123456789", &mut msg_list, 6, "test", &labels), Some(0x075B_CD15));
-        assert_eq!(convert_argument("label1:", &mut msg_list, 7, "test", &labels), Some(0x1));
-        assert_eq!(convert_argument("label1: ", &mut msg_list, 8, "test", &labels), Some(0x1));
+        assert_eq!(resolve_operand("0x1234", &labels), Ok(0x1234));
+        assert_eq!(resolve_operand("1234", &labels), Ok(0x4D2));
+        assert_eq!(resolve_operand("123456789", &labels), Ok(0x075B_CD15));
+        assert_eq!(resolve_operand("label1:", &labels), Ok(0x1));
+        assert_eq!(resolve_operand("label1: ", &labels), Ok(0x1));
 
-        assert_eq!(convert_argument("label2:", &mut msg_list, 14, "test", &labels), Some(0x2));
+        assert_eq!(resolve_operand("label2:", &labels), Ok(0x2));
 
-        assert_eq!(convert_argument("#data1", &mut msg_list, 14, "test", &labels), Some(0x1E));
+        assert_eq!(resolve_operand("#data1", &labels), Ok(0x1E));
     }
 
     #[test]
-    // Test for convert_argument if the argument is invalid with correct message
-    fn test_convert_argument2() {
+    // Test for resolve_operand if the argument is invalid with correct message
+    fn test_resolve_operand2() {
         let labels = SymbolTable::from_pairs(&[("label1:", 1), ("label2:", 2), ("#data1", 30)]);
-        let mut msg_list = Diagnostics::new();
+        let message = |argument| resolve_operand(argument, &labels).unwrap_err().to_string();
 
         // Check for label reference without colon suffix
-        assert_eq!(convert_argument("label1", &mut msg_list, 0, "test", &labels), Some(0x1));
+        assert_eq!(resolve_operand("label1", &labels), Ok(0x1));
 
         // Check for unknown label text
-        assert_eq!(convert_argument("unknown", &mut msg_list, 0, "test", &labels), None);
-        assert_eq!(msg_list.messages().last().unwrap().text(), "Decimal value unknown incorrect".to_owned());
+        assert_eq!(message("unknown"), "Decimal value unknown incorrect");
 
         // Check for hex value out of bounds
-        assert_eq!(convert_argument("0x123456789", &mut msg_list, 4, "test", &labels), None);
-        assert_eq!(
-            msg_list.messages().last().unwrap().text(),
-            "Hex value 0x0000000123456789 out of bounds".to_owned()
-        );
+        assert_eq!(message("0x123456789"), "Hex value 0x0000000123456789 out of bounds");
 
         // Check for label not defined
-        assert_eq!(convert_argument("label3:", &mut msg_list, 14, "test", &labels), None);
-        assert_eq!(msg_list.messages().last().unwrap().text(), "Label label3: not found".to_owned());
+        assert_eq!(message("label3:"), "Label label3: not found");
 
         // Check for invalid decimal value
-        assert_eq!(convert_argument("4294967296", &mut msg_list, 14, "test", &labels), None);
-        assert_eq!(
-            msg_list.messages().last().unwrap().text(),
-            "Decimal value 4294967296 out of bounds".to_owned()
-        );
+        assert_eq!(message("4294967296"), "Decimal value 4294967296 out of bounds");
 
         // Check for data not defined
-        assert_eq!(convert_argument("#data2", &mut msg_list, 15, "test", &labels), None);
-        assert_eq!(msg_list.messages().last().unwrap().text(), "Label #data2 not found".to_owned());
+        assert_eq!(message("#data2"), "Label #data2 not found");
 
         // Check for invalid hex value
-        assert_eq!(convert_argument("0xGGG", &mut msg_list, 14, "test", &labels), None);
-        assert_eq!(msg_list.messages().last().unwrap().text(), "Hex value 0xGGG incorrect".to_owned());
+        assert_eq!(message("0xGGG"), "Hex value 0xGGG incorrect");
+
+        // Literals too long for the parser keep their text
+        assert_eq!(
+            message("99999999999999999999999999999999999999999"),
+            "Decimal value 99999999999999999999999999999999999999999 out of bounds"
+        );
+        assert_eq!(message("0x1_0000_0000_0000_0000"), "Hex value 0x1_0000_0000_0000_0000 out of bounds");
     }
 
     #[test]
     // Regression: undefined labels and bad literals were warnings, so the line
-    // assembled as 00000000 and the build succeeded. They are now errors at the line.
-    fn test_convert_argument_failures_are_errors() {
+    // assembled as 00000000 and the build succeeded. They are now errors, and
+    // the message names the operand without repeating a location.
+    fn test_resolve_operand_failures_are_errors() {
         let labels = SymbolTable::from_pairs(&[("loop:", 8)]);
         for bad in [
             "nowhere:",
@@ -316,34 +336,24 @@ mod tests {
             "4294967296",
             "99999999999999999999",
         ] {
-            let mut msg_list = Diagnostics::new();
-            assert_eq!(convert_argument(bad, &mut msg_list, 9, "prog.kla", &labels), None, "{bad}");
-            assert_eq!(msg_list.count(MessageType::Error), 1, "{bad}");
-            assert_eq!(msg_list.count(MessageType::Warning), 0, "{bad}");
-            let msg = msg_list.messages().first().unwrap();
-            assert_eq!((msg.line_number(), msg.file_name()), (Some(9), Some("prog.kla")), "{bad}");
-            assert!(
-                !msg.text().contains("- line"),
-                "location is attached, not repeated in the text: {}",
-                msg.text()
-            );
+            let message = resolve_operand(bad, &labels).unwrap_err().to_string();
+            assert!(!message.contains("- line"), "location is attached, not repeated in the text: {message}");
         }
     }
 
     #[test]
     // Literal forms shared with the rest of the assembler (num::parse_int).
-    fn test_convert_argument_literal_forms() {
+    fn test_resolve_operand_literal_forms() {
         let labels = SymbolTable::default();
-        let mut msg_list = Diagnostics::new();
-        let mut convert = |arg: &str| convert_argument(arg, &mut msg_list, 1, "t", &labels);
-        assert_eq!(convert("0x1_0"), Some(0x10));
-        assert_eq!(convert("0XFF"), Some(0xFF));
-        assert_eq!(convert("-1"), Some(0xFFFF_FFFF));
-        assert_eq!(convert("-0x10"), Some(0xFFFF_FFF0));
-        assert_eq!(convert("0xFFFFFFFFFFFFFFFF"), Some(0xFFFF_FFFF));
-        assert_eq!(convert("-2147483648"), Some(0x8000_0000));
-        assert_eq!(convert("-2147483649"), None);
-        assert_eq!(msg_list.messages().last().unwrap().text(), "Decimal value -2147483649 out of bounds");
+        let resolve = |arg: &str| resolve_operand(arg, &labels);
+        assert_eq!(resolve("0x1_0"), Ok(0x10));
+        assert_eq!(resolve("0XFF"), Ok(0xFF));
+        assert_eq!(resolve("-1"), Ok(0xFFFF_FFFF));
+        assert_eq!(resolve("-0x10"), Ok(0xFFFF_FFF0));
+        assert_eq!(resolve("0xFFFFFFFFFFFFFFFF"), Ok(0xFFFF_FFFF));
+        assert_eq!(resolve("-2147483648"), Ok(0x8000_0000));
+        assert_eq!(resolve("-2147483649"), Err(OperandError::DecimalOutOfBounds(-2_147_483_649)));
+        assert_eq!(resolve("-2147483649").unwrap_err().to_string(), "Decimal value -2147483649 out of bounds");
     }
 
     #[test]
