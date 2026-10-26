@@ -3,8 +3,9 @@
 
 use crate::asm::macros::Macro;
 use crate::diag::Diagnostics;
-use crate::isa::Opcode;
+use crate::isa::{Opcode, Operand};
 use itertools::Itertools as _;
+use serde::Serialize;
 use std::fs::File;
 use std::io::{BufWriter, Error, Write};
 
@@ -58,6 +59,40 @@ const HTML_TAIL: &str = "</table>
 </html>
 ";
 
+/// One opcode as the JSON export writes it: the field names and order the
+/// export has always had.
+#[derive(Serialize)]
+struct OpcodeRow<'a> {
+    /// Description of the opcode.
+    comment: &'a str,
+    /// Word-0 template as 8 hex digits.
+    hex_code: String,
+    /// Number of source tokens that fill fields of word 0.
+    registers: u32,
+    /// Section the opcode is listed under.
+    section: &'a str,
+    /// Mnemonic.
+    text_name: &'a str,
+    /// Number of appended immediate words.
+    variables: u32,
+    /// Ordered source-operand layout.
+    ops: &'a [Operand],
+}
+
+impl<'a> From<&'a Opcode> for OpcodeRow<'a> {
+    fn from(opcode: &'a Opcode) -> Self {
+        Self {
+            comment: opcode.doc,
+            hex_code: format!("{:08X}", opcode.template),
+            registers: opcode.reg_tokens(),
+            section: opcode.section,
+            text_name: opcode.name,
+            variables: opcode.imm_words(),
+            ops: opcode.ops,
+        }
+    }
+}
+
 /// Create the output file `filename`, reporting a warning when it cannot be.
 fn create(filename: &str, msg_list: &mut Diagnostics) -> Result<BufWriter<File>, Error> {
     let file = File::create(filename).inspect_err(|_| msg_list.warning(format!("Error opening file {filename}")))?;
@@ -81,8 +116,9 @@ pub(crate) fn output_macros_opcodes_html(filename_stem: &str, opcodes: &[Opcode]
     write!(html_file, "Created {}", Local::now().format("%d/%m/%Y %H:%M"))?;
     html_file.write_all(HTML_OPCODE_TABLE.as_bytes())?;
 
-    let mut sorted_opcodes: Vec<Opcode> = opcodes.to_vec();
-    sorted_opcodes.sort_by(|first, second| first.hex_code.cmp(&second.hex_code));
+    // A stable sort, so opcodes sharing a template keep their table order.
+    let mut sorted_opcodes: Vec<&Opcode> = opcodes.iter().collect();
+    sorted_opcodes.sort_by_key(|opcode| opcode.template);
 
     let mut old_section = "";
     for opcode in &sorted_opcodes {
@@ -92,12 +128,16 @@ pub(crate) fn output_macros_opcodes_html(filename_stem: &str, opcodes: &[Opcode]
                 "<tr>\n    <td colspan=\"5\" style=\"background-color:#b0b0b0;\"><b>{}</b></td>\n</tr>",
                 opcode.section
             )?;
-            old_section = &opcode.section;
+            old_section = opcode.section;
         }
         writeln!(
             html_file,
-            "<tr>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>",
-            opcode.text_name, opcode.hex_code, opcode.variables, opcode.registers, opcode.comment
+            "<tr>\n    <td>{}</td>\n    <td>{:08X}</td>\n    <td>{}</td>\n    <td>{}</td>\n    <td>{}</td>\n</tr>",
+            opcode.name,
+            opcode.template,
+            opcode.imm_words(),
+            opcode.reg_tokens(),
+            opcode.doc
         )?;
     }
 
@@ -126,7 +166,7 @@ pub(crate) fn output_macros_opcodes_html(filename_stem: &str, opcodes: &[Opcode]
 /// Writes all macros and opcodes to `<filename_stem>_opcodes.json` and
 /// `<filename_stem>_macros.json`.
 #[cfg(not(tarpaulin_include))] // Not needed except for setting up VScode and docs
-fn output_macros_opcodes_json(filename_stem: &str, opcodes: &[Opcode], macros: &[Macro], msg_list: &mut Diagnostics) -> Result<(), Error> {
+fn output_macros_opcodes_json(filename_stem: &str, opcodes: &[&Opcode], macros: &[Macro], msg_list: &mut Diagnostics) -> Result<(), Error> {
     let json_opcode_filename = format!("{filename_stem}_opcodes.json");
     let json_macro_filename = format!("{filename_stem}_macros.json");
 
@@ -134,7 +174,8 @@ fn output_macros_opcodes_json(filename_stem: &str, opcodes: &[Opcode], macros: &
     msg_list.info(format!("Writing JSON macro file to {json_macro_filename}"));
 
     let mut json_opcode_file = create(&json_opcode_filename, msg_list)?;
-    serde_json::to_writer_pretty(&mut json_opcode_file, opcodes)?;
+    let rows: Vec<OpcodeRow<'_>> = opcodes.iter().map(|&opcode| opcode.into()).collect();
+    serde_json::to_writer_pretty(&mut json_opcode_file, &rows)?;
     json_opcode_file.flush()?;
 
     let mut json_macro_file = create(&json_macro_filename, msg_list)?;
@@ -151,6 +192,6 @@ pub(crate) fn output_opcodes_textmate(filename_stem: &str, opcodes: &[Opcode], m
     msg_list.info(format!("Writing textmate opcode file to {textmate_opcode_filename}"));
 
     let mut textmate_file = create(&textmate_opcode_filename, msg_list)?;
-    write!(textmate_file, "{}", opcodes.iter().map(|opcode| opcode.text_name.as_str()).join("|"))?;
+    write!(textmate_file, "{}", opcodes.iter().map(|opcode| opcode.name).join("|"))?;
     textmate_file.flush()
 }

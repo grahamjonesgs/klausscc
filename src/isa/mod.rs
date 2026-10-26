@@ -11,13 +11,13 @@ pub(crate) mod disasm;
 pub(crate) mod encode;
 pub(crate) mod table;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// One source-operand slot of a v2 instruction, describing how the operand
 /// token maps onto the instruction word (`doc/ISA_ENCODING_V2.md` §1). The uniform
 /// v2 layout is `word0 = template | rd<<8 | rs1<<4 | rs2` plus `N<<15` for the
 /// embedded shift/bit count.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub(crate) enum Operand {
     /// Destination register → word0[11:8].
     Rd,
@@ -87,30 +87,40 @@ impl Operand {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-/// Struct for opcode.
+/// One instruction of the table: its mnemonic, its word-0 template and how
+/// its source operands map onto the instruction words.
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Opcode {
-    /// Comment from opcode definition file.
-    pub comment: String,
-    /// Hexadecimal opcode template (word 0, register/count fields = 0).
-    pub hex_code: String,
-    /// Number of register/count source operands (tokens consumed into word 0).
-    pub registers: u32,
-    /// Section name from opcode definition file.
-    pub section: String,
-    /// Text name of opcode.
-    pub text_name: String,
-    /// Number of appended immediate words (imm32 → 1, imm64 → 2).
-    pub variables: u32,
+    /// Mnemonic, in upper case.
+    pub name: &'static str,
+    /// Instruction word 0 with every operand field clear.
+    pub template: u32,
     /// Ordered source-operand layout (empty for an opcode without operands).
-    #[serde(default)]
-    pub ops: Vec<Operand>,
+    pub ops: &'static [Operand],
+    /// Heading the docs export groups the opcode under.
+    pub section: &'static str,
+    /// Description for the docs export.
+    pub doc: &'static str,
 }
 
-/// Find the opcode whose `text_name` matches the first word of `line`.
+impl Opcode {
+    /// The number of source tokens that fill fields of word 0 (registers,
+    /// counts, short literals and branch targets).
+    pub(crate) fn reg_tokens(&self) -> u32 {
+        self.ops.iter().filter(|op| op.is_word0()).count() as u32
+    }
+
+    /// The number of 32-bit immediate words appended after word 0
+    /// (imm32 → 1, imm64 → 2).
+    pub(crate) fn imm_words(&self) -> u32 {
+        self.ops.iter().map(|op| op.imm_words()).sum()
+    }
+}
+
+/// Find the opcode whose name matches the first word of `line`.
 fn return_opcode_struct<'a>(line: &str, opcodes: &'a [Opcode]) -> Option<&'a Opcode> {
     let first = line.split_whitespace().next().unwrap_or("").to_uppercase();
-    opcodes.iter().find(|o| o.text_name == first)
+    opcodes.iter().find(|o| o.name == first)
 }
 
 /// Returns number of args for opcode.
@@ -120,8 +130,8 @@ pub(crate) fn num_arguments(opcodes: &[Opcode], line: &str) -> Option<u32> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
-        if first_word.to_uppercase() == opcode.text_name {
-            return Some(opcode.variables);
+        if first_word.to_uppercase() == opcode.name {
+            return Some(opcode.imm_words());
         }
     }
     None
@@ -137,8 +147,8 @@ fn num_registers(opcodes: &[Opcode], line: &str) -> Option<u32> {
         if first_word.is_empty() {
             return None;
         }
-        if first_word == opcode.text_name {
-            return Some(opcode.registers);
+        if first_word == opcode.name {
+            return Some(opcode.reg_tokens());
         }
     }
     None
@@ -151,8 +161,8 @@ pub(crate) fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
     for opcode in opcodes {
         let mut words = line.split_whitespace();
         let first_word = words.next().unwrap_or("");
-        if first_word.to_uppercase() == opcode.text_name {
-            return Some(opcode.hex_code.to_uppercase());
+        if first_word.to_uppercase() == opcode.name {
+            return Some(format!("{:08X}", opcode.template));
         }
     }
     None
@@ -161,7 +171,7 @@ pub(crate) fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::table::v2_opcodes;
+    use crate::isa::table::V2_OPCODES;
 
     #[test]
     // Each operand names the word-0 field it fills; immediates fill none
@@ -183,77 +193,76 @@ mod tests {
     // Every opcode's operand fields are disjoint and clear in its template,
     // and its immediates come after all of its word-0 operands.
     fn test_table_operand_fields_are_disjoint() {
-        for opcode in &v2_opcodes() {
-            let template = u32::from_str_radix(&opcode.hex_code, 16).unwrap();
+        for opcode in V2_OPCODES {
             let mut fields = 0;
-            for op in &opcode.ops {
-                assert_eq!(fields & op.mask(), 0, "{} {op:?}", opcode.text_name);
+            for op in opcode.ops {
+                assert_eq!(fields & op.mask(), 0, "{} {op:?}", opcode.name);
                 fields |= op.mask();
             }
-            assert_eq!(template & fields, 0, "{}", opcode.text_name);
+            assert_eq!(opcode.template & fields, 0, "{}", opcode.name);
             let first_imm = opcode.ops.iter().position(|op| !op.is_word0()).unwrap_or(opcode.ops.len());
-            assert!(opcode.ops[first_imm..].iter().all(|op| !op.is_word0()), "{}", opcode.text_name);
+            assert!(opcode.ops[first_imm..].iter().all(|op| !op.is_word0()), "{}", opcode.name);
         }
     }
 
     #[test]
     // The register/count operands of an opcode are counted; unknown names are None
     fn test_num_registers() {
-        let opcodes = v2_opcodes();
-        assert_eq!(num_registers(&opcodes, "PUSH"), Some(1));
-        assert_eq!(num_registers(&opcodes, "ADDR A B C"), Some(3));
-        assert_eq!(num_registers(&opcodes, "RET"), Some(0));
-        assert_eq!(num_registers(&opcodes, "PULL"), None);
-        assert_eq!(num_registers(&opcodes, ""), None);
+        let opcodes = V2_OPCODES;
+        assert_eq!(num_registers(opcodes, "PUSH"), Some(1));
+        assert_eq!(num_registers(opcodes, "ADDR A B C"), Some(3));
+        assert_eq!(num_registers(opcodes, "RET"), Some(0));
+        assert_eq!(num_registers(opcodes, "PULL"), None);
+        assert_eq!(num_registers(opcodes, ""), None);
     }
 
     #[test]
     // An opcode without immediates has no argument words
     fn test_num_arguments1() {
-        assert_eq!(num_arguments(&v2_opcodes(), "PUSH A"), Some(0));
+        assert_eq!(num_arguments(V2_OPCODES, "PUSH A"), Some(0));
     }
 
     #[test]
     // A 32-bit immediate is one argument word, whatever the case of the mnemonic
     fn test_num_arguments2() {
-        let opcodes = v2_opcodes();
-        assert_eq!(num_arguments(&opcodes, "SETR A 5"), Some(1));
-        assert_eq!(num_arguments(&opcodes, "setr A 5"), Some(1));
+        let opcodes = V2_OPCODES;
+        assert_eq!(num_arguments(opcodes, "SETR A 5"), Some(1));
+        assert_eq!(num_arguments(opcodes, "setr A 5"), Some(1));
     }
 
     #[test]
     // A 64-bit immediate is two argument words
     fn test_num_arguments3() {
-        let opcodes = v2_opcodes();
-        assert_eq!(num_arguments(&opcodes, "SETR64 A 0x1_0000_0000"), Some(2));
-        assert_eq!(num_arguments(&opcodes, "PUSHV64 1 2"), Some(2));
+        let opcodes = V2_OPCODES;
+        assert_eq!(num_arguments(opcodes, "SETR64 A 0x1_0000_0000"), Some(2));
+        assert_eq!(num_arguments(opcodes, "PUSHV64 1 2"), Some(2));
     }
 
     #[test]
     // None is returned if the opcode is not found
     fn test_num_arguments4() {
-        assert_eq!(num_arguments(&v2_opcodes(), "PUSH2 A B"), None);
+        assert_eq!(num_arguments(V2_OPCODES, "PUSH2 A B"), None);
     }
 
     #[test]
     // None is returned if the line is blank
     fn test_num_arguments5() {
-        let opcodes = v2_opcodes();
-        assert_eq!(num_arguments(&opcodes, ""), None);
-        assert_eq!(num_arguments(&opcodes, "   "), None);
+        let opcodes = V2_OPCODES;
+        assert_eq!(num_arguments(opcodes, ""), None);
+        assert_eq!(num_arguments(opcodes, "   "), None);
     }
 
     #[test]
     // The opcode's template is returned as 8 hex digits, whatever the case of the mnemonic
     fn test_return_opcode1() {
-        let opcodes = v2_opcodes();
-        assert_eq!(return_opcode("PUSH A", &opcodes), Some(String::from("64000000")));
-        assert_eq!(return_opcode("halt", &opcodes), Some(String::from("6C010000")));
+        let opcodes = V2_OPCODES;
+        assert_eq!(return_opcode("PUSH A", opcodes), Some(String::from("64000000")));
+        assert_eq!(return_opcode("halt", opcodes), Some(String::from("6C010000")));
     }
 
     #[test]
     // Test that None is returned if the opcode is not found
     fn test_return_opcode2() {
-        assert_eq!(return_opcode("PUSH2", &v2_opcodes()), None);
+        assert_eq!(return_opcode("PUSH2", V2_OPCODES), None);
     }
 }

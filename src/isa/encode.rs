@@ -98,15 +98,12 @@ pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_
         return "ERR     ".to_owned();
     };
 
-    let Ok(mut word0) = u32::from_str_radix(&opcode.hex_code, 16) else {
-        msg_list.error_at(filename, line_number, format!("Incorrect opcode template - \"{line}\""));
-        return "ERR     ".to_owned();
-    };
+    let mut word0 = opcode.template;
 
     let tokens: Vec<&str> = line.split_whitespace().collect();
     let mut token_idx = 1_usize; // first operand token (after the mnemonic)
     let mut ok = true;
-    for op in &opcode.ops {
+    for op in opcode.ops {
         match op {
             Operand::Imm | Operand::Imm64 => {} // appended words — handled by add_arguments
             Operand::Imm8 => {
@@ -254,13 +251,13 @@ mod tests {
     use super::*;
     use crate::diag::MessageType;
     use crate::isa::disasm::disassemble_word;
-    use crate::isa::table::v2_opcodes;
+    use crate::isa::table::V2_OPCODES;
 
     #[test]
     // Register operands are packed into their v2 fields (rd[11:8], rs1[7:4])
     fn test_add_registers1() {
         let mut msg_list = Diagnostics::new();
-        let output = add_registers(&v2_opcodes(), "COPY A B", "test", &mut msg_list, 1);
+        let output = add_registers(V2_OPCODES, "COPY A B", "test", &mut msg_list, 1);
         assert_eq!(output, String::from("54000010"));
         assert!(msg_list.messages().is_empty());
     }
@@ -269,7 +266,7 @@ mod tests {
     // A missing register operand is an error
     fn test_add_registers2() {
         let mut msg_list = Diagnostics::new();
-        let output = add_registers(&v2_opcodes(), "COPY A", "test", &mut msg_list, 1);
+        let output = add_registers(V2_OPCODES, "COPY A", "test", &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
         assert_eq!(msg_list.messages()[0].text(), "Incorrect register definition - \"COPY A\"");
     }
@@ -278,7 +275,7 @@ mod tests {
     // A register name that is not A..P is an error
     fn test_add_registers3() {
         let mut msg_list = Diagnostics::new();
-        let output = add_registers(&v2_opcodes(), "COPY A Z", "test", &mut msg_list, 1);
+        let output = add_registers(V2_OPCODES, "COPY A Z", "test", &mut msg_list, 1);
         assert_eq!(output, String::from("ERR     "));
         assert_eq!(msg_list.count(MessageType::Error), 1);
     }
@@ -288,7 +285,7 @@ mod tests {
     fn test_add_arguments1() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(&v2_opcodes(), "PUSHV 0xFFFF", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(V2_OPCODES, "PUSHV 0xFFFF", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("0000FFFF"));
     }
 
@@ -297,7 +294,7 @@ mod tests {
     fn test_add_arguments2() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(&v2_opcodes(), "PUSHV 1234", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(V2_OPCODES, "PUSHV 1234", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("000004D2"));
     }
 
@@ -306,7 +303,7 @@ mod tests {
     fn test_add_arguments3() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(&v2_opcodes(), "PUSHV HELLO", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(V2_OPCODES, "PUSHV HELLO", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000000"));
         assert_eq!(msg_list.count(MessageType::Error), 1);
     }
@@ -316,7 +313,7 @@ mod tests {
     fn test_add_arguments4() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(&v2_opcodes(), "PUSHV64 0xF RRR", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(V2_OPCODES, "PUSHV64 0xF RRR", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("0000000F00000000"));
         assert_eq!(msg_list.count(MessageType::Error), 1);
     }
@@ -326,7 +323,7 @@ mod tests {
     fn test_add_arguments5() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(&v2_opcodes(), "PUSHV64 1 0xF", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(V2_OPCODES, "PUSHV64 1 0xF", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("000000010000000F"));
         assert!(msg_list.messages().is_empty());
     }
@@ -336,7 +333,7 @@ mod tests {
     fn test_add_arguments6() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let output = add_arguments(&v2_opcodes(), "PUSHV 1 0xF", &mut msg_list, 1, "test", &labels);
+        let output = add_arguments(V2_OPCODES, "PUSHV 1 0xF", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(msg_list.messages()[0].text(), "Too many arguments found - \"PUSHV 1 0xF\"");
     }
@@ -346,7 +343,7 @@ mod tests {
     fn test_add_arguments_extra_tokens_warn_once() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let opcodes = &mut v2_opcodes();
+        let opcodes = V2_OPCODES;
         let output = add_arguments(opcodes, "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
         assert_eq!(msg_list.count(MessageType::Warning), 1);
@@ -368,24 +365,27 @@ mod tests {
     // Every opcode without operands (NOP, HALT, RET, IRET, ...) encodes to its
     // template alone, and disassembles back to its name.
     fn test_zero_operand_opcodes_encode_to_their_template() {
-        let opcodes = v2_opcodes();
+        let opcodes = V2_OPCODES;
         let labels = SymbolTable::default();
         let mut msg_list = Diagnostics::new();
         let zero_operand: Vec<&Opcode> = opcodes.iter().filter(|o| o.ops.is_empty()).collect();
-        let names: Vec<&str> = zero_operand.iter().map(|o| o.text_name.as_str()).collect();
+        let names: Vec<&str> = zero_operand.iter().map(|o| o.name).collect();
         assert_eq!(names, ["LEAVE", "LEAVERET", "RET", "IRET", "NOP", "HALT", "WAIT", "RESET", "TRAP"]);
         for opcode in zero_operand {
-            let line = opcode.text_name.as_str();
-            assert_eq!(add_registers(&opcodes, line, "t", &mut msg_list, 1), opcode.hex_code, "{line}");
-            assert_eq!(add_arguments(&opcodes, line, &mut msg_list, 1, "t", &labels), "", "{line}");
-            assert_eq!(pc_relative_bits(&opcodes, line, 0x20, &labels, &mut msg_list, 1, "t"), 0, "{line}");
-            let word = u32::from_str_radix(&opcode.hex_code, 16).unwrap();
-            assert_eq!(disassemble_word(word, &opcodes), Some((line.to_owned(), 0)), "{line}");
+            let line = opcode.name;
+            assert_eq!(
+                add_registers(opcodes, line, "t", &mut msg_list, 1),
+                format!("{:08X}", opcode.template),
+                "{line}"
+            );
+            assert_eq!(add_arguments(opcodes, line, &mut msg_list, 1, "t", &labels), "", "{line}");
+            assert_eq!(pc_relative_bits(opcodes, line, 0x20, &labels, &mut msg_list, 1, "t"), 0, "{line}");
+            assert_eq!(disassemble_word(opcode.template, opcodes), Some((line.to_owned(), 0)), "{line}");
         }
         // The encodings themselves, as the listing and the emulator see them.
         let mut words = Vec::new();
         for line in ["NOP", "HALT", "WAIT", "RESET", "TRAP", "RET", "IRET", "LEAVE", "LEAVERET", "nop"] {
-            words.push(add_registers(&opcodes, line, "t", &mut msg_list, 1));
+            words.push(add_registers(opcodes, line, "t", &mut msg_list, 1));
         }
         assert_eq!(
             words,
@@ -400,7 +400,7 @@ mod tests {
     // add_registers handles three-register (RRR) instructions correctly
     fn test_add_registers_three_regs() {
         let mut msg_list = Diagnostics::new();
-        let output = add_registers(&v2_opcodes(), "ADDR A B C", "test", &mut msg_list, 1);
+        let output = add_registers(V2_OPCODES, "ADDR A B C", "test", &mut msg_list, 1);
         // rd=A(0)<<8 | rs1=B(1)<<4 | rs2=C(2)
         assert_eq!(output, String::from("44200012"));
     }
@@ -408,7 +408,7 @@ mod tests {
     #[test]
     // Regression: a count was masked to 6 bits, so "SHLV A 64" encoded as a shift of 0.
     fn test_count_operand_range() {
-        let opcodes = &mut v2_opcodes();
+        let opcodes = V2_OPCODES;
         let mut msg_list = Diagnostics::new();
         assert_eq!(add_registers(opcodes, "SHLV A 0", "t", &mut msg_list, 1), "50204000");
         assert_eq!(add_registers(opcodes, "SHLV A 63", "t", &mut msg_list, 1), "503FC000");
@@ -430,7 +430,7 @@ mod tests {
     // ISA v3 mnemonics encode to the same words the emulator/RTL tests use.
     fn test_v3_short_forms_assemble() {
         let mut msg_list = Diagnostics::new();
-        let opcodes = &mut v2_opcodes();
+        let opcodes = V2_OPCODES;
         let cases = [
             ("SETR.S A -5", "4BDFB000"),
             ("ADDI.S C B -1", "483FF210"),
@@ -464,7 +464,7 @@ mod tests {
     // ISA v3 PC-relative targets: short (simm18) and fused (simm13) branches.
     fn test_v3_pc_relative_branches() {
         let mut msg_list = Diagnostics::new();
-        let opcodes = &mut v2_opcodes();
+        let opcodes = V2_OPCODES;
         let labels = SymbolTable::from_pairs(&[("LOOP:", 0x28), ("FAR:", 0x0004_0000)]);
         // BNEI A 0 LOOP: at 0x30 -> -2 words in [20:8]; register fields in word0.
         let line = "BNEI A 0 LOOP:".to_owned();

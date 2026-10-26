@@ -110,7 +110,7 @@ mod tests {
                 line_counter: u32::try_from(i + 1).unwrap(),
             })
             .collect();
-        let assembly = assemble_lines(input, &oplist, &macro_list, &mut msg_list);
+        let assembly = assemble_lines(input, oplist, &macro_list, &mut msg_list);
         (assembly.lines, msg_list)
     }
 
@@ -213,7 +213,7 @@ mod tests {
         let file = dir.path().join("missing.kla");
         let mut msg_list = Diagnostics::new();
         let (oplist, macros) = v2_opcodes_and_macros(&mut msg_list);
-        assert!(assemble(&file.to_string_lossy(), &oplist, &macros, &mut msg_list).is_none());
+        assert!(assemble(&file.to_string_lossy(), oplist, &macros, &mut msg_list).is_none());
         assert!(msg_list.has_errors());
     }
 
@@ -225,7 +225,7 @@ mod tests {
         std::fs::write(&file, "_start\nNOTANOP A\nHALT\n").unwrap();
         let mut msg_list = Diagnostics::new();
         let (oplist, macros) = v2_opcodes_and_macros(&mut msg_list);
-        let assembly = assemble(&file.to_string_lossy(), &oplist, &macros, &mut msg_list).unwrap();
+        let assembly = assemble(&file.to_string_lossy(), oplist, &macros, &mut msg_list).unwrap();
         assert!(msg_list.has_errors());
         assert_eq!(assembly.lines.len(), 3);
         assert_eq!(msg_list.messages()[0].text(), format!("Input file is {}", file.to_string_lossy()));

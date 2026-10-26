@@ -315,7 +315,7 @@ mod tests {
     }
 
     /// The built-in v2 opcode table and expanded macros, as the CLI loads them.
-    fn v2_tables() -> (Vec<Opcode>, Vec<macros::Macro>) {
+    fn v2_tables() -> (&'static [Opcode], Vec<macros::Macro>) {
         let mut msg_list = Diagnostics::new();
         let (oplist, macros_raw) = macros::v2_opcodes_and_macros(&mut msg_list);
         let macro_list = macros::expand_embedded_macros(macros_raw, &mut msg_list);
@@ -339,7 +339,7 @@ mod tests {
         let mut failures: Vec<String> = Vec::new();
         for path in &files {
             let file = path.to_string_lossy();
-            match verify_emulated(&file, &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS) {
+            match verify_emulated(&file, oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS) {
                 Ok(Verdict::NotValidatable) => {}
                 Ok(Verdict::Pass { .. }) => passed.push(file.into_owned()),
                 other => failures.push(format!("{file}: {other:?}")),
@@ -363,7 +363,7 @@ mod tests {
         fs::write(&file, source).expect("write fixture");
 
         let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(
             verdict,
             Ok(Verdict::Fail {
@@ -380,7 +380,7 @@ mod tests {
         let file = dir.path().join("plain.kla");
         fs::write(&file, "// no expected values here\nHALT\n").expect("write fixture");
         let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(verdict, Ok(Verdict::NotValidatable));
     }
 
@@ -389,7 +389,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("missing.kla");
         let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert!(matches!(&verdict, Err(reason) if reason.starts_with("cannot read: ")), "{verdict:?}");
     }
 
@@ -399,7 +399,7 @@ mod tests {
         let file = dir.path().join("bad.kla");
         fs::write(&file, "//   00000001  (never printed)\nNOTANOPCODE A\nHALT\n").expect("write fixture");
         let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(verdict, Err("assembly error".to_owned()));
     }
 }

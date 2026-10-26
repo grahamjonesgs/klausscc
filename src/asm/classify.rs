@@ -50,19 +50,19 @@ impl LineType {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::table::v2_opcodes;
+    use crate::isa::table::V2_OPCODES;
 
     #[test]
     fn test_classify_known_opcode_is_valid() {
         let input = String::from("PUSH");
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_ne!(LineType::classify(&input, opcodes), LineType::Error);
     }
 
     #[test]
     fn test_classify_unknown_opcode_is_error() {
         let input = String::from("PULL");
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_eq!(LineType::classify(&input, opcodes), LineType::Error);
     }
 
@@ -70,8 +70,8 @@ mod tests {
     // Test for opcode line type
     fn test_line_type1() {
         let input = String::from("PUSH");
-        let opcodes = v2_opcodes();
-        let output = LineType::classify(&input, &opcodes);
+        let opcodes = V2_OPCODES;
+        let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Opcode);
     }
 
@@ -79,7 +79,7 @@ mod tests {
     // Test for label line type
     fn test_line_type2() {
         let input = String::from("LOOP:");
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Label);
     }
@@ -88,7 +88,7 @@ mod tests {
     // Test for data line type
     fn test_line_type3() {
         let input = String::from("#Data_name");
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Data);
     }
@@ -97,7 +97,7 @@ mod tests {
     // Test for blank line type
     fn test_line_type4() {
         let input = String::default();
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Blank);
     }
@@ -106,7 +106,7 @@ mod tests {
     // Test for comment line type
     fn test_line_type5() {
         let input = String::from("//This is a comment");
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Comment);
     }
@@ -115,7 +115,7 @@ mod tests {
     // Test for start line type
     fn test_line_type6() {
         let input = String::from("_start");
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Start);
     }
@@ -124,50 +124,50 @@ mod tests {
     // Test for error line type
     fn test_line_type7() {
         let input = String::from("1234");
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         let output = LineType::classify(&input, opcodes);
         assert_eq!(output, LineType::Error);
     }
 
     #[test]
     fn test_line_type_directive_word() {
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_eq!(LineType::classify(".word 42", opcodes), LineType::Data);
     }
 
     #[test]
     fn test_line_type_directive_space() {
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_eq!(LineType::classify(".space 16", opcodes), LineType::Data);
     }
 
     #[test]
     fn test_line_type_directive_text() {
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_eq!(LineType::classify(".text", opcodes), LineType::Directive);
     }
 
     #[test]
     fn test_line_type_directive_data() {
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_eq!(LineType::classify(".data", opcodes), LineType::Directive);
     }
 
     #[test]
     fn test_line_type_directive_global() {
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_eq!(LineType::classify(".global main", opcodes), LineType::Directive);
     }
 
     #[test]
     fn test_line_type_directive_comm() {
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_eq!(LineType::classify(".comm buffer, 256, 4", opcodes), LineType::Directive);
     }
 
     #[test]
     fn test_line_type_directive_lcomm() {
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         assert_eq!(LineType::classify(".lcomm temp 8", opcodes), LineType::Directive);
     }
 }

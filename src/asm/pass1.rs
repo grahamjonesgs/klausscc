@@ -187,7 +187,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::table::v2_opcodes;
+    use crate::isa::table::V2_OPCODES;
 
     #[test]
     // Regression: a decimal SETR value that only fits 64 bits as a two's-complement
@@ -215,7 +215,7 @@ mod tests {
     // Test get_pass1 for correct vector returned, with correct program counters
     fn test_get_pass1_1() {
         let mut msg_list = Diagnostics::new();
-        let opcodes = v2_opcodes();
+        let opcodes = V2_OPCODES;
 
         let pass0 = vec![
             SourceLine {
@@ -254,7 +254,7 @@ mod tests {
                 line_counter: 7,
             },
         ];
-        let pass1 = get_pass1(&mut msg_list, pass0, &opcodes);
+        let pass1 = get_pass1(&mut msg_list, pass0, opcodes);
         // Byte addressing: PC starts at 32 (4 header words × 8 bytes each in 64-bit).
         // Each instruction word = 4 bytes (opcode encoding unchanged).
         // Each 64-bit data word = 8 bytes (16 hex chars).
@@ -277,7 +277,7 @@ mod tests {
             file_name: String::new(),
             line_counter: 1,
         }];
-        let _pass1 = get_pass1(&mut msg_list, pass0, &v2_opcodes());
+        let _pass1 = get_pass1(&mut msg_list, pass0, V2_OPCODES);
         assert_eq!(msg_list.messages()[0].text(), "Error Test_not_code_line");
     }
 
@@ -295,7 +295,7 @@ mod tests {
                 line_counter,
             })
             .collect();
-        let pass1 = get_pass1(&mut msg_list, pass0, &v2_opcodes());
+        let pass1 = get_pass1(&mut msg_list, pass0, V2_OPCODES);
         let types: Vec<LineType> = pass1.iter().map(|p| p.line_type).collect();
         assert_eq!(
             types,

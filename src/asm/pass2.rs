@@ -47,14 +47,14 @@ pub(super) fn get_pass2(msg_list: &mut Diagnostics, pass1: Vec<Pass1>, oplist: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::table::v2_opcodes;
+    use crate::isa::table::V2_OPCODES;
 
     #[test]
     // Test get_pass2 for correct vector returned, with correct opcodes, registers and variables
     fn test_get_pass2_1() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         let pass2 = get_pass2(
             &mut msg_list,
             vec![
@@ -141,7 +141,7 @@ mod tests {
     fn test_get_pass2_2() {
         let mut msg_list = Diagnostics::new();
         let labels = SymbolTable::default();
-        let opcodes = &v2_opcodes();
+        let opcodes = V2_OPCODES;
         let pass2 = get_pass2(
             &mut msg_list,
             vec![Pass1 {

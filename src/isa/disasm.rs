@@ -35,13 +35,10 @@ fn hex_nibble_to_reg(nibble: u32) -> &'static str {
 pub(crate) fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> {
     for opcode in opcodes {
         // Build the fixed-bit mask from the operand layout, then match.
-        let Ok(template) = u32::from_str_radix(&opcode.hex_code, 16) else {
-            continue;
-        };
         let mask = !opcode.ops.iter().fold(0, |fields, op| fields | op.mask());
-        if (word & mask) == (template & mask) {
-            let mut text = opcode.text_name.clone();
-            for op in &opcode.ops {
+        if (word & mask) == (opcode.template & mask) {
+            let mut text = opcode.name.to_owned();
+            for op in opcode.ops {
                 match op {
                     Operand::Rd | Operand::RdRs1 => {
                         text.push(' ');
@@ -85,7 +82,7 @@ pub(crate) fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String,
                     Operand::Imm | Operand::Imm64 => {}
                 }
             }
-            return Some((text, opcode.variables));
+            return Some((text, opcode.imm_words()));
         }
     }
     None
@@ -95,7 +92,7 @@ pub(crate) fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String,
 ///
 /// Each 4-byte chunk is read as a little-endian 32-bit word (matching the `KlaussCPU` LLVM ELF
 /// byte order) and matched against `opcodes`.  When a match is found, register operands are
-/// extracted and any argument words that follow (determined by `opcode.variables`) are consumed
+/// extracted and any argument words that follow (determined by [`Opcode::imm_words`]) are consumed
 /// and appended to the same entry's `opcode` hex string so `write_code_output_file` formats them
 /// correctly.  Unrecognised words produce a `???` fallback line.  When the binary ends before
 /// all of an instruction's argument words, the words that are there are shown once, on that
@@ -160,7 +157,7 @@ pub(crate) fn disassemble_flat_to_pass2(binary: &[u8], base_addr: u32, opcodes: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isa::table::v2_opcodes;
+    use crate::isa::table::V2_OPCODES;
 
     /// Little-endian bytes of `words`, as an ELF or flat binary holds them.
     fn le_bytes(words: &[u32]) -> Vec<u8> {
@@ -170,8 +167,8 @@ mod tests {
     #[test]
     // Words are read little-endian; a 64-bit argument is shown as one value
     fn test_disassemble_flat_to_pass2_le_and_64bit() {
-        let opcodes = v2_opcodes();
-        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000, 5, 0xCBC0_0000, 0x5566_7788, 0x1122_3344]), 0x20, &opcodes);
+        let opcodes = V2_OPCODES;
+        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000, 5, 0xCBC0_0000, 0x5566_7788, 0x1122_3344]), 0x20, opcodes);
         assert_eq!(pass2.len(), 2);
         assert_eq!(pass2[0].program_counter, 0x20);
         assert_eq!(pass2[0].opcode, "8BD0000000000005");
@@ -186,8 +183,8 @@ mod tests {
     // Regression: a 64-bit argument cut off by the end of the binary showed its
     // lo32 word on the instruction's line and then again as the next line.
     fn test_disassemble_flat_to_pass2_truncated_argument() {
-        let opcodes = v2_opcodes();
-        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0xCBC0_0000, 0x5566_7788]), 0x20, &opcodes);
+        let opcodes = V2_OPCODES;
+        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0xCBC0_0000, 0x5566_7788]), 0x20, opcodes);
         assert_eq!(pass2.len(), 1);
         assert_eq!(pass2[0].opcode, "CBC0000055667788");
         assert!(
@@ -196,7 +193,7 @@ mod tests {
             pass2[0].input_text_line
         );
 
-        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000]), 0x20, &opcodes);
+        let pass2 = disassemble_flat_to_pass2(&le_bytes(&[0x8BD0_0000]), 0x20, opcodes);
         assert_eq!(pass2.len(), 1);
         assert!(pass2[0].input_text_line.ends_with(" (truncated)"), "{}", pass2[0].input_text_line);
     }

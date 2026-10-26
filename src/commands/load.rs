@@ -123,12 +123,12 @@ pub(crate) fn run_elf2serial(
     // Optionally produce a .code disassembly listing alongside the .kbt, using
     // the built-in ISA-v2 opcode table.  (Skipped for a serial load — see above.)
     if port.is_none() {
-        let opcodes = crate::isa::table::v2_opcodes();
+        let opcodes = crate::isa::table::V2_OPCODES;
         let code_file_name = {
             let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
             format!("{stem}.code")
         };
-        let pass2 = disassemble_flat_to_pass2(&image.bytes, CODE_BASE, &opcodes);
+        let pass2 = disassemble_flat_to_pass2(&image.bytes, CODE_BASE, opcodes);
         if let Err(e) = write_code_output_file(&code_file_name, &pass2, msg_list) {
             msg_list.warning(format!("Failed to write disassembly file {code_file_name}: {e}"));
         }
