@@ -973,3 +973,123 @@ fn reserved_encodings_stop_without_moving_the_pc() {
         assert_eq!(cpu.debug_regs().pc, CODE_BASE, "{why}");
     }
 }
+
+// ---- flag effects checked against pipeline_core.sv (KlaussCPU master) ------
+
+/// A 1-word class-5 unary word `rd = OP(rs1)` with SIZE `[21:20]` and F `[19]`.
+const fn unary(op: u32, size: u32, f: bool, rd: u32, rs1: u32) -> u32 {
+    0x5400_0000 | (op << 22) | (size << 20) | ((f as u32) << 19) | (rd << 8) | (rs1 << 4)
+}
+
+/// A 1-word class-4 word with the count in rs2 (SRC=0, N=0) and F `[14]`.
+const fn shift_reg(op: u32, f: bool, rd: u32, rs1: u32, rs2: u32) -> u32 {
+    0x5000_0000 | (op << 22) | ((f as u32) << 14) | (rd << 8) | (rs1 << 4) | rs2
+}
+
+#[test]
+fn and_or_xor_reg_write_no_flags() {
+    // pipeline_core.sv:413-415: AND/OR/XOR decode with an empty fmask.
+    for op in [4, 5, 6] {
+        for (a, b) in [(0xF0, 0x0F), (0xFF, 0xFF), (0, 0)] {
+            for flags in [0b0000, 0b1111, 0b0101] {
+                let cpu = exec_one(alu_rr(op, 2, 0, 1), a, b, flags);
+                let want = match op {
+                    4 => a & b,
+                    5 => a | b,
+                    _ => a ^ b,
+                };
+                assert_eq!(cpu.regs[2], want, "op {op}");
+                assert_eq!(cpu.debug_regs().flags, flags, "op {op}: {a:#x}, {b:#x} leaves the flags");
+            }
+        }
+    }
+}
+
+#[test]
+fn absr_sets_v_only_for_int_min() {
+    // pipeline_core.sv:520-522 (Z and V), :1060-1062 (V = operand == INT_MIN).
+    const MIN: u64 = 1 << 63;
+    // (a, result, ZSCV after) from flags S C V all set, Z clear.
+    let table = [(MIN, MIN, 0b0111), (-5_i64 as u64, 5, 0b0110), (5, 5, 0b0110), (0, 0, 0b1110)];
+    for (a, want, zscv) in table {
+        let cpu = exec_one(unary(3, 0, true, 2, 0), a, 0, 0b0111);
+        assert_eq!(cpu.regs[2], want, "{a:#x}");
+        assert_eq!(cpu.debug_regs().flags, zscv, "{a:#x}");
+    }
+}
+
+#[test]
+fn rotate_by_register_count_never_writes_carry() {
+    // pipeline_core.sv:467-475: only SRC=1, N=1, F=1 is U_ROT1 (Z and C); a
+    // register count is U_SHIFT, which writes Z alone with F.
+    const TOP: u64 = 1 << 63;
+    for (op, a, want) in [(3, TOP, 1), (4, 1, TOP)] {
+        for carry in [0b0000, 0b0010] {
+            let cpu = exec_one(shift_reg(op, true, 2, 0, 1), a, 1, carry);
+            assert_eq!(cpu.regs[2], want, "op {op}");
+            assert_eq!(cpu.debug_regs().flags, carry, "op {op}: C is left alone, Z clear");
+        }
+        // The embedded N=1 form with F writes C (and Z).
+        let cpu = exec_one(shift_imm_f(op, 2, 0, 1), a, 0, 0);
+        assert_eq!(cpu.regs[2], want, "op {op}");
+        assert_eq!(cpu.debug_regs().flags, 0b0010, "op {op}: C = the bit rotated out");
+    }
+}
+
+#[test]
+fn f_bit_writes_z_on_unary_and_bit_ops() {
+    // pipeline_core.sv:483-485, :493-494 (BSET/BCLR/BTGL/BTSTRR) and
+    // :516-518, :532-535 (COPY, BSWAP, BITREV, CLZ, CTZ, GETF): F writes Z
+    // from the result.  Each word is given with F clear; (word, a, b, result).
+    let f14 = 1 << 14;
+    let f19 = 1 << 19;
+    let table = [
+        (unary(0, 0, false, 2, 0), 0, 0, 0, f19),                                 // COPY 0
+        (unary(0, 0, false, 2, 0), 7, 0, 7, f19),                                 // COPY 7
+        (unary(6, 0, false, 2, 0), 0, 0, 0, f19),                                 // BSWAP 0
+        (unary(7, 0, false, 2, 0), 1, 0, 1 << 63, f19),                           // BITREV
+        (unary(9, 0, false, 2, 0), 1 << 63, 0, 0, f19),                           // CLZ = 0
+        (unary(10, 0, false, 2, 0), 1, 0, 0, f19),                                // CTZ = 0
+        (unary(10, 0, false, 2, 0), 0, 0, 64, f19),                               // CTZ(0) = 64
+        (shift_reg(8, false, 2, 0, 1), 0, 3, 8, f14),                             // BSETRR
+        (shift_reg(9, false, 2, 0, 1), 8, 3, 0, f14),                             // BCLRRR
+        (shift_reg(10, false, 2, 0, 1), 8, 3, 0, f14),                            // BTGLRR
+        (shift_reg(11, false, 2, 0, 1), 8, 3, 1, f14),                            // BTSTRR set
+        (shift_reg(11, false, 2, 0, 1), 8, 2, 0, f14),                            // BTSTRR clear
+        (0x5000_0000 | (8 << 22) | (1 << 21) | (5 << 15) | 0x200, 0, 0, 32, f14), // BSET N=5
+    ];
+    for (word, a, b, want, fbit) in table {
+        for flags in [0b0000, 0b1111] {
+            // F clear: the flags are left alone.
+            let cpu = exec_one(word, a, b, flags);
+            assert_eq!(cpu.regs[2], want, "{word:08x}");
+            assert_eq!(cpu.debug_regs().flags, flags, "{word:08x} without F");
+            // F set: Z = (result == 0), nothing else.
+            let cpu = exec_one(word | fbit, a, b, flags);
+            assert_eq!(cpu.regs[2], want, "{word:08x} with F");
+            let z = if want == 0 { 0b1000 } else { 0 };
+            assert_eq!(cpu.debug_regs().flags, (flags & 0b0111) | z, "{word:08x} with F");
+        }
+    }
+}
+
+#[test]
+fn getf_with_f_sets_z_from_the_saved_word() {
+    // GETF result {Z, Z, C, V, 60'b0} (pipeline_core.sv:1076); F then writes
+    // Z = (result == 0) (:532-535), so Z = !(Z | C | V).
+    // (flags before, rd, flags after)
+    let table = [
+        (0b0000, 0, 0b1000),
+        (0b0100, 0, 0b1100), // S is not in the word
+        (0b0010, 0x2 << 60, 0b0010),
+        (0b1000, 0xC << 60, 0b0000),
+        (0b0001, 0x1 << 60, 0b0001),
+    ];
+    for (before, want, after) in table {
+        let cpu = exec_one(unary(12, 0, true, 2, 0), 0, 0, before);
+        assert_eq!(cpu.regs[2], want, "{before:04b}");
+        assert_eq!(cpu.debug_regs().flags, after, "{before:04b}");
+        let cpu = exec_one(unary(12, 0, false, 2, 0), 0, 0, before);
+        assert_eq!(cpu.debug_regs().flags, before, "{before:04b} without F");
+    }
+}

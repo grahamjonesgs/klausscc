@@ -235,13 +235,15 @@ impl Cpu {
             1 => self.sub_flags(a, b, 0),               // SUBR
             2 => self.add_flags(a, b, self.carry_in()), // ADDC
             3 => self.sub_flags(a, b, self.carry_in()), // SUBC
-            4 => self.with_z(a & b),                    // ANDR — RRR logic sets zero
-            5 => self.with_z(a | b),                    // ORR
-            6 => self.with_z(a ^ b),                    // XORR
-            7 => (a as i64).min(b as i64) as u64,       // MINR (signed)
-            8 => (a as i64).max(b as i64) as u64,       // MAXR
-            9 => a.min(b),                              // MINUR (unsigned)
-            10 => a.max(b),                             // MAXUR
+            // AND / OR / XOR write no flags: their decode sets no fmask
+            // (pipeline_core.sv:413-415).
+            4 => a & b,                           // ANDR
+            5 => a | b,                           // ORR
+            6 => a ^ b,                           // XORR
+            7 => (a as i64).min(b as i64) as u64, // MINR (signed)
+            8 => (a as i64).max(b as i64) as u64, // MAXR
+            9 => a.min(b),                        // MINUR (unsigned)
+            10 => a.max(b),                       // MAXUR
             _ => return Err(Illegal),
         };
         // v3 D3: W [19] on ADD/SUB — result = sext of the low 32 bits; Z
@@ -333,20 +335,24 @@ impl Cpu {
         let rd = f.rd;
         let a = self.regs[f.rs1];
         let cnt = if embedded { f.field(15, 6) } else { (self.regs[f.rs2] & 0x3F) as u32 };
+        // U_ROT1: SRC=1, N=1, F=1 (pipeline_core.sv:469, :478).
+        let rot1 = embedded && cnt == 1 && set_z;
         match f.field(22, 4) {
             0 => self.write_z(rd, a << cnt, set_z),                   // SHL
             1 => self.write_z(rd, a >> cnt, set_z),                   // SHR
             2 => self.write_z(rd, ((a as i64) >> cnt) as u64, set_z), // SAR
             3 => {
-                // ROL; a 1-bit rotate with F also sets C to the bit rotated out.
-                if set_z && cnt == 1 {
+                // ROL.  Only the embedded N=1 form with F (U_ROT1) also sets C
+                // to the bit rotated out; a register count of 1 is a plain
+                // U_SHIFT that writes Z alone (pipeline_core.sv:469-475, :1048).
+                if rot1 {
                     self.flags.set_carry(a >> 63 == 1);
                 }
                 self.write_z(rd, a.rotate_left(cnt), set_z);
             }
             4 => {
-                // ROR
-                if set_z && cnt == 1 {
+                // ROR (pipeline_core.sv:1049).
+                if rot1 {
                     self.flags.set_carry(a & 1 == 1);
                 }
                 self.write_z(rd, a.rotate_right(cnt), set_z);
@@ -363,16 +369,18 @@ impl Cpu {
                 self.flags.set_carry(a & 1 == 1);
                 self.write_z(rd, r, set_z);
             }
-            8 => self.regs[rd] = a | (1 << cnt),  // BSET
-            9 => self.regs[rd] = a & !(1 << cnt), // BCLR
-            10 => self.regs[rd] = a ^ (1 << cnt), // BTGL
+            // BSET / BCLR / BTGL: F writes Z from the result (pipeline_core.sv:483-485).
+            8 => self.write_z(rd, a | (1 << cnt), set_z),
+            9 => self.write_z(rd, a & !(1 << cnt), set_z),
+            10 => self.write_z(rd, a ^ (1 << cnt), set_z),
             11 => {
-                // BTST — BTSTRR (reg) writes rd = bit; BTST-imm is flag-only (Z=~bit).
+                // BTST — BTSTRR (reg) writes rd = bit, and Z from it with F
+                // (pipeline_core.sv:493-494); BTST-imm is flag-only (Z=~bit).
                 let bit = (a >> cnt) & 1;
                 if embedded {
                     self.flags.set_zero(bit == 0);
                 } else {
-                    self.regs[rd] = bit;
+                    self.write_z(rd, bit, set_z);
                 }
             }
             12 => {
@@ -405,13 +413,16 @@ impl Cpu {
         let rd = f.rd;
         let a = self.regs[f.rs1];
         match f.field(22, 4) {
-            0 => self.regs[rd] = a,                         // COPY
+            // F writes Z from the result for every op but ABS / INC / DEC,
+            // which require it, and SEXT, which adds S (pipeline_core.sv:516-518).
+            0 => self.write_z(rd, a, set_z),                // COPY
             1 => self.write_z(rd, a.wrapping_neg(), set_z), // NEG
             2 => self.write_z(rd, !a, set_z),               // NOT
             3 => {
-                // ABS — INT_MIN wraps (result INT_MIN, overflow cleared); matches v1.
+                // ABS — INT_MIN wraps to itself and sets V, the one input
+                // whose absolute value does not fit (pipeline_core.sv:1060-1062).
                 if set_z {
-                    self.flags.set_overflow(false);
+                    self.flags.set_overflow(a == 1 << 63);
                 }
                 self.write_z(rd, (a as i64).wrapping_abs() as u64, set_z);
             }
@@ -423,15 +434,16 @@ impl Cpu {
                 }
                 self.regs[rd] = r;
             }
-            5 => self.write_z(rd, zero_extend(a, size_bytes), set_z), // ZEXT
-            6 => self.regs[rd] = a.swap_bytes(),                      // BSWAP (64-bit)
-            7 => self.regs[rd] = a.reverse_bits(),                    // BITREV
-            8 => self.write_z(rd, u64::from(a.count_ones()), set_z),  // POPCNT
-            9 => self.regs[rd] = u64::from(a.leading_zeros()),        // CLZ; CLZ(0)=64
-            10 => self.regs[rd] = u64::from(a.trailing_zeros()),      // CTZ; CTZ(0)=64
+            5 => self.write_z(rd, zero_extend(a, size_bytes), set_z),     // ZEXT
+            6 => self.write_z(rd, a.swap_bytes(), set_z),                 // BSWAP (64-bit)
+            7 => self.write_z(rd, a.reverse_bits(), set_z),               // BITREV
+            8 => self.write_z(rd, u64::from(a.count_ones()), set_z),      // POPCNT
+            9 => self.write_z(rd, u64::from(a.leading_zeros()), set_z),   // CLZ; CLZ(0)=64
+            10 => self.write_z(rd, u64::from(a.trailing_zeros()), set_z), // CTZ; CTZ(0)=64
             // GETF / SETFR: rd = {zero,equal,carry,overflow} in the top nibble [63:60].
             // `equal` is DERIVED (E = Z) — retired as storage (doc/ISA_ENCODING_V2.md §7.1).
-            12 => self.regs[rd] = u64::from(self.flags.to_getf()) << 60,
+            // With F, Z is then written from that result (pipeline_core.sv:532-535).
+            12 => self.write_z(rd, u64::from(self.flags.to_getf()) << 60, set_z),
             14 => self.regs[rd] = self.add_flags(a, 1, 0), // INC
             15 => self.regs[rd] = self.sub_flags(a, 1, 0), // DEC
             _ => return Err(Illegal),
