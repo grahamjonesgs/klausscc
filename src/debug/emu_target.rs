@@ -48,9 +48,15 @@ use std::sync::mpsc;
 /// Instructions run between checks for debugger input (Ctrl-C) and UART I/O.
 const POLL_INTERVAL: u32 = 4096;
 
+/// What the debugger last asked the emulator to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ExecMode {
-    Step,
+    /// Run one instruction.
+    Step {
+        /// Resuming skipped a compiled-in TRAP, which was the step.
+        skipped_trap: bool,
+    },
+    /// Run until something stops it.
     Continue,
 }
 
@@ -63,8 +69,6 @@ pub(crate) struct EmuTarget {
     watches: Vec<Watch>,
     /// Set by resume/step: don't stop on a breakpoint at the resume PC.
     resuming: bool,
-    /// Set when resuming skipped a compiled-in TRAP.
-    skipped_trap: bool,
     /// `monitor mmio on`: let the debugger access device registers.
     allow_mmio: bool,
     uart_rx: mpsc::Receiver<u8>,
@@ -79,7 +83,6 @@ impl EmuTarget {
             hw_breakpoints: Vec::new(),
             watches: Vec::new(),
             resuming: false,
-            skipped_trap: false,
             allow_mmio: false,
             uart_rx,
         }
@@ -87,15 +90,17 @@ impl EmuTarget {
 
     /// Prepare to run from the current PC: step past a compiled-in TRAP the
     /// last stop reported, and let the emulator continue after a fault stop.
-    fn prepare_resume(&mut self) {
+    /// Returns whether a TRAP was skipped.
+    fn prepare_resume(&mut self) -> bool {
         let mut regs = self.cpu.debug_regs();
-        self.skipped_trap = self.cpu.fetch_word(regs.pc) == TRAP_WORD;
-        if self.skipped_trap {
+        let skipped_trap = self.cpu.fetch_word(regs.pc) == TRAP_WORD;
+        if skipped_trap {
             regs.pc = regs.pc.wrapping_add(4);
             self.cpu.set_debug_regs(&regs);
         }
         self.cpu.clear_stop();
         self.resuming = true;
+        skipped_trap
     }
 
     /// Stream UART output to stdout and feed stdin into the UART RX FIFO.
@@ -148,8 +153,8 @@ impl EmuTarget {
     }
 
     fn run(&mut self, mut incoming_data: impl FnMut() -> bool) -> RunEvent {
-        if self.exec == ExecMode::Step {
-            let stop = if self.skipped_trap {
+        if let ExecMode::Step { skipped_trap } = self.exec {
+            let stop = if skipped_trap {
                 None // skipping the TRAP was the step
             } else {
                 self.step_instruction(false) // single-steps never take interrupts
@@ -320,6 +325,7 @@ impl SingleThreadResume for EmuTarget {
         if signal.is_some() {
             return Err("KlaussCPU cannot resume with a signal");
         }
+        // a skipped TRAP just means the run starts after it
         self.prepare_resume();
         self.exec = ExecMode::Continue;
         Ok(())
@@ -335,8 +341,8 @@ impl SingleThreadSingleStep for EmuTarget {
         if signal.is_some() {
             return Err("KlaussCPU cannot step with a signal");
         }
-        self.prepare_resume();
-        self.exec = ExecMode::Step;
+        let skipped_trap = self.prepare_resume();
+        self.exec = ExecMode::Step { skipped_trap };
         Ok(())
     }
 }
@@ -462,4 +468,53 @@ pub(crate) fn serve(cpu: Cpu, port: u16) -> Result<String, GdbError> {
     let result = run_session(conn, &mut target);
     target.pump_uart();
     session_summary(result, "debugger disconnected", "debugger killed the program")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A target whose emulator has `word` at the entry, 0x20.
+    fn target_with(word: u32) -> EmuTarget {
+        let mut cpu = Cpu::new(&[0; 0x100], 0x20);
+        assert!(cpu.debug_write(0x20, &word.to_le_bytes()));
+        EmuTarget::new(cpu, mpsc::channel().1)
+    }
+
+    #[test]
+    fn stepping_a_compiled_in_trap_skips_it() {
+        let mut target = target_with(TRAP_WORD);
+        assert!(target.step(None).is_ok());
+        assert_eq!(target.exec, ExecMode::Step { skipped_trap: true });
+        assert!(matches!(target.run(|| false), RunEvent::Stop(SingleThreadStopReason::DoneStep)));
+        assert_eq!(target.cpu.debug_regs().pc, 0x24);
+    }
+
+    #[test]
+    fn continuing_from_a_trap_starts_after_it() {
+        let mut target = target_with(TRAP_WORD);
+        assert!(target.resume(None).is_ok());
+        assert_eq!(target.exec, ExecMode::Continue);
+        assert_eq!(target.cpu.debug_regs().pc, 0x24);
+        assert!(target.resume(Some(Signal::SIGINT)).is_err());
+    }
+
+    #[test]
+    fn registers_convert_both_ways() {
+        let mut target = target_with(0);
+        let mut regs = KlaussRegs::default();
+        assert!(target.read_registers(&mut regs).is_ok());
+        assert_eq!(regs.pc, 0x20);
+        regs.r[7] = 0x1234_5678_9ABC_DEF0;
+        regs.flags = 0x1F;
+        assert!(target.write_registers(&regs).is_ok());
+        let d = target.cpu.debug_regs();
+        assert_eq!((d.r[7], d.flags), (0x1234_5678_9ABC_DEF0, 0xF), "flags keep their nibble");
+        let mut buf = [0_u8; 8];
+        assert_eq!(target.read_register((), KlaussRegId::Gpr(7), &mut buf).ok(), Some(8));
+        assert_eq!(u64::from_le_bytes(buf), 0x1234_5678_9ABC_DEF0);
+        assert!(target.write_register((), KlaussRegId::Pc, &0x40_u32.to_le_bytes()).is_ok());
+        assert_eq!(target.cpu.debug_regs().pc, 0x40);
+        assert!(target.write_register((), KlaussRegId::Pc, &[1, 2]).is_err(), "wrong size");
+    }
 }
