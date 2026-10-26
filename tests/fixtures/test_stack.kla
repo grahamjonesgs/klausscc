@@ -8,12 +8,9 @@
 //   0000000C  (push A=0xA, B=0xB, C=0xC, pop C gets 0xC - LIFO)
 //   0000000B  (pop B gets 0xB)
 //   0000000A  (pop A gets 0xA)
-// Expected 7SEG: 0x09
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x09
 $NEWLINE
 
 // Basic push/pop
@@ -66,7 +63,6 @@ POP A
 $TXR A  // Expect: 0000000A
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

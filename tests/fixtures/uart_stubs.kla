@@ -1,15 +1,14 @@
-// Shared ISA-v2 UART output helpers (MMIO), replacing the retired v1 print
-// opcodes (TXR / NEWLINE / TXCHARMEMR / TXSTRMEMR). UART is memory-mapped:
+// Shared ISA-v2 UART output helpers (MMIO). The UART is memory-mapped:
 // TX_DATA lives at 0xF0010000 and a byte store transmits data[7:0].
 //
 // Every routine preserves ALL general-purpose registers (A..P) it does not
-// take as an argument, so it is a drop-in replacement for the single-opcode v1
-// primitives. Include this file at the END of a program (after HALT) so the
-// subroutines are never reached by fall-through:  !include uart_stubs.kla
+// take as an argument; the flags are not preserved. Include this file at the
+// END of a program (after HALT) so the subroutines are never reached by
+// fall-through:  !include uart_stubs.kla
 //
 // Calling convention (see the $TXR / $NEWLINE / $TXCHAR / $TXSTR macros):
 //   TX_HEX32 : prints reg A's low 32 bits as 8 uppercase hex digits.
-//   TX_NL    : prints a newline (0x0A).
+//   TX_NL    : prints a newline (CR LF, 0x0D 0x0A).
 //   TX_CHAR  : prints reg A's low byte as a raw character.
 //   TX_STR   : prints the NUL-terminated string at address reg A.
 

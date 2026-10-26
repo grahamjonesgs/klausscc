@@ -15,12 +15,9 @@
 //   00000015  (GCD: gcd(252, 105) = 21)
 //   00000008  (primes: count of primes from 2 to 20 = 8)
 //   00000013  (primes: largest prime <= 20 = 19)
-// Expected 7SEG: 0x14
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x14
 $NEWLINE
 
 // ================================================================
@@ -190,7 +187,6 @@ $NEWLINE
 // ALL PHASES COMPLETE
 // ================================================================
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // ================================================================

@@ -5,12 +5,9 @@
 //   000000BB  (MEMSETR/MEMREADR: write 0xBB to fixed addr, read back)
 //   DEADBEEF  (write 0xDEADBEEF to data area, read back)
 //   00000003  (sequential write 1,2,3 then read third value)
-// Expected 7SEG: 0x08
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x08
 $NEWLINE
 
 // Test MEMSETRR / MEMREADRR: register-addressed write and read
@@ -54,7 +51,6 @@ MEMREADRR C A         // Read back last written (3)
 $TXR C  // Expect: 00000003
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 #BUF1 10

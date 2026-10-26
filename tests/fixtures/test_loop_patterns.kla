@@ -5,12 +5,9 @@
 //   00000037  (sum 1..10 = 55 = 0x37)
 //   00000018  (factorial 4! = 24 = 0x18)
 //   00000007  (find max of {3, 7, 1, 5} = 7)
-// Expected 7SEG: 0x10
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x10
 $NEWLINE
 
 // --- Countdown loop: count from 10 to 0, output count of iterations ---
@@ -69,7 +66,6 @@ SKIP3:
 $TXR A  // Expect: 00000007 (max = 7)
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

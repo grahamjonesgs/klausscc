@@ -27,12 +27,9 @@
 //   00000006  (GCD: gcd(48, 18) = 6)
 //   00000008  (primes: count from 2 to 20)
 //   00000013  (primes: largest prime <= 20 = 19)
-// Expected 7SEG: 0x15
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x15
 $NEWLINE
 
 // ================================================================
@@ -312,7 +309,6 @@ $TXR G  // Output: 00000013 (largest = 19)
 $NEWLINE
 
 // ================================================================
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // ================================================================

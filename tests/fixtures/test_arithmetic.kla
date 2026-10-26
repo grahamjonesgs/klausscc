@@ -6,12 +6,9 @@
 //   0000006E  (ADDV: 0x0A + 100 = 0x6E)
 //   0000005E  (MINUSV: 0x6E - 0x10 = 0x5E)
 //   00000000  (overflow test: 0xFFFFFFFF + 1 wraps to 0)
-// Expected 7SEG: 0x02
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x02
 $NEWLINE
 
 // ADDRR: A + B -> A
@@ -43,7 +40,6 @@ INCR A
 $TXR A  // Expect: 00000000
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

@@ -8,12 +8,9 @@
 //   00000001  (register P, last register, stores and retrieves correctly)
 //   00000010  (all 16 registers: each set to index, P incremented to 0x10)
 //   00000079  (sum of all 16 register values: 0+1+..+14+16 = 121 = 0x79)
-// Expected 7SEG: 0x0D
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x0D
 $NEWLINE
 
 // INCR then DECR cancels out
@@ -86,7 +83,6 @@ ADDR A A P  // A = 105+16 = 121
 $TXR A  // Expect: 00000079 (121 = 0x79)
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

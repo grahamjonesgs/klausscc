@@ -10,12 +10,9 @@
 //   00000032  (MULV: 10 * 5 = 50 = 0x32)
 //   00000005  (DIVV: 50 / 10 = 5)
 //   00000002  (MODV: 17 % 5 = 2)
-// Expected 7SEG: 0x06
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x06
 $NEWLINE
 
 // MULRR: signed multiply
@@ -74,7 +71,6 @@ MODV A 5
 $TXR A  // Expect: 00000002
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

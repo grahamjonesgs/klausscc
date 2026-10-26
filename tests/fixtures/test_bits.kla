@@ -9,12 +9,9 @@
 //   00000038  (CLZ: 0x000000FF has 56 leading zeros (64-bit register))
 //   00000008  (CTZ: 0x0000FF00 has 8 trailing zeros)
 //   00000000  (BITREV: 0x000000FF reversed in 64 bits = 0xFF00000000000000, low word 0)
-// Expected 7SEG: 0x05
-// Expected LEDs: 0xFF = all pass
 
 _start       
 DELAYV 0x2FFF
-// v2-removed (7SEG1V): 7SEG1V 0x05
 $NEWLINE
 
 // BSET: set bit 7
@@ -62,7 +59,6 @@ BITREV A
 $TXR A  // Expect: FF000000
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

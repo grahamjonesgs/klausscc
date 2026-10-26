@@ -14,12 +14,9 @@
 //   FFFFFFFE  (ADDRR 0xFFFFFFFF + 0xFFFFFFFF = 0xFFFFFFFE, unsigned wrap)
 //   00000000  (MULHRR: MULHR = high 64 of 128-bit product; 0x20000*0x20000 fits in 64 bits, so high = 0)
 //   00000000  (MULHURR: high word of 0x100 * 0x100 = 0x10000, fits in low)
-// Expected 7SEG: 0x11
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x11
 $NEWLINE
 
 // INCR wrap: 0xFFFFFFFF + 1 = 0x00000000
@@ -96,7 +93,6 @@ MULHUR A A B
 $TXR A  // Expect: 00000000
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

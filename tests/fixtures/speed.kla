@@ -4,6 +4,5 @@ SETR A 0x0
 
 
 LOOP:
-// v2-removed (7SEGR): 7SEGR A
 INCR A
 JMP LOOP:

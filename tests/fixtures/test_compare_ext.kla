@@ -14,12 +14,9 @@
 //   0000000A  (CALLZ: conditional call taken when zero flag set)
 //   0000000B  (CALLNZ: conditional call taken when zero flag clear)
 //   0000000C  (JMPR: jump to address in register)
-// Expected 7SEG: 0x13
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x13
 $NEWLINE
 
 // --- CMPLERR: signed less-or-equal (5 <= 10) ---
@@ -155,7 +152,6 @@ $TXR P  // Expect: 0000000C
 $NEWLINE
 
 DONE:
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // Subroutines

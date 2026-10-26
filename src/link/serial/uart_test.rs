@@ -254,7 +254,7 @@ mod tests {
             "//   00000080  (BSET: set bit 7)".to_owned(),
             "//   000000FF  (result)".to_owned(),
             "//   FF000000  (BITREV)".to_owned(),
-            "// Expected 7SEG: 0x05".to_owned(),
+            "// Ends with HALT".to_owned(),
             "_start".to_owned(),
             "SETR A 0x0".to_owned(),
         ];

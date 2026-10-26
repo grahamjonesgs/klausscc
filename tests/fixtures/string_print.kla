@@ -1,7 +1,7 @@
 // String print subroutine
 // Input: A = pointer to null-terminated string in memory
 // Uses: A (pointer), B (character read)
-// Prints each character via TXCHARMEMR until a zero byte is found.
+// Prints each character with $TXMEMCHAR until a zero byte is found.
 
 STRING_PRINT:
 MEMREADRR B A          // B = mem[A] (read character)

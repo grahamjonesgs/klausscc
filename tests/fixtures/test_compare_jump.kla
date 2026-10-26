@@ -1,6 +1,6 @@
 // Test 07: Comparison and Conditional Jumps
 // Tests: CMPRR, CMPRV, JMPZ, JMPNZ, JMPE, JMPNE, JMPS, JMPNS, JMPLT, JMPGT
-// Verification method: Each test outputs a PASS code via TXR.
+// Verification method: Each test prints a PASS code with $TXR.
 //   If a wrong branch is taken, that test outputs FAIL (0xFFFFFFFF) instead.
 // Expected UART output (all pass):
 //   00000001  (JMPZ: taken after DECR to zero)
@@ -11,12 +11,9 @@
 //   00000006  (JMPNS: taken when result positive)
 //   00000007  (JMPLT: taken after signed less-than compare)
 //   00000008  (JMPGT: taken after signed greater-than compare)
-// Expected 7SEG: 0x07
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x07
 $NEWLINE
 
 // --- Test JMPZ: jump if zero ---
@@ -135,7 +132,6 @@ $TXR P  // Expect: 00000008
 $NEWLINE
 
 DONE:
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

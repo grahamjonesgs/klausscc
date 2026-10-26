@@ -7,12 +7,9 @@
 //   00007FFF  (SEXTH: 0x7FFF sign-extended from halfword = 0x00007FFF)
 //   000000AB  (ZEXTB: 0x12AB zero-extended byte = 0x000000AB)
 //   0000CDEF  (ZEXTH: 0xABCDEF zero-extended halfword = 0x0000CDEF)
-// Expected 7SEG: 0x0E
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x0E
 $NEWLINE
 
 // SEXTB: sign extend byte, negative (bit 7 set)
@@ -51,7 +48,6 @@ ZEXTH A
 $TXR A  // Expect: 0000CDEF
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

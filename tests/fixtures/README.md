@@ -35,10 +35,6 @@ Results that land in the upper half therefore print as `00000000`; for
 example, `BSWAP` and `BITREV` reverse all 64 bits. The expected values allow
 for this.
 
-The tests were first written for the v1 CPU, which also showed progress on the
-7-segment display and LEDs. The v2 ISA has no such instructions, so those lines
-are commented out (`// v2-removed ...`), and some headers still mention them.
-
 A minimal test (assemble it next to a copy of `uart_stubs.kla`):
 
 ```
@@ -124,7 +120,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 08 | `test_memory.kla` | Memory access | MEMSET64RR, MEMREADRR, MEMSETR, MEMREADR |
 | 09 | `test_stack.kla` | Stack | PUSH, POP, PUSHV, LIFO ordering |
 | 10 | `test_call_ret.kla` | Subroutines | CALL, RET, nested calls, CALLE, CALLNE |
-| 11 | `test_io.kla` | I/O | Prints step numbers only (its LED, 7-segment, switch and RGB instructions are v1-only); no expected values, so it is skipped |
+| 11 | `test_io.kla` | Step sequence | Prints the step numbers 1 to 10, pausing after each; it does not use the LED, 7-segment, switch or RGB registers. No expected values, so it is skipped |
 | 12 | `test_strings.kla` | String data | `#name "string"` data layout, read back with MEMGET32 |
 | 13 | `test_edge_cases.kla` | Edge cases | Zero wrap, max values, sign boundary, all 16 registers |
 | 14 | `test_sign_extend.kla` | Type conversion | SEXTB, SEXTH, ZEXTB, ZEXTH |

@@ -6,12 +6,9 @@
 //   00000003  (nested call: main->func1->func2, result = 3)
 //   00000042  (conditional CALLE taken after CMPRR equal)
 //   00000099  (CALLNE not taken when equal, continues to output 0x99)
-// Expected 7SEG: 0x0A
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x0A
 $NEWLINE
 
 // --- Simple CALL/RET ---
@@ -52,7 +49,6 @@ SETR A 0x99
 $TXR A  // Expect: 00000099 (CALLNE was skipped)
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // --- Subroutines ---

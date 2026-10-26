@@ -8,12 +8,9 @@
 //   000000FE  (DECR B, 0xFF-1 = 0xFE)
 //   FFFFFFFE  (NEGR C with C=2, twos complement = 0xFFFFFFFE)
 //   00000002  (ABSR D with D=-2, absolute = 2)
-// Expected 7SEG: 0x01 (test number)
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x01 // Test number on display
 $NEWLINE
 
 // Test SETR
@@ -49,8 +46,7 @@ ABSR D
 $TXR D  // Expect: 00000002
 $NEWLINE
 
-// All pass
-// v2-removed (LEDV): LEDV 0xFF
+// All values printed
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)

@@ -8,12 +8,9 @@
 //   000000FF  (ORV: 0xF0 | 0x0F = 0xFF)
 //   000000F0  (XORV: 0xFF ^ 0x0F = 0xF0)
 //   00000000  (BSWAP is 64-bit: sign-extended 0x12345678 swapped, low word 0)
-// Expected 7SEG: 0x03
-// Expected LEDs: 0xFF = all pass
 
 _start
 DELAYV 0x0500
-// v2-removed (7SEG1V): 7SEG1V 0x03
 $NEWLINE
 
 // AND registers
@@ -58,7 +55,6 @@ BSWAP A
 $TXR A  // Expect: 78563412
 $NEWLINE
 
-// v2-removed (LEDV): LEDV 0xFF
 HALT
 
 // v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
