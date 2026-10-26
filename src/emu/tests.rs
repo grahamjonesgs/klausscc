@@ -872,9 +872,10 @@ fn bdep_deposits_the_low_field_of_rs2_and_leaves_flags() {
 // assembler's opcode table: LEN=01 [31:30], CLASS [29:26], OP [25:22],
 // rd [11:8], rs1 [7:4], rs2 [3:0].
 
-/// A 1-word class-1 ALU reg-reg word: `rd = rs1 OP rs2`.
+/// A 1-word class-1 ALU reg-reg word: `rd = rs1 OP rs2`, with F `[21]`
+/// set for the flag-writing ops 0-3, which require it.
 const fn alu_rr(op: u32, rd: u32, rs1: u32, rs2: u32) -> u32 {
-    0x4400_0000 | (op << 22) | (rd << 8) | (rs1 << 4) | rs2
+    0x4400_0000 | (op << 22) | (((op <= 3) as u32) << 21) | (rd << 8) | (rs1 << 4) | rs2
 }
 
 /// A 1-word class-4 shift word with an embedded count and `F` (bit 14) set.
@@ -934,7 +935,7 @@ fn min_max_compare_signed_or_unsigned_and_leave_flags() {
 #[test]
 fn rcl_and_rcr_rotate_one_bit_through_carry() {
     const TOP: u64 = 1 << 63;
-    // (op, a, carry in, result, ZSCV after); the count field is ignored.
+    // (op, a, carry in, result, ZSCV after); only N = 1 is legal.
     let table = [
         (5, TOP | 1, false, 0b10, 0b0010),            // RCL: bit 63 -> C
         (5, TOP | 1, true, 0b11, 0b0010),             // C -> bit 0
@@ -946,7 +947,7 @@ fn rcl_and_rcr_rotate_one_bit_through_carry() {
         (6, TOP, true, TOP | (TOP >> 1), 0b0000),
     ];
     for (op, a, carry, want, zscv) in table {
-        let cpu = exec_one(shift_imm_f(op, 2, 0, 7), a, 0, if carry { 0b0010 } else { 0 });
+        let cpu = exec_one(shift_imm_f(op, 2, 0, 1), a, 0, if carry { 0b0010 } else { 0 });
         assert_eq!(cpu.regs[2], want, "op {op}: {a:#x} carry {carry}");
         assert_eq!(cpu.debug_regs().flags, zscv, "op {op}: {a:#x} carry {carry}");
     }
@@ -1167,4 +1168,156 @@ fn modv_by_zero_writes_the_dividend_to_rd() {
     let cpu = run_words(&[0x8BD0_0000, 17, 0x8BD0_0200, 99, 0xAA80_0200, 0, HALT]);
     assert_eq!(cpu.regs[2], 17);
     assert!(cpu.flags.overflow());
+}
+
+// ---- decode legality checked against pipeline_core.sv f_decode_raw --------
+
+#[test]
+fn every_assembler_form_executes() {
+    // Every opcode the assembler can emit, with several operand values in
+    // each field, decodes as legal: the RTL legality checks must never trap
+    // assembled code.
+    use crate::isa::Operand;
+    use crate::isa::table::V2_OPCODES;
+    /// Values for a word-0 field, before shifting into place.
+    fn values(op: Operand) -> &'static [u32] {
+        match op {
+            Operand::Rd => &[2, 0, 15],
+            Operand::Rs1 => &[3, 15, 0],
+            Operand::Rs2 => &[4, 0, 15],
+            Operand::RdRs1 => &[0x22, 0x00, 0xFF],
+            Operand::Count => &[1, 0, 63, 5],
+            Operand::Imm8 | Operand::Off8(_) => &[0x80, 0, 0xFF, 0x7F],
+            Operand::Frame22 => &[0, 3, 0x3F_FFFF],
+            Operand::Simm4 => &[0xF, 0, 7],
+            Operand::Rel18 => &[1, 0, 0x3_FFFF],
+            Operand::Rel13 => &[1, 0, 0x1FFF],
+            Operand::Imm | Operand::Imm64 => &[0],
+        }
+    }
+    for opcode in V2_OPCODES {
+        for variant in 0..4 {
+            let mut word = opcode.template;
+            let mut imm = Vec::new();
+            for &op in opcode.ops {
+                let mask = op.mask();
+                if mask != 0 {
+                    let vals = values(op);
+                    word |= (vals[variant % vals.len()] << mask.trailing_zeros()) & mask;
+                }
+                for k in 0..op.imm_words() {
+                    imm.push([0x40, 0xFFFF_FFFF, 0x1234_5678, 0][(variant + k as usize) % 4]);
+                }
+            }
+            let mut words = vec![word];
+            words.extend(imm);
+            words.push(HALT);
+            let mut cpu = cpu_with(&image_from_words(&words));
+            let mut regs = cpu.debug_regs();
+            regs.r = [0x100; 16];
+            cpu.set_debug_regs(&regs);
+            let stop = cpu.step_one(false);
+            assert_ne!(stop, Some(StopReason::InvalidOpcode(word)), "{} as {word:08x}", opcode.name);
+        }
+    }
+}
+
+#[test]
+fn rtl_reserved_encodings_trap() {
+    // (word, why it is reserved, pipeline_core.sv line)
+    let table = [
+        (0x4400_0201, "ADDR with F = 0", 408),
+        (0x4520_0000, "ANDR with F = 1", 413),
+        (0x4510_0000, "class 1 with SGN = 1", 402),
+        (0x4500_1000, "class 1 with [18:12] set", 402),
+        (0x4508_0000, "W on ANDR", 403),
+        (0x8420_0000, "2-word class 1", 402),
+        (0x8820_0001, "ADDV with rs2 set", 404),
+        (0x8868_0000, "W on MINUSV", 405),
+        (0x89C0_0000, "MIN with an immediate", 417),
+        (0x8920_0000, "ANDV with F = 1", 413),
+        (0xC820_0000, "3-word ADD", 431),
+        (0xCBC0_0010, "SETR64 with rs1 set", 432),
+        (0x4C80_0000, "flag CMP with PRED = 1", 450),
+        (0x4C40_0000, "flag CMP with INV", 450),
+        (0x4C00_0100, "flag CMP with rd set", 450),
+        (0x4C30_0000, "short boolean compare", 442),
+        (0x8C10_0001, "CMPRV with rs2 set", 441),
+        (0xCC00_0000, "3-word compare", 440),
+        (0x5000_8000, "SRC = 0 shift with N = 1", 461),
+        (0x5000_1000, "shift with [13:12] set", 458),
+        (0x5161_4000, "ROLCR with N = 2", 478),
+        (0x5160_8000, "ROLCR without F", 478),
+        (0x5140_4000, "ROLCR with a register count", 478),
+        (0x52E0_0100, "BTST with rd set", 489),
+        (0x52E0_4000, "BTST with F", 489),
+        (0x5300_0000, "1-word BEXTR", 462),
+        (0x9300_0001, "BEXTR with rs2 set", 501),
+        (0x9300_4000, "BEXTR with F", 500),
+        (0x9000_0000, "2-word SHL", 499),
+        (0x5458_0000, "NEGR with SIZE = 01", 514),
+        (0x5530_0000, "SEXT with SIZE = 11", 524),
+        (0x5570_0000, "ZEXT with SIZE = 11", 528),
+        (0x54C0_0000, "ABSR without F", 520),
+        (0x5780_0000, "INCR without F", 537),
+        (0x5400_0001, "COPY with rs2 set", 512),
+        (0x9400_0000, "2-word unary", 512),
+        (0x5A80_0000, "MEMGET32 with SGN", 560),
+        (0x5C80_0000, "store with SGN", 548),
+        (0x5810_0000, "A on a byte load", 549),
+        (0x5800_0001, "[rs1] load with rs2 set", 552),
+        (0x9B40_0010, "[imm] load with rs1 set", 553),
+        (0x9820_0001, "rs1+imm load with rs2 set", 554),
+        (0x5840_0000, "1-word [imm] load", 550),
+        (0x9800_0000, "2-word [rs1] load", 551),
+        (0x9860_0000, "2-word rs1+rs2 load", 551),
+        (0x5800_1000, "[rs1] load with [19:12] set", 547),
+        (0xD800_0000, "3-word load", 550),
+        (0xA004_0000, "COND 0 with INV", 575),
+        (0xA080_0000, "2-word JMPR", 572),
+        (0xA000_0100, "2-word JMP with rd set", 572),
+        (0x6180_0000, "1-word REL and RIND", 573),
+        (0x6000_0000, "1-word absolute JMP", 573),
+        (0x6080_0010, "JMPR with rs1 set", 573),
+        (0x6400_0100, "PUSH with rd set", 605),
+        (0x6410_0000, "PUSH with [21:20] set", 602),
+        (0x6480_0010, "POP with rs1 set", 609),
+        (0x6580_0010, "RET with rs1 set", 619),
+        (0x6440_0000, "1-word PUSHV", 604),
+        (0xA540_0100, "ADDSP with rd set", 629),
+        (0x6640_0001, "LEAVE with [21:0] set", 591),
+        (0x66C0_0000, "stack op 11", 627),
+        (0xA600_0000, "2-word ENTER", 630),
+        (0x6810_0000, "MUL with [21:20] set", 650),
+        (0x68C8_0000, "W on MULHR", 651),
+        (0x6940_0000, "DIV with HIGH", 659),
+        (0x6908_0000, "W on DIVR", 651),
+        (0xA880_0001, "MULV with rs2 set", 652),
+        (0xE880_0000, "3-word MUL", 652),
+        (0x6C00_0010, "NOP with rs1 set", 675),
+        (0xAC01_0000, "2-word HALT", 683),
+        (0xAC05_0010, "DELAYV with rs1 set", 683),
+        (0x6C41_0000, "system with [25:22] set", 672),
+        (0x7200_0000, "1-word LCDRST", 700),
+        (0x7000_0100, "LCDCMDR with rd set", 700),
+        (0xB000_0010, "LCDCMDV with rs1 set", 703),
+        (0xB300_0000, "LCD op 3", 704),
+        (0x7000_1000, "LCD with [23:12] set", 699),
+        (0x4000_0000, "class 0", 712),
+        (0x7800_0000, "class E", 712),
+    ];
+    for (word, why, line) in table {
+        let mut cpu = cpu_with(&image_from_words(&[word, HALT]));
+        assert_eq!(cpu.step_one(false), Some(StopReason::InvalidOpcode(word)), "{why} (:{line})");
+        assert_eq!(cpu.debug_regs().pc, CODE_BASE, "{why}");
+    }
+}
+
+#[test]
+fn lcd_words_are_legal_no_ops() {
+    // LCDCMDR B ; LCDDATAV 0x41 ; LCDRST 1 ; HALT — nothing architectural
+    // changes (pipeline_core.sv:698-711; the port is not modelled).
+    let cpu = run_words(&[0x7000_0010, 0xB100_0000, 0x41, 0xB200_0000, 1, HALT]);
+    assert_eq!(cpu.stop, Some(StopReason::Halt));
+    assert_eq!(cpu.regs, [0; 16]);
 }

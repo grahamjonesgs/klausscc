@@ -4,6 +4,12 @@
 //! dispatches on CLASS, and applies the handler's [`Flow`]: the handlers never
 //! touch the PC themselves, and a reserved encoding is an [`Illegal`] error
 //! that becomes [`StopReason::InvalidOpcode`] in one place.
+//!
+//! Which encodings are reserved follows the board core's decoder,
+//! `f_decode_raw` in `pipeline_core.sv` (`KlaussCPU` master, lines 388-715):
+//! every reserved bit, unused register field and attribute combination it
+//! traps on, the emulator traps on too.  The line numbers cited below are in
+//! that file.
 
 use super::flags::Flags;
 use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, Cpu, StopReason};
@@ -59,6 +65,11 @@ struct Illegal;
 
 /// What a class handler returns.
 type Exec = Result<Flow, Illegal>;
+
+/// `Ok` when the RTL decoder accepts the encoding (`ok`), else [`Illegal`].
+const fn legal(ok: bool) -> Result<(), Illegal> {
+    if ok { Ok(()) } else { Err(Illegal) }
+}
 
 /// A class-3 / class-D compare predicate (PRED `[25:23]`).  `INV` gives the
 /// negations.
@@ -198,13 +209,13 @@ impl Cpu {
             0x3 => self.exec_compare(f),
             0x4 => self.exec_shift_bit(f),
             0x5 => self.exec_unary(f),
-            0x6 => Ok(self.exec_load(f)),
-            0x7 => Ok(self.exec_store(f)),
+            0x6 => self.exec_load(f),
+            0x7 => self.exec_store(f),
             0x8 => self.exec_branch(f),
             0x9 => self.exec_stack(f),
             0xA => self.exec_muldiv(f),
             0xB => self.exec_system(f),
-            0xC => Ok(Flow::Next), // I/O (LCD) — modelled as a no-op (no architectural state)
+            0xC => exec_lcd(f),
             0xD if len == 1 => self.exec_fused_branch(f),
             _ => Err(Illegal),
         };
@@ -228,6 +239,11 @@ impl Cpu {
     /// Class 1 — ALU reg-reg: `rd = rs1 OP rs2` (`doc/ISA_ENCODING_V2.md` §2).
     fn exec_alu_rr(&mut self, f: Fields) -> Exec {
         let op = f.field(22, 4);
+        let w = f.bit(19);
+        // One word, SGN = 0, [18:12] = 0, and W only on ADD/SUB (:402-403);
+        // F set on ADD/SUB/ADC/SBC and clear on the rest (:408-418).
+        legal(f.len == 1 && !f.bit(20) && f.field(12, 7) == 0 && (!w || op <= 1))?;
+        legal(f.bit(21) == (op <= 3))?;
         let a = self.regs[f.rs1];
         let b = self.regs[f.rs2];
         let res = match op {
@@ -248,7 +264,7 @@ impl Cpu {
         };
         // v3 D3: W [19] on ADD/SUB — result = sext of the low 32 bits; Z
         // follows the W result (S/C/V are the 64-bit operation's).
-        self.regs[f.rd] = if f.bit(19) && op <= 1 { self.w32(res) } else { res };
+        self.regs[f.rd] = if w { self.w32(res) } else { res };
         Ok(Flow::Next)
     }
 
@@ -259,14 +275,27 @@ impl Cpu {
 
     /// Class 2 — ALU immediate: `rd = rs1 OP ext(imm)` (MOV/LEA ignore rs1).
     fn exec_alu_imm(&mut self, f: Fields) -> Exec {
+        let op = f.field(22, 4);
+        if f.len == 3 {
+            // SETR64: MOV with [21:12], rs1 and rs2 zero (:431-433).
+            legal(op == 15 && f.field(12, 10) == 0 && f.field(0, 8) == 0)?;
+            self.regs[f.rd] = self.imm64();
+            return Ok(Flow::Next);
+        }
+        // v3 D3 ADDIW = the 2-word ADD with W [19] (the short form's [19:12]
+        // is its immediate).
+        let w = f.len == 2 && f.bit(19);
+        // rs2 = 0; the 2-word form also needs [18:12] = 0 and W only on ADD
+        // (:404-406); F as class 1, and MIN/MAX are reg-reg only (:408-428).
+        legal(f.rs2 == 0 && (f.len == 1 || (f.field(12, 7) == 0 && (!w || op == 0))))?;
+        legal(f.bit(21) == (op <= 3))?;
         let imm = ext(f.imm32, f.bit(20));
         let a = self.regs[f.rs1];
-        self.regs[f.rd] = match f.field(22, 4) {
+        self.regs[f.rd] = match op {
             0 => {
-                // ADDI / ADDV; v3 D3 ADDIW = the 2-word form with W [19]
-                // (the short form's [19:12] is its immediate).
+                // ADDI / ADDV / ADDIW
                 let r = self.add_flags(a, imm, 0);
-                if f.len == 2 && f.bit(19) { self.w32(r) } else { r }
+                if w { self.w32(r) } else { r }
             }
             1 => self.sub_flags(a, imm, 0),                 // MINUSV
             2 => self.add_flags(a, imm, self.carry_in()),   // ADC-imm
@@ -275,9 +304,7 @@ impl Cpu {
             5 => a | imm,                                   // ORV
             6 => a ^ imm,                                   // XORV
             14 => u64::from(self.pc.wrapping_add(f.imm32)), // LEAPC: rd = PC + imm32
-            // MOV: SETR (2-word, sign-extended) or SETR64 (3-word, full 64-bit).
-            15 if f.len == 3 => self.imm64(),
-            15 => imm,
+            15 => imm,                                      // MOV: SETR (sign- or zero-extended per SGN)
             _ => return Err(Illegal),
         };
         Ok(Flow::Next)
@@ -289,6 +316,13 @@ impl Cpu {
         let boolean = f.bit(21);
         let sgn = f.bit(20);
         let short = f.len == 1 && sgn && !boolean;
+        // The reg form (SGN = 0), the 2-word form (rs2 = 0) and the short
+        // form (rs2 = 0), each with [18:12] = 0 outside the immediate (:440-442).
+        legal(match f.len {
+            1 => (!sgn && f.field(12, 7) == 0) || (short && f.rs2 == 0),
+            2 => f.field(12, 7) == 0 && f.rs2 == 0,
+            _ => false,
+        })?;
         let lhs = self.regs[f.rs1];
         // 2-word forms (and the v3 short form, LEN=01 SGN=1 B=0) take a
         // sign/zero-extended immediate; other forms use rs2.
@@ -299,10 +333,11 @@ impl Cpu {
         // the same trick the RTL uses at its dispatch mux.
         let (lhs, rhs) = if !short && f.bit(19) { (lhs << 32, rhs << 32) } else { (lhs, rhs) };
         if boolean {
-            // PRED is only decoded (and only reserved) for the boolean form.
             let pred = Pred::decode(f.field(23, 3))?;
             self.regs[f.rd] = u64::from(pred.holds(lhs, rhs) ^ inv);
         } else {
+            // The flag-setting CMP has PRED = 0, INV = 0 and rd = 0 (:450).
+            legal(f.field(23, 3) == 0 && !inv && f.rd == 0)?;
             self.cmp(lhs, rhs);
         }
         Ok(Flow::Next)
@@ -330,14 +365,21 @@ impl Cpu {
 
     /// Class 4 — shift / rotate / bit manipulation.
     fn exec_shift_bit(&mut self, f: Fields) -> Exec {
+        let op = f.field(22, 4);
+        if f.len == 2 {
+            return self.exec_bit_field(f, op);
+        }
         let embedded = f.bit(21); // 0 = count in rs2[5:0], 1 = embedded N [20:15]
+        let n = f.field(15, 6);
         let set_z = f.bit(14); // F
+        // One word with [13:12] = 0 (:458), and SRC = 0 needs N = 0 (:461).
+        legal(f.len == 1 && f.field(12, 2) == 0 && (embedded || n == 0))?;
         let rd = f.rd;
         let a = self.regs[f.rs1];
-        let cnt = if embedded { f.field(15, 6) } else { (self.regs[f.rs2] & 0x3F) as u32 };
-        // U_ROT1: SRC=1, N=1, F=1 (pipeline_core.sv:469, :478).
-        let rot1 = embedded && cnt == 1 && set_z;
-        match f.field(22, 4) {
+        let cnt = if embedded { n } else { (self.regs[f.rs2] & 0x3F) as u32 };
+        // U_ROT1: SRC=1, N=1, F=1 (:469, :478).
+        let rot1 = embedded && n == 1 && set_z;
+        match op {
             0 => self.write_z(rd, a << cnt, set_z),                   // SHL
             1 => self.write_z(rd, a >> cnt, set_z),                   // SHR
             2 => self.write_z(rd, ((a as i64) >> cnt) as u64, set_z), // SAR
@@ -358,13 +400,16 @@ impl Cpu {
                 self.write_z(rd, a.rotate_right(cnt), set_z);
             }
             5 => {
-                // RCL — rotate left one bit through carry (ROLCR).
+                // RCL — rotate left one bit through carry (ROLCR); only the
+                // U_ROT1 encoding is legal (:477-482).
+                legal(rot1)?;
                 let r = (a << 1) | self.carry_in();
                 self.flags.set_carry(a >> 63 == 1);
                 self.write_z(rd, r, set_z);
             }
             6 => {
                 // RCR — rotate right one bit through carry (RORCR).
+                legal(rot1)?;
                 let r = (a >> 1) | (self.carry_in() << 63);
                 self.flags.set_carry(a & 1 == 1);
                 self.write_z(rd, r, set_z);
@@ -378,24 +423,38 @@ impl Cpu {
                 // (pipeline_core.sv:493-494); BTST-imm is flag-only (Z=~bit).
                 let bit = (a >> cnt) & 1;
                 if embedded {
+                    // BTST-imm: rd = 0 and F = 0 (:489).
+                    legal(f.rd == 0 && !set_z)?;
                     self.flags.set_zero(bit == 0);
                 } else {
                     self.write_z(rd, bit, set_z);
                 }
             }
+            _ => return Err(Illegal),
+        }
+        Ok(Flow::Next)
+    }
+
+    /// Class 4, 2 words — BEXTR / BDEP, the field descriptor in word 1.
+    fn exec_bit_field(&mut self, f: Fields, op: u32) -> Exec {
+        // [21:12] = 0 (:499-500).
+        legal(f.field(12, 10) == 0)?;
+        let rd = f.rd;
+        let a = self.regs[f.rs1];
+        let (start, mask) = bit_field(f.imm32);
+        match op {
             12 => {
-                // BEXTR — extract the imm-described field of rs1.  The RTL
-                // shifts the full 64-bit register (pipeline_core U_BEXTR), so a
-                // field with start+len > 32 takes bits from rs1[63:32]; the
-                // result is at most 31 bits, zero-extended.  Z is always set
-                // from the result (fmask.zero), although F is clear.
-                let (start, mask) = bit_field(f.imm32);
+                // BEXTR (rs2 = 0, :501) — extract the imm-described field of
+                // rs1.  The RTL shifts the full 64-bit register (:1083-1088),
+                // so a field with start+len > 32 takes bits from rs1[63:32];
+                // the result is at most 31 bits, zero-extended.  Z is always
+                // set from the result (fmask.zero, :503), although F is clear.
+                legal(f.rs2 == 0)?;
                 self.write_z(rd, (a >> start) & mask, true);
             }
             13 => {
                 // BDEP — deposit rs2's low field into rs1 (the base) at start;
                 // the result is the low 32 bits, zero-extended.  No flags.
-                let (start, mask) = bit_field(f.imm32);
                 let field = (self.regs[f.rs2] & mask) << start;
                 let clear = !(mask << start) & 0xFFFF_FFFF;
                 self.regs[rd] = (a & clear) | (field & 0xFFFF_FFFF);
@@ -407,24 +466,30 @@ impl Cpu {
 
     /// Class 5 — unary: `rd = OP(rs1)`.
     fn exec_unary(&mut self, f: Fields) -> Exec {
-        // SEXT/ZEXT SIZE [21:20]: 00=8 01=16 10=32 (11 acts as 32).
-        let size_bytes = 1_usize << f.field(20, 2).min(2);
+        let op = f.field(22, 4);
+        // SEXT/ZEXT SIZE [21:20]: 00=8 01=16 10=32; 11 is reserved, and the
+        // other ops need SIZE = 0 (:514, :524, :528).
+        let size = f.field(20, 2);
+        // One word with [18:12] and rs2 zero (:512).
+        legal(f.len == 1 && f.field(12, 7) == 0 && f.rs2 == 0)?;
+        legal(if op == 4 || op == 5 { size != 3 } else { size == 0 })?;
+        let size_bytes = 1_usize << size;
         let set_z = f.bit(19); // F
         let rd = f.rd;
         let a = self.regs[f.rs1];
-        match f.field(22, 4) {
+        match op {
             // F writes Z from the result for every op but ABS / INC / DEC,
             // which require it, and SEXT, which adds S (pipeline_core.sv:516-518).
             0 => self.write_z(rd, a, set_z),                // COPY
             1 => self.write_z(rd, a.wrapping_neg(), set_z), // NEG
             2 => self.write_z(rd, !a, set_z),               // NOT
             3 => {
-                // ABS — INT_MIN wraps to itself and sets V, the one input
-                // whose absolute value does not fit (pipeline_core.sv:1060-1062).
-                if set_z {
-                    self.flags.set_overflow(a == 1 << 63);
-                }
-                self.write_z(rd, (a as i64).wrapping_abs() as u64, set_z);
+                // ABS, legal only with F (:520-522) — INT_MIN wraps to itself
+                // and sets V, the one input whose absolute value does not fit
+                // (:1060-1062).
+                legal(set_z)?;
+                self.flags.set_overflow(a == 1 << 63);
+                self.write_z(rd, (a as i64).wrapping_abs() as u64, true);
             }
             4 => {
                 // SEXT
@@ -444,15 +509,25 @@ impl Cpu {
             // `equal` is DERIVED (E = Z) — retired as storage (doc/ISA_ENCODING_V2.md §7.1).
             // With F, Z is then written from that result (pipeline_core.sv:532-535).
             12 => self.write_z(rd, u64::from(self.flags.to_getf()) << 60, set_z),
-            14 => self.regs[rd] = self.add_flags(a, 1, 0), // INC
-            15 => self.regs[rd] = self.sub_flags(a, 1, 0), // DEC
+            // INC / DEC, legal only with F (:537-540).
+            14 => {
+                legal(set_z)?;
+                self.regs[rd] = self.add_flags(a, 1, 0);
+            }
+            15 => {
+                legal(set_z)?;
+                self.regs[rd] = self.sub_flags(a, 1, 0);
+            }
             _ => return Err(Illegal),
         }
         Ok(Flow::Next)
     }
 
     /// Class 6 — loads: `rd = ext(mem[EA])`.
-    fn exec_load(&mut self, f: Fields) -> Flow {
+    fn exec_load(&mut self, f: Fields) -> Exec {
+        mem_legal(f, false)?;
+        // MEMGET32 ([rs1], 32-bit) has no sign-extending form (:559-560).
+        legal(!(f.field(24, 2) == 2 && f.field(21, 2) == 0 && f.bit(23)))?;
         let size_bytes = 1_usize << f.field(24, 2); // 00=8 01=16 10=32 11=64
         let ea = self.ea(f) & load_align_mask(size_bytes, f.field(21, 2), f.bit(20));
         let val = if size_bytes == 8 {
@@ -461,11 +536,12 @@ impl Cpu {
             self.read_sub(ea, size_bytes)
         };
         self.regs[f.rd] = if f.bit(23) { sign_extend(val, size_bytes) } else { val };
-        Flow::Next
+        Ok(Flow::Next)
     }
 
     /// Class 7 — stores: `mem[EA] = reg[rd]` (rd field is the data source).
-    fn exec_store(&mut self, f: Fields) -> Flow {
+    fn exec_store(&mut self, f: Fields) -> Exec {
+        mem_legal(f, true)?;
         let size_bytes = 1_usize << f.field(24, 2);
         let ea = self.ea(f) & store_align_mask(size_bytes, f.field(21, 2), f.bit(20));
         let data = self.regs[f.rd];
@@ -474,7 +550,7 @@ impl Cpu {
         } else {
             self.write_sub(ea, data, size_bytes);
         }
-        Flow::Next
+        Ok(Flow::Next)
     }
 
     /// Effective address of a load or store from its MODE field `[22:21]`.
@@ -493,8 +569,20 @@ impl Cpu {
         let link = f.bit(25); // call (push return address)
         let rel = f.bit(24); // PC-relative displacement
         let rind = f.bit(23); // target = rs2
+        let inv = f.bit(18);
+        // The 2-word absolute / PC-relative form with [17:0] = 0, the 1-word
+        // register form with [17:4] = 0, or the 1-word short PC-relative
+        // form; COND 0 (always) has no inverse (:572-575).
+        legal(
+            match f.len {
+                2 => !rind && f.field(0, 18) == 0,
+                1 if rel => !rind,
+                1 => rind && f.field(4, 14) == 0,
+                _ => false,
+            } && !(f.field(19, 4) == 0 && inv),
+        )?;
         let cond = self.eval_cond(f.field(19, 4)).ok_or(Illegal)?;
-        if !(cond ^ f.bit(18)) {
+        if !(cond ^ inv) {
             return Ok(Flow::Next);
         }
         let target = if rind {
@@ -535,7 +623,50 @@ impl Cpu {
 
     /// Class 9 — stack / SP.
     fn exec_stack(&mut self, f: Fields) -> Exec {
-        match f.field(22, 4) {
+        let op = f.field(22, 4);
+        match (f.len, op) {
+            (1, 8) => {
+                // v3 C: ENTER N — push R15; R15 = SP; SP -= 8*N  (N = [21:0],
+                // any value, :587).
+                self.push(self.regs[15]);
+                self.regs[15] = u64::from(self.sp);
+                self.sp = self.sp.wrapping_sub(f.field(0, 22) << 3);
+            }
+            (1, 9) => {
+                // v3 C: LEAVE — SP = R15; pop R15 ([21:0] = 0, :591).
+                legal(f.field(0, 22) == 0)?;
+                let fp = self.regs[15] as u32;
+                self.regs[15] = self.read64(fp);
+                self.sp = fp.wrapping_add(8);
+            }
+            (1, 10) => {
+                // v3 C: LEAVERET — SP = R15; pop R15; pop PC (= LEAVE; RET)
+                // ([21:0] = 0, :595).
+                legal(f.field(0, 22) == 0)?;
+                let fp = self.regs[15] as u32;
+                self.regs[15] = self.read64(fp);
+                let ra = self.read64(fp.wrapping_add(8));
+                self.sp = fp.wrapping_add(16);
+                return Ok(Flow::Jump(ra as u32));
+            }
+            _ => return self.exec_stack_v2(f, op),
+        }
+        Ok(Flow::Next)
+    }
+
+    /// Class 9, the v2 forms: PUSH / POP / SP access / RET / IRET.  Each
+    /// needs `[21:12]` = 0 and its unused register fields zero (:602-643).
+    fn exec_stack_v2(&mut self, f: Fields, op: u32) -> Exec {
+        legal(f.field(12, 10) == 0)?;
+        // The register fields each form may use: (rd, rs1); rs2 is never used.
+        let (rd, rs1) = match (f.len, op) {
+            (1, 0 | 4) => (false, true),                        // PUSH, SETSP
+            (1, 2 | 3) => (true, false),                        // POP, GETSP
+            (1, 6 | 7) | (2, 1 | 5) | (3, 1) => (false, false), // RET, IRET, PUSHV, ADDSP, PUSHV64
+            _ => return Err(Illegal),
+        };
+        legal(f.rs2 == 0 && (rd || f.rd == 0) && (rs1 || f.rs1 == 0))?;
+        match op {
             0 => self.push(self.regs[f.rs1]), // PUSH rs1
             // PUSHI: PUSHV (2-word, zero-ext imm32) or PUSHV64 (3-word, imm64).
             1 if f.len == 3 => self.push(self.imm64()),
@@ -546,28 +677,7 @@ impl Cpu {
             5 => self.sp = self.sp.wrapping_add(f.imm32), // ADDSP (imm sign-ext, 32-bit add)
             // RET — restore PC from [31:0] of the popped slot.
             6 => return Ok(Flow::Jump(self.pop() as u32)),
-            7 => return Ok(self.iret()),
-            8 if f.len == 1 => {
-                // v3 C: ENTER N — push R15; R15 = SP; SP -= 8*N  (N = [21:0]).
-                self.push(self.regs[15]);
-                self.regs[15] = u64::from(self.sp);
-                self.sp = self.sp.wrapping_sub(f.field(0, 22) << 3);
-            }
-            9 if f.len == 1 => {
-                // v3 C: LEAVE — SP = R15; pop R15.
-                let fp = self.regs[15] as u32;
-                self.regs[15] = self.read64(fp);
-                self.sp = fp.wrapping_add(8);
-            }
-            10 if f.len == 1 => {
-                // v3 C: LEAVERET — SP = R15; pop R15; pop PC (= LEAVE; RET).
-                let fp = self.regs[15] as u32;
-                self.regs[15] = self.read64(fp);
-                let ra = self.read64(fp.wrapping_add(8));
-                self.sp = fp.wrapping_add(16);
-                return Ok(Flow::Jump(ra as u32));
-            }
-            _ => return Err(Illegal),
+            _ => return Ok(self.iret()),
         }
         Ok(Flow::Next)
     }
@@ -593,11 +703,21 @@ impl Cpu {
     fn exec_muldiv(&mut self, f: Fields) -> Exec {
         let sgn = f.bit(23);
         let high = f.bit(22); // high half (MUL only)
+        let kind = f.field(24, 2);
+        // [21:20] and [18:12] zero, W only on the low-half MUL, and rs2 = 0
+        // in the 2-word form (:650-652); HIGH only on MUL (:659, :663).
+        legal(
+            f.field(20, 2) == 0
+                && f.field(12, 7) == 0
+                && (!f.bit(19) || (kind == 0 && !high))
+                && (f.len == 1 || (f.len == 2 && f.rs2 == 0))
+                && (kind == 0 || !high),
+        )?;
         let is_imm = f.len == 2;
         let rd = f.rd;
         let a = self.regs[f.rs1];
         let b = if is_imm { ext(f.imm32, sgn) } else { self.regs[f.rs2] };
-        match f.field(24, 2) {
+        match kind {
             0 => {
                 // MUL: the full 128-bit product, signed or unsigned per SGN
                 // (:892-899); rd takes its high or low half.
@@ -649,20 +769,68 @@ impl Cpu {
 
     /// Class B — system: NOP / HALT / WAIT / RESET / TRAP / DELAY.
     fn exec_system(&mut self, f: Fields) -> Exec {
-        Ok(match f.field(16, 6) {
-            0 | 5 => Flow::Next, // NOP / DELAY (DELAY's wait is not modelled)
-            2 => {
+        // [25:22], [15:8] and rs2 zero (:672).
+        legal(f.field(22, 4) == 0 && f.field(8, 8) == 0 && f.rs2 == 0)?;
+        let op = f.field(16, 6);
+        // rs1 is used only by DELAYR (:675-684).
+        legal(f.rs1 == 0 || (f.len == 1 && op == 5))?;
+        Ok(match (f.len, op) {
+            // NOP, and DELAYR / DELAYV (the wait is not modelled)
+            (1, 0) | (1 | 2, 5) => Flow::Next,
+            (1, 1) => Flow::Stop(StopReason::Halt),
+            (1, 2) => {
                 // WAIT: sleep until an interrupt source is ready; the IRQ
                 // pushes the following instruction as the resume address.
                 self.waiting = true;
                 Flow::Next
             }
-            1 => Flow::Stop(StopReason::Halt),
-            3 => Flow::Jump(0x4), // RESET → PC = 0x4
-            4 => Flow::Stop(StopReason::Trap),
+            (1, 3) => Flow::Jump(0x4), // RESET → PC = 0x4
+            (1, 4) => Flow::Stop(StopReason::Trap),
             _ => return Err(Illegal),
         })
     }
+}
+
+/// Class C — the SPI LCD port: `LCDCMDR`/`LCDDATAR` (1 word, rs1),
+/// `LCDCMDV`/`LCDDATAV`/`LCDRST` (2 words, imm32).  There is no LCD model, so
+/// a legal word does nothing; the decode checks are the RTL's (:698-711).
+fn exec_lcd(f: Fields) -> Exec {
+    let op = f.field(24, 2);
+    legal(
+        f.field(12, 12) == 0
+            && f.rd == 0
+            && f.rs2 == 0
+            && match f.len {
+                1 => op <= 1,
+                2 => f.rs1 == 0 && op <= 2,
+                _ => false,
+            },
+    )?;
+    Ok(Flow::Next)
+}
+
+/// The load / store decode checks shared by classes 6 and 7 (:547-554): the
+/// short form (1 word, MODE = 01) keeps its offset in `[19:12]`, which is
+/// otherwise zero; a store has no SGN; A only on a 64-bit access; MODE
+/// 00/01/11 as 1 word and 01/10 as 2 words; and the register fields a MODE
+/// does not use are zero.
+fn mem_legal(f: Fields, store: bool) -> Result<(), Illegal> {
+    let mode = f.field(21, 2);
+    legal(
+        (f.field(12, 8) == 0 || (f.len == 1 && mode == 1))
+            && !(store && f.bit(23))
+            && !(f.bit(20) && f.field(24, 2) != 3)
+            && match f.len {
+                1 => mode != 2,
+                2 => mode == 1 || mode == 2,
+                _ => false,
+            }
+            && match mode {
+                0 | 1 => f.rs2 == 0,
+                2 => f.field(0, 8) == 0,
+                _ => true,
+            },
+    )
 }
 
 /// ISA v3 short 1-word forms (`ISA_V3_PROPOSAL.md` §3): the immediate is in
