@@ -10,7 +10,6 @@
 pub(crate) mod disasm;
 pub(crate) mod encode;
 pub(crate) mod table;
-/// The legacy `.vh` opcode-definition file format.
 mod vh;
 
 use serde::{Deserialize, Serialize};

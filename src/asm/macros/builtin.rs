@@ -7,10 +7,11 @@ use crate::isa::table::v2_opcodes;
 
 /// Standard macro definitions bundled with the assembler (formerly the `.vh`
 /// header's `/* Macro definition */` block).
-/// Built-in macro definitions, in the same `$NAME item / item / …` syntax the
-/// old `opcode_select.vh` used (`%1`, `%2`, … are positional arguments). These
-/// are always available; programs can add their own with the `!macro` /
-/// `!macros` source directives (see [`apply_source_macros`](super::apply_source_macros)).
+///
+/// They use the same `$NAME item / item / …` syntax the old `opcode_select.vh`
+/// used (`%1`, `%2`, … are positional arguments).  They are always available;
+/// programs can add their own with the `!macro` / `!macros` source directives
+/// (see [`apply_source_macros`](super::apply_source_macros)).
 const V2_MACROS: &[&str] = &[
     // --- Multi-register save / restore (hardware stack; POP mirrors PUSH) ---
     "$PUSH2 PUSH %1 / PUSH %2",
