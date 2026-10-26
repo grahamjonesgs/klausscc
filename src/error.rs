@@ -9,6 +9,8 @@
 //! exit code.
 
 use crate::gdbserver::GdbError;
+#[cfg(feature = "board")]
+use crate::gdbserver_board::BoardError;
 use crate::netload::NetbootError;
 use std::fmt;
 use std::io;
@@ -76,9 +78,9 @@ pub(crate) enum Error {
     NoTests(PathBuf),
     /// The command line asks for something that cannot be done.
     Usage(&'static str),
-    /// A board debugging failure, already described in the message.
+    /// Debugging the board over JTAG failed.
     #[cfg(feature = "board")]
-    Other(String),
+    Board(BoardError),
 }
 
 impl Error {
@@ -120,7 +122,7 @@ impl fmt::Display for Error {
             Self::NoTests(path) => write!(f, "no tests with expected UART values found at {}", path.display()),
             Self::Usage(text) => f.write_str(text),
             #[cfg(feature = "board")]
-            Self::Other(text) => f.write_str(text),
+            Self::Board(err) => write!(f, "board: {err}"),
         }
     }
 }
@@ -135,6 +137,8 @@ impl std::error::Error for Error {
             | Self::OpcodeList(source) => Some(source),
             Self::Netboot(err) => Some(err),
             Self::Gdb(err) => Some(err),
+            #[cfg(feature = "board")]
+            Self::Board(err) => Some(err),
             _ => None,
         }
     }
@@ -143,6 +147,13 @@ impl std::error::Error for Error {
 impl From<GdbError> for Error {
     fn from(err: GdbError) -> Self {
         Self::Gdb(err)
+    }
+}
+
+#[cfg(feature = "board")]
+impl From<BoardError> for Error {
+    fn from(err: BoardError) -> Self {
+        Self::Board(err)
     }
 }
 

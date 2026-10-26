@@ -60,7 +60,7 @@ impl Jtag {
         // SAFETY: ftdi_new has no preconditions; a null result is checked below.
         let ctx = unsafe { ftdi_new() };
         if ctx.is_null() {
-            return Err(JtagError("ftdi_new failed".into()));
+            return Err(JtagError::NoContext);
         }
         // From here `jtag` owns `ctx`: its Drop frees it on every early return.
         let mut jtag = Self { ctx, idle_clocks: 16 };
@@ -70,11 +70,7 @@ impl Jtag {
         // SAFETY: as above.
         let rc = unsafe { ftdi_usb_open(ctx, 0x0403, 0x6010) };
         if rc < 0 {
-            return Err(JtagError(format!(
-                "cannot open the board's USB-JTAG (FT2232H 0403:6010 channel A): {} \
-                 (is the board connected, and Vivado's hardware manager / hw_server closed?)",
-                jtag.last_error()
-            )));
+            return Err(JtagError::Open(jtag.last_error()));
         }
         // SAFETY: as above.
         jtag.check(unsafe { ftdi_usb_reset(ctx) }, "usb reset")?;
@@ -117,9 +113,18 @@ impl Jtag {
         unsafe { CStr::from_ptr(msg) }.to_string_lossy().into_owned()
     }
 
-    fn check(&self, rc: c_int, what: &str) -> Result<()> {
+    /// Fail with libftdi's error when a call doing `op` returned `rc < 0`.
+    /// The error for a failed libftdi call doing `op`.
+    fn ftdi_error(&self, op: &'static str) -> JtagError {
+        JtagError::Ftdi {
+            op,
+            message: self.last_error(),
+        }
+    }
+
+    fn check(&self, rc: c_int, op: &'static str) -> Result<()> {
         if rc < 0 {
-            Err(JtagError(format!("ftdi {what}: {}", self.last_error())))
+            Err(self.ftdi_error(op))
         } else {
             Ok(())
         }
@@ -131,7 +136,7 @@ impl Jtag {
         if n as usize == buf.len() {
             Ok(())
         } else {
-            Err(JtagError(format!("ftdi write: {}", self.last_error())))
+            Err(self.ftdi_error("write"))
         }
     }
 
@@ -143,12 +148,12 @@ impl Jtag {
             // SAFETY: `self.ctx` is live, and `out[got..]` is valid for `n - got` bytes.
             let r = unsafe { ftdi_read_data(self.ctx, out[got..].as_mut_ptr(), (n - got) as c_int) };
             if r < 0 {
-                return Err(JtagError(format!("ftdi read: {}", self.last_error())));
+                return Err(self.ftdi_error("read"));
             }
             got += r as usize;
             tries += 1;
             if tries > 10_000 {
-                return Err(JtagError("ftdi read timeout".into()));
+                return Err(JtagError::ReadTimeout);
             }
         }
         Ok(out)

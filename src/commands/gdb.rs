@@ -58,11 +58,11 @@ pub(crate) fn run_gdbserver_board(
     send: SendOpts<'_>,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
-    use crate::gdbserver_board;
+    use crate::gdbserver_board::{self, BoardError};
 
-    let fail = |e: String| {
+    let fail = |e: BoardError| {
         eprintln!("klausscc gdbserver: {e}");
-        Error::Other(e)
+        Error::Board(e)
     };
     let (mut board, desc) = gdbserver_board::Board::open(jtag_khz).map_err(fail)?;
     eprintln!("klausscc gdbserver: {desc}");
@@ -79,7 +79,7 @@ pub(crate) fn run_gdbserver_board(
         let mut load = || {
             let loaded = run_elf2serial(input, kbt_file_name, send, msg_list);
             msg_list.print_summary();
-            loaded.map_err(|err| format!("loading {} over {} failed ({err})", input.path, send.port))
+            loaded.map_err(|err| BoardError::Load(format!("loading {} over {} failed ({err})", input.path, send.port)))
         };
         gdbserver_board::attach(&mut board, Some(&mut load)).map_err(fail)?
     };

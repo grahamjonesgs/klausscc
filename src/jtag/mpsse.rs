@@ -151,15 +151,10 @@ pub(super) fn dmi_answer(raw: &[u8], asked: DmiReq) -> Result<u64> {
     let out = parse_scan(raw, DMI_BITS);
     let want = asked.addr();
     if out[9] & 3 != 0 {
-        return Err(JtagError(format!(
-            "DMI busy answering 0x{want:02X} (raise the idle clocks, or lower --jtag-khz)"
-        )));
+        return Err(JtagError::DmiBusy { addr: want });
     }
     if out[8] != want {
-        return Err(JtagError(format!(
-            "DMI answer for 0x{:02X}, asked 0x{want:02X} (is the bitstream built with DEBUG_EN=1?)",
-            out[8]
-        )));
+        return Err(JtagError::DmiMismatch { asked: want, got: out[8] });
     }
     Ok(u64::from_le_bytes([out[0], out[1], out[2], out[3], out[4], out[5], out[6], out[7]]))
 }
@@ -395,19 +390,36 @@ mod tests {
     #[test]
     fn dmi_answer_rejects_a_busy_status() {
         let raw = dmi_response(dmi_value(3, 0x11, 0));
-        let err = dmi_answer(&raw, DmiReq::Write(0x11, 5)).err().map(|e| e.0);
+        let err = dmi_answer(&raw, DmiReq::Write(0x11, 5)).err();
+        assert!(matches!(err, Some(JtagError::DmiBusy { addr: 0x11 })), "{err:?}");
         assert_eq!(
-            err.as_deref(),
+            err.map(|e| e.to_string()).as_deref(),
             Some("DMI busy answering 0x11 (raise the idle clocks, or lower --jtag-khz)")
+        );
+    }
+
+    #[test]
+    fn only_a_busy_debug_module_keeps_the_link() {
+        assert!(!JtagError::DmiBusy { addr: 1 }.is_link_lost());
+        assert!(JtagError::DmiMismatch { asked: 1, got: 2 }.is_link_lost());
+        assert!(JtagError::ReadTimeout.is_link_lost());
+        assert_eq!(
+            JtagError::Ftdi {
+                op: "write",
+                message: "usb gone".to_owned()
+            }
+            .to_string(),
+            "ftdi write: usb gone"
         );
     }
 
     #[test]
     fn dmi_answer_rejects_an_answer_for_another_register() {
         let raw = dmi_response(dmi_value(0, 0x22, 0));
-        let err = dmi_answer(&raw, DmiReq::Read(0x11)).err().map(|e| e.0);
+        let err = dmi_answer(&raw, DmiReq::Read(0x11)).err();
+        assert!(matches!(err, Some(JtagError::DmiMismatch { asked: 0x11, got: 0x22 })), "{err:?}");
         assert_eq!(
-            err.as_deref(),
+            err.map(|e| e.to_string()).as_deref(),
             Some("DMI answer for 0x22, asked 0x11 (is the bitstream built with DEBUG_EN=1?)")
         );
     }

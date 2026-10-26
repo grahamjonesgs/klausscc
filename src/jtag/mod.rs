@@ -26,11 +26,70 @@ pub(crate) use mpsse::DmiReq;
 
 /// A JTAG / DMI error.
 #[derive(Debug)]
-pub(crate) struct JtagError(pub(crate) String);
+#[cfg_attr(
+    not(feature = "board"),
+    allow(dead_code, reason = "without the board feature only the MPSSE tests build these")
+)]
+pub(crate) enum JtagError {
+    /// libftdi could not allocate a context.
+    NoContext,
+    /// The board's USB-JTAG could not be opened; libftdi's description.
+    Open(String),
+    /// A libftdi call failed.
+    Ftdi {
+        /// What was being done (`"write"`, `"usb reset"`, ...).
+        op: &'static str,
+        /// libftdi's description of the error.
+        message: String,
+    },
+    /// The cable did not send back the bytes a scan should produce.
+    ReadTimeout,
+    /// The debug module had not answered the request for `addr` within the
+    /// idle clocks (and dropped the request after it).
+    DmiBusy {
+        /// The DMI register asked for.
+        addr: u8,
+    },
+    /// The answer was for another register: the scan did not reach a debug module.
+    DmiMismatch {
+        /// The DMI register asked for.
+        asked: u8,
+        /// The register the answer is for.
+        got: u8,
+    },
+}
 
 impl fmt::Display for JtagError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        match self {
+            Self::NoContext => f.write_str("ftdi_new failed"),
+            Self::Open(message) => write!(
+                f,
+                "cannot open the board's USB-JTAG (FT2232H 0403:6010 channel A): {message} \
+                 (is the board connected, and Vivado's hardware manager / hw_server closed?)"
+            ),
+            Self::Ftdi { op, message } => write!(f, "ftdi {op}: {message}"),
+            Self::ReadTimeout => f.write_str("ftdi read timeout"),
+            Self::DmiBusy { addr } => write!(f, "DMI busy answering 0x{addr:02X} (raise the idle clocks, or lower --jtag-khz)"),
+            Self::DmiMismatch { asked, got } => {
+                write!(
+                    f,
+                    "DMI answer for 0x{got:02X}, asked 0x{asked:02X} (is the bitstream built with DEBUG_EN=1?)"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for JtagError {}
+
+impl JtagError {
+    /// True if the link to the debug module is gone or never worked (the
+    /// cable failed, or the scans reach no debug module), as opposed to a
+    /// busy debug module, which may answer a retry.
+    #[cfg_attr(not(feature = "board"), allow(dead_code, reason = "only the board debugger asks"))]
+    pub(crate) const fn is_link_lost(&self) -> bool {
+        !matches!(self, Self::DmiBusy { .. })
     }
 }
 
