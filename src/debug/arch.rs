@@ -147,12 +147,12 @@ pub(crate) enum KlaussRegId {
     IntMask,
 }
 
-#[cfg_attr(
-    not(any(test, feature = "board")),
-    allow(dead_code, reason = "only the board target addresses registers by number")
-)]
 impl KlaussRegId {
     /// The number of registers (`regnum` 0 to 19).
+    #[cfg_attr(
+        not(any(test, feature = "board")),
+        allow(dead_code, reason = "only the board target lists every register")
+    )]
     pub(crate) const COUNT: usize = 20;
 
     /// The register with GDB `regnum` `n`, which is also its index in the
@@ -169,11 +169,19 @@ impl KlaussRegId {
     }
 
     /// Every register, in `regnum` order.
+    #[cfg_attr(
+        not(any(test, feature = "board")),
+        allow(dead_code, reason = "only the board target lists every register")
+    )]
     pub(crate) fn all() -> impl Iterator<Item = Self> {
         (0..Self::COUNT).filter_map(Self::from_regnum)
     }
 
     /// The register's GDB `regnum` (and debug module `REG_CMD` index).
+    #[cfg_attr(
+        not(any(test, feature = "board")),
+        allow(dead_code, reason = "only the board target addresses registers by number")
+    )]
     pub(crate) const fn regnum(self) -> usize {
         match self {
             Self::Gpr(n) => n as usize,
