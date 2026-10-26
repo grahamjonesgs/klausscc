@@ -623,7 +623,7 @@ CALL PFLAGS:
 // ===== j) A #name string ===================================================
 // #name "text" is a C string: characters in memory order, then a NUL. Byte
 // loads take lane addr[2:0] of the doubleword (pc:1343, 1367); MEMGET32
-// (U_LOAD32, pc:560) at offset 0 takes bytes 0-3 little-endian (pc:1348).
+// (U_LOAD32, pc:560) at offset 0 takes bytes 0-3 little-endian (pc:1349).
 SETR A #HWSTR
 $TXSTR A
 $NEWLINE
