@@ -214,7 +214,6 @@ impl Cpu {
         match flow {
             Ok(Flow::Next) => self.pc = f.next,
             Ok(Flow::Jump(target)) => self.pc = target,
-            Ok(Flow::Stop(StopReason::Halt)) => self.halted = true,
             Ok(Flow::Stop(reason)) => self.stop = Some(reason),
             Err(Illegal) => self.stop = Some(StopReason::InvalidOpcode(word)),
         }

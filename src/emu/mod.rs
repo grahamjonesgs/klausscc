@@ -120,9 +120,8 @@ pub struct Cpu {
     /// UART receive FIFO — head byte returned (and popped) by an `RX_DATA` read.
     /// Empty unless a caller feeds it via [`Cpu::feed_uart_rx`].
     uart_rx: VecDeque<u8>,
-    /// True once a HALT (or other terminator) is reached.
-    halted: bool,
-    /// Set when an unrecoverable stop condition occurs.
+    /// Why execution stopped, once it has.  A HALT is final; the other
+    /// reasons can be cleared by a debugger ([`Cpu::clear_stop`]).
     stop: Option<StopReason>,
     /// Pending memory write for trace annotation (addr, `byte_enable`, data).
     last_write: Option<(u32, u8, u64)>,
@@ -168,7 +167,6 @@ impl Cpu {
             mem,
             uart: String::new(),
             uart_rx: VecDeque::new(),
-            halted: false,
             stop: None,
             last_write: None,
             watches: Vec::new(),
@@ -329,10 +327,7 @@ impl Cpu {
     /// instruction run costs no extra memory.
     pub fn run(&mut self, max_instructions: u64, mut trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
         let mut count: u64 = 0;
-        while !self.halted && count < max_instructions {
-            if self.stop.is_some() {
-                break;
-            }
+        while self.stop.is_none() && count < max_instructions {
             if let Some((pc, word)) = self.step_inner(true) {
                 count += 1;
                 if let Some(t) = trace.as_deref_mut() {
@@ -340,9 +335,7 @@ impl Cpu {
                 }
             }
         }
-        let stop = self
-            .stop
-            .unwrap_or(if self.halted { StopReason::Halt } else { StopReason::InstructionCap });
+        let stop = self.stop.unwrap_or(StopReason::InstructionCap);
         EmulateResult {
             uart: std::mem::take(&mut self.uart),
             instructions: count,

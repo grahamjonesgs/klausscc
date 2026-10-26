@@ -326,6 +326,10 @@ fn test_debug_step_one_and_regs() {
     assert_eq!(cpu.debug_regs(), regs);
     while cpu.step_one(true).is_none() {}
     assert_eq!(cpu.step_one(true), Some(StopReason::Halt), "HALT stays final");
+    let pc = cpu.debug_regs().pc;
+    cpu.clear_stop();
+    assert_eq!(cpu.step_one(true), Some(StopReason::Halt), "clear_stop keeps a HALT");
+    assert_eq!(cpu.debug_regs().pc, pc, "nothing ran past the HALT");
 }
 
 #[test]

@@ -172,20 +172,18 @@ impl Cpu {
     /// interrupt is taken.  Returns why execution stopped, if it did (HALT,
     /// TRAP, invalid opcode, PC out of range, WAIT forever); `None` to go on.
     pub fn step_one(&mut self, allow_irq: bool) -> Option<StopReason> {
-        if self.halted {
-            return Some(StopReason::Halt);
+        if self.stop.is_none() {
+            self.step_inner(allow_irq);
         }
-        if let Some(stop) = self.stop {
-            return Some(stop);
-        }
-        self.step_inner(allow_irq);
-        if self.halted { Some(StopReason::Halt) } else { self.stop }
+        self.stop
     }
 
     /// Forget a TRAP / fault stop so execution can resume (the debugger has
     /// moved the PC or patched memory).  HALT stays final.
     pub fn clear_stop(&mut self) {
-        self.stop = None;
+        if self.stop != Some(StopReason::Halt) {
+            self.stop = None;
+        }
     }
 
     /// Replace the watchpoint list.
