@@ -9,7 +9,7 @@
 //! a build with errors may still be used for, by checking
 //! [`Diagnostics::has_errors`].
 //!
-//! [`line`] holds the per-line records that flow between the passes and
+//! [`line`](mod@line) holds the per-line records that flow between the passes and
 //! [`lexer`] the pure text predicates used to classify a source line.  Both
 //! are leaves: they import nothing else from the crate, so every other
 //! assembler module can depend on them without forming a cycle.

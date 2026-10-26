@@ -5,7 +5,7 @@
 //! so one run can report all of them.  [`Error`] covers the failures that stop
 //! a command.  By convention a handler reports the failure to the user (to the
 //! streaming `Diagnostics`, or on stderr) before returning the `Error`, so
-//! [`run`] only prints the run summary and turns the error into an
+//! [`run`](crate::run) only prints the run summary and turns the error into an
 //! exit code.
 
 use crate::debug::GdbError;

@@ -1,4 +1,4 @@
-//! JTAG over an FTDI FT2232H in MPSSE mode, and the KlaussCPU debug module's
+//! JTAG over an FTDI FT2232H in MPSSE mode, and the `KlaussCPU` debug module's
 //! DMI on top of it (`klaussCPU` `debug_module.sv`, `DEBUG_PLAN.md` §4).
 //!
 //! The Nexys A7's on-board USB-JTAG is a Digilent-programmed FT2232H: channel

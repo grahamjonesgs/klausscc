@@ -1,5 +1,5 @@
 //! Integer literal parsing shared by the assembler and the command line,
-//! and [`human_bytes`](crate::num::human_bytes) for the sizes in progress messages.
+//! and [`human_bytes`] for the sizes in progress messages.
 //!
 //! Every numeric operand in the assembler (`.word`, `.space`, `#name N`,
 //! immediates, counts) and the `--entry` address go through [`parse_int`], so

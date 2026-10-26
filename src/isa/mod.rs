@@ -1,12 +1,12 @@
 //! The Klauss instruction set: the opcode table, encoding source operands
 //! into instruction words, and disassembling them again.
 //!
-//! [`Opcode`](crate::isa::Opcode) and [`Operand`](crate::isa::Operand)
+//! [`Opcode`] and [`Operand`]
 //! describe one instruction and how its operands map onto the word, and
-//! [`Isa`](crate::isa::Isa) looks opcodes up by name;
-//! [`table`](crate::isa::table) holds the built-in ISA-encoding-v2 table,
-//! [`encode`](crate::isa::encode) packs a source line's operands into words
-//! and [`disasm`](crate::isa::disasm) turns words back into text.
+//! [`Isa`] looks opcodes up by name;
+//! [`table`] holds the built-in ISA-encoding-v2 table,
+//! [`encode`] packs a source line's operands into words
+//! and [`disasm`] turns words back into text.
 
 pub(crate) mod disasm;
 pub(crate) mod encode;
@@ -32,37 +32,37 @@ pub(crate) fn reg_index(name: &str) -> Option<u32> {
 /// embedded shift/bit count.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub(crate) enum Operand {
-    /// Destination register → word0[11:8].
+    /// Destination register → `word0[11:8]`.
     Rd,
-    /// First source / base register → word0[7:4].
+    /// First source / base register → `word0[7:4]`.
     Rs1,
-    /// Second source / offset register → word0[3:0].
+    /// Second source / offset register → `word0[3:0]`.
     Rs2,
-    /// In-place register: one source token drives BOTH rd[11:8] and rs1[7:4].
+    /// In-place register: one source token drives BOTH `rd[11:8]` and `rs1[7:4]`.
     /// v1's in-place forms (`ADDV A 5`, `NEGR A`, `SHLV A 4`) become v2's
     /// 3-operand encodings with `rd == rs1`.
     RdRs1,
-    /// Embedded 6-bit shift/bit count or position → word0[20:15].
+    /// Embedded 6-bit shift/bit count or position → `word0[20:15]`.
     Count,
     /// 32-bit immediate word appended at PC+4.
     Imm,
     /// 64-bit immediate appended as lo32@PC+4, hi32@PC+8.
     Imm64,
-    /// ISA v3 short form: literal 8-bit immediate → word0[19:12]
+    /// ISA v3 short form: literal 8-bit immediate → `word0[19:12]`
     /// (-128..=255; the instruction's SGN bit picks the extension).
     Imm8,
     /// ISA v3 short load/store: literal BYTE offset, a multiple of
-    /// `1 << shift` whose scaled value fits simm8 → word0[19:12].
+    /// `1 << shift` whose scaled value fits simm8 → `word0[19:12]`.
     Off8(u8),
-    /// ISA v3 `ENTER`: literal frame size in 8-byte units → word0[21:0].
+    /// ISA v3 `ENTER`: literal frame size in 8-byte units → `word0[21:0]`.
     Frame22,
-    /// ISA v3 fused branch: literal simm4 compare immediate → word0[3:0].
+    /// ISA v3 fused branch: literal simm4 compare immediate → `word0[3:0]`.
     Simm4,
     /// ISA v3 short branch target (label or address) → simm18 word
-    /// displacement from this instruction, word0[17:0]. Filled in pass 2.
+    /// displacement from this instruction, `word0[17:0]`. Filled in pass 2.
     Rel18,
     /// ISA v3 fused branch target (label or address) → simm13 word
-    /// displacement from this instruction, word0[20:8]. Filled in pass 2.
+    /// displacement from this instruction, `word0[20:8]`. Filled in pass 2.
     Rel13,
 }
 

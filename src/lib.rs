@@ -4,38 +4,40 @@
 //! The library holds every part of the tool; the `klausscc` binary is
 //! [`run`], which reads the command line and runs the selected mode.  The
 //! golden-model [`emu`] module is public so it can be driven directly.
+//!
+//! The modules, from the command line down (each one's own docs say more):
+//!
+//! * `cli` parses the command line into a `Mode`; `commands` holds the
+//!   handler that runs each mode end to end.
+//! * `asm` assembles `.kla` source; `isa` is the opcode table, encoder and
+//!   disassembler it uses.
+//! * `output` writes the `.code` listing, the program image formats and the
+//!   opcode docs; `loader` turns an ELF or flat binary into a program.
+//! * [`emu`] is the golden-model emulator; `debug` serves it, or the board
+//!   over `jtag`, to lldb as a GDB remote target.
+//! * `link` puts a program on the board over the UART or the network.
+//! * `diag`, `error`, `layout` and `num` are the leaves everything shares:
+//!   diagnostics, the error type and exit codes, the memory map and integer
+//!   literal parsing.
 
-/// The assembler: `.kla` source in, addressed machine code out.
 mod asm;
-/// Module defining the command-line interface (clap).
 mod cli;
-/// Module of subcommand handlers (the `run_*` entry points).
 mod commands;
-/// GDB remote-protocol servers for the emulator and the board (`--gdbserver`).
 mod debug;
-/// Diagnostics: the errors, warnings and notes reported to the user.
 mod diag;
-/// The independent ISA emulator (golden-model trace generator).
 pub mod emu;
-/// Module defining the crate error type and exit codes.
 mod error;
-/// The Klauss instruction set: opcode table, encoder and disassembler.
 mod isa;
-/// JTAG over the board's FT2232H, and the debug module's DMI.  The pure MPSSE
-/// framing and the `Dmi` seam are also built for tests, so they (and the
-/// board debugger's tests) run without libftdi.
+// The pure MPSSE framing and the `Dmi` seam are also built for tests, so
+// they (and the board debugger's tests) run without libftdi.
 #[cfg(any(test, feature = "board"))]
 mod jtag;
-/// The memory map: heap header, code base, heap start and the MMIO window.
 mod layout;
-/// Loading a program onto the board over the UART or the network.
 mod link;
-/// Loading an ELF or flat binary as a board program.
 mod loader;
-/// Integer literal parsing, and byte counts for messages.
 mod num;
-/// The files the tool writes: listing, program image and opcode docs.
 mod output;
+
 use asm::Assembly;
 use asm::macros::{Macro, builtin_macros, expand_embedded_macros};
 use clap::{CommandFactory as _, Parser as _};

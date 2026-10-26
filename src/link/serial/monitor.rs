@@ -69,7 +69,7 @@ enum KeyAction {
 ///
 /// Only presses and auto-repeats count: Windows also reports key releases,
 /// which would otherwise send every keystroke twice.  A character goes out
-/// as its full UTF-8 encoding; Ctrl+<ASCII char> sends its control code.
+/// as its full UTF-8 encoding; `Ctrl+<ASCII char>` sends its control code.
 fn key_action(event: &KeyEvent) -> KeyAction {
     if !matches!(event.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
         return KeyAction::Ignore;

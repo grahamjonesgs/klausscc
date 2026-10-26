@@ -1,4 +1,4 @@
-//! Independent ISA emulator (golden-model trace generator) for the KlaussCPU.
+//! Independent ISA emulator (golden-model trace generator) for the `KlaussCPU`.
 //!
 //! This is Phase-0 of the FPGA pipelining effort: an architectural reference
 //! model that executes a flat DDR image and emits a per-retired-instruction
@@ -21,7 +21,7 @@
 //! context word `{INT_MASK, flags, PC}` is pushed, the source's mask bit
 //! cleared and the timer's pending bit acknowledged; `IRET` restores all of
 //! it, and `WAIT` sleeps until a source is ready.  Time is modelled as
-//! [`CYCLES_PER_INSTRUCTION`](crate::emu::CYCLES_PER_INSTRUCTION) cycles per retired instruction, so interrupt
+//! [`CYCLES_PER_INSTRUCTION`] cycles per retired instruction, so interrupt
 //! *timing* differs from the RTL (no golden-trace use) while the
 //! architectural effects match.  Blitter / Ethernet interrupts (sources 1-2)
 //! are not modelled.
@@ -45,7 +45,7 @@
 //! the assembler's opcode table — so the emulator is a genuine second
 //! implementation, not a re-run of the assembler.
 //!
-//! [`Cpu`](crate::emu::Cpu) and the run entry points live here, with the
+//! [`Cpu`] and the run entry points live here, with the
 //! memory helpers.  The rest of the machine is split by concern: `exec`
 //! decodes and executes one instruction, `flags` is the `Z S C V` register
 //! and its saved layouts, `mmio` models the UART, interrupt controller /
