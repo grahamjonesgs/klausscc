@@ -29,9 +29,9 @@
 //! are not modelled.
 //!
 //! The UART transmitter is timed on the same clock: a `TX_DATA` store keeps
-//! `STATUS.TX_BUSY` set for one frame ([`UART_CYCLES_PER_BYTE`]), and a store
-//! while it is set is dropped, as the RTL drops it, and recorded
-//! ([`EmulateResult::tx_busy_writes`]).  [`emulate_loaded_image`] starts a
+//! `STATUS.TX_BUSY` set for one frame and the sender's own two cycles
+//! ([`UART_CYCLES_PER_STORE`]), and a store while it is set is dropped, as
+//! the RTL drops it, and recorded ([`EmulateResult::tx_busy_writes`]).  [`emulate_loaded_image`] starts a
 //! program as the board does after a UART load, with the loader's reply still
 //! being sent for [`LOADER_MESSAGE_CYCLES`].
 //!
@@ -71,7 +71,7 @@ mod tests;
 mod trace;
 
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
-pub use mmio::{IrqState, LOADER_MESSAGE_CYCLES, LOADER_MESSAGE_LEN, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE};
+pub use mmio::{IrqState, LOADER_MESSAGE_CYCLES, LOADER_MESSAGE_LEN, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE};
 
 use crate::layout::is_mmio;
 use flags::Flags;

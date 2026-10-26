@@ -57,8 +57,8 @@ const UART_RX_FIFO_DEPTH: usize = 16;
 // (`uart_send_msg.sv` :47-58); while it is sending, `i_msg_send_DV` is not
 // looked at (:61-76), so a store while busy is dropped and the byte in flight
 // goes out unchanged.  `STATUS.TX_BUSY` is that sender's `o_sending_msg`
-// (`KlaussCPU.sv` :911), which stays set until the last frame's stop bit is
-// out (`uart_send_msg.sv` :61-81).
+// (`KlaussCPU.sv` :911), which stays set until the cycle after the last
+// frame's `s_CLEANUP` (`uart_send_msg.sv` :61-82).
 
 /// `uart_tx` `CLKS_PER_BIT` (`uart_tx.sv` :7, not overridden by the instance in
 /// `uart_send_msg.sv` :29): `i_Clk` cycles per bit.  `i_Clk` is the 100 MHz MIG
@@ -69,19 +69,41 @@ const UART_BITS_PER_FRAME: u64 = 10;
 /// The cycle `uart_tx` spends in `s_IDLE` accepting a byte and the one in
 /// `s_CLEANUP` after the stop bit (`uart_tx.sv` :34-45, :103-106).
 const UART_FRAME_OVERHEAD_CYCLES: u64 = 2;
-/// `i_Clk` cycles `TX_BUSY` stays set for each byte sent (332, about 3.3 µs).
+/// `i_Clk` cycles between bytes of one message (332, about 3.3 µs):
+/// `uart_send_msg` holds `r_UART_Tx_DV` high for the whole message, so `uart_tx`
+/// goes from `s_CLEANUP` straight back through `s_IDLE` into the next start bit.
 pub const UART_CYCLES_PER_BYTE: u64 = UART_BITS_PER_FRAME * UART_CLKS_PER_BIT + UART_FRAME_OVERHEAD_CYCLES;
+/// The cycle `uart_send_msg` spends in `s_IDLE` taking a send request (before
+/// `uart_tx` sees it) and the one in `s_CLEANUP` (`o_sending_msg` still 1) after
+/// the last byte (`uart_send_msg.sv` :47-58, :78-82).
+const UART_SEND_MSG_OVERHEAD_CYCLES: u64 = 2;
+/// `i_Clk` cycles from a `TX_DATA` store (the cycle that sets `r_msg_send_DV`)
+/// to the first cycle a second store is taken (334): a store `n` cycles after
+/// the previous one is dropped while `n` < 334.  `o_sending_msg` reads 1 from 2
+/// cycles after the store until then, and an MMIO read decodes from the
+/// registered address a cycle after its strobe (`KlaussCPU.sv` :411-414), so
+/// a `TX_BUSY` poll issued right after a store already sees 1.
+pub const UART_CYCLES_PER_STORE: u64 = UART_CYCLES_PER_BYTE + UART_SEND_MSG_OVERHEAD_CYCLES;
 /// Length of the loader's `"Load Complete OK\n\r"` reply (`t_tx_message(1)`,
-/// `uart_tasks.vh` :519-539), which `LOAD_COMPLETE` starts sending as it hands
-/// over to the program (`KlaussCPU.sv` :1727).  `START_WAIT` does not wait for
-/// it: `r_start_wait_counter` is never loaded, so it is 0 and the pipeline starts
-/// on the next cycle (:1736-1742).  A netboot image goes through the same
-/// `LOAD_COMPLETE` (:1103-1108).
+/// `uart_tasks.vh` :519-539, `r_msg_send_DV` set at :615), which `LOAD_COMPLETE`
+/// starts sending as it hands over to the program (`KlaussCPU.sv` :1727).
+/// `START_WAIT` does not wait for it: `r_start_wait_counter` is never loaded
+/// (declared at :155, only tested and decremented at :1738-1746), so it is 0
+/// and the pipeline is started on the next cycle.  A netboot image goes
+/// through the same `LOAD_COMPLETE` (:1103-1108, :1559).
 pub const LOADER_MESSAGE_LEN: u64 = 18;
 /// `i_Clk` cycles the loader's reply keeps `TX_BUSY` set after a program loaded
 /// over the UART starts (5976, about 60 µs): a program must poll `TX_BUSY`
-/// before its first `TX_DATA` store too.
-pub const LOADER_MESSAGE_CYCLES: u64 = LOADER_MESSAGE_LEN * UART_CYCLES_PER_BYTE;
+/// before its first `TX_DATA` store too.  A store is taken from 18 × 332 + 2
+/// cycles after the `LOAD_COMPLETE` cycle that sets `r_msg_send_DV` (as for
+/// one byte, above), and the program's first cycle is
+/// `LOADER_TO_PIPELINE_CYCLES` after that cycle, so from it the window is at
+/// most 18 × 332 (the first store comes a few fetch cycles later still).
+pub const LOADER_MESSAGE_CYCLES: u64 = LOADER_MESSAGE_LEN * UART_CYCLES_PER_BYTE + UART_SEND_MSG_OVERHEAD_CYCLES - LOADER_TO_PIPELINE_CYCLES;
+/// Cycles from `LOAD_COMPLETE` to the pipeline's first cycle: `START_WAIT`
+/// (one cycle, the counter being 0) sets `r_pip_start`, which the pipeline
+/// sees the cycle after (`KlaussCPU.sv` :1718, :1736-1742).
+const LOADER_TO_PIPELINE_CYCLES: u64 = 2;
 /// How many write-while-busy events [`TxBusyWrites`] keeps (the total is
 /// always counted), so a program that never polls cannot grow it without bound.
 const TX_BUSY_WRITES_KEPT: usize = 16;
@@ -317,7 +339,7 @@ impl Cpu {
             return;
         }
         self.uart.push(b);
-        self.tx_busy_until = self.cycles + UART_CYCLES_PER_BYTE;
+        self.tx_busy_until = self.cycles + UART_CYCLES_PER_STORE;
     }
 
     /// Start as a program loaded over the UART (or by netboot) does: with the

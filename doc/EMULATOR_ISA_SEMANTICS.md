@@ -197,18 +197,22 @@ access reads 0 or is ignored.
   ignored.
 - The UART transmitter is timed on the modelled clock, not on the
   board's. A `TX_DATA` store sets `STATUS.TX_BUSY` for
-  `UART_CYCLES_PER_BYTE` = 332 cycles: 10 bits of `CLKS_PER_BIT` = 33
-  (`uart_tx.sv` :7, 3 Mbaud at the 100 MHz `ui_clk`) plus `uart_tx`'s
-  `s_IDLE` and `s_CLEANUP` cycles. There is no TX FIFO: a store while
+  `UART_CYCLES_PER_STORE` = 334 cycles: a frame of
+  `UART_CYCLES_PER_BYTE` = 332 (10 bits of `CLKS_PER_BIT` = 33,
+  `uart_tx.sv` :7, 3 Mbaud at the 100 MHz `ui_clk`, plus `uart_tx`'s
+  `s_IDLE` and `s_CLEANUP` cycles) and `uart_send_msg`'s own `s_IDLE`
+  and `s_CLEANUP` cycles; on the RTL a second store is taken 334 cycles
+  after the first at the earliest. There is no TX FIFO: a store while
   busy is ignored by `uart_send_msg` (:47-76), so the emulator drops it
   too and records its PC and byte (`EmulateResult::tx_busy_writes`).
   `--emulate` lists them; `--emulate-test` fails the file. A program
   run by `--emulate` / `--emulate-test` (`emulate_loaded_image`) starts
-  with TX busy for `LOADER_MESSAGE_CYCLES` = 18 × 332 cycles: the
+  with TX busy for `LOADER_MESSAGE_CYCLES` = 5976 cycles: the
   loader's `"Load Complete OK\n\r"` reply (`uart_tasks.vh` :519-539),
   which `LOAD_COMPLETE` starts as it hands over (`KlaussCPU.sv` :1727;
   `START_WAIT` does not wait, since `r_start_wait_counter` is never
-  loaded). `--gdbserver` and `emulate_image` start with TX idle. The busy
+  loaded). A store is taken 18 × 332 + 2 cycles after `LOAD_COMPLETE`,
+  and the pipeline starts 2 cycles after it. `--gdbserver` and `emulate_image` start with TX idle. The busy
   window is the RTL's in cycles, but polling loops spin a different
   number of times, because instructions take 2 modelled cycles each.
 - Memory is 128 MiB. Reads past the end return 0 and writes past it are

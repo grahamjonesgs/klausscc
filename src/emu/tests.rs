@@ -104,15 +104,16 @@ fn test_mmio_uart_tx_drops_a_store_while_busy() {
 
 #[test]
 fn test_uart_tx_busy_lasts_one_frame() {
-    // STATUS.TX_BUSY (bit 0) is set for UART_CYCLES_PER_BYTE cycles after a
-    // TX_DATA store: 10 bits of 33 clocks (uart_tx.sv :7) plus the IDLE and
-    // CLEANUP cycles.
+    // STATUS.TX_BUSY (bit 0) is set for UART_CYCLES_PER_STORE cycles after a
+    // TX_DATA store: 10 bits of 33 clocks (uart_tx.sv :7), uart_tx's IDLE and
+    // CLEANUP cycles, and uart_send_msg's IDLE and CLEANUP cycles.
     assert_eq!(UART_CYCLES_PER_BYTE, 332);
+    assert_eq!(UART_CYCLES_PER_STORE, 334);
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 0, "idle at reset");
     cpu.mmio_write(0xF001_0000, u64::from(b'A'));
     assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 1, "busy once a byte is stored");
-    cpu.tick(UART_CYCLES_PER_BYTE - 1);
+    cpu.tick(UART_CYCLES_PER_STORE - 1);
     assert_eq!(cpu.mmio_read(0xF001_0010) & 1, 1, "still busy one cycle before the frame ends");
     cpu.mmio_write(0xF001_0000, u64::from(b'B'));
     cpu.tick(1);
@@ -126,8 +127,11 @@ fn test_uart_tx_busy_lasts_one_frame() {
 
 #[test]
 fn test_uart_load_starts_with_the_loader_reply_in_flight() {
-    // "Load Complete OK\n\r" (uart_tasks.vh :519-539) is 18 bytes.
+    // "Load Complete OK\n\r" (uart_tasks.vh :519-539) is 18 bytes; a store
+    // is taken 18 * 332 + 2 cycles after LOAD_COMPLETE, and the program starts
+    // 2 cycles after LOAD_COMPLETE.
     assert_eq!(LOADER_MESSAGE_CYCLES, 18 * UART_CYCLES_PER_BYTE);
+    assert_eq!(LOADER_MESSAGE_CYCLES, 5976);
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     cpu.start_after_uart_load();
     cpu.tick(LOADER_MESSAGE_CYCLES - 1);
@@ -153,7 +157,7 @@ fn test_uart_keeps_raw_bytes() {
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     for b in [0xC3_u8, 0xA9, 0xFF, b'\n'] {
         cpu.mmio_write(0xF001_0000, 0x1200 | u64::from(b));
-        cpu.tick(UART_CYCLES_PER_BYTE);
+        cpu.tick(UART_CYCLES_PER_STORE);
     }
     assert_eq!(cpu.take_uart(), [0xC3, 0xA9, 0xFF, b'\n'], "the low byte of each store, verbatim");
     assert_eq!(cpu.take_uart(), b"", "taken once");
