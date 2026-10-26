@@ -106,7 +106,7 @@ impl EmuTarget {
         let out = self.cpu.take_uart();
         if !out.is_empty() {
             let mut stdout = std::io::stdout();
-            let _ = stdout.write_all(&crate::emu::uart_bytes(&out));
+            let _ = stdout.write_all(&out);
             let _ = stdout.flush();
         }
         let rx: Vec<u8> = self.uart_rx.try_iter().collect();

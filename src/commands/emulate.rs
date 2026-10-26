@@ -82,7 +82,7 @@ fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions:
     {
         use std::io::Write as _;
         let mut out = std::io::stdout();
-        let _ = out.write_all(&emu::uart_bytes(&result.uart));
+        let _ = out.write_all(&result.uart);
         let _ = out.flush();
     }
     println!("--- end UART ---");
@@ -280,7 +280,9 @@ pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macro
     };
 
     let (result, _) = emu::emulate_image(&image.to_ddr(), image.entry, max_instructions, false);
-    let got: Vec<&str> = result.uart.lines().filter_map(hex_token).collect();
+    // Each byte as one `char` (Latin-1): every byte survives into the lines.
+    let uart: String = result.uart.iter().copied().map(char::from).collect();
+    let got: Vec<&str> = uart.lines().filter_map(hex_token).collect();
 
     // Compare in order; report the first difference.
     for (idx, exp) in expected.iter().enumerate() {

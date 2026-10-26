@@ -210,11 +210,11 @@ impl Cpu {
 
     /// Emit a raw byte to the UART capture (a UART `TX_DATA` MMIO store).
     fn tx_byte(&mut self, b: u8) {
-        self.uart.push(b as char);
+        self.uart.push(b);
     }
 
     /// Take the UART output produced since the last call.
-    pub fn take_uart(&mut self) -> String {
+    pub fn take_uart(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.uart)
     }
 }

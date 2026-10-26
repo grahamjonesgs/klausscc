@@ -57,7 +57,17 @@ fn test_mmio_uart_tx() {
     ];
     let img = image_from_words(&words);
     let (r, _) = emulate_image(&img, default_entry(), 100, false);
-    assert_eq!(r.uart, "Hi");
+    assert_eq!(r.uart, b"Hi");
+}
+
+#[test]
+fn test_uart_keeps_raw_bytes() {
+    let mut cpu = Cpu::new(&image_from_words(&[HALT]), default_entry());
+    for b in [0xC3_u8, 0xA9, 0xFF, b'\n'] {
+        cpu.mmio_write(0xF001_0000, 0x1200 | u64::from(b));
+    }
+    assert_eq!(cpu.take_uart(), [0xC3, 0xA9, 0xFF, b'\n'], "the low byte of each store, verbatim");
+    assert_eq!(cpu.take_uart(), b"", "taken once");
 }
 
 #[test]
@@ -399,7 +409,7 @@ fn test_debug_memory_access_skips_mmio_side_effects() {
     assert_eq!(cpu.debug_read(0x100, &mut back), 3);
     assert_eq!(back, [1, 2, 3]);
     assert!(cpu.debug_write_mmio(0xF001_0000, b"Z"));
-    assert_eq!(cpu.take_uart(), "Z");
+    assert_eq!(cpu.take_uart(), b"Z");
 }
 
 #[test]

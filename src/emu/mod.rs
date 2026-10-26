@@ -93,18 +93,11 @@ const STACK_TOP: u32 = 0x0800_0000;
 pub struct EmulateResult {
     /// Captured UART output: the byte stream written to the UART `TX_DATA` MMIO
     /// register (`0xF001_0000`), one byte (`data[7:0]`) per store, in order.
-    pub uart: String,
+    pub uart: Vec<u8>,
     /// Number of instructions retired.
     pub instructions: u64,
     /// Why execution stopped.
     pub stop: StopReason,
-}
-
-/// The raw UART bytes in `uart`, which stores each transmitted byte as one
-/// `char` (Latin-1), so multi-byte UTF-8 output can be written back verbatim.
-#[must_use]
-pub fn uart_bytes(uart: &str) -> Vec<u8> {
-    uart.chars().map(|c| c as u32 as u8).collect()
 }
 
 /// A memory write, as the trace annotates it.
@@ -142,7 +135,7 @@ pub struct Cpu {
     /// Flat little-endian memory image (128 MiB).
     mem: Vec<u8>,
     /// Captured UART output (`TX_DATA` writes, low byte per store).
-    uart: String,
+    uart: Vec<u8>,
     /// UART receive FIFO — head byte returned (and popped) by an `RX_DATA` read.
     /// Empty unless a caller feeds it via [`Cpu::feed_uart_rx`].
     uart_rx: VecDeque<u8>,
@@ -191,7 +184,7 @@ impl Cpu {
             pc: entry,
             flags: Flags::default(),
             mem,
-            uart: String::new(),
+            uart: Vec::new(),
             uart_rx: VecDeque::new(),
             stop: None,
             last_write: None,
