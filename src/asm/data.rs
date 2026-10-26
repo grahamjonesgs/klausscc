@@ -56,9 +56,9 @@ enum DataDirective {
     /// `.zeropad N`: exactly `N` zero bytes, a whole number of 32-bit words.
     ///
     /// Assembler-internal: emitted by `get_pass1` to 8-byte-align the start of
-    /// a data section so 64-bit loads (MEMREADR / MEMGET64), which mask the
-    /// address down to an 8-byte boundary, read .word data cleanly instead of
-    /// the preceding word.  `N` must be a whole number of 32-bit words: the
+    /// a data section, and inline data, so 64-bit loads (MEMREADR / MEMGET64),
+    /// which mask the address down to an 8-byte boundary, read .word data
+    /// cleanly instead of the preceding word.  `N` must be a whole number of 32-bit words: the
     /// board loads the program a word at a time, so a part word would shift
     /// everything after it, entry included.
     ZeroPad(usize),

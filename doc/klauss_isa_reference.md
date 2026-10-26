@@ -370,7 +370,7 @@ COUNT:
 .text
 ```
 
-Code is a whole number of 4-byte words, so data written inline after an odd number of code words starts at an address that is 4 more than a multiple of 8. Use a data section (or `.zeropad 4`) for 64-bit data that must be 8-byte aligned.
+Inline data starts on an 8-byte boundary too. Code is a whole number of 4-byte words, so after an odd number of code words the assembler adds a `.zeropad 4` before the data, and before the labels, comments and directives just above it, so those labels name the data. Every data item is a whole number of 8-byte words (except `.zeropad`, which is never aligned), so the data that follows stays aligned. The pad is zero, which is not a valid instruction, so do not let execution run into inline data.
 
 ---
 

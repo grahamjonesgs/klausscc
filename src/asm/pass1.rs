@@ -3,6 +3,7 @@
 //! Lines keep their source order, except that data (and the labels on it)
 //! inside a `.data`/`.rodata`/`.bss` section is moved after the code, starting
 //! 8-byte aligned.  `.comm`/`.lcomm` become a label plus `.space` there too.
+//! Data left inline in the code is 8-byte aligned where it stands.
 
 use crate::asm::data::num_data_bytes;
 use crate::asm::lexer::strip_comments;
@@ -42,6 +43,50 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
     let leading_ws = &line[..line.len() - trimmed.len()];
     // SAFETY: trimmed starts with "setr" (4 ASCII chars), confirmed by eq_ignore_ascii_case above.
     format!("{leading_ws}SETR64{}", &trimmed[4..])
+}
+
+/// 8-byte-align a data item that stays inline in the code.
+///
+/// The data cache serves every 64-bit RAM access from the aligned doubleword
+/// that holds the address (`mem_read_write.sv`:270-277 select it by
+/// `addr[4:3]`), so a `.word` or `#name` word at a 4-aligned address would be
+/// read and written together with the code word before it.  When
+/// `program_counter` is not 8-aligned, a 4-byte `.zeropad` goes in before the
+/// labels (and the comments, blank lines and directives among them) that lead
+/// up to the data, so they name the aligned data, not the pad.  C compilers
+/// emit their data inline after a function's `RET`, where nothing runs into
+/// the pad.
+fn align_inline_data(pass1: &mut Vec<Pass1>, program_counter: &mut u32) {
+    // Code is 4-byte granular and data a multiple of 8 bytes, so 4 aligns it.
+    const PAD: u32 = 4;
+    if program_counter.is_multiple_of(8) {
+        return;
+    }
+    let leading = pass1
+        .iter()
+        .rev()
+        .take_while(|line| {
+            matches!(
+                line.line_type,
+                LineType::Label | LineType::Comment | LineType::Blank | LineType::Directive
+            )
+        })
+        .count();
+    let at = pass1.len() - leading;
+    for line in &mut pass1[at..] {
+        line.program_counter += PAD;
+    }
+    pass1.insert(
+        at,
+        Pass1 {
+            input_text_line: format!(".zeropad {PAD}"),
+            file_name: String::from("<align>"),
+            line_counter: 0,
+            program_counter: *program_counter,
+            line_type: LineType::Data,
+        },
+    );
+    *program_counter += PAD;
 }
 
 /// Returns pass1 from pass0.
@@ -119,6 +164,10 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, isa:
         if in_data_section && lt == LineType::Label {
             data_pass0.push((pass, lt));
             continue;
+        }
+
+        if lt == LineType::Data && !in_data_section && first_word != ".zeropad" {
+            align_inline_data(&mut pass1, &mut program_counter);
         }
 
         pass1.push(Pass1 {
@@ -259,10 +308,46 @@ mod tests {
         assert_eq!(pass1[0].program_counter, 32); // SETR64
         assert_eq!(pass1[1].program_counter, 44); // PUSH (SETR64=3 words×4=12)
         assert_eq!(pass1[2].program_counter, 48); // RET  (+4)
-        assert_eq!(pass1[3].program_counter, 52); // #DATA1 0x2 inline (+4)
-        assert_eq!(pass1[4].program_counter, 68); // RET  (2 data words×8=16)
-        assert_eq!(pass1[5].program_counter, 72); // #DATA1 "HELLO" inline (+4)
-        assert_eq!(pass1[6].program_counter, 80); // RET  (string="HELLO\0" padded to one 64-bit word)
+        // Inline data is 8-byte aligned: a 4-byte pad goes in before it.
+        assert_eq!(pass1[3].program_counter, 52); // <align> .zeropad 4
+        assert_eq!(pass1[3].input_text_line, ".zeropad 4");
+        assert_eq!(pass1[4].program_counter, 56); // #DATA1 0x2 inline
+        assert_eq!(pass1[5].program_counter, 72); // RET  (2 data words×8=16)
+        assert_eq!(pass1[6].program_counter, 76); // <align> .zeropad 4
+        assert_eq!(pass1[7].program_counter, 80); // #DATA1 "HELLO" inline
+        assert_eq!(pass1[8].program_counter, 88); // RET  (string="HELLO\0" padded to one 64-bit word)
+    }
+
+    #[test]
+    // The alignment pad goes before the labels, comments and directives that
+    // lead up to inline data, so they name the data; aligned data gets none.
+    fn test_get_pass1_aligns_inline_data_after_its_labels() {
+        let mut msg_list = Diagnostics::new();
+        let pass0 = ["RET", "msg:", "// text", ".global msg", ".word 0x41", "msg2:", ".word 0x42"]
+            .into_iter()
+            .zip(1..)
+            .map(|(text, line_counter)| SourceLine {
+                input_text_line: text.to_owned(),
+                file_name: String::new(),
+                line_counter,
+            })
+            .collect();
+        let pass1 = get_pass1(&mut msg_list, pass0, &Isa::v2());
+        let lines: Vec<(&str, u32)> = pass1.iter().map(|p| (p.input_text_line.as_str(), p.program_counter)).collect();
+        assert_eq!(
+            lines,
+            [
+                ("RET", 32),
+                (".zeropad 4", 36),
+                ("msg:", 40),
+                ("// text", 40),
+                (".global msg", 40),
+                (".word 0x41", 40),
+                ("msg2:", 48),
+                (".word 0x42", 48),
+            ]
+        );
+        assert!(!msg_list.has_errors());
     }
 
     #[test]
