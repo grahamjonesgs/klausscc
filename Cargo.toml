@@ -7,12 +7,56 @@ rust-version = "1.88"
 authors = ["Graham Jones"]
 description = "Assembler for Klauss micro controller defined in FPGA"
 repository = "https://github.com/grahamjonesgs/klausscc.git"
+readme = "README.md"
 license = "MIT"
 keywords = ["assembler"]
 categories = ["development-tools"]
-# Ship sources, docs, the runtime library, the test fixtures and the lockfile only;
-# editor/CI config and top-level files stay out.
-include = ["src/**", "doc/**", "runtime/**", "tests/**", "build.rs", "Cargo.toml", "Cargo.lock", "LICENSE*", "rustfmt.toml", "clippy.toml"]
+# Ship the sources, docs, runtime library, test fixtures and lockfile only.
+# The globs name file types rather than whole directories, because an
+# explicit include list ignores .gitignore: generated .code/.kbt outputs,
+# scratch copies and Finder metadata in the working tree stay out.  The
+# crate-root modules are listed by name for the same reason.
+include = [
+    "Cargo.toml",
+    "Cargo.lock",
+    "README.md",
+    "build.rs",
+    "clippy.toml",
+    "rustfmt.toml",
+    "src/main.rs",
+    "src/lib.rs",
+    "src/cli.rs",
+    "src/diag.rs",
+    "src/error.rs",
+    "src/layout.rs",
+    "src/loader.rs",
+    "src/num.rs",
+    "src/asm/**/*.rs",
+    "src/commands/*.rs",
+    "src/debug/**/*.rs",
+    "src/emu/*.rs",
+    "src/isa/*.rs",
+    "src/jtag/*.rs",
+    "src/link/**/*.rs",
+    "src/output/*.rs",
+    "doc/*.md",
+    "doc/FLAG_UNIFICATION_CHANGES",
+    "runtime/*.c",
+    "runtime/*.h",
+    "runtime/*.kla",
+    "tests/*.rs",
+    "tests/fixtures/README.md",
+    "tests/fixtures/all_tests.txt",
+    "tests/fixtures/*.kla",
+    "tests/fixtures/*.c",
+    "tests/fixtures/adventure.elf",
+    "tests/fixtures/hello.elf",
+    "tests/fixtures/hello1.elf",
+    "tests/fixtures/hello2.elf",
+    "tests/fixtures/test_64bit.elf",
+    "tests/fixtures/legacy_v1/README.md",
+    "tests/fixtures/legacy_v1/*.kla",
+]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
