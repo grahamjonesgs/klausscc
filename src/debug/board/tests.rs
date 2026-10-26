@@ -22,6 +22,9 @@ struct DmState {
     cause: u8,
     halted_seen: bool,
     error: bool,
+    /// The core parked by itself (HALT/TRAP/illegal = park kind 0-2) with
+    /// no debugger attached: halt requests do not reach it.
+    stopped: Option<u8>,
     /// Every DMCONTROL write, in order.
     controls: Vec<u64>,
     /// Memory commands on doublewords at and above this address fail.
@@ -46,6 +49,7 @@ impl DmState {
             | ((HW_BREAKPOINTS as u64) << 16)
             | (1 << 12)
             | (u64::from(self.halted_seen) << 11)
+            | self.stopped.map_or(0, |kind| (1 << 7) | (u64::from(kind) << 8))
             | (u64::from(self.cause) << 4)
             | (u64::from(self.error) << 3)
             | u64::from(self.halted);
@@ -55,7 +59,7 @@ impl DmState {
 
     fn control(&mut self, v: u64) {
         self.controls.push(v);
-        if v & CTL_HALTREQ != 0 && !self.halted {
+        if v & CTL_HALTREQ != 0 && !self.halted && self.stopped.is_none() {
             self.halt(Cause::Request);
         }
         if v & CTL_RESUMEREQ != 0 && self.halted {
@@ -303,6 +307,42 @@ fn attach_passes_on_a_failed_load() {
     let mut load = || Err(BoardError::Unsupported("no port"));
     let err = attach(&mut board, Some(&mut load)).err();
     assert!(matches!(err, Some(BoardError::Unsupported("no port"))), "{err:?}");
+}
+
+#[test]
+fn attach_refuses_a_stopped_core_without_a_halt_request() {
+    let dm = FakeDm::default();
+    let state = Rc::clone(&dm.0);
+    state.borrow_mut().stopped = Some(1); // TRAP
+    let mut board = Board::new(dm);
+    let err = attach(&mut board, None).err();
+    assert!(matches!(err, Some(BoardError::Stopped { .. })), "{err:?}");
+    assert!(err.is_some_and(|e| e.to_string().contains("TRAP")));
+    assert_eq!(state.borrow().controls, [0], "no halt request is left pending");
+}
+
+#[test]
+fn a_failed_load_does_not_leave_halt_on_load_set() {
+    let dm = FakeDm::default();
+    let state = Rc::clone(&dm.0);
+    let mut board = Board::new(dm);
+    let mut load = || Err(BoardError::Unsupported("no port"));
+    assert!(attach(&mut board, Some(&mut load)).is_err());
+    assert_eq!(state.borrow().controls, [CTL_ATTACHED | CTL_HALT_ON_LOAD, 0]);
+}
+
+#[test]
+fn a_halt_for_another_cause_clears_dmcontrol() {
+    let dm = FakeDm::default();
+    let state = Rc::clone(&dm.0);
+    let mut board = Board::new(dm);
+    let loader = Rc::clone(&state);
+    let mut load = move || {
+        loader.borrow_mut().halt(Cause::Breakpoint);
+        Ok(())
+    };
+    assert!(attach(&mut board, Some(&mut load)).is_err());
+    assert_eq!(state.borrow().controls.last(), Some(&0));
 }
 
 #[test]

@@ -160,6 +160,18 @@ impl DmStatus {
         self.field(8, 3)
     }
 
+    /// The core is parked (any park, debug halts included).
+    pub(crate) const fn parked(self) -> bool {
+        self.0 & (1 << 7) != 0
+    }
+
+    /// The core stopped on its own (HALT, TRAP or an illegal instruction,
+    /// park kinds 0-2) with no debugger attached: a halt request cannot
+    /// reach it.  A WAIT (kind 3) still takes one.
+    pub(crate) const fn stopped(self) -> bool {
+        self.parked() && !self.halted() && self.park_kind() <= 2
+    }
+
     /// The core has halted since DMSTATUS was last read.
     pub(crate) const fn halted_seen(self) -> bool {
         self.0 & (1 << 11) != 0

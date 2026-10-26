@@ -89,6 +89,12 @@ pub(crate) enum BoardError {
     },
     /// A halt request went unanswered (no program running, most likely).
     HaltRequest(Box<BoardError>),
+    /// The program on the board stopped by itself (HALT, TRAP or an illegal
+    /// instruction), so there is nothing to halt.
+    Stopped {
+        /// The DMSTATUS that showed it.
+        status: DmStatus,
+    },
     /// The debug module reported a failed memory command.
     MemCommand {
         /// The DMSTATUS that reported it.
@@ -133,6 +139,15 @@ impl fmt::Display for BoardError {
             ),
             Self::NotHalted { status } => write!(f, "the core did not halt (DMSTATUS 0x{status:08X})"),
             Self::HaltRequest(e) => write!(f, "{e}: is a program running on the board? (load one with -s)"),
+            Self::Stopped { status } => write!(
+                f,
+                "the program on the board has already stopped ({}, DMSTATUS 0x{status:08X}) and cannot be halted: load one with -s",
+                match status.park_kind() {
+                    0 => "HALT",
+                    1 => "TRAP",
+                    _ => "illegal instruction",
+                }
+            ),
             Self::MemCommand { status } => write!(f, "debug module memory command failed (DMSTATUS 0x{status:08X})"),
             Self::PastTop { addr, len } => write!(f, "{len} bytes at 0x{addr:08X} run past the end of the address space"),
             Self::Load { path, port, source } => write!(f, "loading {path} over {port} failed ({source})"),
@@ -861,7 +876,20 @@ impl<D: Dmi> Session for BoardTarget<D> {
 /// With `load`, `load()` sends the program over the UART with halt-on-load
 /// set, and the core halts on the program's first instruction; otherwise the
 /// running program is halted where it is.
+///
+/// On failure DMCONTROL is cleared (best effort): a halt request or
+/// halt-on-load left behind would stop the next ordinary program load on its
+/// first instruction, since a plain load does not clear them.
 pub(crate) fn attach<D: Dmi>(board: &mut Board<D>, load: Option<&mut dyn FnMut() -> BoardResult<()>>) -> BoardResult<u32> {
+    let result = halt_for_session(board, load);
+    if result.is_err() {
+        let _ = board.control(0);
+    }
+    result
+}
+
+/// The body of [`attach`].
+fn halt_for_session<D: Dmi>(board: &mut Board<D>, load: Option<&mut dyn FnMut() -> BoardResult<()>>) -> BoardResult<u32> {
     // start clean: a server that was killed leaves its slots armed
     clear_slots(board)?;
     if let Some(load) = load {
@@ -874,7 +902,11 @@ pub(crate) fn attach<D: Dmi>(board: &mut Board<D>, load: Option<&mut dyn FnMut()
             return Err(BoardError::WrongCause { cause: st.cause() });
         }
     } else {
-        if !board.status()?.halted() {
+        let st = board.status()?;
+        if st.stopped() {
+            return Err(BoardError::Stopped { status: st });
+        }
+        if !st.halted() {
             board.control(CTL_ATTACHED | CTL_HALTREQ)?;
             board
                 .wait_halted(Duration::from_secs(2))
