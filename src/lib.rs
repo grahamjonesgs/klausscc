@@ -218,7 +218,7 @@ fn opcode_tables(msg_list: &mut Diagnostics) -> (Isa, Vec<Macro>) {
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn assemble(input: &str, msg_list: &mut Diagnostics) -> Result<Assembly, Error> {
     let (isa, macro_list) = opcode_tables(msg_list);
-    asm::assemble(input, &isa, &macro_list, msg_list).ok_or_else(|| Error::Assembly(msg_list.count(MessageType::Error).max(1)))
+    asm::assemble(input, &isa, &macro_list, msg_list)
 }
 
 /// Assemble `input`, write its `.code` listing and `.kbt`, and send, test or

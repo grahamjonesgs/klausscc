@@ -28,7 +28,8 @@ mod pass2;
 mod source;
 pub(crate) mod symbols;
 
-use crate::diag::Diagnostics;
+use crate::diag::{Diagnostics, MessageType};
+use crate::error::Error;
 use crate::isa::Isa;
 use crate::output::image::Image;
 use line::{LineType, Pass2, SourceLine};
@@ -83,13 +84,16 @@ impl Assembly {
 
 /// Assemble the source file `input_file_name`.
 ///
-/// Returns `None` only when the file (or one it includes) cannot be read,
-/// which is reported.  Otherwise the assembly is returned even when it has
-/// errors; see the [module documentation](self).
-pub(crate) fn assemble(input_file_name: &str, isa: &Isa, macro_list: &[Macro], msg_list: &mut Diagnostics) -> Option<Assembly> {
+/// Fails only when the file (or one it includes) cannot be read, which is
+/// reported first, with [`Error::Assembly`] counting the errors so far.
+/// Otherwise the assembly is returned even when it has errors; see the
+/// [module documentation](self).
+pub(crate) fn assemble(input_file_name: &str, isa: &Isa, macro_list: &[Macro], msg_list: &mut Diagnostics) -> Result<Assembly, Error> {
     msg_list.info(format!("Input file is {input_file_name}"));
-    let input_list = read_file_to_vector(input_file_name, msg_list)?;
-    Some(assemble_lines(input_list, isa, macro_list, msg_list))
+    let Some(input_list) = read_file_to_vector(input_file_name, msg_list) else {
+        return Err(Error::Assembly(msg_list.count(MessageType::Error).max(1)));
+    };
+    Ok(assemble_lines(input_list, isa, macro_list, msg_list))
 }
 
 /// Assemble source lines that have already been read.
@@ -118,7 +122,6 @@ mod tests {
     use super::*;
     use crate::asm::line::Emitted;
     use crate::asm::macros::{builtin_macros, expand_embedded_macros};
-    use crate::diag::MessageType;
 
     /// Assemble `source` (as `test.kla`) with the built-in v2 table, without file I/O.
     fn assemble_text(source: &str) -> (Vec<Pass2>, Diagnostics) {
@@ -240,7 +243,10 @@ mod tests {
         let file = dir.path().join("missing.kla");
         let mut msg_list = Diagnostics::new();
         let (isa, macros) = (Isa::v2(), builtin_macros());
-        assert!(assemble(&file.to_string_lossy(), &isa, &macros, &mut msg_list).is_none());
+        assert!(matches!(
+            assemble(&file.to_string_lossy(), &isa, &macros, &mut msg_list),
+            Err(Error::Assembly(1))
+        ));
         assert!(msg_list.has_errors());
     }
 

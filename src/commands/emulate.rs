@@ -275,7 +275,7 @@ pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro
 
     let mut test_msgs = Diagnostics::new();
     let assembly = assemble(file, isa, macro_list, &mut test_msgs);
-    let Some(image) = assembly.filter(|_| !test_msgs.has_errors()).and_then(|assembly| assembly.image()) else {
+    let Some(image) = assembly.ok().filter(|_| !test_msgs.has_errors()).and_then(|assembly| assembly.image()) else {
         return Err("assembly error".to_owned());
     };
 

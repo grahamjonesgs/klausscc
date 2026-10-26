@@ -113,7 +113,7 @@ pub(crate) fn run_test_mode(
 /// listing cannot be written or the build has errors.
 #[cfg(not(tarpaulin_include))]
 fn assemble_to_kbt(input_file_name: &str, isa: &Isa, macro_list: &[macros::Macro], msg_list: &mut Diagnostics) -> Option<String> {
-    let assembly = assemble(input_file_name, isa, macro_list, msg_list)?;
+    let assembly = assemble(input_file_name, isa, macro_list, msg_list).ok()?;
 
     let output_file_name = format!("{}.code", filename_stem(input_file_name));
     if let Err(result_err) = write_code_output_file(&output_file_name, &assembly.lines, msg_list) {
