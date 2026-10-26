@@ -146,7 +146,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
                 // Keep inline data when no explicit .data section is active.
                 // This preserves label semantics for C compiler output data blocks.
                 //
-                program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, &pass.file_name) / 2;
+                program_counter += num_data_bytes(&pass.input_text_line, msg_list, pass.line_counter, &pass.file_name);
             }
         }
     }
@@ -178,7 +178,7 @@ pub(super) fn get_pass1(msg_list: &mut Diagnostics, pass0: Vec<SourceLine>, opli
         });
 
         if lt == LineType::Data {
-            program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, &data_pass.file_name) / 2;
+            program_counter += num_data_bytes(&data_pass.input_text_line, msg_list, data_pass.line_counter, &data_pass.file_name);
         }
     }
     pass1

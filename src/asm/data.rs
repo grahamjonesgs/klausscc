@@ -49,6 +49,113 @@ fn data_size(token: &str, max: i128) -> Result<usize, DataError> {
     Ok(value as usize)
 }
 
+/// One data definition, parsed from its source line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum DataDirective {
+    /// `.word VALUE`: one 64-bit word.
+    Word(u64),
+    /// `.zeropad N`: exactly `N` zero bytes, a whole number of 32-bit words.
+    ///
+    /// Assembler-internal: emitted by `get_pass1` to 8-byte-align the start of
+    /// a data section so 64-bit loads (MEMREADR / MEMGET64), which mask the
+    /// address down to an 8-byte boundary, read .word data cleanly instead of
+    /// the preceding word.  `N` must be a whole number of 32-bit words: the
+    /// board loads the program a word at a time, so a part word would shift
+    /// everything after it, entry included.
+    ZeroPad(usize),
+    /// `.space N`: `N` zero bytes, rounded up to a whole 64-bit word.
+    Space(usize),
+    /// `#name "text"`: a length-prefixed, NUL-terminated string (`\n` in the
+    /// source already turned into CR LF).
+    Str(String),
+    /// `#name N`: `N` zeroed 64-bit words.
+    Words(usize),
+}
+
+impl DataDirective {
+    /// Parse the data definition on `line`.
+    fn parse(line: &str) -> Result<Self, DataError> {
+        let mut words = line.split_whitespace();
+        let first_word = words.next().ok_or(DataError::Malformed)?;
+        match first_word {
+            ".word" => {
+                let value_str = words.next().ok_or(DataError::Malformed)?;
+                parse_bits64(value_str)
+                    .map(Self::Word)
+                    .map_err(|err| DataError::BadValue(value_str.to_owned(), err))
+            }
+            ".zeropad" => {
+                let count_str = words.next().ok_or(DataError::Malformed)?;
+                let byte_count = data_size(count_str, MAX_DATA_BYTES)?;
+                if !byte_count.is_multiple_of(4) {
+                    return Err(DataError::NotWordMultiple(count_str.to_owned()));
+                }
+                Ok(Self::ZeroPad(byte_count))
+            }
+            ".space" => {
+                let count_str = words.next().ok_or(DataError::Malformed)?;
+                Ok(Self::Space(data_size(count_str, MAX_DATA_BYTES)?))
+            }
+            _ => {
+                let second_word = words.next().ok_or(DataError::Malformed)?;
+                if !second_word.starts_with('\"') {
+                    return Ok(Self::Words(data_size(second_word, MAX_DATA_BYTES / 8)?));
+                }
+                let remaining_line = line.trim_start_matches(first_word).trim();
+                if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
+                    Ok(Self::Str(remaining_line.trim_matches('\"').replace("\\n", "\r\n")))
+                } else {
+                    Err(DataError::Malformed)
+                }
+            }
+        }
+    }
+
+    /// The number of 32-bit words holding a string's characters, which
+    /// always include at least one NUL byte: the string's length prefix.
+    const fn char_words(text: &str) -> usize {
+        text.len() / 4 + 1
+    }
+
+    /// The number of bytes the definition emits.
+    fn size_bytes(&self) -> usize {
+        match self {
+            Self::Word(_) => 8,
+            Self::ZeroPad(bytes) => *bytes,
+            Self::Space(bytes) => bytes.div_ceil(8) * 8,
+            // The prefix word and the characters, NUL-padded out to a 64-bit
+            // word like every other data item, so data after a string stays
+            // 8-byte aligned for MEMGET64 / MEMSET64.
+            Self::Str(text) => (4 + Self::char_words(text) * 4).next_multiple_of(8),
+            Self::Words(count) => count * 8,
+        }
+    }
+
+    /// The bytes the definition emits, as hex (two digits per byte, each
+    /// 32-bit word as its value).
+    fn encode(&self) -> String {
+        match self {
+            Self::Word(value) => {
+                let lo32 = (value & 0xFFFF_FFFF) as u32;
+                let hi32 = (value >> 32) as u32;
+                format!("{lo32:08X}{hi32:08X}")
+            }
+            Self::Str(text) => {
+                let mut output_hex = String::with_capacity(self.size_bytes() * 2);
+                let _ = write!(output_hex, "{:08X}", Self::char_words(text));
+                for char in text.as_bytes() {
+                    let _ = write!(output_hex, "{char:02X}");
+                }
+                while output_hex.len() < self.size_bytes() * 2 {
+                    output_hex.push('0');
+                }
+                output_hex
+            }
+            Self::ZeroPad(_) | Self::Space(_) | Self::Words(_) => "0".repeat(self.size_bytes() * 2),
+        }
+    }
+}
+
 /// Returns bytes for data element.
 ///
 /// Parses data element and returns data as bytes, or None if error.
@@ -60,94 +167,16 @@ pub(crate) fn data_as_bytes(line: &str) -> Option<String> {
 ///
 /// The bytes are returned as a hex string (two characters per byte).
 fn data_bytes(line: &str) -> Result<String, DataError> {
-    let mut words = line.split_whitespace();
-    let first_word = words.next().unwrap_or("");
-    if first_word.is_empty() {
-        return Err(DataError::Malformed);
-    }
-
-    // Handle .word VALUE directive — emit a single 64-bit word
-    if first_word == ".word" {
-        let value_str = words.next().unwrap_or("");
-        if value_str.is_empty() {
-            return Err(DataError::Malformed);
-        }
-        let v64 = parse_bits64(value_str).map_err(|err| DataError::BadValue(value_str.to_owned(), err))?;
-        let lo32 = (v64 & 0xFFFF_FFFF) as u32;
-        let hi32 = ((v64 >> 32) & 0xFFFF_FFFF) as u32;
-        return Ok(format!("{lo32:08X}{hi32:08X}"));
-    }
-
-    // Handle .zeropad N directive — EXACTLY N bytes of zero (no rounding to 8).
-    // Assembler-internal: emitted by get_pass1 to 8-byte-align the start of a data
-    // section so 64-bit loads (MEMREADR / MEMGET64), which mask the address down to
-    // an 8-byte boundary, read .word data cleanly instead of the preceding word.
-    // N must be a whole number of 32-bit words: the board loads the program a word
-    // at a time, so a part word would shift everything after it, entry included.
-    if first_word == ".zeropad" {
-        let count_str = words.next().unwrap_or("");
-        if count_str.is_empty() {
-            return Err(DataError::Malformed);
-        }
-        let byte_count = data_size(count_str, MAX_DATA_BYTES)?;
-        if !byte_count.is_multiple_of(4) {
-            return Err(DataError::NotWordMultiple(count_str.to_owned()));
-        }
-        return Ok("00".repeat(byte_count));
-    }
-
-    // Handle .space N directive — N bytes of zero, rounded up to 64-bit word boundary
-    if first_word == ".space" {
-        let count_str = words.next().unwrap_or("");
-        if count_str.is_empty() {
-            return Err(DataError::Malformed);
-        }
-        let byte_count = data_size(count_str, MAX_DATA_BYTES)?;
-        let word_count = byte_count.div_ceil(8);
-        return Ok("0000000000000000".repeat(word_count));
-    }
-
-    let second_word = words.next().unwrap_or("");
-    if second_word.is_empty() {
-        return Err(DataError::Malformed);
-    }
-
-    // Check if next word starts with quote
-    if second_word.starts_with('\"') {
-        let remaining_line = line.trim_start_matches(first_word).trim();
-
-        if remaining_line.starts_with('\"') && remaining_line.ends_with('\"') {
-            let input_string = remaining_line.trim_matches('\"').replace("\\n", "\r\n");
-            // Length prefix: the number of 32-bit words holding the characters,
-            // which always include at least one NUL byte.
-            let char_words = input_string.len() / 4 + 1;
-            let mut output_hex = format!("{char_words:08X}");
-            for char in input_string.as_bytes() {
-                let _ = write!(output_hex, "{char:02X}");
-            }
-            // NUL-pad the characters out to `char_words`, then the whole item out to
-            // a 64-bit word, like every other data item, so data after a string stays
-            // 8-byte aligned for MEMGET64 / MEMSET64.
-            let item_bytes = (4 + char_words * 4).next_multiple_of(8);
-            while output_hex.len() < item_bytes * 2 {
-                output_hex.push('0');
-            }
-            return Ok(output_hex);
-        }
-        Err(DataError::Malformed)
-    } else {
-        // `#name N` reserves N zeroed 64-bit words.
-        let word_count = data_size(second_word, MAX_DATA_BYTES / 8)?;
-        Ok("0000000000000000".repeat(word_count))
-    }
+    DataDirective::parse(line).map(|data| data.encode())
 }
 
 /// Return number of bytes of data.
 ///
-/// From instruction name, option of number of bytes of data, or 0 is error.
+/// The number of bytes the data definition on `line` emits, or 0 when it is
+/// not valid, which is reported as an error at the line.
 pub(crate) fn num_data_bytes(line: &str, msg_list: &mut Diagnostics, line_number: u32, filename: &str) -> u32 {
-    match data_bytes(line) {
-        Ok(data) => data.len().try_into().unwrap_or_default(),
+    match DataDirective::parse(line) {
+        Ok(data) => data.size_bytes().try_into().unwrap_or_default(),
         Err(err) => {
             let text = if err == DataError::Malformed {
                 format!("Error in data definition for {line}")
@@ -171,7 +200,7 @@ mod tests {
         let mut msg_list = Diagnostics::new();
         let input = String::from("#TEST 3");
         let output = num_data_bytes(&input, &mut msg_list, 0, "test");
-        assert_eq!(output, 48); // 3 words × 16 hex chars per 64-bit word = 48
+        assert_eq!(output, 24); // 3 words × 8 bytes per 64-bit word
     }
 
     #[test]
@@ -380,6 +409,26 @@ mod tests {
         );
         assert_eq!(data_bytes("#BUF 0x10000000"), Err(DataError::TooLarge("0x10000000".to_owned())));
         assert_eq!(data_bytes("#BUF"), Err(DataError::Malformed));
+    }
+
+    #[test]
+    // Each definition is parsed once into a DataDirective, whose size (pass 1)
+    // matches what it encodes (pass 2).
+    fn test_data_directive_size_matches_encoding() {
+        let cases = [
+            (".word 0x2A", DataDirective::Word(0x2A), 8),
+            (".zeropad 12", DataDirective::ZeroPad(12), 12),
+            (".space 5", DataDirective::Space(5), 8),
+            ("#S \"Hi\\n\"", DataDirective::Str("Hi\r\n".to_owned()), 16),
+            ("#S \"abcdefgh\"", DataDirective::Str("abcdefgh".to_owned()), 16),
+            ("#BUF 3", DataDirective::Words(3), 24),
+        ];
+        for (line, want, size) in cases {
+            let data = DataDirective::parse(line).unwrap();
+            assert_eq!(data, want, "{line}");
+            assert_eq!(data.size_bytes(), size, "{line}");
+            assert_eq!(data.encode().len(), size * 2, "{line}");
+        }
     }
 
     #[test]
