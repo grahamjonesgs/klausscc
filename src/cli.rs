@@ -11,6 +11,7 @@ use crate::loader::BinaryInput;
 use crate::netload::NETBOOT_DEFAULT_PORT;
 use crate::num::parse_u32;
 use crate::serial::{SerialTarget, AUTO_SERIAL};
+use clap::builder::NonEmptyStringValueParser;
 use clap::Parser;
 use std::path::{Path, PathBuf};
 
@@ -39,18 +40,26 @@ pub(crate) const DEFAULT_JTAG_KHZ: u32 = 10_000;
     long_about = None,
     arg_required_else_help = true
 )]
+// At most one mode: an input file, a net-load, a boot-ROM image, a board or
+// emulator test run, or the opcode lists (--opcodes and -t may go together).
+//
+// clap does not enforce `requires = X` when X conflicts with an argument
+// that is present (nor, transitively, what X requires), so a flag that
+// qualifies one mode (`--emulate` and `--gdbserver` need `-i`) is checked in
+// `Cli::mode` instead.
 pub(crate) struct Cli {
     /// ELF or flat binary: flatten and stream to the board over TCP (network boot). Needs --ip.
     #[arg(
         short = 'N',
         long,
         value_name = "FILE",
-        conflicts_with_all = ["input", "test_list", "textmate", "opcodes", "mem_out"]
+        requires = "ip",
+        conflicts_with_all = ["input", "mem_out", "test_list", "emulate_test", "opcodes", "textmate"]
     )]
     pub(crate) net_load: Option<PathBuf>,
 
     /// Board IP address (or host name) for --net-load (e.g. 192.168.68.50)
-    #[arg(long, value_name = "ADDRESS")]
+    #[arg(long, value_name = "ADDRESS", value_parser = NonEmptyStringValueParser::new())]
     pub(crate) ip: Option<String>,
 
     /// Board TCP port for --net-load
@@ -58,11 +67,7 @@ pub(crate) struct Cli {
     pub(crate) port: u16,
 
     /// ELF or flat binary: write a $readmemh boot-ROM image for boot_rom.v (resident netboot).
-    #[arg(
-        long,
-        value_name = "FILE",
-        conflicts_with_all = ["input", "test_list", "textmate", "opcodes", "net_load"]
-    )]
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["input", "test_list", "emulate_test", "opcodes", "textmate"])]
     pub(crate) mem_out: Option<PathBuf>,
 
     /// Output path for --mem-out (default: the --mem-out file with a .mem extension)
@@ -79,7 +84,7 @@ pub(crate) struct Cli {
         long,
         value_name = "FILE",
         required_unless_present_any = ["textmate", "opcodes", "test_list", "net_load", "mem_out", "monitor", "emulate_test"],
-        conflicts_with_all = ["textmate", "opcodes"]
+        conflicts_with_all = ["test_list", "emulate_test", "opcodes", "textmate"]
     )]
     pub(crate) input: Option<PathBuf>,
 
@@ -100,15 +105,22 @@ pub(crate) struct Cli {
     pub(crate) textmate: bool,
 
     /// Serial port for output. With no value, the first USB serial port found
-    #[arg(short = 's', long, value_name = "PORT", num_args = 0..=1, default_missing_value = AUTO_SERIAL)]
+    #[arg(
+        short = 's',
+        long,
+        value_name = "PORT",
+        num_args = 0..=1,
+        default_missing_value = AUTO_SERIAL,
+        value_parser = SerialTarget::parse
+    )]
     pub(crate) serial: Option<SerialTarget>,
 
     /// Monitor serial port for UART output after sending (Ctrl+C to stop)
-    #[arg(short = 'm', long, conflicts_with = "test")]
+    #[arg(short = 'm', long, conflicts_with_all = ["test", "mem_out", "opcodes", "textmate"])]
     pub(crate) monitor: bool,
 
     /// Test mode: verify UART output against expected values in source comments
-    #[arg(short = 'T', long, conflicts_with = "monitor")]
+    #[arg(short = 'T', long, conflicts_with = "monitor", requires = "serial")]
     pub(crate) test: bool,
 
     /// Timeout in seconds for test mode UART capture
@@ -116,7 +128,13 @@ pub(crate) struct Cli {
     pub(crate) test_timeout: u64,
 
     /// File containing list of test .kla files to assemble and verify sequentially
-    #[arg(short = 'L', long, value_name = "FILE", conflicts_with_all = ["input", "monitor"])]
+    #[arg(
+        short = 'L',
+        long,
+        value_name = "FILE",
+        requires = "serial",
+        conflicts_with_all = ["emulate_test", "opcodes", "textmate", "monitor"]
+    )]
     pub(crate) test_list: Option<PathBuf>,
 
     /// Skip UART break signal and send 'S' instead (for testing CPU without break)
@@ -143,17 +161,18 @@ pub(crate) struct Cli {
     #[arg(
         long,
         value_name = "KHZ",
+        requires = "board",
         value_parser = clap::value_parser!(u32).range(100..=30_000),
         default_value_t = DEFAULT_JTAG_KHZ
     )]
     pub(crate) jtag_khz: u32,
 
     /// With --emulate, write the per-instruction golden-model trace. Give a path to write a file, or pass --trace with no value (or '-') to stream it to stdout
-    #[arg(long, value_name = "FILE", num_args = 0..=1, default_missing_value = "-")]
+    #[arg(long, value_name = "FILE", num_args = 0..=1, default_missing_value = "-", requires = "emulate")]
     pub(crate) trace: Option<PathBuf>,
 
     /// Run the emulator over a test list (or a directory of .kla files) and verify captured UART vs expected // values
-    #[arg(long, value_name = "PATH")]
+    #[arg(long, value_name = "PATH", conflicts_with_all = ["opcodes", "textmate", "monitor"])]
     pub(crate) emulate_test: Option<PathBuf>,
 
     /// Instruction-count cap for the emulator
@@ -266,26 +285,24 @@ pub(crate) enum Mode<'a> {
 impl Cli {
     /// Decide which mode the command line asks for.
     ///
-    /// The precedence is that of the original early-return chain, so a flag
-    /// another mode does not use is ignored.
+    /// clap has already rejected two modes at once and a flag without the
+    /// one it qualifies; this checks what depends on the input file's type.
+    /// A failure is an [`Error::Usage`].
     pub(crate) fn mode(&self) -> Result<Mode<'_>, Error> {
         let input = self.input.as_deref().map(utf8).transpose()?;
-
-        // Monitor only: `-m` (optionally with `-s`) and nothing to load.
-        if self.monitor
-            && input.is_none()
-            && self.net_load.is_none()
-            && self.mem_out.is_none()
-            && self.test_list.is_none()
-            && !self.opcodes
-            && !self.textmate
-        {
-            return Ok(Mode::Monitor);
+        if input.is_none() {
+            if self.emulate {
+                return Err(Error::Usage("--emulate needs an input file (-i)"));
+            }
+            if self.gdbserver.is_some() {
+                return Err(Error::Usage("--gdbserver needs an input file (-i)"));
+            }
         }
+
         if let Some(path) = &self.net_load {
             return Ok(Mode::NetLoad {
                 input: utf8(path)?,
-                ip: self.ip.as_deref().unwrap_or_default(),
+                ip: self.ip.as_deref().ok_or(Error::Usage("--net-load needs the board's address (--ip)"))?,
             });
         }
         if let Some(path) = &self.mem_out {
@@ -299,7 +316,11 @@ impl Cli {
 
         let trace = self.trace.as_deref().map(utf8).transpose()?;
         if let Some(input) = input {
-            match InputKind::of(input) {
+            let kind = InputKind::of(input);
+            if self.gdbserver.is_some() && kind != InputKind::Binary {
+                return Err(Error::Usage("--gdbserver debugs an ELF or flat binary, not a .kla or .kbt input"));
+            }
+            match kind {
                 InputKind::Binary => {
                     let kbt = output_name(self.bitcode.as_deref(), input, "kbt")?;
                     return Ok(if let Some(port) = self.gdbserver {
@@ -315,9 +336,13 @@ impl Cli {
                         Mode::SendBinary { input, kbt }
                     });
                 }
+                InputKind::Kbt if self.emulate => return Err(Error::Usage("--emulate runs a .kla, ELF or flat binary, not a .kbt image")),
                 InputKind::Kbt => return Ok(Mode::SendKbt(input)),
                 InputKind::Source => {}
             }
+        } else if self.monitor {
+            // `-m` (optionally with `-s`) and nothing to load: monitor only.
+            return Ok(Mode::Monitor);
         }
 
         if self.opcodes || self.textmate {
@@ -335,6 +360,11 @@ impl Cli {
         };
         if self.emulate {
             return Ok(Mode::Emulate { input, trace });
+        }
+        // A .kbt input auto-detects the port for -m, but an assembly only
+        // monitors the port it sent to.
+        if self.monitor && self.serial.is_none() {
+            return Err(Error::Usage("monitor flag (-m) requires a serial port (-s) when assembling"));
         }
         Ok(Mode::Assemble {
             input,
@@ -501,6 +531,57 @@ mod tests {
             &["-i"],
             &["-i", "prog.kla", "-o"],
         ]);
+    }
+
+    #[test]
+    // Combinations the old early-return chain silently ignored part of.
+    fn nonsensical_combinations_are_rejected() {
+        assert_rejected(&[
+            // Two modes at once.
+            &["--emulate-test", "tests", "-i", "prog.kla"],
+            &["--emulate-test", "tests", "-i", "prog.elf"],
+            &["--emulate-test", "tests", "--opcodes"],
+            &["--emulate-test", "tests", "-t"],
+            &["--emulate-test", "tests", "-L", "list.txt", "-s", "COM3"],
+            &["--emulate-test", "tests", "--mem-out", "prog.elf"],
+            &["--emulate-test", "tests", "-N", "prog.elf", "--ip", "10.0.0.2"],
+            &["-L", "list.txt", "-s", "COM3", "--opcodes"],
+            &["-L", "list.txt", "-s", "COM3", "-t"],
+            // -m with a mode that never monitors.
+            &["-m", "--emulate-test", "tests"],
+            &["-m", "--mem-out", "prog.elf"],
+            &["-m", "--opcodes"],
+            &["-m", "-t"],
+            // A flag without the mode it qualifies.
+            &["-i", "prog.kla", "--trace"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--jtag-khz", "5000"],
+            &["--opcodes", "--jtag-khz", "5000"],
+            // What used to be reported only once the work was done.
+            &["-N", "prog.elf"],
+            &["-N", "prog.elf", "--ip", ""],
+            &["-L", "list.txt"],
+            &["-i", "prog.kla", "-T"],
+            &["-i", "prog.kla", "-s", ""],
+        ]);
+    }
+
+    #[test]
+    // Rules that depend on the input file's type are checked by Cli::mode.
+    fn input_type_rules_are_usage_errors() {
+        for args in [
+            &["-i", "prog.kla", "--gdbserver", "1234"][..],
+            &["-i", "prog.kbt", "--gdbserver", "1234"],
+            &["-i", "prog.kbt", "--emulate"],
+            &["-i", "prog.kla", "-m"],
+            // --emulate and --gdbserver qualify -i.
+            &["--emulate-test", "tests", "--emulate"],
+            &["-m", "--emulate"],
+            &["--opcodes", "--gdbserver", "1234"],
+            &["-N", "prog.elf", "--ip", "10.0.0.2", "--gdbserver", "1234"],
+        ] {
+            let cli = parse(args).unwrap();
+            assert!(matches!(cli.mode(), Err(Error::Usage(_))), "{args:?}");
+        }
     }
 
     #[test]

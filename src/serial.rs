@@ -30,15 +30,14 @@ impl SerialTarget {
             Self::Port(name) => name,
         }
     }
-}
 
-impl From<&str> for SerialTarget {
-    /// A `-s` value; [`AUTO_SERIAL`], which a bare `-s` stands for, asks for auto-detection.
-    fn from(value: &str) -> Self {
-        if value == AUTO_SERIAL {
-            Self::Auto
-        } else {
-            Self::Port(value.to_owned())
+    /// Parse a `-s` value.  [`AUTO_SERIAL`], which a bare `-s` stands for,
+    /// asks for auto-detection; an empty port name is an error.
+    pub(crate) fn parse(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "" => Err("the serial port name is empty"),
+            AUTO_SERIAL => Ok(Self::Auto),
+            name => Ok(Self::Port(name.to_owned())),
         }
     }
 }

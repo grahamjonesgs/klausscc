@@ -281,28 +281,12 @@ fn run_assemble(
         msg_list.warning("Not writing new binary file due to assembly errors");
     }
 
-    // A failed build is a failure: don't go on to monitor a stale program.
+    // A failed build is a failure.  (`-m` and `-T` need `-s`, so they were
+    // handled with the send above.)
     outcome?;
     let error_count = msg_list.count(MessageType::Error);
     if error_count > 0 {
         return Err(Error::Assembly(error_count));
     }
-
-    // Monitor serial port after assembly and send if requested
-    if cli.monitor {
-        if output_serial_port.is_empty() {
-            msg_list.error("Monitor flag (-m) requires a serial port (-s)");
-            return Err(Error::Usage("monitor flag (-m) requires a serial port (-s)"));
-        }
-        msg_list.print_summary();
-        monitor(output_serial_port, cli.debug, msg_list)?;
-    }
-
-    // Check test flag requires serial port
-    if cli.test && output_serial_port.is_empty() {
-        msg_list.error("Test flag (-T) requires a serial port (-s)");
-        return Err(Error::Usage("test flag (-T) requires a serial port (-s)"));
-    }
-
     Ok(())
 }

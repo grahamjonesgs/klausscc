@@ -180,11 +180,6 @@ pub(crate) fn run_test_list(
     send_break: bool,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
-    if output_serial_port.is_empty() {
-        msg_list.error("Test list (-L) requires a serial port (-s)");
-        return Err(Error::Usage("test list (-L) requires a serial port (-s)"));
-    }
-
     let test_files = read_test_list(list_file, msg_list);
     if test_files.is_empty() {
         msg_list.error("No test files found in test list");

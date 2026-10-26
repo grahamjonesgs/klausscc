@@ -192,3 +192,39 @@ fn help_prints_no_summary() {
     let out = klausscc(dir.path(), &["--help"]);
     assert_eq!(summaries(&out.stderr), 0);
 }
+
+#[test]
+fn a_bad_number_is_a_usage_error() {
+    // Used to fall back to the default cap without a word.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("prog.kla"), GOOD_PROGRAM).unwrap();
+
+    let out = klausscc(dir.path(), &["-i", "prog.kla", "--emulate", "--max-instructions", "lots"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("invalid value 'lots'"), "stderr: {stderr}");
+    assert_eq!(summaries(&out.stderr), 0, "nothing ran: {stderr}");
+}
+
+#[test]
+fn a_nonsensical_combination_fails_before_any_work() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("prog.kla"), GOOD_PROGRAM).unwrap();
+    std::fs::write(dir.path().join("prog.kbt"), "").unwrap();
+
+    // Rejected by clap: --trace without --emulate.
+    let out = klausscc(dir.path(), &["-i", "prog.kla", "--trace"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!dir.path().join("prog.code").exists(), "nothing was assembled");
+
+    // Rejected by Cli::mode: a .kbt cannot be emulated.
+    let out = klausscc(dir.path(), &["-i", "prog.kbt", "--emulate"]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("error: --emulate runs a .kla, ELF or flat binary, not a .kbt image"),
+        "stderr: {stderr}"
+    );
+    assert!(stderr.contains("Usage: klausscc"), "reported like clap's own errors: {stderr}");
+    assert_eq!(summaries(&out.stderr), 0, "nothing ran: {stderr}");
+}

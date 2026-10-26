@@ -22,11 +22,6 @@ use std::path::PathBuf;
 /// in the heap-header DDR layout (`build_ddr_image`) and sent via `net_load`.
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_netload(input: BinaryInput<'_>, board_ip: &str, board_port: u16, msg_list: &mut Diagnostics) -> Result<(), Error> {
-    if board_ip.is_empty() {
-        msg_list.error("net-load requires --ip <board address>");
-        return Err(Error::Usage("net-load requires --ip <board address>"));
-    }
-
     let loaded = load_flat(input, msg_list)?;
     msg_list.info(loaded.detected_message(true));
 
