@@ -3,9 +3,10 @@
 //! PC-relative branch fields that need the instruction's address.
 
 use super::{Opcode, Operand, num_arguments, num_registers, return_opcode_struct};
-use crate::asm::symbols::{Label, convert_argument};
+use crate::asm::symbols::{SymbolTable, convert_argument};
 use crate::diag::Diagnostics;
 use crate::num::{parse_bits64, parse_int};
+use std::fmt::Write as _;
 
 /// Parse a signed literal: decimal or `0x` hex, optionally negative.
 fn parse_simm(token: &str) -> Option<i128> {
@@ -30,7 +31,7 @@ pub(crate) fn add_arguments(
     msg_list: &mut Diagnostics,
     line_number: u32,
     filename: &str,
-    labels: &[Label],
+    labels: &SymbolTable,
 ) -> String {
     let num_registers = num_registers(opcodes, &line.to_uppercase()).unwrap_or(0);
     let num_arguments = num_arguments(opcodes, &line.to_uppercase()).unwrap_or(0);
@@ -55,17 +56,12 @@ pub(crate) fn add_arguments(
     for (i, word) in line.split_whitespace().enumerate() {
         words += 1;
         if (i == num_registers as usize + 1) && ((num_arguments == 1) || (num_arguments == 2)) {
-            arguments.push_str(&{
-                let this = convert_argument(&word.to_uppercase(), msg_list, line_number, filename, labels);
-                //let default = "00000000".to_owned();
-                this.unwrap_or_else(|| "00000000".to_owned())
-            });
+            let value = convert_argument(&word.to_uppercase(), msg_list, line_number, filename, labels).unwrap_or(0);
+            let _ = write!(arguments, "{value:08X}");
         }
         if i == num_registers as usize + 2 && num_arguments == 2 {
-            arguments.push_str(&{
-                let this = convert_argument(&word.to_uppercase(), msg_list, line_number, filename, labels);
-                this.unwrap_or_else(|| "00000000".to_owned())
-            });
+            let value = convert_argument(&word.to_uppercase(), msg_list, line_number, filename, labels).unwrap_or(0);
+            let _ = write!(arguments, "{value:08X}");
         }
     }
     // One warning for the line, however many extra tokens it has.
@@ -251,7 +247,7 @@ pub(crate) fn pc_relative_bits(
     opcodes: &[Opcode],
     line: &str,
     pc: u32,
-    labels: &[Label],
+    labels: &SymbolTable,
     msg_list: &mut Diagnostics,
     line_number: u32,
     filename: &str,
@@ -267,10 +263,9 @@ pub(crate) fn pc_relative_bits(
             _ => continue,
         };
         let Some(tok) = tokens.get(i + 1) else { return 0 };
-        let Some(hex) = convert_argument(tok, msg_list, line_number, filename, labels) else {
+        let Some(target) = convert_argument(tok, msg_list, line_number, filename, labels) else {
             return 0;
         };
-        let Ok(target) = u32::from_str_radix(&hex, 16) else { return 0 };
         let delta = i64::from(target) - i64::from(pc);
         let words = delta / 4;
         let lim = 1_i64 << (bits - 1);
@@ -356,7 +351,7 @@ mod tests {
     fn test_add_arguments1() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 0xFFFF");
-        let labels = Vec::<Label>::new();
+        let labels = SymbolTable::default();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -376,7 +371,7 @@ mod tests {
     fn test_add_arguments2() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1234");
-        let labels = Vec::<Label>::new();
+        let labels = SymbolTable::default();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -396,7 +391,7 @@ mod tests {
     fn test_add_arguments3() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH HELLO");
-        let labels = Vec::<Label>::new();
+        let labels = SymbolTable::default();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -416,7 +411,7 @@ mod tests {
     fn test_add_arguments4() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 0xF RRR");
-        let labels = Vec::<Label>::new();
+        let labels = SymbolTable::default();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -436,7 +431,7 @@ mod tests {
     fn test_add_arguments5() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1 0xF");
-        let labels = Vec::<Label>::new();
+        let labels = SymbolTable::default();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -456,7 +451,7 @@ mod tests {
     fn test_add_arguments6() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1 0xF");
-        let labels = Vec::<Label>::new();
+        let labels = SymbolTable::default();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -476,7 +471,7 @@ mod tests {
     // Regression: one "Too many arguments" warning was pushed per extra token.
     fn test_add_arguments_extra_tokens_warn_once() {
         let mut msg_list = Diagnostics::new();
-        let labels = Vec::<Label>::new();
+        let labels = SymbolTable::default();
         let opcodes = &mut v2_opcodes();
         let output = add_arguments(opcodes, "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));
@@ -575,16 +570,7 @@ mod tests {
     fn test_v3_pc_relative_branches() {
         let mut msg_list = Diagnostics::new();
         let opcodes = &mut v2_opcodes();
-        let labels = vec![
-            Label {
-                name: "LOOP:".to_owned(),
-                program_counter: 0x28,
-            },
-            Label {
-                name: "FAR:".to_owned(),
-                program_counter: 0x0004_0000,
-            },
-        ];
+        let labels = SymbolTable::from_pairs(&[("LOOP:", 0x28), ("FAR:", 0x0004_0000)]);
         // BNEI A 0 LOOP: at 0x30 -> -2 words in [20:8]; register fields in word0.
         let line = "BNEI A 0 LOOP:".to_owned();
         let w0 = u32::from_str_radix(&add_registers(opcodes, &line, "t", &mut msg_list, 1), 16).unwrap();

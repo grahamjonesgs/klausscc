@@ -5,28 +5,80 @@ use crate::asm::lexer::{data_name_from_string, label_name_from_string, strip_com
 use crate::asm::line::Pass1;
 use crate::diag::Diagnostics;
 use crate::num::{LiteralError, fits_imm32, is_hex_literal, parse_bits64, parse_int};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
+/// Where a label or data name was defined, and its address.
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// Label struct.
-pub(crate) struct Label {
-    /// Label name as text without colon.
-    pub name: String,
-    /// Program counter derived from Pass1.
-    pub program_counter: u32,
+pub(crate) struct Symbol {
+    /// The address the name stands for.
+    pub(crate) address: u32,
+    /// The file the name was defined in.
+    pub(crate) file_name: String,
+    /// The line of `file_name` the name was defined on.
+    pub(crate) line_counter: u32,
+}
+
+/// The program's labels (`name:`) and data names (`#name`).
+///
+/// Names are looked up without regard to case, and a label's trailing `:`
+/// is optional, so `loop:`, `LOOP:` and `loop` are one symbol.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct SymbolTable(HashMap<String, Symbol>);
+
+impl SymbolTable {
+    /// The key `name` is stored under: upper case, without a trailing `:`.
+    fn key(name: &str) -> String {
+        name.strip_suffix(':').unwrap_or(name).to_uppercase()
+    }
+
+    /// Define `name` as `symbol`.
+    ///
+    /// When the name is already defined the table keeps the first
+    /// definition, which is returned as the error.
+    pub(crate) fn insert(&mut self, name: &str, symbol: Symbol) -> Result<(), &Symbol> {
+        match self.0.entry(Self::key(name)) {
+            Entry::Vacant(entry) => {
+                entry.insert(symbol);
+                Ok(())
+            }
+            Entry::Occupied(entry) => Err(entry.into_mut()),
+        }
+    }
+
+    /// The address of `name`, if it is defined.
+    pub(crate) fn address(&self, name: &str) -> Option<u32> {
+        self.0.get(&Self::key(name)).map(|symbol| symbol.address)
+    }
+
+    /// A table of `(name, address)` pairs, defined at line 0 of `test`.
+    #[cfg(test)]
+    pub(crate) fn from_pairs(pairs: &[(&str, u32)]) -> Self {
+        let mut table = Self::default();
+        for &(name, address) in pairs {
+            let symbol = Symbol {
+                address,
+                file_name: "test".to_owned(),
+                line_counter: 0,
+            };
+            assert!(table.insert(name, symbol).is_ok(), "{name} defined twice");
+        }
+        table
+    }
 }
 
 /// Gets address from label or absolute values.
 ///
-/// Converts argument to label value or converts to Hex. An undefined label or
-/// a malformed or out-of-range literal is reported as an error at the line and
-/// returns `None`.
-pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_number: u32, filename: &str, labels: &[Label]) -> Option<String> {
+/// Converts argument to its label's address or its literal value, as the
+/// 32-bit word the instruction holds. An undefined label or a malformed or
+/// out-of-range literal is reported as an error at the line and returns `None`.
+pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_number: u32, filename: &str, symbols: &SymbolTable) -> Option<u32> {
     let argument_trim = argument.trim();
     let mut error = |text: String| msg_list.error_at(filename, line_number, text);
 
     if label_name_from_string(argument_trim).is_some() || data_name_from_string(argument_trim).is_some() {
-        if let Some(n) = return_label_value(argument_trim, labels) {
-            return Some(format!("{n:08X}"));
+        if let Some(n) = symbols.address(argument_trim) {
+            return Some(n);
         }
         error(format!("Label {argument} not found"));
         return None;
@@ -42,7 +94,7 @@ pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_
             Ok(bits) => {
                 let value = bits as i64;
                 if fits_imm32(i128::from(value)) {
-                    return Some(format!("{:08X}", value as u32));
+                    return Some(value as u32);
                 }
                 error(format!("Hex value 0x{bits:016X} out of bounds"));
             }
@@ -55,16 +107,15 @@ pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_
     match parse_int(argument_trim) {
         Ok(n) => {
             if fits_imm32(n) {
-                return Some(format!("{:08X}", n as u32));
+                return Some(n as u32);
             }
             error(format!("Decimal value {n} out of bounds"));
         }
         Err(LiteralError::Overflow) => error(format!("Decimal value {argument} out of bounds")),
         Err(_) => {
             // Try resolving as a label name without colon suffix
-            let label_with_colon = format!("{argument_trim}:");
-            if let Some(n) = return_label_value(&label_with_colon, labels) {
-                return Some(format!("{n:08X}"));
+            if let Some(n) = symbols.address(argument_trim) {
+                return Some(n);
             }
             error(format!("Decimal value {argument} incorrect"));
         }
@@ -72,85 +123,59 @@ pub(crate) fn convert_argument(argument: &str, msg_list: &mut Diagnostics, line_
     None
 }
 
-/// Check if label is duplicate.
+/// Build the symbol table from pass 1.
 ///
-/// Check if label is duplicate, and output message if duplicate is found.
-pub(crate) fn find_duplicate_label(labels: &[Label], msg_list: &mut Diagnostics) {
-    for label in labels {
-        let opt_found_line = return_label_value(&label.name, labels);
-        if opt_found_line.unwrap_or(0) != label.program_counter {
-            msg_list.error(format!("Duplicate label {} found, with differing values", label.name));
-        }
-    }
-}
+/// Every label and data name is defined at its line's program counter.  A
+/// name defined again at a different address is an error at the second
+/// definition (the first one stands), and text after a label or a data
+/// definition that will be ignored is a warning.
+pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut Diagnostics) -> SymbolTable {
+    let mut symbols = SymbolTable::default();
+    for line in pass1 {
+        let label = label_name_from_string(&line.input_text_line);
+        let data = data_name_from_string(&line.input_text_line);
+        let Some(name) = label.or(data) else { continue };
 
-/// Create the vector of labels.
-///
-/// Takes the vector of pass 1 with the line numbers in it, and return a vector of all labels.
-pub(crate) fn get_labels(pass1: &[Pass1], msg_list: &mut Diagnostics) -> Vec<Label> {
-    let labels: Vec<Label> = pass1
-        .iter()
-        .filter(|n| label_name_from_string(&n.input_text_line).is_some() || data_name_from_string(&n.input_text_line).is_some())
-        .map(|n| -> Label {
-            Label {
-                program_counter: n.program_counter,
-                name: {
-                    let this = label_name_from_string(&n.input_text_line);
-                    this.or_else(|| data_name_from_string(&n.input_text_line)).unwrap_or_default().to_owned()
-                },
-            }
-        })
-        .collect();
-    for line in pass1 {
-        if label_name_from_string(&line.input_text_line).is_some() {
-            let stripped = strip_comments(&line.input_text_line);
-            let mut words = stripped.split_whitespace();
-            let first_word = words.next().unwrap_or("");
-            let second_word = words.next();
-            if second_word.is_some() {
-                msg_list.warning_at(
-                    &line.file_name,
-                    line.line_counter,
-                    format!("Label {first_word} has extra text {}", second_word.unwrap_or_default()),
-                );
-            }
+        let symbol = Symbol {
+            address: line.program_counter,
+            file_name: line.file_name.clone(),
+            line_counter: line.line_counter,
+        };
+        if let Err(first) = symbols.insert(name, symbol)
+            && first.address != line.program_counter
+        {
+            msg_list.error_at(
+                &line.file_name,
+                line.line_counter,
+                format!(
+                    "Duplicate label {name} found, with differing values, first defined at line {} in file {}",
+                    first.line_counter, first.file_name
+                ),
+            );
         }
-    }
-    for line in pass1 {
-        if data_name_from_string(&line.input_text_line).is_some() {
-            let stripped = strip_comments(&line.input_text_line);
-            let mut words = stripped.split_whitespace();
-            let first_word = words.next().unwrap_or("");
-            let remaining_line = stripped.trim_start_matches(first_word).trim().to_owned();
-            let second_word = words.next();
-            let third_word = words.next();
-            if third_word.is_some() && !second_word.unwrap_or_default().starts_with('\"') {
-                msg_list.warning_at(
-                    &line.file_name,
-                    line.line_counter,
-                    format!("Data {first_word} has extra text {}", third_word.unwrap_or_default()),
-                );
+
+        let stripped = strip_comments(&line.input_text_line);
+        let mut words = stripped.split_whitespace();
+        let first_word = words.next().unwrap_or("");
+        let second_word = words.next();
+        if label.is_some()
+            && let Some(extra) = second_word
+        {
+            msg_list.warning_at(&line.file_name, line.line_counter, format!("Label {first_word} has extra text {extra}"));
+        }
+        if data.is_some() {
+            let remaining_line = stripped.trim_start_matches(first_word).trim();
+            if let Some(extra) = words.next()
+                && !second_word.unwrap_or_default().starts_with('\"')
+            {
+                msg_list.warning_at(&line.file_name, line.line_counter, format!("Data {first_word} has extra text {extra}"));
             }
             if remaining_line.starts_with('\"') && !remaining_line.ends_with('\"') {
                 msg_list.warning_at(&line.file_name, line.line_counter, format!("Data {first_word} has no string termination"));
             }
         }
     }
-
-    labels
-}
-
-/// Return program counter for label.
-///
-/// Return option of program counter for label if it exists, or None.
-fn return_label_value(line: &str, labels: &[Label]) -> Option<u32> {
-    let line_upper = line.to_uppercase();
-    for label in labels {
-        if label.name.to_uppercase() == line_upper {
-            return Some(label.program_counter);
-        }
-    }
-    None
+    symbols
 }
 
 #[cfg(test)]
@@ -160,128 +185,90 @@ mod tests {
     use crate::diag::MessageType;
 
     #[test]
-    // Check that labels are correctly extracted from strings test for data
-    fn test_return_label_value1() {
-        let labels = vec![
-            Label {
-                program_counter: 0,
-                name: "label1".to_owned(),
-            },
-            Label {
-                program_counter: 1,
-                name: "label2".to_owned(),
-            },
-        ];
-        assert_eq!(return_label_value("label1", &labels), Some(0));
-        assert_eq!(return_label_value("label2", &labels), Some(1));
+    // Names are looked up without regard to case or a trailing colon.
+    fn test_symbol_table_address() {
+        let symbols = SymbolTable::from_pairs(&[("label1", 0), ("label2:", 1), ("#data1", 2)]);
+        assert_eq!(symbols.address("label1"), Some(0));
+        assert_eq!(symbols.address("LABEL1:"), Some(0));
+        assert_eq!(symbols.address("Label2"), Some(1));
+        assert_eq!(symbols.address("label2:"), Some(1));
+        assert_eq!(symbols.address("#DATA1"), Some(2));
+        assert_eq!(symbols.address("label3"), None);
+        assert_eq!(symbols.address("data1"), None);
     }
 
     #[test]
-    // Check that none is returned if not a label
-    fn test_return_label_value2() {
-        let labels = vec![
-            Label {
-                program_counter: 0,
-                name: "label1".to_owned(),
-            },
-            Label {
-                program_counter: 1,
-                name: "label2".to_owned(),
-            },
-        ];
-        assert_eq!(return_label_value("label3", &labels), None);
+    // A second definition is refused and the first one is kept.
+    fn test_symbol_table_insert_duplicate() {
+        let mut symbols = SymbolTable::default();
+        let at = |address, line_counter| Symbol {
+            address,
+            file_name: "a.kla".to_owned(),
+            line_counter,
+        };
+        assert_eq!(symbols.insert("loop:", at(8, 3)), Ok(()));
+        assert_eq!(symbols.insert("LOOP:", at(16, 9)), Err(&at(8, 3)));
+        assert_eq!(symbols.address("loop:"), Some(8));
+    }
+
+    /// The pass-1 line `text` at `program_counter`, on `line_counter` of `test`.
+    fn pass1_line(text: &str, program_counter: u32, line_counter: u32) -> Pass1 {
+        Pass1 {
+            program_counter,
+            file_name: String::from("test"),
+            line_counter,
+            input_text_line: text.to_owned(),
+            line_type: LineType::Label,
+        }
     }
 
     #[test]
-    // Test duplicate label names are identified
-    fn test_find_duplicate_label() {
-        let labels = vec![
-            Label {
-                program_counter: 0,
-                name: "label1".to_owned(),
-            },
-            Label {
-                program_counter: 1,
-                name: "label2".to_owned(),
-            },
-            Label {
-                program_counter: 2,
-                name: "label1".to_owned(),
-            },
+    // Test duplicate label names are identified, with both locations
+    fn test_duplicate_label() {
+        let pass1 = vec![
+            pass1_line("label1:", 0, 1),
+            pass1_line("label2:", 1, 2),
+            pass1_line("LABEL1:", 2, 3),
+            // The same name at the same address is harmless.
+            pass1_line("label2:", 1, 4),
         ];
         let mut msg_list = Diagnostics::new();
-        find_duplicate_label(&labels, &mut msg_list);
+        let symbols = get_labels(&pass1, &mut msg_list);
         assert_eq!(msg_list.count(MessageType::Error), 1);
         assert_eq!(msg_list.count(MessageType::Warning), 0);
-
-        assert_eq!(msg_list.messages()[0].text(), "Duplicate label label1 found, with differing values");
+        let msg = &msg_list.messages()[0];
+        assert_eq!(
+            msg.text(),
+            "Duplicate label LABEL1: found, with differing values, first defined at line 1 in file test"
+        );
+        assert_eq!((msg.line_number(), msg.file_name()), (Some(3), Some("test")));
+        assert_eq!(symbols.address("label1:"), Some(0));
     }
 
     #[test]
     // Test conversion is correct for value arguments
     fn test_convert_argument1() {
-        let labels = vec![
-            Label {
-                program_counter: 1,
-                name: "label1:".to_owned(),
-            },
-            Label {
-                program_counter: 2,
-                name: "label2:".to_owned(),
-            },
-            Label {
-                program_counter: 30,
-                name: "#data1".to_owned(),
-            },
-        ];
+        let labels = SymbolTable::from_pairs(&[("label1:", 1), ("label2:", 2), ("#data1", 30)]);
         let mut msg_list = Diagnostics::new();
-        assert_eq!(convert_argument("0x1234", &mut msg_list, 3, "test", &labels), Some("00001234".to_owned()));
-        assert_eq!(convert_argument("1234", &mut msg_list, 5, "test", &labels), Some("000004D2".to_owned()));
-        assert_eq!(
-            convert_argument("123456789", &mut msg_list, 6, "test", &labels),
-            Some("075BCD15".to_owned())
-        );
-        assert_eq!(
-            convert_argument("label1:", &mut msg_list, 7, "test", &labels),
-            Some("00000001".to_owned())
-        );
-        assert_eq!(
-            convert_argument("label1: ", &mut msg_list, 8, "test", &labels),
-            Some("00000001".to_owned())
-        );
+        assert_eq!(convert_argument("0x1234", &mut msg_list, 3, "test", &labels), Some(0x1234));
+        assert_eq!(convert_argument("1234", &mut msg_list, 5, "test", &labels), Some(0x4D2));
+        assert_eq!(convert_argument("123456789", &mut msg_list, 6, "test", &labels), Some(0x075B_CD15));
+        assert_eq!(convert_argument("label1:", &mut msg_list, 7, "test", &labels), Some(0x1));
+        assert_eq!(convert_argument("label1: ", &mut msg_list, 8, "test", &labels), Some(0x1));
 
-        assert_eq!(
-            convert_argument("label2:", &mut msg_list, 14, "test", &labels),
-            Some("00000002".to_owned())
-        );
+        assert_eq!(convert_argument("label2:", &mut msg_list, 14, "test", &labels), Some(0x2));
 
-        assert_eq!(
-            convert_argument("#data1", &mut msg_list, 14, "test", &labels),
-            Some("0000001E".to_owned())
-        );
+        assert_eq!(convert_argument("#data1", &mut msg_list, 14, "test", &labels), Some(0x1E));
     }
 
     #[test]
     // Test for convert_argument if the argument is invalid with correct message
     fn test_convert_argument2() {
-        let labels = vec![
-            Label {
-                program_counter: 1,
-                name: "label1:".to_owned(),
-            },
-            Label {
-                program_counter: 2,
-                name: "label2:".to_owned(),
-            },
-            Label {
-                program_counter: 30,
-                name: "#data1".to_owned(),
-            },
-        ];
+        let labels = SymbolTable::from_pairs(&[("label1:", 1), ("label2:", 2), ("#data1", 30)]);
         let mut msg_list = Diagnostics::new();
 
         // Check for label reference without colon suffix
-        assert_eq!(convert_argument("label1", &mut msg_list, 0, "test", &labels), Some("00000001".to_owned()));
+        assert_eq!(convert_argument("label1", &mut msg_list, 0, "test", &labels), Some(0x1));
 
         // Check for unknown label text
         assert_eq!(convert_argument("unknown", &mut msg_list, 0, "test", &labels), None);
@@ -318,10 +305,7 @@ mod tests {
     // Regression: undefined labels and bad literals were warnings, so the line
     // assembled as 00000000 and the build succeeded. They are now errors at the line.
     fn test_convert_argument_failures_are_errors() {
-        let labels = vec![Label {
-            program_counter: 8,
-            name: "loop:".to_owned(),
-        }];
+        let labels = SymbolTable::from_pairs(&[("loop:", 8)]);
         for bad in [
             "nowhere:",
             "#nodata",
@@ -349,15 +333,15 @@ mod tests {
     #[test]
     // Literal forms shared with the rest of the assembler (num::parse_int).
     fn test_convert_argument_literal_forms() {
-        let labels = Vec::new();
+        let labels = SymbolTable::default();
         let mut msg_list = Diagnostics::new();
         let mut convert = |arg: &str| convert_argument(arg, &mut msg_list, 1, "t", &labels);
-        assert_eq!(convert("0x1_0"), Some("00000010".to_owned()));
-        assert_eq!(convert("0XFF"), Some("000000FF".to_owned()));
-        assert_eq!(convert("-1"), Some("FFFFFFFF".to_owned()));
-        assert_eq!(convert("-0x10"), Some("FFFFFFF0".to_owned()));
-        assert_eq!(convert("0xFFFFFFFFFFFFFFFF"), Some("FFFFFFFF".to_owned()));
-        assert_eq!(convert("-2147483648"), Some("80000000".to_owned()));
+        assert_eq!(convert("0x1_0"), Some(0x10));
+        assert_eq!(convert("0XFF"), Some(0xFF));
+        assert_eq!(convert("-1"), Some(0xFFFF_FFFF));
+        assert_eq!(convert("-0x10"), Some(0xFFFF_FFF0));
+        assert_eq!(convert("0xFFFFFFFFFFFFFFFF"), Some(0xFFFF_FFFF));
+        assert_eq!(convert("-2147483648"), Some(0x8000_0000));
         assert_eq!(convert("-2147483649"), None);
         assert_eq!(msg_list.messages().last().unwrap().text(), "Decimal value -2147483649 out of bounds");
     }
@@ -439,62 +423,19 @@ mod tests {
             },
         ];
         let labels = get_labels(&pass1, msglist);
+        assert_eq!(labels.address("label1:"), Some(0));
+        assert_eq!(labels.address("label2:"), Some(4));
+        assert_eq!(labels.address("label3:"), Some(6));
+        assert_eq!(labels.address("#data321"), Some(7));
+        assert_eq!(labels.address("test"), None);
+        // "label1: dummy" redefines label1 at another address.
+        assert_eq!(msglist.count(MessageType::Error), 1);
         assert_eq!(
-            labels[0],
-            Label {
-                program_counter: 0,
-                name: "label1:".to_owned(),
-            }
+            msglist.messages()[0].text(),
+            "Duplicate label label1: found, with differing values, first defined at line 0 in file test"
         );
-        assert_eq!(
-            labels[1],
-            Label {
-                program_counter: 4,
-                name: "label2:".to_owned(),
-            }
-        );
-        assert_eq!(
-            labels[2],
-            Label {
-                program_counter: 6,
-                name: "label3:".to_owned(),
-            }
-        );
-        assert_eq!(
-            labels[3],
-            Label {
-                program_counter: 7,
-                name: "#data321".to_owned(),
-            }
-        );
-        assert_eq!(msglist.messages()[0].text(), "Label label1: has extra text dummy");
-        assert_eq!(msglist.messages()[1].text(), "Data #data123 has extra text dummy2");
-        assert_eq!(msglist.messages()[2].text(), "Data #data3 has no string termination");
-    }
-
-    #[test]
-    // Test for correct label returned
-    fn test_return_label_value_with_colon() {
-        let labels = &mut Vec::<Label>::new();
-        labels.push(Label {
-            program_counter: 42,
-            name: String::from("LOOP:"),
-        });
-        let input = String::from("LOOP:");
-        let output = return_label_value(&input, labels);
-        assert_eq!(output, Some(42));
-    }
-
-    #[test]
-    // Test for no label returned
-    fn test_return_label_value_with_colon_missing() {
-        let labels = &mut Vec::<Label>::new();
-        labels.push(Label {
-            program_counter: 42,
-            name: String::from("LOOP1:"),
-        });
-        let input = String::from("LOOP2:");
-        let output = return_label_value(&input, labels);
-        assert_eq!(output, None);
+        assert_eq!(msglist.messages()[1].text(), "Label label1: has extra text dummy");
+        assert_eq!(msglist.messages()[2].text(), "Data #data123 has extra text dummy2");
+        assert_eq!(msglist.messages()[3].text(), "Data #data3 has no string termination");
     }
 }

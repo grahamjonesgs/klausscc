@@ -36,7 +36,7 @@ use macros::{Macro, apply_source_macros, expand_macros};
 use pass1::get_pass1;
 use pass2::get_pass2;
 use source::{read_file_to_vector, remove_block_comments};
-use symbols::{find_duplicate_label, get_labels};
+use symbols::get_labels;
 
 /// One assembled source file.
 #[derive(Debug)]
@@ -83,7 +83,6 @@ pub(crate) fn assemble_lines(input_list: Vec<SourceLine>, oplist: &[Opcode], mac
     // Pass 1 to get line numbers and labels
     let pass1 = get_pass1(msg_list, pass0, oplist);
     let labels = get_labels(&pass1, msg_list);
-    find_duplicate_label(&labels, msg_list);
 
     // Pass 2 to create the output
     Assembly {
