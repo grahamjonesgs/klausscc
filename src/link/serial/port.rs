@@ -8,17 +8,16 @@ use std::fmt::Write as _;
 use std::io::Error;
 use std::time::Duration;
 
-/// Return bool if port is possibly correct FDTI port.
-///
-/// Checks the info to check the VID and PID of known boards.
-#[cfg(not(tarpaulin_include))] // Cannot test writing to serial in tarpaulin
-fn check_usb_serial_possible(info: &UsbPortInfo) -> bool {
-    let vid_pi = format!("{:04x}:{:04x}", info.vid, info.pid);
+/// FTDI's USB vendor id.
+const FTDI_VID: u16 = 0x0403;
+/// FTDI USB-UART product ids the board's loader port can show up as
+/// (FT232R, FT2232H, FT4232H and FT232H).
+const FTDI_PIDS: [u16; 4] = [0x6001, 0x6010, 0x6011, 0x6014];
 
-    if vid_pi == "0403:6001" || vid_pi == "0403:6010" || vid_pi == "0403:6011" || vid_pi == "0403:6014" {
-        return true;
-    }
-    false
+/// Whether a USB device with this vendor and product id may be the board's
+/// FTDI USB-UART.
+fn is_ftdi(vid: u16, pid: u16) -> bool {
+    vid == FTDI_VID && FTDI_PIDS.contains(&pid)
 }
 
 /// Formats the USB Port information into a human readable form.
@@ -60,7 +59,7 @@ fn find_possible_port() -> Option<String> {
                 .into_iter()
                 .filter_map(|port| {
                     if let SerialPortType::UsbPort(info) = port.port_type
-                        && check_usb_serial_possible(&info)
+                        && is_ftdi(info.vid, info.pid)
                     {
                         return Some(port.port_name);
                     }
@@ -110,7 +109,7 @@ pub(super) fn return_port(port_name: &str, msg_list: &mut Diagnostics) -> Result
                     }
                     if let SerialPortType::UsbPort(info) = port.port_type {
                         let _ = write!(all_ports, "USB Serial Device{} {}", extra_usb_info(&info), port.port_name);
-                        if check_usb_serial_possible(&info) {
+                        if is_ftdi(info.vid, info.pid) {
                             suggested_port = Some(port.port_name.clone());
                         }
                     } else {
@@ -157,5 +156,14 @@ mod tests {
         assert_eq!(ports_found_message(1, "A"), "only port A was found");
         assert_eq!(ports_found_message(2, "A,\nB"), "the following 2 ports were found:\nA,\nB");
         assert_eq!(ports_found_message(3, "A,\nB,\nC"), "the following 3 ports were found:\nA,\nB,\nC");
+    }
+
+    #[test]
+    fn is_ftdi_matches_the_known_uart_chips() {
+        for pid in [0x6001, 0x6010, 0x6011, 0x6014] {
+            assert!(is_ftdi(0x0403, pid), "{pid:04x}");
+        }
+        assert!(!is_ftdi(0x0403, 0x6015));
+        assert!(!is_ftdi(0x10C4, 0x6001), "another vendor's chip with the same pid");
     }
 }
