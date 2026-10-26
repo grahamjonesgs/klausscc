@@ -210,13 +210,176 @@ mod tests {
         set_matches().debug_assert();
     }
 
+    /// Parse `args` (without the program name).
+    fn parse(args: &[&str]) -> Result<clap::ArgMatches, clap::Error> {
+        set_matches().try_get_matches_from(std::iter::once("klausscc").chain(args.iter().copied()))
+    }
+
+    /// Assert that every command line in `cases` parses.
+    fn assert_accepted(cases: &[&[&str]]) {
+        for args in cases {
+            if let Err(err) = parse(args) {
+                panic!("{args:?} should parse: {err}");
+            }
+        }
+    }
+
+    /// Assert that every command line in `cases` is a usage error.
+    fn assert_rejected(cases: &[&[&str]]) {
+        for args in cases {
+            assert!(parse(args).is_err(), "{args:?} should be rejected");
+        }
+    }
+
     #[test]
     // --entry takes hex or decimal and rejects junk instead of falling back to 0x20.
     fn entry_point_is_parsed() {
-        let parse = |value: &str| set_matches().try_get_matches_from(["klausscc", "-i", "prog.elf", "--entry", value]);
-        assert_eq!(parse("0x40").unwrap().get_one::<u32>("entry_point").copied(), Some(0x40));
-        assert_eq!(parse("64").unwrap().get_one::<u32>("entry_point").copied(), Some(64));
-        assert!(parse("0xZZ").is_err());
-        assert!(parse("0x1_0000_0000").is_err());
+        let entry = |value: &str| parse(&["-i", "prog.elf", "--entry", value]);
+        assert_eq!(entry("0x40").unwrap().get_one::<u32>("entry_point").copied(), Some(0x40));
+        assert_eq!(entry("64").unwrap().get_one::<u32>("entry_point").copied(), Some(64));
+        assert!(entry("0xZZ").is_err());
+        assert!(entry("0x1_0000_0000").is_err());
+    }
+
+    #[test]
+    // Every mode's usual flag combinations, short and long.
+    fn each_mode_accepts_its_flags() {
+        assert_accepted(&[
+            // Monitor only.
+            &["-m"],
+            &["--monitor", "--debug"],
+            &["-m", "-s"],
+            &["-m", "-s", "/dev/ttyUSB1", "-d"],
+            // Net-load, optionally monitoring afterwards.
+            &["-N", "prog.elf", "--ip", "192.168.68.50"],
+            &["--net-load", "prog.bin", "--ip", "10.0.0.2", "--port", "6000", "--entry", "0x40"],
+            &["-N", "prog.elf", "--ip", "10.0.0.2", "-m"],
+            &["-N", "prog.elf", "--ip", "10.0.0.2", "-m", "-s", "/dev/ttyUSB1", "-d"],
+            // Boot-ROM image.
+            &["--mem-out", "prog.elf"],
+            &["--mem-out", "prog.elf", "--mem-file", "boot.mem"],
+            // ELF / flat binary to the board.
+            &["-i", "prog.elf"],
+            &["--input", "prog.bin", "--entry", "64", "-b", "out.kbt"],
+            &["-i", "prog.elf", "-s", "/dev/ttyUSB1", "-n"],
+            &["-i", "prog.elf", "--serial", "-m", "-d"],
+            // Debugging.
+            &["-i", "prog.elf", "--gdbserver", "1234"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--jtag-khz", "5000", "-s", "COM3"],
+            // The emulator.
+            &["-i", "prog.elf", "--emulate"],
+            &["-i", "prog.elf", "--emulate", "--trace"],
+            &["-i", "prog.kla", "--emulate", "--trace", "trace.txt", "--max-instructions", "100"],
+            &["--emulate-test", "tests"],
+            &["--emulate-test", "list.txt", "--max-instructions", "1000"],
+            // A pre-built image.
+            &["-i", "prog.kbt", "-s", "/dev/ttyUSB1"],
+            &["-i", "prog.kbt", "-m"],
+            // Opcode lists.
+            &["--opcodes"],
+            &["-t"],
+            &["--textmate", "--opcodes"],
+            // Board tests.
+            &["-L", "list.txt", "-s", "/dev/ttyUSB1"],
+            &["--test-list", "list.txt", "-s", "/dev/ttyUSB1", "--test-timeout", "20", "--no-break"],
+            // Assembly, optionally sending, testing or monitoring.
+            &["-i", "prog.kla"],
+            &["-i", "prog.kla", "-o", "prog.code", "--bitcode", "prog.kbt"],
+            &["-i", "prog.kla", "--output", "out", "-b", "out"],
+            &["-i", "prog.kla", "-s", "/dev/ttyUSB1"],
+            &["-i", "prog.kla", "-s", "/dev/ttyUSB1", "-m", "-d"],
+            &["-i", "prog.kla", "-s", "/dev/ttyUSB1", "-T", "--test-timeout", "5", "-n"],
+            &["-i", "prog.kla", "-s", "/dev/ttyUSB1", "--test"],
+        ]);
+    }
+
+    #[test]
+    // Mixing modes, or a flag without what it qualifies, is a usage error.
+    fn conflicting_flags_are_rejected() {
+        assert_rejected(&[
+            // Nothing to do.
+            &[],
+            &["-s", "/dev/ttyUSB1"],
+            // Two modes.
+            &["-i", "prog.kla", "-t"],
+            &["-i", "prog.kla", "--opcodes"],
+            &["-L", "list.txt", "-i", "prog.kla"],
+            &["-N", "prog.elf", "--ip", "10.0.0.2", "-i", "prog.kla"],
+            &["-N", "prog.elf", "--ip", "10.0.0.2", "--mem-out", "prog.elf"],
+            &["--mem-out", "prog.elf", "-i", "prog.kla"],
+            // Monitoring and testing at once.
+            &["-i", "prog.kla", "-s", "/dev/ttyUSB1", "-m", "-T"],
+            &["-L", "list.txt", "-s", "/dev/ttyUSB1", "-m"],
+            // --board needs --gdbserver.
+            &["-i", "prog.elf", "--board"],
+            // Bad values.
+            &["-i", "prog.elf", "--gdbserver", "port"],
+            &["-i", "prog.elf", "--gdbserver", "70000"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--jtag-khz", "50"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--jtag-khz", "30001"],
+            // Unknown flags and missing values.
+            &["--no-such-flag"],
+            &["-i"],
+            &["-i", "prog.kla", "-o"],
+        ]);
+    }
+
+    #[test]
+    // -s with no value asks for the first USB serial port.
+    fn serial_port_is_optional_valued() {
+        let serial = |args: &[&str]| parse(args).unwrap().get_one::<String>("serial").cloned();
+        assert_eq!(serial(&["-i", "prog.kla"]), None);
+        assert_eq!(serial(&["-i", "prog.kla", "-s"]), Some(AUTO_SERIAL.to_owned()));
+        assert_eq!(serial(&["-i", "prog.kla", "-s", "-m"]), Some(AUTO_SERIAL.to_owned()));
+        assert_eq!(serial(&["-s", "/dev/ttyUSB1", "-i", "prog.kla"]), Some("/dev/ttyUSB1".to_owned()));
+        assert_eq!(serial(&["-i", "prog.kla", "--serial=COM3"]), Some("COM3".to_owned()));
+    }
+
+    #[test]
+    // --trace with no value streams the trace to stdout.
+    fn trace_is_optional_valued() {
+        let trace = |args: &[&str]| parse(args).unwrap().get_one::<String>("trace").cloned();
+        assert_eq!(trace(&["-i", "prog.kla", "--emulate"]), None);
+        assert_eq!(trace(&["-i", "prog.kla", "--emulate", "--trace"]), Some("-".to_owned()));
+        assert_eq!(trace(&["-i", "prog.kla", "--emulate", "--trace", "t.txt"]), Some("t.txt".to_owned()));
+    }
+
+    #[test]
+    fn values_reach_their_options() {
+        let matches = parse(&["-i", "prog.kla", "-o", "o.code", "-b", "o.kbt", "-s", "COM3", "-T", "-n", "-d"]).unwrap();
+        assert_eq!(matches.get_one::<String>("input").map(String::as_str), Some("prog.kla"));
+        assert_eq!(matches.get_one::<String>("output").map(String::as_str), Some("o.code"));
+        assert_eq!(matches.get_one::<String>("bitcode").map(String::as_str), Some("o.kbt"));
+        assert!(matches.get_flag("test") && matches.get_flag("no_break") && matches.get_flag("debug"));
+        assert!(!matches.get_flag("monitor") && !matches.get_flag("emulate"));
+
+        let matches = parse(&["-i", "prog.elf", "--gdbserver", "1234", "--board", "--jtag-khz", "2500"]).unwrap();
+        assert_eq!(matches.get_one::<u16>("gdbserver").copied(), Some(1234));
+        assert!(matches.get_flag("board"));
+        assert_eq!(matches.get_one::<u32>("jtag_khz").copied(), Some(2500));
+
+        let matches = parse(&["-N", "prog.elf", "--ip", "10.0.0.2", "--port", "6000"]).unwrap();
+        assert_eq!(matches.get_one::<String>("net_load").map(String::as_str), Some("prog.elf"));
+        assert_eq!(matches.get_one::<String>("ip").map(String::as_str), Some("10.0.0.2"));
+        assert_eq!(matches.get_one::<String>("port").map(String::as_str), Some("6000"));
+
+        let matches = parse(&["--mem-out", "prog.elf", "--mem-file", "boot.mem"]).unwrap();
+        assert_eq!(matches.get_one::<String>("mem_out").map(String::as_str), Some("prog.elf"));
+        assert_eq!(matches.get_one::<String>("mem_file").map(String::as_str), Some("boot.mem"));
+
+        let matches = parse(&["-L", "list.txt", "-s", "COM3", "--test-timeout", "20"]).unwrap();
+        assert_eq!(matches.get_one::<String>("test_list").map(String::as_str), Some("list.txt"));
+        assert_eq!(matches.get_one::<String>("test_timeout").map(String::as_str), Some("20"));
+
+        let matches = parse(&["--emulate-test", "dir", "--max-instructions", "1000"]).unwrap();
+        assert_eq!(matches.get_one::<String>("emulate_test").map(String::as_str), Some("dir"));
+        assert_eq!(matches.get_one::<String>("max_instructions").map(String::as_str), Some("1000"));
+    }
+
+    #[test]
+    fn test_timeout_defaults_to_10() {
+        let matches = parse(&["-i", "prog.kla"]).unwrap();
+        assert_eq!(matches.get_one::<String>("test_timeout").map(String::as_str), Some("10"));
     }
 }
