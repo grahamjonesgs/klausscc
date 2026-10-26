@@ -43,10 +43,10 @@ pub(crate) const DEFAULT_JTAG_KHZ: u32 = 10_000;
 // At most one mode: an input file, a net-load, a boot-ROM image, a board or
 // emulator test run, or the opcode lists (--opcodes and -t may go together).
 //
-// clap does not enforce `requires = X` when X conflicts with an argument
-// that is present (nor, transitively, what X requires), so a flag that
-// qualifies one mode (`--emulate` and `--gdbserver` need `-i`) is checked in
-// `Cli::mode` instead.
+// clap counts `requires = X` as met whenever X conflicts with an argument
+// that is present, so `requires = "input"` would let `--emulate` through
+// beside `--emulate-test`.  That a flag such as `--emulate` or
+// `--gdbserver` needs `-i` is checked in `Cli::mode` instead.
 pub(crate) struct Cli {
     /// ELF or flat binary: flatten and stream to the board over TCP (network boot). Needs --ip.
     #[arg(
