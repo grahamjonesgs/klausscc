@@ -1,5 +1,13 @@
 # Klauss ISA Assembly Language Reference
 
+> **Note:** the instruction tables below describe the original (v1) Klauss ISA.
+> The CPU and klausscc now use ISA encoding v2, whose instruction set and
+> encodings are defined in [ISA_ENCODING_V2.md](ISA_ENCODING_V2.md); where the
+> two disagree, that document is authoritative, and many v1 mnemonics listed
+> here no longer assemble. `klausscc --opcodes` writes the built-in v2 opcode
+> and macro tables as HTML and JSON. The command-line sections (assembler
+> usage, serial communication, test mode, output files) are current.
+
 This document describes the Klauss Instruction Set Architecture (ISA) and its assembler, **klausscc**. The Klauss ISA is a custom 32-bit architecture implemented on an FPGA, with a rich instruction set covering arithmetic, logic, memory, I/O, and flow control.
 
 ## Table of Contents
@@ -56,66 +64,104 @@ JMP BEGIN:        // Loop forever
 Save this as `myprogram.kla` and assemble it with:
 
 ```sh
-klausscc -c opcode_select.vh -i myprogram.kla
+klausscc -i myprogram.kla
 ```
 
-The `opcode_select.vh` file comes directly from the Verilog source of the FPGA CPU design. It is the hardware's own definition of which instructions the CPU supports, so the assembler always stays in sync with the actual silicon -- if an instruction is added or changed in the Verilog, the assembler automatically picks it up.
+The ISA v2 opcode table and the standard macros are built into the assembler, so no opcode file is needed. (Older versions read the CPU's `opcode_select.vh` with `-c`; that flag is gone.)
 
 ---
 
 ## Assembler Usage
 
 ```
-klausscc [OPTIONS] -c <opcode_file>
+klausscc [OPTIONS]
 ```
 
-### Required Arguments
+The input's extension picks what `-i` does: a `.kla` file is assembled, a `.kbt` file is a pre-built image to send, and anything else (an `.elf` or a flat binary) is converted to the board's wire format. `klausscc --help` lists every option.
+
+### Assembling and sending
 
 | Flag | Description |
 |------|-------------|
-| `-c`, `--opcode <file>` | Opcode definition file (`.vh`) from the Verilog CPU design. This file is part of the FPGA CPU hardware definition and serves as the single source of truth for available instructions. |
-| `-i`, `--input <file>` | Assembly source file to assemble |
+| `-i`, `--input <FILE>` | Input file (`.kla`, `.kbt`, `.elf` or flat binary) |
+| `-o`, `--output <FILE>` | Listing file name (default: input stem + `.code`) |
+| `-b`, `--bitcode <FILE>` | Binary output file name (default: input stem + `.kbt`) |
+| `-s`, `--serial [PORT]` | Send the program to the board over this serial port. Without a value, the first USB serial port found (the board's FTDI USB-UART) is used. |
+| `-m`, `--monitor` | After sending, print the board's UART output and forward keystrokes (Ctrl+C to stop). On its own, `-m` just opens the monitor. |
+| `-n`, `--no-break` | Reset the board by sending `S` instead of a UART break |
+| `-d`, `--debug` | Print each received UART byte as hex alongside normal output |
+| `--entry <ADDRESS>` | Entry point for ELF / flat-binary input (read from the ELF header if not given; flat binaries default to `0x20`) |
 
-### Optional Arguments
+### Testing
 
 | Flag | Description |
 |------|-------------|
-| `-o`, `--output <name>` | Output info file name (default: input stem + `.code`) |
-| `-b`, `--bitcode <name>` | Output binary file name (default: input stem + `.kbt`) |
-| `-s`, `--serial [port]` | Serial port to write binary output to the FPGA board. If given without a value, auto-detects the FTDI USB serial device. |
-| `-m`, `--monitor` | After sending, stay connected and print all UART output from the board (Ctrl+C to stop) |
-| `-T`, `--test` | Test mode: assemble, send to board, and verify UART output against expected values declared in source file comments. See [Automated Test Mode](#automated-test-mode). |
-| `--test-timeout <secs>` | Timeout for test mode (default: 10 seconds) |
-| `--opcodes` | Output opcode/macro documentation as HTML and JSON, then exit |
-| `-t`, `--textmate` | Output opcode list for TextMate/VSCode syntax highlighting, then exit |
+| `-T`, `--test` | Test mode: send to the board and verify its UART output against the expected values in the source's comments. See [Automated Test Mode](#automated-test-mode). Needs `-s`. |
+| `--test-timeout <SECONDS>` | Timeout for test mode UART capture (default: 10) |
+| `-L`, `--test-list <FILE>` | Assemble, send and verify each `.kla` file listed in `FILE` in turn |
+| `--emulate-test <PATH>` | Verify a test list (or a directory of `.kla` files) on the built-in emulator instead of the board |
 
-Note: `-m` and `-T` are mutually exclusive. Both require `-s`.
+### Emulator and debugger
+
+| Flag | Description |
+|------|-------------|
+| `--emulate` | Assemble the input (or load the ELF) and run it on the built-in ISA emulator; prints the captured UART output |
+| `--trace [FILE]` | With `--emulate`, write the per-instruction trace to `FILE`, or to stdout with no value (or `-`) |
+| `--max-instructions <COUNT>` | Instruction-count cap for the emulator (default: 50000000) |
+| `--gdbserver <PORT>` | Debug an ELF on the emulator over the GDB remote protocol on `127.0.0.1:PORT` (for lldb) |
+| `--board` | With `--gdbserver`, debug the real board over its USB-JTAG instead (needs a klausscc built with `--features board`) |
+| `--jtag-khz <KHZ>` | JTAG clock for `--board` (default: 10000) |
+
+### Network boot and boot ROM
+
+| Flag | Description |
+|------|-------------|
+| `-N`, `--net-load <FILE>` | Flatten an ELF (or take a flat binary) and stream it to the board over TCP. Needs `--ip`. |
+| `--ip <ADDRESS>` | Board IP address or host name for `--net-load` |
+| `--port <PORT>` | Board TCP port for `--net-load` (default: 5000) |
+| `--mem-out <FILE>` | Write a `$readmemh` boot-ROM image of an ELF or flat binary |
+| `--mem-file <FILE>` | Output path for `--mem-out` (default: the input with a `.mem` extension) |
+
+### Documentation
+
+| Flag | Description |
+|------|-------------|
+| `--opcodes` | Write the opcode and macro tables as HTML and JSON, then exit |
+| `-t`, `--textmate` | Write the opcode list for TextMate/VSCode syntax highlighting, then exit |
+
+Note: `-m` and `-T` are mutually exclusive, and `-T` requires `-s`. Flag combinations that make no sense are rejected before any work is done.
 
 ### Examples
 
 Assemble a program:
 ```sh
-klausscc -c opcode_select.vh -i count.kla
+klausscc -i count.kla
 ```
 
 Assemble and upload to FPGA board via serial (auto-detect port):
 ```sh
-klausscc -c opcode_select.vh -i count.kla -s
+klausscc -i count.kla -s
 ```
 
 Assemble, upload, and monitor UART output:
 ```sh
-klausscc -c opcode_select.vh -i count.kla -s -m
+klausscc -i count.kla -s -m
 ```
 
 Assemble, upload, and run automated verification:
 ```sh
-klausscc -c opcode_select.vh -i test_bits.kla -s --test
+klausscc -i test_bits.kla -s --test
+```
+
+Run a program on the emulator, or check the test corpus there:
+```sh
+klausscc -i test_bits.kla --emulate
+klausscc --emulate-test tests/fixtures
 ```
 
 Generate ISA documentation:
 ```sh
-klausscc -c opcode_select.vh --opcodes
+klausscc --opcodes
 ```
 
 ---
@@ -304,16 +350,15 @@ Use the `!include` directive to include another assembly file:
 
 ## Macros
 
-Macros are defined alongside the opcodes in the Verilog CPU definition file (`.vh`) inside a block comment, and expand to one or more instructions. Because they live in the same file as the hardware opcode definitions, macros and instructions are maintained together as a single source of truth.
+Macros expand to one or more instructions. A standard set (such as `$PUSHALL`, `$POPALL` and `$WAIT`) is built into the assembler and always available; `klausscc --opcodes` lists them. (Older versions read them from the `.vh` opcode file.)
 
-### Defining Macros (in the `.vh` file)
+### Defining Macros (in `.kla` files)
+
+A program adds its own macros with `!macro`, one definition per line, or reads a file of them (one per line) with `!macros <file>`, resolved like `!include`. Redefining an existing macro is an error.
 
 ```
-/* Macro definition
-$PUSHALL PUSH A / PUSH B / PUSH C
-$POPALL POP A / POP B / POP C
-$WAIT DELAYV %1 / DELAYV %2
-*/
+!macro $SAVEABC PUSH A / PUSH B / PUSH C
+!macro $WAIT2 DELAYV %1 / DELAYV %2
 ```
 
 - Macro names start with `$`
@@ -324,7 +369,7 @@ $WAIT DELAYV %1 / DELAYV %2
 ### Using Macros (in `.kla` files)
 
 ```
-$PUSHALL              // Expands to: PUSH A, PUSH B, PUSH C
+$PUSHALL              // Expands to: PUSH A, PUSH B, PUSH C, PUSH D
 $WAIT 0xFFF 0x100     // Expands to: DELAYV 0xFFF, DELAYV 0x100
 ```
 
@@ -335,7 +380,7 @@ Arguments are substituted positionally into `%1`, `%2`, etc.
 Macros can invoke other macros:
 
 ```
-$IMBED3 $PUSHALL / $IMBED1
+!macro $SAVEALL2 $PUSHALL / $SAVEABC
 ```
 
 The assembler resolves nested macros through multiple expansion passes.
@@ -790,13 +835,13 @@ The assembler can upload compiled programs to the FPGA board via UART serial and
 Use `-s` to send the compiled binary to the board after assembly:
 
 ```sh
-klausscc -c opcode_select.vh -i myprogram.kla -s /dev/ttyUSB0
+klausscc -i myprogram.kla -s /dev/ttyUSB0
 ```
 
 If `-s` is given without a port name, the assembler auto-detects the first FTDI USB serial device (VID/PID 0403:6001, 6010, 6011, or 6014):
 
 ```sh
-klausscc -c opcode_select.vh -i myprogram.kla -s
+klausscc -i myprogram.kla -s
 ```
 
 The upload protocol sends an `S` character to reset the board, waits for the board to respond, then transmits the binary byte-by-byte. The board responds with an acknowledgment message (e.g. "Load Complete OK") when the program is loaded.
@@ -806,7 +851,7 @@ The upload protocol sends an `S` character to reset the board, waits for the boa
 Use `-m` alongside `-s` to monitor the board's UART output after uploading. This is useful for programs that send debug output via `TXR`, `NEWLINE`, `TXSTRMEMR`, etc:
 
 ```sh
-klausscc -c opcode_select.vh -i myprogram.kla -s -m
+klausscc -i myprogram.kla -s -m
 ```
 
 The monitor prints all received serial data to stdout in real time. Press **Ctrl+C** to stop monitoring -- the serial port is closed cleanly so it can be reused immediately.
@@ -816,7 +861,7 @@ The monitor prints all received serial data to stdout in real time. Press **Ctrl
 Use `-T` (or `--test`) to automatically verify the board's UART output against expected values declared in the source file's comments:
 
 ```sh
-klausscc -c opcode_select.vh -i test_bits.kla -s --test
+klausscc -i test_bits.kla -s --test
 ```
 
 The assembler:
@@ -840,7 +885,7 @@ Test result: 7/8 passed, 1/8 failed
 Use `--test-timeout` to adjust the wait time (default 10 seconds):
 
 ```sh
-klausscc -c opcode_select.vh -i test_bits.kla -s --test --test-timeout 20
+klausscc -i test_bits.kla -s --test --test-timeout 20
 ```
 
 **Exit codes:**
@@ -950,7 +995,7 @@ HALT
 
 Run it with automated verification:
 ```sh
-klausscc -c opcode_select.vh -i test_regs.kla -s --test
+klausscc -i test_regs.kla -s --test
 ```
 
 ### Available Test Programs
@@ -1121,17 +1166,14 @@ RET
 
 ### Example 5: Using Macros
 
-With macros defined in the `.vh` file:
+Define a pair of macros in the source (the built-in `$PUSHALL` and `$POPALL` save A–D; these save only A–C):
 
 ```
-/* Macro definition
-$PUSHALL PUSH A / PUSH B / PUSH C
-$POPALL POP A / POP B / POP C
-$WAIT DELAYV %1 / DELAYV %2
-*/
+!macro $SAVEABC PUSH A / PUSH B / PUSH C
+!macro $RESTOREABC POP C / POP B / POP A
 ```
 
-Use them in your assembly:
+Use them, and the built-in `$WAIT`, in your assembly:
 
 ```
 _start
@@ -1140,13 +1182,13 @@ SETR A 0x1
 SETR B 0x2
 SETR C 0x3
 
-$PUSHALL              // Expands to: PUSH A, PUSH B, PUSH C
+$SAVEABC              // Expands to: PUSH A, PUSH B, PUSH C
 
 SETR A 0xFF
 SETR B 0xFE
 SETR C 0xFD
 
-$POPALL               // Expands to: POP A, POP B, POP C
+$RESTOREABC           // Expands to: POP C, POP B, POP A
                       // A=1, B=2, C=3 again
 
 $WAIT 0xFFFF 0x1000  // Expands to: DELAYV 0xFFFF, DELAYV 0x1000
@@ -1165,19 +1207,19 @@ When assembling, klausscc produces:
 | `<name>.code` | Human-readable listing with addresses, opcodes, and source lines |
 | `<name>.kbt` | Binary output file for uploading to the FPGA board |
 
-When using `--opcodes`:
+When using `--opcodes` (written to the current directory):
 
 | File | Description |
 |------|-------------|
-| `<name>.html` | ISA documentation with opcode and macro tables |
-| `<name>_opcodes.json` | Machine-readable opcode list |
-| `<name>_macros.json` | Machine-readable macro list |
+| `klausscc_opcodes_v2.html` | ISA documentation with opcode and macro tables |
+| `klausscc_opcodes_v2_opcodes.json` | Machine-readable opcode list |
+| `klausscc_opcodes_v2_macros.json` | Machine-readable macro list |
 
 When using `--textmate`:
 
 | File | Description |
 |------|-------------|
-| `<name>_textmate.txt` | Pipe-delimited opcode names for TextMate/VSCode syntax grammar |
+| `klausscc_opcodes_v2_textmate.txt` | Pipe-delimited opcode names for TextMate/VSCode syntax grammar |
 
 ---
 
@@ -1206,4 +1248,4 @@ Several instructions set CPU flags that are used by conditional jumps and calls:
 
 ---
 
-*This document was generated from the Klauss ISA opcode definitions and the klausscc assembler source code.*
+*The instruction tables were generated from the v1 Klauss ISA opcode definitions; see [ISA_ENCODING_V2.md](ISA_ENCODING_V2.md) for the current ISA.*
