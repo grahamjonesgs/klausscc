@@ -15,7 +15,7 @@ use crate::num::{fits_imm32, parse_bits64, parse_int, parse_operand};
 /// Auto-upgrade `SETR R value` to `SETR64 R value` when the immediate doesn't fit in 32 bits.
 ///
 /// Returns the (possibly rewritten) line string unchanged for all other mnemonics or
-/// when the value fits in the 32-bit range accepted by `convert_argument`
+/// when the value fits in the 32-bit range accepted by `resolve_operand`
 /// (i.e. `i32::MIN ..= 0xFFFF_FFFF`).
 fn upgrade_setr_to_setr64(line: &str) -> String {
     let stripped = strip_comments(line);
@@ -27,10 +27,10 @@ fn upgrade_setr_to_setr64(line: &str) -> String {
     let Some(val_str) = words.next() else {
         return line.to_owned();
     };
-    // Same rule as convert_argument: hex is a 64-bit pattern (0xFFFF_FFFF_FFFF_FFFF
+    // Same rule as resolve_operand: hex is a 64-bit pattern (0xFFFF_FFFF_FFFF_FFFF
     // is -1 and fits), decimal keeps its value (18446744073709551615 does not fit).
     // Labels, bad literals and values no 64-bit word can hold stay SETR, so
-    // convert_argument reports them.
+    // resolve_operand rejects them.
     let Ok(val) = parse_operand(val_str) else {
         return line.to_owned();
     };

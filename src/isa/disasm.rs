@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     // Words are read little-endian; a 64-bit argument is shown as one value
-    fn test_disassemble_flat_to_pass2_le_and_64bit() {
+    fn test_flat_to_pass2_le_and_64bit() {
         let pass2 = Disassembler::new(V2_OPCODES).flat_to_pass2(&le_bytes(&[0x8BD0_0000, 5, 0xCBC0_0000, 0x5566_7788, 0x1122_3344]), 0x20);
         assert_eq!(pass2.len(), 2);
         assert_eq!(pass2[0].program_counter, 0x20);
@@ -249,7 +249,7 @@ mod tests {
     #[test]
     // Regression: a 64-bit argument cut off by the end of the binary showed its
     // lo32 word on the instruction's line and then again as the next line.
-    fn test_disassemble_flat_to_pass2_truncated_argument() {
+    fn test_flat_to_pass2_truncated_argument() {
         let disassembler = Disassembler::new(V2_OPCODES);
         let pass2 = disassembler.flat_to_pass2(&le_bytes(&[0xCBC0_0000, 0x5566_7788]), 0x20);
         assert_eq!(pass2.len(), 1);
