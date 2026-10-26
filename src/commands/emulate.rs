@@ -380,6 +380,34 @@ mod tests {
         assert!(passed.len() >= 24, "only {} validated files passed: {passed:#?}", passed.len());
     }
 
+    /// `all_tests.txt` is what a board run (`-L`) checks, so it must list every
+    /// fixture the emulator corpus checks, and nothing that is not there.
+    #[test]
+    fn all_tests_lists_every_file_with_expected_values() {
+        let mut with_values: Vec<String> = fs::read_dir(fixture_dir())
+            .expect("read fixture dir")
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|p| p.extension().is_some_and(|e| e == "kla"))
+            .filter(|p| {
+                let source = fs::read_to_string(p).expect("read fixture");
+                let lines: Vec<String> = source.lines().map(String::from).collect();
+                !parse_expected_uart_values(&lines).is_empty()
+            })
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        with_values.sort();
+
+        let mut msg_list = Diagnostics::new();
+        let listed = read_test_list(&fixture_dir().join("all_tests.txt"), &mut msg_list);
+        assert!(!msg_list.has_errors());
+        for file in &listed {
+            assert!(Path::new(file).is_file(), "{file} is listed but missing");
+        }
+        let missing: Vec<&String> = with_values.iter().filter(|f| !listed.contains(f)).collect();
+        assert!(missing.is_empty(), "files with expected values missing from all_tests.txt: {missing:#?}");
+    }
+
     #[test]
     fn verify_reports_the_first_wrong_value() {
         // test_regs with its first expected value changed: the program still

@@ -34,3 +34,8 @@ test_rotate.kla
 test_compare_ext.kla
 test_algorithms.kla
 test_benchmark.kla
+
+// Directives and compiled C (test_64bit brings in ../../runtime/crt0.kla)
+test_directives.kla
+hello_world.kla
+test_64bit.kla

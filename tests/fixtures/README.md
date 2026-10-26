@@ -139,18 +139,25 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 20 | `test_algorithms.kla` | Algorithms | Fibonacci, bubble sort, GCD, prime detection |
 | 21 | `test_benchmark.kla` | Stress | Binary search, bit ops, high multiply, carry flags, indexed memory |
 | 22 | `test_txstr.kla` | String data | `#name "string"` printed with `$TXSTR`: several words, `\n`, an empty string |
+| — | `test_directives.kla` | Directives | `.global`, `.extern`, `.text`, `.word`, `.comm` |
+| — | `hello_world.kla` | Compiled C | Arithmetic, factorial, GCD, Fibonacci, primes |
+| — | `test_64bit.kla` | Compiled C | 33 64-bit checks; expects main's return value (the failure count) `00000000` |
+
+The list holds every file here with expected values (plus `test_io`), so a
+board run covers the whole emulator corpus; `all_tests_lists_every_file_with_expected_values`
+(in `src/commands/emulate.rs`) checks this.
 
 ### Other fixtures
 
 | File | What it is |
 |------|------------|
-| `hello_world.kla` | Compiled C: arithmetic, factorial, GCD, Fibonacci and primes. Has expected values, so it is in the emulator corpus |
-| `test_directives.kla` | The directives C compilers emit (`.global`, `.extern`, `.text`, `.word`, `.comm`). In the emulator corpus |
+| `hello_world.kla` | Compiled C: arithmetic, factorial, GCD, Fibonacci and primes. Has expected values, so it is in the emulator corpus and `all_tests.txt` |
+| `test_directives.kla` | The directives C compilers emit (`.global`, `.extern`, `.text`, `.word`, `.comm`). In the emulator corpus and `all_tests.txt` |
 | `v2_hello.kla`, `v2_loop.kla`, `v2_math.kla` | Minimal programs that store straight to the UART `TX_DATA` register (`0xF0010000`), without `uart_stubs.kla`, polling `STATUS.TX_BUSY` before each byte. Checked by `tests/roundtrip.rs`. They print characters, not hex values, so they list no expected values and are not in `all_tests.txt` |
 | `uart_stubs.kla` | The UART print routines the tests include: `TX_HEX32`, `TX_NL`, `TX_CHAR`, `TX_STR` |
 | `string_print.kla` | A `STRING_PRINT` subroutine for inclusion; not a program by itself |
 | `demo.kla`, `hello_simple.kla` | Compiler output with its own startup code; they run but list no expected values |
-| `test2.kla`, `test_64bit.kla` | Compiler output (lcc `-target=klacpu`) for `test2.c` and `test_64bit.c`, with one added `!include ../../runtime/crt0.kla` line that brings in the startup code, `libc.kla` and the runtime's `uart_stubs.kla`. `test2` prints `Hellow World` and main's return value; `test_64bit` runs 33 checks and is in the emulator corpus, expecting main's return value (the failure count) `00000000` |
+| `test2.kla`, `test_64bit.kla` | Compiler output (lcc `-target=klacpu`) for `test2.c` and `test_64bit.c`, with one added `!include ../../runtime/crt0.kla` line that brings in the startup code, `libc.kla` and the runtime's `uart_stubs.kla`. `test2` prints `Hellow World` and main's return value; `test_64bit` runs 33 checks and is in the emulator corpus and `all_tests.txt`, expecting main's return value (the failure count) `00000000` |
 | `memcoherency.kla` | Diagnostic: byte stores followed by a 64-bit read, printed as two 32-bit halves |
 | `test_mem0.kla` | Diagnostic: prints the word at address 0 (the heap header's `heap_start`) |
 | `speed.kla` | An endless `INCR` loop with no output (it never halts) |
