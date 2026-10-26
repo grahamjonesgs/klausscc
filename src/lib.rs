@@ -165,17 +165,17 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // .kbt input: already in board wire format — send and/or monitor verbatim.
         Mode::SendKbt(input) => run_kbt_send(Path::new(input), serial, send, msg_list),
         Mode::Opcodes => {
-            use output::docs::output_macros_opcodes_html;
+            use output::docs::{output_macros_opcodes_html, output_opcodes_textmate};
 
+            const STEM: &str = "klausscc_opcodes_v2";
             let (oplist, macro_list) = opcode_tables(msg_list);
-            let html_result = output_macros_opcodes_html(
-                "klausscc_opcodes_v2".to_owned(),
-                &oplist,
-                &macro_list,
-                msg_list,
-                cli.opcodes,
-                cli.textmate,
-            );
+            let mut html_result = Ok(());
+            if cli.opcodes {
+                html_result = output_macros_opcodes_html(STEM, &oplist, &macro_list, msg_list);
+            }
+            if cli.textmate && html_result.is_ok() {
+                html_result = output_opcodes_textmate(STEM, &oplist, msg_list);
+            }
             if let Err(result_err) = &html_result {
                 msg_list.error(format!("Error {result_err} writing opcode list to HTML"));
             }
