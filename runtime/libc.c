@@ -1,6 +1,6 @@
 /* libc.c - Minimal C library for FPGA_CPU_64_DDR_cache
  *
- * Byte-addressed CPU. sizeof(char)=1, sizeof(int)=8, sizeof(void*)=4.
+ * Byte-addressed CPU. sizeof(char)=1, sizeof(int)=sizeof(void*)=8.
  * CHAR_BIT=8. Registers are 64-bit. No floating point. No file I/O.
  * Output via UART only.
  *
@@ -255,7 +255,7 @@ static void _heap_init(void) {
 }
 
 /* malloc: allocate 'size' bytes from the heap.
- * Internally rounds up to the nearest 4-byte word.
+ * Internally rounds up to the nearest 8-byte word.
  * Returns a pointer to the usable data area, or 0 on failure.
  * Uses first-fit; splits the block when the surplus is large enough. */
 void *malloc(int size) {
@@ -428,7 +428,7 @@ int heap_get_top(void) {
     return (int)_heap_top;
 }
 
-/* heap_words_free: count 4-byte words sitting in free blocks. */
+/* heap_words_free: count 8-byte words sitting in free blocks. */
 int heap_words_free(void) {
     int *curr;
     int  free_words;

@@ -75,9 +75,11 @@ void print_int(int n) {
 void _print_neg(int neg, int orig) {
     if (neg < 0) {
 
-        putchar(50); putchar(49); putchar(52); putchar(55);
-        putchar(52); putchar(56); putchar(51); putchar(54);
-        putchar(52); putchar(56);
+        putchar(57); putchar(50); putchar(50); putchar(51);
+        putchar(51); putchar(55); putchar(50); putchar(48);
+        putchar(51); putchar(54); putchar(56); putchar(53);
+        putchar(52); putchar(55); putchar(55); putchar(53);
+        putchar(56); putchar(48); putchar(56);
     } else {
         print_unsigned(neg);
     }
@@ -231,7 +233,7 @@ void *malloc(int size) {
     if (size <= 0) return 0;
 
 
-    words = (size + 3) / 4;
+    words = (size + 7) / 8;
 
 
     prev = 0;
@@ -348,12 +350,12 @@ void *realloc(void *ptr, int new_size) {
 
     blk       = (int *)ptr - 3;
     old_words = blk[0];
-    new_words = (new_size + 3) / 4;
+    new_words = (new_size + 7) / 8;
     if (new_words <= old_words) return ptr;
 
     new_ptr = malloc(new_size);
     if (new_ptr == 0) return 0;
-    memcpy((char *)new_ptr, (char *)ptr, old_words * 4);
+    memcpy((char *)new_ptr, (char *)ptr, old_words * 8);
     free(ptr);
     return new_ptr;
 }
