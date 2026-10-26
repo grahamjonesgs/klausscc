@@ -4,9 +4,6 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-       
-
-
         {
             "type": "lldb",
             "request": "launch",
@@ -15,28 +12,6 @@
                 "args": [
                     "build",
                     "--bin=klausscc",
-                    "--package=klausscc",
-                    
-                ],
-                "filter": {
-                    "name": "klausscc",
-                    "kind": "bin"
-                }
-            },
-           // "args": ["-i", "tests/fixtures/legacy_v1/numbers.kla", "-s", "/dev/ttyUSB1"],
-            "args": ["-i", "tests/fixtures/legacy_v1/count.kla", "-s"],
-            "cwd": "${workspaceFolder}",
-            "env": { "RUST_BACKTRACE": "full" }
-        },
-        {
-            "type": "lldb",
-            "request": "launch",
-            "name": "Debug unit tests in executable 'klausscc'",
-            "cargo": {
-                "args": [
-                    "test",
-                    "--no-run",
-                    "--bin=klausscc",
                     "--package=klausscc"
                 ],
                 "filter": {
@@ -44,10 +19,30 @@
                     "kind": "bin"
                 }
             },
+            // Add "-s" (or "-s", "/dev/ttyUSB1") to also send the program to the board.
+            "args": ["-i", "tests/fixtures/v2_hello.kla"],
+            "cwd": "${workspaceFolder}",
+            "env": { "RUST_BACKTRACE": "full" }
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'klausscc'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=klausscc"
+                ],
+                "filter": {
+                    "name": "klausscc",
+                    "kind": "lib"
+                }
+            },
             "args": [],
             "cwd": "${workspaceFolder}",
             "env": { "RUST_BACKTRACE": "full" }
-            
         }
     ]
 }
