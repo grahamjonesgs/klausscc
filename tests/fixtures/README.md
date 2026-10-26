@@ -97,6 +97,11 @@ That is the rate the bitstream fixes for the board UART.
   is the same check as `klausscc --emulate-test tests/fixtures`. It also fails
   if fewer than 24 files pass, so a test that stops declaring its values is
   noticed.
+- `every_kla_file_assembles` (in `src/asm/corpus_tests.rs`) assembles every
+  `.kla` here and in `runtime/` and fails on any error. A file that is only
+  meant to be included (`uart_stubs.kla`, `string_print.kla` and the runtime
+  files) is listed there with a small driver that supplies the `_start` or
+  `main` it lacks; a new file of that kind needs an entry.
 - `tests/roundtrip.rs` runs `v2_hello.kla`, `v2_loop.kla` and `v2_math.kla`
   with `--emulate` and checks the exact characters they print.
 - `tests/cli.rs` runs `--emulate-test` on `test_strings.kla` and checks that

@@ -19,6 +19,8 @@
 //! definitions and `symbols` holds the labels.
 
 mod classify;
+#[cfg(test)]
+mod corpus_tests;
 mod data;
 pub(crate) mod lexer;
 pub(crate) mod line;
