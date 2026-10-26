@@ -10,7 +10,6 @@
 pub(crate) mod disasm;
 pub(crate) mod encode;
 pub(crate) mod table;
-mod vh;
 
 use serde::{Deserialize, Serialize};
 
@@ -69,7 +68,7 @@ pub(crate) struct Opcode {
     pub text_name: String,
     /// Number of appended immediate words (imm32 → 1, imm64 → 2).
     pub variables: u32,
-    /// Ordered source-operand layout (empty for legacy `.vh`-parsed opcodes).
+    /// Ordered source-operand layout (empty for an opcode without operands).
     #[serde(default)]
     pub ops: Vec<Operand>,
 }

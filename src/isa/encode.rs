@@ -88,21 +88,15 @@ fn parse_count(token: &str) -> Option<i128> {
 /// Updates opcode with register.
 ///
 /// Builds instruction word 0 (as an 8-hex string) from the opcode template and
-/// the register/count operands on the line.  For v2 opcodes (those carrying an
-/// [`Operand`] layout) the register fields are packed numerically per
-/// `doc/ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place `rd==rs1`, embedded
-/// `N<<15`).  Opcodes without a layout fall back to the legacy trailing-nibble
-/// scheme (used by `.vh`-parsed tables).
+/// the register/count operands on the line, packed per the opcode's
+/// [`Operand`] layout and `doc/ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`,
+/// in-place `rd==rs1`, embedded `N<<15`); an opcode without operands is its
+/// template.
 pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_list: &mut Diagnostics, line_number: u32) -> String {
     let Some(opcode) = return_opcode_struct(&line.to_uppercase(), opcodes) else {
         msg_list.error_at(filename, line_number, format!("Opcode not found - \"{line}\""));
         return "ERR     ".to_owned();
     };
-
-    // Legacy path: opcodes with no v2 operand layout keep the trailing-nibble fill.
-    if opcode.ops.is_empty() {
-        return legacy_add_registers(opcode, line, filename, msg_list, line_number);
-    }
 
     let Ok(mut word0) = u32::from_str_radix(&opcode.hex_code, 16) else {
         msg_list.error_at(filename, line_number, format!("Incorrect opcode template - \"{line}\""));
@@ -183,34 +177,6 @@ pub(crate) fn add_registers(opcodes: &[Opcode], line: &str, filename: &str, msg_
         return "ERR     ".to_owned();
     }
     format!("{word0:08X}")
-}
-
-/// Legacy trailing-nibble register packing for `.vh`-parsed opcodes (`hex_code`
-/// carries `?` wildcards in its trailing nibbles).
-fn legacy_add_registers(opcode: &Opcode, line: &str, filename: &str, msg_list: &mut Diagnostics, line_number: u32) -> String {
-    let num_registers = opcode.registers;
-    let mut opcode_found = opcode.hex_code.clone();
-
-    if opcode_found.len() != 8 {
-        msg_list.error_at(filename, line_number, format!("Incorrect register definition - \"{line}\""));
-        return "ERR     ".to_owned();
-    }
-
-    let cloned_opcode_found = opcode_found.get(..(8 - num_registers) as usize).unwrap_or("").to_owned();
-    opcode_found.clear();
-    opcode_found.push_str(&cloned_opcode_found);
-
-    for (i, word) in line.split_whitespace().enumerate() {
-        if i >= 1 && i <= num_registers as usize {
-            opcode_found.push_str(&map_reg_to_hex(word));
-        }
-    }
-
-    if opcode_found.len() != 8 || opcode_found.contains('X') {
-        msg_list.error_at(filename, line_number, format!("Incorrect register definition - \"{line}\""));
-        return "ERR     ".to_owned();
-    }
-    opcode_found
 }
 
 /// Register name to hex.
@@ -395,6 +361,38 @@ mod tests {
         assert_eq!(map_reg_to_hex("B"), "1");
         assert_eq!(map_reg_to_hex("P"), "F");
         assert_eq!(map_reg_to_hex("Z"), "X");
+    }
+
+    #[test]
+    // Every opcode without operands (NOP, HALT, RET, IRET, ...) encodes to its
+    // template alone, and disassembles back to its name.
+    fn test_zero_operand_opcodes_encode_to_their_template() {
+        let opcodes = v2_opcodes();
+        let labels = SymbolTable::default();
+        let mut msg_list = Diagnostics::new();
+        let zero_operand: Vec<&Opcode> = opcodes.iter().filter(|o| o.ops.is_empty()).collect();
+        let names: Vec<&str> = zero_operand.iter().map(|o| o.text_name.as_str()).collect();
+        assert_eq!(names, ["LEAVE", "LEAVERET", "RET", "IRET", "NOP", "HALT", "WAIT", "RESET", "TRAP"]);
+        for opcode in zero_operand {
+            let line = opcode.text_name.as_str();
+            assert_eq!(add_registers(&opcodes, line, "t", &mut msg_list, 1), opcode.hex_code, "{line}");
+            assert_eq!(add_arguments(&opcodes, line, &mut msg_list, 1, "t", &labels), "", "{line}");
+            assert_eq!(pc_relative_bits(&opcodes, line, 0x20, &labels, &mut msg_list, 1, "t"), 0, "{line}");
+            let word = u32::from_str_radix(&opcode.hex_code, 16).unwrap();
+            assert_eq!(disassemble_word(word, &opcodes), Some((line.to_owned(), 0)), "{line}");
+        }
+        // The encodings themselves, as the listing and the emulator see them.
+        let mut words = Vec::new();
+        for line in ["NOP", "HALT", "WAIT", "RESET", "TRAP", "RET", "IRET", "LEAVE", "LEAVERET", "nop"] {
+            words.push(add_registers(&opcodes, line, "t", &mut msg_list, 1));
+        }
+        assert_eq!(
+            words,
+            [
+                "6C000000", "6C010000", "6C020000", "6C030000", "6C040000", "65800000", "65C00000", "66400000", "66800000", "6C000000"
+            ]
+        );
+        assert!(msg_list.messages().is_empty());
     }
 
     #[test]

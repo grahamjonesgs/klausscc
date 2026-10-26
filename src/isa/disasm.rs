@@ -28,40 +28,13 @@ fn hex_nibble_to_reg(nibble: u32) -> &'static str {
 
 /// Disassemble a 32-bit instruction word.
 ///
-/// Searches `opcodes` for the first entry whose `hex_code` pattern matches `word`.
-/// `'?'` characters in `hex_code` act as nibble wildcards.
-/// Returns `(mnemonic_with_registers, variables_count)` or `None` if no match.
-/// Register operands are extracted from the low nibbles of `word` in the same
-/// order they appear in source (reg1 at the highest of the occupied nibbles).
+/// Searches `opcodes` for the first entry whose template matches `word` in
+/// every bit its operands do not occupy.
+/// Returns `(mnemonic_with_operands, variables_count)` or `None` if no match.
+/// Operands are shown in source order.
 pub(crate) fn disassemble_word(word: u32, opcodes: &[Opcode]) -> Option<(String, u32)> {
     for opcode in opcodes {
-        if opcode.ops.is_empty() {
-            // Legacy path: '?' in hex_code marks a wildcard nibble.
-            let mut mask: u32 = 0;
-            let mut pattern: u32 = 0;
-            for ch in opcode.hex_code.chars() {
-                mask <<= 4;
-                pattern <<= 4;
-                if ch != '?' {
-                    mask |= 0xF_u32;
-                    pattern |= ch.to_digit(16).unwrap_or(0);
-                }
-            }
-            if (word & mask) == pattern {
-                let n = opcode.registers;
-                let mut text = opcode.text_name.clone();
-                for i in 1..=n {
-                    let shift = (n - i) * 4;
-                    let nibble = (word >> shift) & 0xF;
-                    text.push(' ');
-                    text.push_str(hex_nibble_to_reg(nibble));
-                }
-                return Some((text, opcode.variables));
-            }
-            continue;
-        }
-
-        // v2 path: build the fixed-bit mask from the operand layout, then match.
+        // Build the fixed-bit mask from the operand layout, then match.
         let Ok(template) = u32::from_str_radix(&opcode.hex_code, 16) else {
             continue;
         };
