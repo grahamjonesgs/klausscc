@@ -4,11 +4,12 @@
 use super::SendOpts;
 #[cfg(feature = "board")]
 use super::load::run_elf2serial;
+use crate::debug::emu_target;
 use crate::diag::Diagnostics;
+use crate::emu;
 use crate::error::Error;
 use crate::layout::CODE_BASE;
 use crate::loader::{BinaryInput, Loaded, load_flat};
-use crate::{emu, gdbserver};
 
 /// Debug an ELF (or flat binary) on the emulator over the GDB remote protocol.
 ///
@@ -31,7 +32,7 @@ pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Di
     msg_list.print_summary();
 
     let cpu = emu::Cpu::new(&image.to_ddr(), image.entry);
-    match gdbserver::serve(cpu, port) {
+    match emu_target::serve(cpu, port) {
         Ok(summary) => {
             eprintln!("klausscc gdbserver: {summary}");
             Ok(())
@@ -58,17 +59,17 @@ pub(crate) fn run_gdbserver_board(
     send: SendOpts<'_>,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
-    use crate::gdbserver_board::{self, BoardError};
+    use crate::debug::board::{self, BoardError};
 
     let fail = |e: BoardError| {
         eprintln!("klausscc gdbserver: {e}");
         Error::Board(e)
     };
-    let (mut board, desc) = gdbserver_board::Board::open(jtag_khz).map_err(fail)?;
+    let (mut board, desc) = board::Board::open(jtag_khz).map_err(fail)?;
     eprintln!("klausscc gdbserver: {desc}");
 
     let pc = if send.port.is_empty() {
-        gdbserver_board::attach(&mut board, None).map_err(fail)?
+        board::attach(&mut board, None).map_err(fail)?
     } else {
         // Load only: the debugger, not the serial monitor, takes over after.
         let send = SendOpts {
@@ -85,12 +86,12 @@ pub(crate) fn run_gdbserver_board(
                 source: Box::new(err),
             })
         };
-        gdbserver_board::attach(&mut board, Some(&mut load)).map_err(fail)?
+        board::attach(&mut board, Some(&mut load)).map_err(fail)?
     };
     eprintln!("klausscc gdbserver: core 1 halted at 0x{pc:08X}");
     msg_list.print_summary();
 
-    match gdbserver_board::serve(board, port) {
+    match board::serve(board, port) {
         Ok(summary) => {
             eprintln!("klausscc gdbserver: {summary}");
             Ok(())

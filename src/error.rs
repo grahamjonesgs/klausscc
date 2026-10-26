@@ -8,9 +8,9 @@
 //! [`run`] only prints the run summary and turns the error into an
 //! exit code.
 
-use crate::gdbserver::GdbError;
+use crate::debug::GdbError;
 #[cfg(feature = "board")]
-use crate::gdbserver_board::BoardError;
+use crate::debug::board::BoardError;
 use crate::netload::NetbootError;
 use std::fmt;
 use std::io;

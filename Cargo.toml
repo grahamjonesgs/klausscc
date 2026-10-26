@@ -2,7 +2,7 @@
 name = "klausscc"
 version = "0.1.2"
 edition = "2024"
-# as_chunks (gdbserver.rs) needs 1.88; is_multiple_of needs 1.87.
+# as_chunks (debug/arch.rs) needs 1.88; is_multiple_of needs 1.87.
 rust-version = "1.88"
 authors = ["Graham Jones"]
 description = "Assembler for Klauss micro controller defined in FPGA"

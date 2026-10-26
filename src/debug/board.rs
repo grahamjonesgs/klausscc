@@ -1,7 +1,7 @@
 //! GDB remote-protocol server for the real board (`--gdbserver PORT --board`).
 //!
 //! Same register layout, target description and stop reporting as the
-//! emulator server (`gdbserver.rs`), but the target is core 1 of a Nexys A7
+//! emulator server (`emu_target`), but the target is core 1 of a Nexys A7
 //! running a `DEBUG_EN=1` bitstream, reached over the on-board USB-JTAG
 //! (`jtag/`) through the debug module (`klaussCPU/debug_module.sv`).
 //!
@@ -10,7 +10,7 @@
 //!   `TRAP`; memory reads show the original word.  Resume invalidates the
 //!   I-cache, so a patched word is always fetched.
 //! * Watchpoints: the debug module's 2 doubleword comparators.  The halt
-//!   comes after the access, up to two instructions late (DEBUG_PLAN.md).
+//!   comes after the access, up to two instructions late (`DEBUG_PLAN.md`).
 //! * A compiled-in `TRAP` (`__builtin_debugtrap`) reports SIGTRAP; resuming
 //!   skips it.  `HALT` reports "exited" with the low byte of r12.
 //! * Single steps run with interrupts masked; the timer, millisecond clock
@@ -20,9 +20,8 @@
 //! On detach the server removes its breakpoints, clears "attached" and lets
 //! the program run on.
 
-use crate::gdbserver::{
-    GdbError, HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD, TRIPLE, accept, access_last_addr,
-};
+use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD, TRIPLE};
+use super::{GdbError, accept, access_last_addr};
 use crate::jtag::{DmiReq, Jtag, JtagError};
 use crate::layout::is_mmio;
 use gdbstub::common::{Endianness, Pid, Signal};

@@ -11,17 +11,14 @@ mod asm;
 mod cli;
 /// Module of subcommand handlers (the `run_*` entry points).
 mod commands;
+/// GDB remote-protocol servers for the emulator and the board (`--gdbserver`).
+mod debug;
 /// Diagnostics: the errors, warnings and notes reported to the user.
 mod diag;
 /// The independent ISA emulator (golden-model trace generator).
 pub mod emu;
 /// Module defining the crate error type and exit codes.
 mod error;
-/// GDB remote-protocol server for the emulator (`--gdbserver`).
-mod gdbserver;
-/// GDB remote-protocol server for the board (`--gdbserver --board`).
-#[cfg(feature = "board")]
-mod gdbserver_board;
 /// The Klauss instruction set: opcode table, encoder and disassembler.
 mod isa;
 /// JTAG over the board's FT2232H, and the debug module's DMI.  The pure MPSSE
