@@ -10,7 +10,7 @@ use std::process::{Command, Output};
 const GOOD_PROGRAM: &str = "_start\nSETR A 0x41\nHALT\n";
 
 /// Run the assembler with `args` in `dir`.
-#[allow(clippy::expect_used, reason = "test helper: no test can go on without the binary")]
+#[expect(clippy::expect_used, reason = "test helper: no test can go on without the binary")]
 fn klausscc(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_klausscc"))
         .args(args)

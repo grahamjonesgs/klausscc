@@ -161,7 +161,7 @@ pub(super) fn dmi_answer(raw: &[u8], asked: DmiReq) -> Result<u64> {
 
 #[cfg(test)]
 mod tests {
-    #![allow(clippy::unnested_or_patterns, reason = "the TAP table reads better flat")]
+    #![expect(clippy::unnested_or_patterns, reason = "the TAP table reads better flat")]
     use super::*;
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

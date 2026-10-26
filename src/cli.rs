@@ -26,7 +26,7 @@ pub(crate) const DEFAULT_JTAG_KHZ: u32 = 10_000;
 /// Each field's doc comment is its `--help` text, so it is written for the
 /// terminal rather than as Markdown.
 #[derive(Debug, Parser)]
-#[allow(
+#[expect(
     clippy::doc_markdown,
     clippy::struct_excessive_bools,
     reason = "the field docs are the --help text; the bools are the command line's on/off flags"
@@ -112,7 +112,7 @@ pub(crate) struct Cli {
         num_args = 0..=1,
         value_parser = NonEmptyStringValueParser::new()
     )]
-    #[allow(clippy::option_option, reason = "clap's shape for an optional-valued flag: no -s, a bare -s, or -s PORT")]
+    #[expect(clippy::option_option, reason = "clap's shape for an optional-valued flag: no -s, a bare -s, or -s PORT")]
     pub(crate) serial: Option<Option<String>>,
 
     /// Monitor serial port for UART output after sending (Ctrl+C to stop)

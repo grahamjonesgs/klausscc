@@ -1154,9 +1154,9 @@ mod tests {
     #[test]
     // Convert string to macro with no variables
     fn test_macro_from_string1() {
-        let mut msglist = Diagnostics::new();
+        let mut msg_list = Diagnostics::new();
         let input_line = String::from("$POPALL POP A / POP B");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
+        let macro_result = macro_from_string(&input_line, &mut msg_list);
         assert_eq!(
             macro_result,
             Some(Macro {
@@ -1172,9 +1172,9 @@ mod tests {
     #[test]
     // Convert string to macro with variables
     fn test_macro_from_string2() {
-        let mut msglist = Diagnostics::new();
+        let mut msg_list = Diagnostics::new();
         let input_line = String::from("$POPALL POP %1 / POP %2");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
+        let macro_result = macro_from_string(&input_line, &mut msg_list);
         assert_eq!(
             macro_result,
             Some(Macro {
@@ -1190,9 +1190,9 @@ mod tests {
     #[test]
     // Convert string to macro with comments and spaces before name
     fn test_macro_from_string3() {
-        let mut msglist = Diagnostics::new();
+        let mut msg_list = Diagnostics::new();
         let input_line = String::from("   $POPALL POP %1 / POP %2 //Test Macro");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
+        let macro_result = macro_from_string(&input_line, &mut msg_list);
         assert_eq!(
             macro_result,
             Some(Macro {
@@ -1208,9 +1208,9 @@ mod tests {
     #[test]
     // Convert string to macro with missing variables
     fn test_macro_from_string4() {
-        let mut msglist = Diagnostics::new();
+        let mut msg_list = Diagnostics::new();
         let input_line = String::from("$POPALL POP %3 / POP %2");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
+        let macro_result = macro_from_string(&input_line, &mut msg_list);
         assert_eq!(
             macro_result,
             Some(Macro {
@@ -1222,7 +1222,7 @@ mod tests {
             })
         );
         assert_eq!(
-            msglist.messages()[0].text(),
+            msg_list.messages()[0].text(),
             "Error in macro variable definition for macro $POPALL, missing \"%1\""
         );
     }
@@ -1230,30 +1230,30 @@ mod tests {
     #[test]
     // Convert string to macro with variables not a macro
     fn test_macro_from_string5() {
-        let mut msglist = Diagnostics::new();
+        let mut msg_list = Diagnostics::new();
         let input_line = String::from("POPALL POP %1 / POP %2");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
+        let macro_result = macro_from_string(&input_line, &mut msg_list);
         assert_eq!(macro_result, None);
     }
 
     #[test]
     // Convert string to macro with variables not a macro with dollar in middle
     fn test_macro_from_string6() {
-        let mut msglist = Diagnostics::new();
+        let mut msg_list = Diagnostics::new();
         let input_line = String::from("POP$ALL POP %1 / POP %2");
-        let macro_result = macro_from_string(&input_line, &mut msglist);
+        let macro_result = macro_from_string(&input_line, &mut msg_list);
         assert_eq!(macro_result, None);
     }
 
     #[test]
     // Convert string to macro with missing variables
     fn test_macro_from_string7() {
-        let mut msglist = Diagnostics::new();
+        let mut msg_list = Diagnostics::new();
         let input_line = String::from("$POPALL POP %5 / POP %3");
-        let _macro_result = macro_from_string(&input_line, &mut msglist);
+        let _macro_result = macro_from_string(&input_line, &mut msg_list);
         //assert_eq!(macro_result, None);
         assert_eq!(
-            msglist.messages()[0].text(),
+            msg_list.messages()[0].text(),
             "Error in macro variable definition for macro $POPALL, missing \"%1 %2 %4\"",
         );
     }

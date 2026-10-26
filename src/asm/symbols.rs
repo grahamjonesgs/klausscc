@@ -359,7 +359,7 @@ mod tests {
     #[test]
     // Test that the labels are correctly extracted from the pass1 list
     fn test_get_labels() {
-        let msglist = &mut Diagnostics::new();
+        let msg_list = &mut Diagnostics::new();
         let pass1 = vec![
             Pass1 {
                 program_counter: 0,
@@ -432,20 +432,20 @@ mod tests {
                 line_type: LineType::Label,
             },
         ];
-        let labels = get_labels(&pass1, msglist);
+        let labels = get_labels(&pass1, msg_list);
         assert_eq!(labels.address("label1:"), Some(0));
         assert_eq!(labels.address("label2:"), Some(4));
         assert_eq!(labels.address("label3:"), Some(6));
         assert_eq!(labels.address("#data321"), Some(7));
         assert_eq!(labels.address("test"), None);
         // "label1: dummy" redefines label1 at another address.
-        assert_eq!(msglist.count(MessageType::Error), 1);
+        assert_eq!(msg_list.count(MessageType::Error), 1);
         assert_eq!(
-            msglist.messages()[0].text(),
+            msg_list.messages()[0].text(),
             "Duplicate label label1: found, with differing values, first defined at line 0 in file test"
         );
-        assert_eq!(msglist.messages()[1].text(), "Label label1: has extra text dummy");
-        assert_eq!(msglist.messages()[2].text(), "Data #data123 has extra text dummy2");
-        assert_eq!(msglist.messages()[3].text(), "Data #data3 has no string termination");
+        assert_eq!(msg_list.messages()[1].text(), "Label label1: has extra text dummy");
+        assert_eq!(msg_list.messages()[2].text(), "Data #data123 has extra text dummy2");
+        assert_eq!(msg_list.messages()[3].text(), "Data #data3 has no string termination");
     }
 }
