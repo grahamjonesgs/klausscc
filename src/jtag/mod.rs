@@ -46,7 +46,7 @@ pub(crate) trait Dmi {
 #[derive(Debug)]
 #[cfg_attr(
     not(feature = "board"),
-    allow(dead_code, reason = "without the board feature only the MPSSE tests build these")
+    expect(dead_code, reason = "without the board feature only the MPSSE tests build these")
 )]
 pub(crate) enum JtagError {
     /// libftdi could not allocate a context.

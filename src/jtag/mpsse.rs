@@ -7,7 +7,7 @@
 // Without the `board` feature only the tests below use this module.
 #![cfg_attr(
     not(feature = "board"),
-    allow(dead_code, reason = "only the tests use the framing without the board feature")
+    expect(dead_code, reason = "only the tests use the framing without the board feature")
 )]
 
 use super::{JtagError, Result};

@@ -69,13 +69,13 @@ pub(crate) enum BoardError {
     /// JTAG or the DMI on top of it failed.
     Jtag(JtagError),
     /// The JTAG chain answered with this IDCODE: there is no FPGA on it.
-    #[cfg_attr(not(feature = "board"), allow(dead_code, reason = "only opening the cable finds no FPGA"))]
+    #[cfg_attr(not(feature = "board"), expect(dead_code, reason = "only opening the cable finds no FPGA"))]
     NoFpga {
         /// The IDCODE read (all zeros or all ones).
         idcode: u32,
     },
     /// The FPGA has no `KlaussCPU` debug module on USER3.
-    #[cfg_attr(not(feature = "board"), allow(dead_code, reason = "only opening the cable finds no debug module"))]
+    #[cfg_attr(not(feature = "board"), expect(dead_code, reason = "only opening the cable finds no debug module"))]
     NoDebugModule {
         /// The FPGA's IDCODE.
         idcode: u32,
