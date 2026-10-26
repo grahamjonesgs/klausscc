@@ -152,12 +152,21 @@ fn describe_port(port: &SerialPortInfo) -> String {
 }
 
 /// Describe the serial ports found, for the error when a port will not open.
+///
+/// Only USB ports are listed (the board's UART is one); a Linux host also
+/// has dozens of `ttyS*` ports, which are just counted.
 fn ports_found_message(ports: &[SerialPortInfo]) -> String {
-    let all_ports = ports.iter().map(describe_port).collect::<Vec<_>>().join(",\n");
-    match ports.len() {
-        0 => "no ports were found".to_owned(),
-        1 => format!("only port {all_ports} was found"),
-        count => format!("the following {count} ports were found:\n{all_ports}"),
+    let (usb, other): (Vec<_>, Vec<_>) = ports.iter().partition(|p| matches!(p.port_type, SerialPortType::UsbPort(_)));
+    let listed = usb.iter().map(|p| describe_port(p)).collect::<Vec<_>>().join(",\n");
+    let found = match usb.len() {
+        0 => "no USB serial ports were found".to_owned(),
+        1 => format!("only USB port {listed} was found"),
+        count => format!("the following {count} USB ports were found:\n{listed}"),
+    };
+    match other.len() {
+        0 => found,
+        1 => format!("{found} (and 1 non-USB serial port)"),
+        count => format!("{found} (and {count} non-USB serial ports)"),
     }
 }
 
@@ -225,12 +234,19 @@ mod tests {
     }
 
     #[test]
-    fn ports_found_message_counts_every_port() {
-        assert_eq!(ports_found_message(&[]), "no ports were found");
-        assert_eq!(ports_found_message(&[other("A")]), "only port Non-USB Serial Device A was found");
+    fn ports_found_message_lists_usb_ports_and_counts_the_rest() {
+        assert_eq!(ports_found_message(&[]), "no USB serial ports were found");
+        assert_eq!(
+            ports_found_message(&[other("A")]),
+            "no USB serial ports were found (and 1 non-USB serial port)"
+        );
         assert_eq!(
             ports_found_message(&[other("A"), usb("B", 0x0403, 0x6010)]),
-            "the following 2 ports were found:\nNon-USB Serial Device A,\nUSB Serial Device 0403:6010 B"
+            "only USB port USB Serial Device 0403:6010 B was found (and 1 non-USB serial port)"
+        );
+        assert_eq!(
+            ports_found_message(&[usb("B", 0x0403, 0x6010), other("A"), usb("C", 0x0403, 0x6001), other("D")]),
+            "the following 2 USB ports were found:\nUSB Serial Device 0403:6010 B,\nUSB Serial Device 0403:6001 C (and 2 non-USB serial ports)"
         );
     }
 
@@ -285,7 +301,7 @@ mod tests {
         assert_eq!(
             text,
             [
-                "Error opening serial port COM9, error \"not found\", only port USB Serial Device 0403:6001 COM4 was found",
+                "Error opening serial port COM9, error \"not found\", only USB port USB Serial Device 0403:6001 COM4 was found",
                 "Suggested port COM4"
             ]
         );
@@ -297,6 +313,9 @@ mod tests {
         let mut msgs = Diagnostics::new();
         err.report_open_failure(&mut msgs);
         let text: Vec<String> = msgs.messages().iter().map(|m| m.text().to_owned()).collect();
-        assert_eq!(text, ["Error opening serial port, no FTDI USB serial port found and no ports were found"]);
+        assert_eq!(
+            text,
+            ["Error opening serial port, no FTDI USB serial port found and no USB serial ports were found"]
+        );
     }
 }
