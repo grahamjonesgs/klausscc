@@ -17,8 +17,6 @@ mod diag;
 pub mod emulate;
 /// Module defining the crate error type and exit codes.
 mod error;
-/// Module to manage file read and write.
-mod files;
 /// GDB remote-protocol server for the emulator (`--gdbserver`).
 mod gdbserver;
 /// GDB remote-protocol server for the board (`--gdbserver --board`).
@@ -26,8 +24,6 @@ mod gdbserver;
 mod gdbserver_board;
 /// Module of helper functions.
 mod helper;
-/// The program image and its `.kbt`, DDR and `$readmemh` formats.
-mod image;
 /// The Klauss instruction set: opcode table, encoder and disassembler.
 mod isa;
 /// JTAG over the board's FT2232H, and the debug module's DMI.  The pure MPSSE
@@ -42,6 +38,8 @@ mod loader;
 mod netload;
 /// Module for integer literal parsing.
 mod num;
+/// The files the tool writes: listing, program image and opcode docs.
+mod output;
 /// Module to write to serial and read response.
 mod serial;
 use asm::Assembly;
@@ -54,8 +52,8 @@ use commands::{
 };
 use diag::{Diagnostics, MessageType};
 use error::Error;
-use files::write_code_output_file;
 use isa::Opcode;
+use output::listing::write_code_output_file;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -167,7 +165,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // .kbt input: already in board wire format — send and/or monitor verbatim.
         Mode::SendKbt(input) => run_kbt_send(input, send, msg_list),
         Mode::Opcodes => {
-            use files::output_macros_opcodes_html;
+            use output::docs::output_macros_opcodes_html;
 
             let (oplist, macro_list) = opcode_tables(msg_list);
             let html_result = output_macros_opcodes_html(

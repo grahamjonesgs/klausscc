@@ -6,10 +6,10 @@
 
 use crate::emulate::DEFAULT_MAX_INSTRUCTIONS;
 use crate::error::Error;
-use crate::files::{filename_stem, output_file_name};
 use crate::loader::BinaryInput;
 use crate::netload::NETBOOT_DEFAULT_PORT;
 use crate::num::parse_u32;
+use crate::output::{filename_stem, output_file_name};
 use crate::serial::{AUTO_SERIAL, SerialTarget};
 use clap::Parser;
 use clap::builder::NonEmptyStringValueParser;

@@ -1651,7 +1651,7 @@ pub const fn default_entry() -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::image::build_ddr_image;
+    use crate::output::image::build_ddr_image;
 
     // ---- v2 instruction encoders (word 0) ------------------------------------
     // Register letters A..P map to nibbles 0..15. `word0 = template | rd<<8 | rs1<<4 | rs2`.

@@ -27,7 +27,7 @@ pub(crate) use test_runner::{run_test_list, run_test_mode};
 
 use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
-use crate::files::write_binary_output_file;
+use crate::output::write_binary_output_file;
 use crate::serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port};
 use std::io;
 use std::path::PathBuf;

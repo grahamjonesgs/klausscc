@@ -13,22 +13,26 @@
 //! [`lexer`] the pure text predicates used to classify a source line.  Both
 //! are leaves: they import nothing else from the crate, so every other
 //! assembler module can depend on them without forming a cycle.
+//!
+//! The other stages each have a module: `source` reads the files, `macros`
+//! expands macros and `symbols` holds the labels.
 
 pub(crate) mod lexer;
 pub(crate) mod line;
 pub(crate) mod macros;
 mod pass1;
 mod pass2;
+mod source;
 pub(crate) mod symbols;
 
 use crate::diag::Diagnostics;
-use crate::files::{read_file_to_vector, remove_block_comments};
-use crate::image::{Image, create_bin_string};
 use crate::isa::Opcode;
+use crate::output::image::{Image, create_bin_string};
 use line::{Pass2, SourceLine};
 use macros::{Macro, apply_source_macros, expand_macros};
 use pass1::get_pass1;
 use pass2::get_pass2;
+use source::{read_file_to_vector, remove_block_comments};
 use symbols::{find_duplicate_label, get_labels};
 
 /// One assembled source file.
