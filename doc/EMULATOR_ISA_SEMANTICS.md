@@ -173,8 +173,9 @@ What is left is what the emulator does not model (next section), and
 one corner that was not checked: a 64-bit or sub-word **MMIO** access at
 an address that is not a multiple of 8. The emulator decodes the
 register from the exact address and returns the value in the low bits.
-On the board the device decoder sees the same address, the core picks
-the byte lanes of the reply by `addr[2:0]`, and what a device returns
+On the board the device decoder sees the same address, a sub-word load
+takes its byte lanes from the reply by `addr[2:0]` (a 64-bit load takes
+the reply whole), and what a device returns
 for an address that is not a multiple of 8 depends on its decoder. The
 emulator's devices only have registers at multiples of 8, so such an
 access reads 0 or is ignored.

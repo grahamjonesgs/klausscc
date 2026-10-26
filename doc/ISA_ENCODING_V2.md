@@ -296,8 +296,8 @@ the access size (`& ~1`, `& ~3`), except **MEMGET32**, which reads the 4
 bytes at any address, even across a doubleword boundary. A 64-bit access
 with A=1 is forced to `& ~7`. With A=0 the core sends the address as is,
 but the data cache picks the doubleword from address bits `[4:3]`, so in
-practice every 64-bit access reads or writes the aligned doubleword (see
-`EMULATOR_ISA_SEMANTICS.md` for where the emulator differs).
+practice every 64-bit RAM access reads or writes the aligned doubleword
+(the emulator does the same; see `EMULATOR_ISA_SEMANTICS.md`).
 
 ### 3.7 Stores (class 7) — `mem[EA] = rd` (the rd field is the data source)
 
@@ -611,8 +611,9 @@ and old discussions; the current rules are in §1–§3 and §7.
 The decoder is field-driven (each attribute bit selects behaviour in a
 shared datapath), so these combinations are **architecturally legal**.
 LLVM can emit them. klausscc has no mnemonics for them. The emulator
-executes them, with the differences listed in `EMULATOR_ISA_SEMANTICS.md`.
-Everything not listed here and not in §3 traps.
+executes them as the RTL does (see `EMULATOR_ISA_SEMANTICS.md`).
+Everything not listed here and not in §3 traps, in the RTL and the
+emulator alike.
 
 - **ALU-imm (class 2)**: ADC/SBC with imm32; both SGN values on every OP
   (e.g. sign-extended SUB-imm, zero-extended MOV).
