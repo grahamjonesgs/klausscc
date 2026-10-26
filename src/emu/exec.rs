@@ -586,6 +586,10 @@ impl Cpu {
     }
 
     /// Class A — mul / div / mod.
+    ///
+    /// Flags follow `pipeline_core.sv`: MUL writes Z, S and V (:655-658,
+    /// :1157-1163), DIV and MOD write Z and V (:659-666, :1164-1176), with Z
+    /// from the value written to rd (:1549-1550).
     fn exec_muldiv(&mut self, f: Fields) -> Exec {
         let sgn = f.bit(23);
         let high = f.bit(22); // high half (MUL only)
@@ -595,44 +599,47 @@ impl Cpu {
         let b = if is_imm { ext(f.imm32, sgn) } else { self.regs[f.rs2] };
         match f.field(24, 2) {
             0 => {
-                // MUL
-                let r = if high {
-                    if sgn {
-                        ((i128::from(a as i64) * i128::from(b as i64)) >> 64) as u64
-                    } else {
-                        ((u128::from(a) * u128::from(b)) >> 64) as u64
-                    }
-                } else if sgn {
-                    (a as i64).wrapping_mul(b as i64) as u64
+                // MUL: the full 128-bit product, signed or unsigned per SGN
+                // (:892-899); rd takes its high or low half.
+                let (lo, hi) = if sgn {
+                    let p = i128::from(a as i64) * i128::from(b as i64);
+                    (p as u64, (p >> 64) as u64)
                 } else {
-                    a.wrapping_mul(b)
+                    let p = u128::from(a) * u128::from(b);
+                    (p as u64, (p >> 64) as u64)
                 };
-                // v3 D3 MULW: W [19] on the low-half MUL.
-                self.regs[rd] = if !high && f.bit(19) { sign_extend(r, 4) } else { r };
+                let r = if high { hi } else { lo };
+                // S is bit 63 of that half, before any W sign-extension; V is
+                // set when the low half does not hold the whole product, and
+                // cleared by the high-half forms (:1159-1162).
+                self.flags.set_sign(r >> 63 == 1);
+                let overflow = if sgn { hi != ((lo as i64) >> 63) as u64 } else { hi != 0 };
+                self.flags.set_overflow(!high && overflow);
+                // v3 D3 MULW: W [19] on the low-half MUL; Z follows the W
+                // result (:649, :1333-1334).
+                let r = if !high && f.bit(19) { sign_extend(r, 4) } else { r };
+                self.regs[rd] = self.with_z(r);
             }
-            1 => {
-                // DIV — divide-by-zero → all-ones result, overflow set, zero untouched.
+            kind @ (1 | 2) => {
+                let is_mod = kind == 2;
                 if b == 0 {
-                    self.regs[rd] = u64::MAX;
+                    // Divide by zero does not trap: DIV gives all ones, MOD (every
+                    // form, MODV too) the dividend; only V is written, set
+                    // (:1165-1169).
+                    self.regs[rd] = if is_mod { a } else { u64::MAX };
                     self.flags.set_overflow(true);
-                } else if sgn {
-                    self.regs[rd] = (a as i64).wrapping_div(b as i64) as u64;
                 } else {
-                    self.regs[rd] = a / b;
-                }
-            }
-            2 => {
-                // MOD — mod-by-zero: reg forms write the dividend, MODV writes nothing;
-                // overflow set either way, zero untouched.
-                if b == 0 {
-                    self.flags.set_overflow(true);
-                    if !is_imm {
-                        self.regs[rd] = a;
-                    }
-                } else if sgn {
-                    self.regs[rd] = (a as i64).wrapping_rem(b as i64) as u64;
-                } else {
-                    self.regs[rd] = a % b;
+                    // Signed division truncates toward zero and INT_MIN / -1
+                    // gives INT_MIN (INT_MIN % -1 = 0), as the RTL's
+                    // magnitude divider does (:923-924, :1170-1175).
+                    let r = match (is_mod, sgn) {
+                        (false, true) => (a as i64).wrapping_div(b as i64) as u64,
+                        (false, false) => a / b,
+                        (true, true) => (a as i64).wrapping_rem(b as i64) as u64,
+                        (true, false) => a % b,
+                    };
+                    self.flags.set_overflow(false);
+                    self.regs[rd] = self.with_z(r);
                 }
             }
             _ => return Err(Illegal),

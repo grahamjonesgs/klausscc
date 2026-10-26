@@ -161,7 +161,7 @@ fn test_muldiv_family() {
     // MULV signed: A=10, MULV A 5 -> 50.
     let cpu = run_words(&[0x8BD0_0000, 10, 0xA880_0000, 5, HALT]);
     assert_eq!(cpu.regs[0] as u32, 50);
-    // MODV by 0 -> NO writeback (A stays 17), overflow set.
+    // MODV by 0 -> the dividend (A stays 17), overflow set.
     let cpu = run_words(&[0x8BD0_0000, 17, 0xAA80_0000, 0, HALT]);
     assert_eq!(cpu.regs[0] as u32, 17);
     assert!(cpu.flags.overflow());
@@ -1092,4 +1092,79 @@ fn getf_with_f_sets_z_from_the_saved_word() {
         let cpu = exec_one(unary(12, 0, false, 2, 0), 0, 0, before);
         assert_eq!(cpu.debug_regs().flags, before, "{before:04b} without F");
     }
+}
+
+/// A 1-word class-A word: KIND `[25:24]` (0 MUL, 1 DIV, 2 MOD), SGN `[23]`,
+/// HIGH `[22]` and W `[19]`.
+const fn muldiv(kind: u32, sgn: bool, high: bool, w: bool, rd: u32, rs1: u32, rs2: u32) -> u32 {
+    0x6800_0000 | (kind << 24) | ((sgn as u32) << 23) | ((high as u32) << 22) | ((w as u32) << 19) | (rd << 8) | (rs1 << 4) | rs2
+}
+
+#[test]
+fn mul_family_writes_z_s_v() {
+    // pipeline_core.sv:655-658 (fmask Z S V), :1157-1163: S = bit 63 of the
+    // half written (before W), V = the low half lost product bits, cleared
+    // by the high-half forms; Z from the value written (:1549-1550).
+    const MIN: u64 = 1 << 63;
+    let neg = |v: i64| v as u64;
+    // (sgn, high, w, a, b, result, ZSCV after from C and V set)
+    let table = [
+        (false, false, false, 3, 5, 15, 0b0010),                   // MULUR
+        (false, false, false, 0, 5, 0, 0b1010),                    // Z
+        (false, false, false, MIN, 2, 0, 0b1011),                  // lost bit: V
+        (false, false, false, 1 << 62, 2, MIN, 0b0110),            // fits unsigned: S, no V
+        (true, false, false, neg(-3), 5, neg(-15), 0b0110),        // MULR
+        (true, false, false, 1 << 62, 2, MIN, 0b0111),             // signed overflow
+        (true, false, false, MIN, neg(-1), MIN, 0b0111),           // INT_MIN * -1
+        (false, true, false, u64::MAX, u64::MAX, neg(-2), 0b0110), // MULHUR: V cleared
+        (false, true, false, 2, 3, 0, 0b1010),
+        (true, true, false, neg(-1), 1, u64::MAX, 0b0110),                  // MULHR
+        (true, false, true, 0x8000_0000, 1, 0xFFFF_FFFF_8000_0000, 0b0010), // MULW: S from bit 63
+        (true, false, true, 1 << 32, 1, 0, 0b1010),                         // Z from the W result
+        (true, false, true, MIN, 1, 0, 0b1110),
+        (true, false, true, 1 << 62, 4, 0, 0b1011), // V from the 64-bit product
+    ];
+    for (sgn, high, w, a, b, want, zscv) in table {
+        let cpu = exec_one(muldiv(0, sgn, high, w, 2, 0, 1), a, b, 0b0011);
+        assert_eq!(cpu.regs[2], want, "sgn {sgn} high {high} w {w}: {a:#x} * {b:#x}");
+        assert_eq!(cpu.debug_regs().flags, zscv, "sgn {sgn} high {high} w {w}: {a:#x} * {b:#x}");
+    }
+}
+
+#[test]
+fn div_and_mod_write_z_and_v() {
+    // pipeline_core.sv:659-666 (fmask Z V), :1164-1176: a non-zero divisor
+    // clears V and writes Z; divide by zero writes only V = 1, with DIV
+    // giving all ones and MOD the dividend.
+    const MIN: u64 = 1 << 63;
+    let neg = |v: i64| v as u64;
+    // (kind, sgn, a, b, flags before, result, flags after)
+    let table = [
+        (1, false, 10, 3, 0b1111, 3, 0b0110),
+        (1, false, 2, 3, 0b0001, 0, 0b1000),
+        (1, true, neg(-7), 2, 0b1001, neg(-3), 0b0000),
+        (1, true, MIN, neg(-1), 0b0000, MIN, 0b0000),
+        (2, true, MIN, neg(-1), 0b0001, 0, 0b1000),
+        (2, true, neg(-7), 2, 0b0000, neg(-1), 0b0000),
+        (2, false, 9, 3, 0b0000, 0, 0b1000),
+        (1, false, 5, 0, 0b1000, u64::MAX, 0b1001), // Z kept
+        (1, true, 5, 0, 0b0110, u64::MAX, 0b0111),
+        (2, false, 5, 0, 0b0000, 5, 0b0001),
+        (2, true, 0, 0, 0b0000, 0, 0b0001), // Z not written from the dividend
+    ];
+    for (kind, sgn, a, b, before, want, after) in table {
+        let cpu = exec_one(muldiv(kind, sgn, false, false, 2, 0, 1), a, b, before);
+        assert_eq!(cpu.regs[2], want, "kind {kind} sgn {sgn}: {a:#x}, {b:#x}");
+        assert_eq!(cpu.debug_regs().flags, after, "kind {kind} sgn {sgn}: {a:#x}, {b:#x}");
+    }
+}
+
+#[test]
+fn modv_by_zero_writes_the_dividend_to_rd() {
+    // The 2-word MOD by zero also writes rs1 to rd (pipeline_core.sv:653,
+    // :1166), so MODV with rd != rs1 copies the dividend.  SETR A 17 ;
+    // SETR C 99 ; MODV C <- A % 0.
+    let cpu = run_words(&[0x8BD0_0000, 17, 0x8BD0_0200, 99, 0xAA80_0200, 0, HALT]);
+    assert_eq!(cpu.regs[2], 17);
+    assert!(cpu.flags.overflow());
 }
