@@ -18,9 +18,10 @@ macro_rules! impl_host_process_info {
     ($target:ty) => {
         impl gdbstub::target::ext::host_info::HostInfo for $target {
             fn host_info(&self, write_item: &mut dyn FnMut(&gdbstub::target::ext::host_info::HostInfoResponse<'_>)) -> Result<(), Self::Error> {
+                use gdbstub::common::Endianness;
                 use gdbstub::target::ext::host_info::HostInfoResponse;
                 write_item(&HostInfoResponse::Triple($crate::debug::arch::TRIPLE));
-                write_item(&HostInfoResponse::Endianness(gdbstub::common::Endianness::Little));
+                write_item(&HostInfoResponse::Endianness(Endianness::Little));
                 write_item(&HostInfoResponse::PointerSize(4));
                 Ok(())
             }
@@ -31,12 +32,13 @@ macro_rules! impl_host_process_info {
                 &self,
                 write_item: &mut dyn FnMut(&gdbstub::target::ext::process_info::ProcessInfoResponse<'_>),
             ) -> Result<(), Self::Error> {
+                use gdbstub::common::{Endianness, Pid};
                 use gdbstub::target::ext::process_info::ProcessInfoResponse;
-                if let Some(pid) = gdbstub::common::Pid::new(1) {
+                if let Some(pid) = Pid::new(1) {
                     write_item(&ProcessInfoResponse::Pid(pid));
                 }
                 write_item(&ProcessInfoResponse::Triple($crate::debug::arch::TRIPLE));
-                write_item(&ProcessInfoResponse::Endianness(gdbstub::common::Endianness::Little));
+                write_item(&ProcessInfoResponse::Endianness(Endianness::Little));
                 write_item(&ProcessInfoResponse::PointerSize(4));
                 Ok(())
             }

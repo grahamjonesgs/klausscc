@@ -26,7 +26,7 @@
 
 use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD};
 use super::{GdbError, RunEvent, Session, accept, mmio_monitor_cmd, run_session, session_summary};
-use crate::emu::{Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
+use crate::emu::{CYCLES_PER_MS, Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
 use crate::layout::is_mmio;
 use gdbstub::common::Signal;
 use gdbstub::stub::SingleThreadStopReason;
@@ -220,7 +220,7 @@ impl MonitorCmd for EmuTarget {
                     st.timer_period,
                     st.timer_count,
                     st.cycles,
-                    st.cycles / 100_000
+                    st.cycles / CYCLES_PER_MS
                 );
             }
             _ if mmio_monitor_cmd(cmd, &mut self.allow_mmio, &mut out) => {}

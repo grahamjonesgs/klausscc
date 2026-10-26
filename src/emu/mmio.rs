@@ -1,10 +1,8 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
 //! the performance counters.
 
-use super::Cpu;
+use super::{CYCLES_PER_MS, Cpu};
 
-/// `i_Clk` cycles per millisecond (100 MHz).
-const CYCLES_PER_MS: u64 = 100_000;
 /// Interrupt controller / timer device select (`addr[27:16]`).
 const IRQ_DEV_SELECT: u32 = 0x00F;
 /// Performance-counter device select (`addr[27:16]`).

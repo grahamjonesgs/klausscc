@@ -68,6 +68,9 @@ use std::collections::VecDeque;
 /// the cycle counter).  The emulator is not cycle-accurate; this only sets how
 /// fast time passes relative to the instruction stream.
 pub const CYCLES_PER_INSTRUCTION: u64 = 2;
+/// `i_Clk` cycles per millisecond (100 MHz): the millisecond clock, and how
+/// [`IrqState::cycles`] converts to time.
+pub const CYCLES_PER_MS: u64 = 100_000;
 /// `TIMER_PERIOD` reset value (~10.5 ms at 100 MHz).
 const TIMER_PERIOD_RESET: u32 = 0x000F_FFFF;
 /// Default instruction-count cap to guard against runaway / infinite loops.
