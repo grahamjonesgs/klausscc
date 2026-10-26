@@ -12,6 +12,7 @@ use crate::debug::GdbError;
 #[cfg(feature = "board")]
 use crate::debug::board::BoardError;
 use crate::link::netload::NetbootError;
+use crate::link::serial::SerialError;
 use std::fmt;
 use std::io;
 use std::path::PathBuf;
@@ -48,10 +49,10 @@ pub(crate) enum Error {
     /// Sending to the board over its serial port, or monitoring its UART
     /// there, failed.
     Serial {
-        /// The serial port name as given (or auto-detected).
+        /// The serial port as given.
         port: String,
-        /// The underlying I/O error.
-        source: io::Error,
+        /// Why the port could not be opened or used.
+        source: SerialError,
     },
     /// Reading the board's UART output over its serial port failed during a test.
     SerialRead {
@@ -112,7 +113,7 @@ impl fmt::Display for Error {
             Self::Read { path, source } => write!(f, "cannot read {}: {source}", path.display()),
             Self::Write { path, source } => write!(f, "cannot write {}: {source}", path.display()),
             Self::Elf(path) => write!(f, "failed to extract LOAD segments from ELF file {}", path.display()),
-            Self::Serial { port, source } => write!(f, "failed to write to serial port {port}: {source}"),
+            Self::Serial { port, source } => write!(f, "failed to use serial port {port}: {source}"),
             Self::SerialRead { port, source } => write!(f, "failed to read from serial port {port}: {source}"),
             Self::Netboot(err) => write!(f, "netboot failed: {err}"),
             Self::Gdb(err) => write!(f, "gdbserver: {err}"),
@@ -131,11 +132,8 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Read { source, .. }
-            | Self::Write { source, .. }
-            | Self::Serial { source, .. }
-            | Self::SerialRead { source, .. }
-            | Self::OpcodeList(source) => Some(source),
+            Self::Serial { source, .. } => Some(source),
+            Self::Read { source, .. } | Self::Write { source, .. } | Self::SerialRead { source, .. } | Self::OpcodeList(source) => Some(source),
             Self::Netboot(err) => Some(err),
             Self::Gdb(err) => Some(err),
             #[cfg(feature = "board")]
@@ -205,7 +203,7 @@ mod tests {
             Error::Elf(PathBuf::from("a.elf")),
             Error::Serial {
                 port: "/dev/null".to_owned(),
-                source: io::Error::from(io::ErrorKind::TimedOut),
+                source: SerialError::Io(io::Error::from(io::ErrorKind::TimedOut)),
             },
             Error::SerialRead {
                 port: "/dev/null".to_owned(),

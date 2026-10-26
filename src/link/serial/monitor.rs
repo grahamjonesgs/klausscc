@@ -1,12 +1,13 @@
 //! The serial monitor: print what the board sends and forward keystrokes to it.
 
-use super::port::return_port;
+use super::SerialTarget;
+use super::port::{SerialError, open_port};
 use crate::diag::Diagnostics;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use serialport::SerialPort;
 use std::borrow::Cow;
 use std::fmt::Write as _;
-use std::io::{self, Error, Write as _};
+use std::io::{self, Write as _};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -48,8 +49,8 @@ fn print_bytes(data: &[u8], debug: bool) {
 /// Continuously reads from the serial port and prints received data to stdout.
 /// Runs until the user presses Ctrl+C, then closes the port cleanly.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub(crate) fn monitor_serial(port_name: &str, debug: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
-    let port = return_port(port_name, msg_list)?;
+pub(crate) fn monitor_serial(target: SerialTarget<'_>, debug: bool, msg_list: &mut Diagnostics) -> Result<(), SerialError> {
+    let port = open_port(target, msg_list)?;
     monitor_serial_port(port, debug, msg_list)
 }
 
@@ -183,10 +184,10 @@ fn flush_stdin() {
 
 /// Monitor an already-open serial port for incoming UART data.
 ///
-/// Used after `write_to_board_keep_port` to continue reading from the same port
+/// Used after `write_to_board` to continue reading from the same port
 /// that was used to upload the program, ensuring no UART output is missed.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut Diagnostics) -> Result<(), SerialError> {
     port.set_timeout(MONITOR_READ_TIMEOUT)?;
 
     let running = Arc::new(AtomicBool::new(true));
@@ -229,7 +230,7 @@ pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, ms
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
                 msg_list.error(format!("Serial monitor error: \"{err}\""));
-                return Err(err);
+                return Err(err.into());
             }
         }
     }

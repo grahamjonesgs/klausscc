@@ -7,38 +7,53 @@ mod uart_test;
 mod upload;
 
 pub(crate) use monitor::{monitor_serial, monitor_serial_port};
+pub(crate) use port::SerialError;
 pub(crate) use uart_test::{TestResult, hex_token, parse_expected_uart_values, run_test_monitor};
-pub(crate) use upload::{write_to_board, write_to_board_keep_port};
+pub(crate) use upload::{AwaitAck, ResetMethod, write_to_board};
 
-/// Used to define if a port request was not defined so is for auto.
-pub(crate) const AUTO_SERIAL: &str = "auto_serial_requested";
+use std::fmt;
 
 /// The serial port `-s` names.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum SerialTarget {
-    /// `-s` with no port: use the first USB serial port found.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SerialTarget<'a> {
+    /// `-s` with no port: use the board's FTDI USB-UART, if one is found.
     Auto,
     /// The named port.
-    Port(String),
+    Port(&'a str),
 }
 
-impl SerialTarget {
-    /// The port name the serial functions take: the port's name, or
-    /// [`AUTO_SERIAL`] to auto-detect.
-    pub(crate) fn port_name(&self) -> &str {
+impl<'a> SerialTarget<'a> {
+    /// The target a `-s` option asks for: `None` for no `-s`, `Some(None)`
+    /// for a bare `-s` and `Some(Some(name))` for `-s name`.
+    pub(crate) fn from_option(option: Option<&'a Option<String>>) -> Option<Self> {
+        option.map(|name| name.as_deref().map_or(Self::Auto, Self::Port))
+    }
+}
+
+impl fmt::Display for SerialTarget<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Auto => AUTO_SERIAL,
-            Self::Port(name) => name,
+            Self::Auto => f.write_str("(auto-detected)"),
+            Self::Port(name) => f.write_str(name),
         }
     }
+}
 
-    /// Parse a `-s` value.  [`AUTO_SERIAL`], which a bare `-s` stands for,
-    /// asks for auto-detection; an empty port name is an error.
-    pub(crate) fn parse(value: &str) -> Result<Self, &'static str> {
-        match value {
-            "" => Err("the serial port name is empty"),
-            AUTO_SERIAL => Ok(Self::Auto),
-            name => Ok(Self::Port(name.to_owned())),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serial_target_follows_the_s_option() {
+        assert_eq!(SerialTarget::from_option(None), None);
+        assert_eq!(SerialTarget::from_option(Some(&None)), Some(SerialTarget::Auto));
+        let name = Some("COM3".to_owned());
+        assert_eq!(SerialTarget::from_option(Some(&name)), Some(SerialTarget::Port("COM3")));
+    }
+
+    #[test]
+    fn serial_target_displays_the_port() {
+        assert_eq!(SerialTarget::Port("/dev/ttyUSB1").to_string(), "/dev/ttyUSB1");
+        assert_eq!(SerialTarget::Auto.to_string(), "(auto-detected)");
     }
 }

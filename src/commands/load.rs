@@ -7,7 +7,7 @@ use crate::error::Error;
 use crate::isa::disasm::disassemble_flat_to_pass2;
 use crate::layout::CODE_BASE;
 use crate::link::netload::net_load;
-use crate::link::serial::AUTO_SERIAL;
+use crate::link::serial::SerialTarget;
 use crate::loader::{BinaryInput, load_flat};
 use crate::output::image::readmemh;
 use crate::output::listing::write_code_output_file;
@@ -76,10 +76,16 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
 /// - **Flat binary**: bytes are used verbatim; entry point comes from `--entry`
 ///   (defaults to `0x20` if not given).
 ///
-/// The resulting wire string is written to a `.kbt` file or, when `send` names a
-/// serial port, sent to the board exactly like the normal assembly path.
+/// The resulting wire string is written to a `.kbt` file or, when `port` is
+/// given, sent to the board over it exactly like the normal assembly path.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_elf2serial(input: BinaryInput<'_>, kbt_file_name: &str, send: SendOpts<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn run_elf2serial(
+    input: BinaryInput<'_>,
+    kbt_file_name: &str,
+    port: Option<SerialTarget<'_>>,
+    send: SendOpts,
+    msg_list: &mut Diagnostics,
+) -> Result<(), Error> {
     let binary_path = input.path;
     // load_flat converts the ELF entry point to a board byte address: the
     // flat buffer starts at ELF VMA `elf_base` but is loaded by the board
@@ -109,13 +115,13 @@ pub(crate) fn run_elf2serial(input: BinaryInput<'_>, kbt_file_name: &str, send: 
      * the image is sent straight from memory (`out`), so writing these (large)
      * files just adds several seconds for no benefit. */
     let mut outcome: Result<(), Error> = Ok(());
-    if send.port.is_empty() {
+    if port.is_none() {
         outcome = write_binary_file(msg_list, kbt_file_name, &out);
     }
 
     // Optionally produce a .code disassembly listing alongside the .kbt, using
     // the built-in ISA-v2 opcode table.  (Skipped for a serial load — see above.)
-    if send.port.is_empty() {
+    if port.is_none() {
         let opcodes = crate::isa::table::v2_opcodes();
         let code_file_name = {
             let stem = kbt_file_name.strip_suffix(".kbt").unwrap_or(kbt_file_name);
@@ -133,8 +139,8 @@ pub(crate) fn run_elf2serial(input: BinaryInput<'_>, kbt_file_name: &str, send: 
         return outcome.and(Err(Error::Assembly(error_count)));
     }
 
-    if !send.port.is_empty() {
-        outcome = send_image(&out, send, msg_list);
+    if let Some(port) = port {
+        outcome = send_image(&out, port, send, msg_list);
     }
     outcome
 }
@@ -146,7 +152,7 @@ pub(crate) fn run_elf2serial(input: BinaryInput<'_>, kbt_file_name: &str, send: 
 /// file and no re-encoding.  With `-m` and no `-s`, the serial port is
 /// auto-detected so a bare `-m` can both send and monitor.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn run_kbt_send(kbt_path: &str, port: Option<SerialTarget<'_>>, send: SendOpts, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let wire = match fs::read_to_string(kbt_path) {
         Ok(contents) => contents,
         Err(e) => {
@@ -160,18 +166,13 @@ pub(crate) fn run_kbt_send(kbt_path: &str, send: SendOpts<'_>, msg_list: &mut Di
     let wire_trimmed = wire.trim();
 
     // A bare `-m` with no `-s` should still send: auto-detect the serial port.
-    let send = if send.port.is_empty() && send.monitor {
-        SendOpts { port: AUTO_SERIAL, ..send }
-    } else {
-        send
-    };
-
-    if send.port.is_empty() {
+    let port = port.or(send.monitor.then_some(SerialTarget::Auto));
+    let Some(port) = port else {
         msg_list.warning("Nothing to do: a .kbt input needs a serial port (-s) to send or -m to monitor");
         return Ok(());
-    }
+    };
 
     msg_list.info(format!("Sending pre-built image {kbt_path} to board"));
 
-    send_image(wire_trimmed, send, msg_list)
+    send_image(wire_trimmed, port, send, msg_list)
 }

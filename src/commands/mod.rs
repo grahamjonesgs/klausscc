@@ -27,53 +27,58 @@ pub(crate) use test_runner::{run_test_list, run_test_mode};
 
 use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
-use crate::link::serial::{monitor_serial, monitor_serial_port, write_to_board, write_to_board_keep_port};
+use crate::link::serial::{AwaitAck, ResetMethod, SerialError, SerialTarget, monitor_serial, monitor_serial_port, write_to_board};
 use crate::output::write_binary_output_file;
-use std::io;
 use std::path::PathBuf;
 
 /// Monitor the board's UART on `port` (and forward keystrokes) until the user quits.
 ///
 /// A monitor that stops on an error is reported and returned as [`Error::Serial`].
 #[cfg(not(tarpaulin_include))] // Cannot test serial hardware in tarpaulin
-pub(crate) fn monitor(port: &str, debug: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn monitor(port: SerialTarget<'_>, debug: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
     monitor_serial(port, debug, msg_list).map_err(|err| monitor_failed(port, err, msg_list))
 }
 
 /// Report that the serial monitor stopped on an error, and make it the command's failure.
 #[cfg(not(tarpaulin_include))]
-fn monitor_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics) -> Error {
-    msg_list.warning(format!("Serial monitor stopped: \"{err}\""));
+fn monitor_failed(port: SerialTarget<'_>, err: SerialError, msg_list: &mut Diagnostics) -> Error {
+    if let SerialError::Io(io_err) = &err {
+        msg_list.warning(format!("Serial monitor stopped: \"{io_err}\""));
+    } else {
+        err.report_open_failure(msg_list);
+    }
     Error::Serial {
-        port: port.to_owned(),
+        port: port.to_string(),
         source: err,
     }
 }
 
 /// Report a failed send to the board's serial port, and make it the command's failure.
 #[cfg(not(tarpaulin_include))]
-fn send_failed(port: &str, err: io::Error, msg_list: &mut Diagnostics) -> Error {
-    msg_list.error(format!("Failed to write to serial port, error \"{err}\""));
+fn send_failed(port: SerialTarget<'_>, err: SerialError, msg_list: &mut Diagnostics) -> Error {
+    if let SerialError::Io(io_err) = &err {
+        msg_list.error(format!("Failed to write to serial port, error \"{io_err}\""));
+    } else {
+        err.report_open_failure(msg_list);
+    }
     Error::Serial {
-        port: port.to_owned(),
+        port: port.to_string(),
         source: err,
     }
 }
 
-/// Where and how to send a `.kbt` wire image to the board.
+/// How to send a `.kbt` wire image to the board.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct SendOpts<'a> {
-    /// Serial port name (`-s`) or [`AUTO_SERIAL`](crate::link::serial::AUTO_SERIAL); empty means do not send.
-    pub(crate) port: &'a str,
-    /// Send a break first, so the board resets into its loader (no `-n`).
-    pub(crate) send_break: bool,
+pub(crate) struct SendOpts {
+    /// How to reset the board into its loader first (`-n` sends `S` rather than a break).
+    pub(crate) reset: ResetMethod,
     /// Keep the port open and monitor the board's UART afterwards (`-m`).
     pub(crate) monitor: bool,
     /// Show the bytes the monitor receives (`-d`).
     pub(crate) debug: bool,
 }
 
-/// Send the `.kbt` wire string `wire` to the board over `opts.port`.
+/// Send the `.kbt` wire string `wire` to the board over `port`.
 ///
 /// With `opts.monitor` the port stays open: once the image is sent the run
 /// summary is printed and the board's UART is monitored until the user quits,
@@ -81,15 +86,15 @@ pub(crate) struct SendOpts<'a> {
 /// the image is sent.  A failed send is reported and returned as
 /// [`Error::Serial`].
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn send_image(wire: &str, port: SerialTarget<'_>, opts: SendOpts, msg_list: &mut Diagnostics) -> Result<(), Error> {
     if opts.monitor {
-        return match write_to_board_keep_port(wire, opts.port, opts.send_break, true, msg_list) {
-            Ok(port) => {
+        return match write_to_board(wire, port, opts.reset, AwaitAck::Skip, msg_list) {
+            Ok(open) => {
                 msg_list.info("Wrote to serial port");
                 msg_list.print_summary();
-                monitor_serial_port(port, opts.debug, msg_list).map_err(|err| monitor_failed(opts.port, err, msg_list))
+                monitor_serial_port(open, opts.debug, msg_list).map_err(|err| monitor_failed(port, err, msg_list))
             }
-            Err(err) => Err(send_failed(opts.port, err, msg_list)),
+            Err(err) => Err(send_failed(port, err, msg_list)),
         };
     }
 
@@ -98,12 +103,12 @@ pub(crate) fn send_image(wire: &str, opts: SendOpts<'_>, msg_list: &mut Diagnost
         msg_list.warning("Not writing to serial port due to assembly errors");
         return Err(Error::Assembly(error_count));
     }
-    match write_to_board(wire, opts.port, opts.send_break, msg_list) {
-        Ok(()) => {
+    match write_to_board(wire, port, opts.reset, AwaitAck::Wait, msg_list) {
+        Ok(_) => {
             msg_list.info("Wrote to serial port");
             Ok(())
         }
-        Err(err) => Err(send_failed(opts.port, err, msg_list)),
+        Err(err) => Err(send_failed(port, err, msg_list)),
     }
 }
 

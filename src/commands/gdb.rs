@@ -9,6 +9,8 @@ use crate::diag::Diagnostics;
 use crate::emu;
 use crate::error::Error;
 use crate::layout::CODE_BASE;
+#[cfg(feature = "board")]
+use crate::link::serial::SerialTarget;
 use crate::loader::{BinaryInput, Loaded, load_flat};
 
 /// Debug an ELF (or flat binary) on the emulator over the GDB remote protocol.
@@ -56,7 +58,8 @@ pub(crate) fn run_gdbserver_board(
     port: u16,
     jtag_khz: u32,
     kbt_file_name: &str,
-    send: SendOpts<'_>,
+    serial: Option<SerialTarget<'_>>,
+    send: SendOpts,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     use crate::debug::board::{self, BoardError};
@@ -68,9 +71,7 @@ pub(crate) fn run_gdbserver_board(
     let (mut board, desc) = board::Board::open(jtag_khz).map_err(fail)?;
     eprintln!("klausscc gdbserver: {desc}");
 
-    let pc = if send.port.is_empty() {
-        board::attach(&mut board, None).map_err(fail)?
-    } else {
+    let pc = if let Some(serial) = serial {
         // Load only: the debugger, not the serial monitor, takes over after.
         let send = SendOpts {
             monitor: false,
@@ -78,15 +79,17 @@ pub(crate) fn run_gdbserver_board(
             ..send
         };
         let mut load = || {
-            let loaded = run_elf2serial(input, kbt_file_name, send, msg_list);
+            let loaded = run_elf2serial(input, kbt_file_name, Some(serial), send, msg_list);
             msg_list.print_summary();
             loaded.map_err(|err| BoardError::Load {
                 path: input.path.to_owned(),
-                port: send.port.to_owned(),
+                port: serial.to_string(),
                 source: Box::new(err),
             })
         };
         board::attach(&mut board, Some(&mut load)).map_err(fail)?
+    } else {
+        board::attach(&mut board, None).map_err(fail)?
     };
     eprintln!("klausscc gdbserver: core 1 halted at 0x{pc:08X}");
     msg_list.print_summary();

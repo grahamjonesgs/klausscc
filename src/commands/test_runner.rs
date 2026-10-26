@@ -7,7 +7,7 @@ use crate::asm::macros;
 use crate::diag::{Diagnostics, print_messages};
 use crate::error::Error;
 use crate::isa::Opcode;
-use crate::link::serial::{TestResult, parse_expected_uart_values, run_test_monitor, write_to_board_keep_port};
+use crate::link::serial::{AwaitAck, ResetMethod, SerialTarget, TestResult, parse_expected_uart_values, run_test_monitor, write_to_board};
 use crate::output::filename_stem;
 use crate::output::listing::write_code_output_file;
 use std::fs;
@@ -41,10 +41,10 @@ enum Outcome {
 pub(crate) fn run_test_mode(
     msg_list: &mut Diagnostics,
     bin_string: &str,
-    output_serial_port: &str,
+    port: SerialTarget<'_>,
     input_file_name: &str,
     test_timeout: Duration,
-    send_break: bool,
+    reset: ResetMethod,
 ) -> Result<(), Error> {
     // Parse expected values from the raw source file
     let raw_lines: Vec<String> = match fs::read_to_string(input_file_name) {
@@ -68,12 +68,12 @@ pub(crate) fn run_test_mode(
     msg_list.info(format!("Found {expected_count} expected UART values in source comments"));
 
     // Send to board and keep port open
-    let open = match write_to_board_keep_port(bin_string, output_serial_port, send_break, false, msg_list) {
+    let open = match write_to_board(bin_string, port, reset, AwaitAck::Wait, msg_list) {
         Ok(open) => {
             msg_list.info("Wrote to serial port");
             open
         }
-        Err(err) => return Err(send_failed(output_serial_port, err, msg_list)),
+        Err(err) => return Err(send_failed(port, err, msg_list)),
     };
 
     msg_list.print_summary();
@@ -81,7 +81,7 @@ pub(crate) fn run_test_mode(
     // Run test verification.  A serial read error is a failure of its own
     // (exit 1), not a timeout (exit 3); run_test_monitor has reported it.
     let result = run_test_monitor(open, &expected_values, test_timeout, msg_list).map_err(|err| Error::SerialRead {
-        port: output_serial_port.to_owned(),
+        port: port.to_string(),
         source: err,
     })?;
 
@@ -168,9 +168,9 @@ pub(crate) fn run_test_list(
     oplist: &[Opcode],
     macro_list: &[macros::Macro],
     list_file: &str,
-    output_serial_port: &str,
+    port: SerialTarget<'_>,
     test_timeout: Duration,
-    send_break: bool,
+    reset: ResetMethod,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     let test_files = read_test_list(list_file, msg_list);
@@ -237,7 +237,7 @@ pub(crate) fn run_test_list(
         }
 
         // Send to board and keep port open
-        let open = match write_to_board_keep_port(&bin_string, output_serial_port, send_break, false, &mut test_msg_list) {
+        let open = match write_to_board(&bin_string, port, reset, AwaitAck::Wait, &mut test_msg_list) {
             Ok(open) => open,
             Err(err) => {
                 println!("  SKIP: serial port error \"{err}\"");

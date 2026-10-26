@@ -46,6 +46,7 @@ use commands::{
 use diag::{Diagnostics, MessageType};
 use error::Error;
 use isa::Opcode;
+use link::serial::SerialTarget;
 use output::listing::write_code_output_file;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -101,9 +102,9 @@ pub fn run() -> ExitCode {
 /// Call the handler for `mode`; the other options come from `cli`.
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
+    let serial = cli.serial();
     let send = SendOpts {
-        port: cli.serial_port(),
-        send_break: !cli.no_break,
+        reset: cli.reset_method(),
         monitor: cli.monitor,
         debug: cli.debug,
     };
@@ -111,10 +112,14 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // Monitor-only mode: `-m` on its own (optionally with `-s`) just opens
         // the serial monitor.  With no `-s` the first USB serial port is
         // auto-detected.
-        Mode::Monitor => monitor(cli.monitor_port(), cli.debug, msg_list),
+        Mode::Monitor(port) => monitor(port, cli.debug, msg_list),
         // net-load mode: flatten an ELF (or take a flat binary) and stream it
         // to the board over TCP — no kbt, no UART. See NETBOOT_PLAN.md / netboot.c.
-        Mode::NetLoad { input, ip } => {
+        Mode::NetLoad {
+            input,
+            ip,
+            monitor: monitor_port,
+        } => {
             run_netload(cli.binary_input(input), ip, cli.port, msg_list)?;
 
             /* After a successful net-load, optionally monitor the board's UART
@@ -123,9 +128,9 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
              * given, otherwise auto-detect the first USB serial port (same as
              * -s with no value).  The load's summary comes first, as the
              * monitor runs until the user quits. */
-            if cli.monitor {
+            if let Some(port) = monitor_port {
                 msg_list.print_summary();
-                monitor(cli.monitor_port(), cli.debug, msg_list)?;
+                monitor(port, cli.debug, msg_list)?;
             }
             Ok(())
         }
@@ -144,10 +149,10 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
             ref kbt,
         } => {
             #[cfg(feature = "board")]
-            return commands::run_gdbserver_board(cli.binary_input(input), port, cli.jtag_khz, kbt, send, msg_list);
+            return commands::run_gdbserver_board(cli.binary_input(input), port, cli.jtag_khz, kbt, serial, send, msg_list);
             #[cfg(not(feature = "board"))]
             {
-                let _ = (input, port, kbt);
+                let _ = (input, port, kbt, serial);
                 Err(commands::board_unsupported(msg_list))
             }
         }
@@ -155,9 +160,9 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
             input, port, board: false, ..
         } => run_gdbserver(cli.binary_input(input), port, msg_list),
         Mode::EmulateBinary { input, trace } => run_emulate_elf(cli.binary_input(input), trace, cli.max_instructions, msg_list),
-        Mode::SendBinary { input, ref kbt } => run_elf2serial(cli.binary_input(input), kbt, send, msg_list),
+        Mode::SendBinary { input, ref kbt } => run_elf2serial(cli.binary_input(input), kbt, serial, send, msg_list),
         // .kbt input: already in board wire format — send and/or monitor verbatim.
-        Mode::SendKbt(input) => run_kbt_send(input, send, msg_list),
+        Mode::SendKbt(input) => run_kbt_send(input, serial, send, msg_list),
         Mode::Opcodes => {
             use output::docs::output_macros_opcodes_html;
 
@@ -181,10 +186,10 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
             run_emulate_test(&oplist, &macro_list, path, cli.max_instructions, msg_list)
         }
         // Batch test list mode.
-        Mode::TestList(path) => {
+        Mode::TestList { list, port } => {
             let (oplist, macro_list) = opcode_tables(msg_list);
             let timeout = Duration::from_secs(cli.test_timeout);
-            run_test_list(&oplist, &macro_list, path, cli.serial_port(), timeout, !cli.no_break, msg_list)
+            run_test_list(&oplist, &macro_list, list, port, timeout, send.reset, msg_list)
         }
         // Emulator mode: build the flat DDR image from the assembled program
         // and run the golden-model.
@@ -192,7 +197,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
             let assembly = assemble(input, msg_list)?;
             run_emulate(&assembly, input, trace, cli.max_instructions, msg_list)
         }
-        Mode::Assemble { input, ref code, ref kbt } => run_assemble(cli, input, code, kbt, send, msg_list),
+        Mode::Assemble { input, ref code, ref kbt } => run_assemble(cli, input, code, kbt, serial, send, msg_list),
     }
 }
 
@@ -224,13 +229,13 @@ fn run_assemble(
     input: &str,
     code_file_name: &str,
     binary_file_name: &str,
-    send: SendOpts<'_>,
+    serial: Option<SerialTarget<'_>>,
+    send: SendOpts,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     use std::fs::remove_file;
 
     let assembly = assemble(input, msg_list)?;
-    let output_serial_port = cli.serial_port();
 
     // The .code listing is written even when assembly failed: it shows where.
     if let Err(result_err) = write_code_output_file(code_file_name, &assembly.lines, msg_list) {
@@ -246,13 +251,15 @@ fn run_assemble(
     if msg_list.count(MessageType::Error) == 0 {
         if let Some(bin_string) = assembly.to_kbt(msg_list) {
             outcome = write_binary_file(msg_list, binary_file_name, &bin_string);
-            if outcome.is_ok() && !output_serial_port.is_empty() {
+            if outcome.is_ok()
+                && let Some(port) = serial
+            {
                 if cli.test {
                     // Test mode: send to board, keep port open, then verify UART output
                     let timeout = Duration::from_secs(cli.test_timeout);
-                    return run_test_mode(msg_list, &bin_string, output_serial_port, input, timeout, !cli.no_break);
+                    return run_test_mode(msg_list, &bin_string, port, input, timeout, send.reset);
                 }
-                outcome = send_image(&bin_string, send, msg_list);
+                outcome = send_image(&bin_string, port, send, msg_list);
                 if cli.monitor {
                     // Monitor mode: the board's UART was monitored after the send.
                     return outcome;

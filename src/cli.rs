@@ -7,7 +7,7 @@
 use crate::emu::DEFAULT_MAX_INSTRUCTIONS;
 use crate::error::Error;
 use crate::link::netload::NETBOOT_DEFAULT_PORT;
-use crate::link::serial::{AUTO_SERIAL, SerialTarget};
+use crate::link::serial::{ResetMethod, SerialTarget};
 use crate::loader::BinaryInput;
 use crate::num::parse_u32;
 use crate::output::{filename_stem, output_file_name};
@@ -110,10 +110,10 @@ pub(crate) struct Cli {
         long,
         value_name = "PORT",
         num_args = 0..=1,
-        default_missing_value = AUTO_SERIAL,
-        value_parser = SerialTarget::parse
+        value_parser = NonEmptyStringValueParser::new()
     )]
-    pub(crate) serial: Option<SerialTarget>,
+    #[allow(clippy::option_option, reason = "clap's shape for an optional-valued flag: no -s, a bare -s, or -s PORT")]
+    pub(crate) serial: Option<Option<String>>,
 
     /// Monitor serial port for UART output after sending (Ctrl+C to stop)
     #[arg(short = 'm', long, conflicts_with_all = ["test", "mem_out", "opcodes", "textmate"])]
@@ -211,8 +211,8 @@ impl InputKind {
 /// are read from the [`Cli`] by the mode's handler.
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Mode<'a> {
-    /// `-m` with no input: monitor the board's UART.
-    Monitor,
+    /// `-m` with no input: monitor the board's UART on this port.
+    Monitor(SerialTarget<'a>),
     /// `-N FILE`: stream an ELF or flat binary to the board over TCP, then
     /// with `-m` monitor its UART.
     NetLoad {
@@ -220,6 +220,8 @@ pub(crate) enum Mode<'a> {
         input: &'a str,
         /// The board's address (`--ip`).
         ip: &'a str,
+        /// The port to monitor afterwards (`-m`): the `-s` port, else auto-detected.
+        monitor: Option<SerialTarget<'a>>,
     },
     /// `--mem-out FILE`: write an ELF or flat binary as a `$readmemh` boot-ROM image.
     MemOut {
@@ -262,7 +264,12 @@ pub(crate) enum Mode<'a> {
     /// `--emulate-test PATH`: run a test list or directory on the emulator.
     EmulateTest(&'a str),
     /// `-L FILE`: run a test list on the board.
-    TestList(&'a str),
+    TestList {
+        /// The test list.
+        list: &'a str,
+        /// The serial port to the board (`-s`).
+        port: SerialTarget<'a>,
+    },
     /// `-i FILE.kla --emulate`: assemble and run on the emulator.
     Emulate {
         /// The assembly source.
@@ -303,6 +310,7 @@ impl Cli {
             return Ok(Mode::NetLoad {
                 input: utf8(path)?,
                 ip: self.ip.as_deref().ok_or(Error::Usage("--net-load needs the board's address (--ip)"))?,
+                monitor: self.monitor.then(|| self.monitor_port()),
             });
         }
         if let Some(path) = &self.mem_out {
@@ -342,7 +350,7 @@ impl Cli {
             }
         } else if self.monitor {
             // `-m` (optionally with `-s`) and nothing to load: monitor only.
-            return Ok(Mode::Monitor);
+            return Ok(Mode::Monitor(self.monitor_port()));
         }
 
         if self.opcodes || self.textmate {
@@ -352,7 +360,10 @@ impl Cli {
             return Ok(Mode::EmulateTest(utf8(path)?));
         }
         if let Some(path) = &self.test_list {
-            return Ok(Mode::TestList(utf8(path)?));
+            return Ok(Mode::TestList {
+                list: utf8(path)?,
+                port: self.serial().ok_or(Error::Usage("--test-list needs a serial port (-s)"))?,
+            });
         }
         // clap requires -i whenever no other mode is given.
         let Some(input) = input else {
@@ -373,16 +384,22 @@ impl Cli {
         })
     }
 
-    /// The serial port to send to: the `-s` port, [`AUTO_SERIAL`] for a bare
-    /// `-s`, or empty for no `-s` (do not send).
-    pub(crate) fn serial_port(&self) -> &str {
-        self.serial.as_ref().map_or("", SerialTarget::port_name)
+    /// The serial port to send to: the `-s` port, auto-detected for a bare
+    /// `-s`, or `None` for no `-s` (do not send).
+    pub(crate) fn serial(&self) -> Option<SerialTarget<'_>> {
+        SerialTarget::from_option(self.serial.as_ref())
     }
 
-    /// The serial port to monitor: as [`serial_port`](Self::serial_port), but
+    /// The serial port to monitor: as [`serial`](Self::serial), but
     /// auto-detected without `-s`.
-    pub(crate) fn monitor_port(&self) -> &str {
-        self.serial.as_ref().map_or(AUTO_SERIAL, SerialTarget::port_name)
+    fn monitor_port(&self) -> SerialTarget<'_> {
+        self.serial().unwrap_or(SerialTarget::Auto)
+    }
+
+    /// How to reset the board into its loader: a UART break, or with `-n`
+    /// the loader's `S` command.
+    pub(crate) const fn reset_method(&self) -> ResetMethod {
+        if self.no_break { ResetMethod::Command } else { ResetMethod::Break }
     }
 
     /// The binary input file `path`, with the `--entry` override.
@@ -602,28 +619,34 @@ mod tests {
     }
 
     #[test]
-    // -s with no value asks for the first USB serial port.
+    // -s with no value asks for the board's USB serial port.
     fn serial_port_is_optional_valued() {
         let serial = |args: &[&str]| parse(args).unwrap().serial;
         assert_eq!(serial(&["-i", "prog.kla"]), None);
-        assert_eq!(serial(&["-i", "prog.kla", "-s"]), Some(SerialTarget::Auto));
-        assert_eq!(serial(&["-i", "prog.kla", "-s", "-m"]), Some(SerialTarget::Auto));
-        assert_eq!(
-            serial(&["-s", "/dev/ttyUSB1", "-i", "prog.kla"]),
-            Some(SerialTarget::Port("/dev/ttyUSB1".to_owned()))
-        );
-        assert_eq!(serial(&["-i", "prog.kla", "--serial=COM3"]), Some(SerialTarget::Port("COM3".to_owned())));
+        assert_eq!(serial(&["-i", "prog.kla", "-s"]), Some(None));
+        assert_eq!(serial(&["-i", "prog.kla", "-s", "-m"]), Some(None));
+        assert_eq!(serial(&["-s", "/dev/ttyUSB1", "-i", "prog.kla"]), Some(Some("/dev/ttyUSB1".to_owned())));
+        assert_eq!(serial(&["-i", "prog.kla", "--serial=COM3"]), Some(Some("COM3".to_owned())));
     }
 
     #[test]
-    // The handlers still take the port as a name: "" for none, AUTO_SERIAL for a bare -s.
-    fn serial_port_names() {
+    // No -s sends nothing, a bare -s auto-detects, and monitoring auto-detects without -s.
+    fn serial_targets() {
         let cli = parse(&["-i", "prog.kla"]).unwrap();
-        assert_eq!((cli.serial_port(), cli.monitor_port()), ("", AUTO_SERIAL));
+        assert_eq!((cli.serial(), cli.monitor_port()), (None, SerialTarget::Auto));
         let cli = parse(&["-i", "prog.kla", "-s"]).unwrap();
-        assert_eq!((cli.serial_port(), cli.monitor_port()), (AUTO_SERIAL, AUTO_SERIAL));
+        assert_eq!((cli.serial(), cli.monitor_port()), (Some(SerialTarget::Auto), SerialTarget::Auto));
         let cli = parse(&["-i", "prog.kla", "-s", "COM3"]).unwrap();
-        assert_eq!((cli.serial_port(), cli.monitor_port()), ("COM3", "COM3"));
+        assert_eq!(
+            (cli.serial(), cli.monitor_port()),
+            (Some(SerialTarget::Port("COM3")), SerialTarget::Port("COM3"))
+        );
+    }
+
+    #[test]
+    fn no_break_resets_with_the_loader_command() {
+        assert_eq!(parse(&["-i", "prog.kla"]).unwrap().reset_method(), ResetMethod::Break);
+        assert_eq!(parse(&["-i", "prog.kla", "-n"]).unwrap().reset_method(), ResetMethod::Command);
     }
 
     #[test]
@@ -710,13 +733,31 @@ mod tests {
 
     #[test]
     fn each_mode_is_selected() {
-        assert_mode(&["-m"], &Mode::Monitor);
-        assert_mode(&["-m", "-s", "COM3", "-d"], &Mode::Monitor);
+        assert_mode(&["-m"], &Mode::Monitor(SerialTarget::Auto));
+        assert_mode(&["-m", "-s"], &Mode::Monitor(SerialTarget::Auto));
+        assert_mode(&["-m", "-s", "COM3", "-d"], &Mode::Monitor(SerialTarget::Port("COM3")));
         assert_mode(
             &["-N", "prog.elf", "--ip", "10.0.0.2", "-m"],
             &Mode::NetLoad {
                 input: "prog.elf",
                 ip: "10.0.0.2",
+                monitor: Some(SerialTarget::Auto),
+            },
+        );
+        assert_mode(
+            &["-N", "prog.elf", "--ip", "10.0.0.2", "-m", "-s", "COM3"],
+            &Mode::NetLoad {
+                input: "prog.elf",
+                ip: "10.0.0.2",
+                monitor: Some(SerialTarget::Port("COM3")),
+            },
+        );
+        assert_mode(
+            &["-N", "prog.elf", "--ip", "10.0.0.2"],
+            &Mode::NetLoad {
+                input: "prog.elf",
+                ip: "10.0.0.2",
+                monitor: None,
             },
         );
         assert_mode(
@@ -760,7 +801,20 @@ mod tests {
         assert_mode(&["--opcodes"], &Mode::Opcodes);
         assert_mode(&["-t", "--opcodes"], &Mode::Opcodes);
         assert_mode(&["--emulate-test", "tests"], &Mode::EmulateTest("tests"));
-        assert_mode(&["-L", "list.txt", "-s", "COM3"], &Mode::TestList("list.txt"));
+        assert_mode(
+            &["-L", "list.txt", "-s", "COM3"],
+            &Mode::TestList {
+                list: "list.txt",
+                port: SerialTarget::Port("COM3"),
+            },
+        );
+        assert_mode(
+            &["-L", "list.txt", "-s"],
+            &Mode::TestList {
+                list: "list.txt",
+                port: SerialTarget::Auto,
+            },
+        );
         assert_mode(
             &["-i", "prog.kla", "--emulate", "--trace", "t.txt"],
             &Mode::Emulate {
