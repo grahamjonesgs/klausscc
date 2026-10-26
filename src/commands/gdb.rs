@@ -8,7 +8,7 @@ use crate::diag::Diagnostics;
 use crate::error::Error;
 use crate::layout::CODE_BASE;
 use crate::loader::{BinaryInput, Loaded, load_flat};
-use crate::{emulate, gdbserver};
+use crate::{emu, gdbserver};
 
 /// Debug an ELF (or flat binary) on the emulator over the GDB remote protocol.
 ///
@@ -30,7 +30,7 @@ pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, msg_list: &mut Di
     }
     msg_list.print_summary();
 
-    let cpu = emulate::Cpu::new(&image.to_ddr(), image.entry);
+    let cpu = emu::Cpu::new(&image.to_ddr(), image.entry);
     match gdbserver::serve(cpu, port) {
         Ok(summary) => {
             eprintln!("klausscc gdbserver: {summary}");

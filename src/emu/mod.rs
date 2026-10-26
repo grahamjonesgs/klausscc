@@ -21,7 +21,7 @@
 //! context word `{INT_MASK, flags, PC}` is pushed, the source's mask bit
 //! cleared and the timer's pending bit acknowledged; `IRET` restores all of
 //! it, and `WAIT` sleeps until a source is ready.  Time is modelled as
-//! [`CYCLES_PER_INSTRUCTION`](crate::emulate::CYCLES_PER_INSTRUCTION) cycles per retired instruction, so interrupt
+//! [`CYCLES_PER_INSTRUCTION`](crate::emu::CYCLES_PER_INSTRUCTION) cycles per retired instruction, so interrupt
 //! *timing* differs from the RTL (no golden-trace use) while the
 //! architectural effects match.  Blitter / Ethernet interrupts (sources 1-2)
 //! are not modelled.

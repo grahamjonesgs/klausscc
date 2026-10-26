@@ -6,7 +6,7 @@ use super::test_runner::{parse_expected_uart_values, read_test_list};
 use crate::asm::macros;
 use crate::asm::{Assembly, assemble};
 use crate::diag::{Diagnostics, MessageType};
-use crate::emulate;
+use crate::emu;
 use crate::error::Error;
 use crate::isa::Opcode;
 use crate::loader::{BinaryInput, Loaded, load_flat};
@@ -64,7 +64,7 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
 #[cfg(not(tarpaulin_include))]
 fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions: u64, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut trace_writer = open_trace_writer(trace_file, msg_list)?;
-    let result = emulate::emulate_image_to_writer(
+    let result = emu::emulate_image_to_writer(
         &image.to_ddr(),
         image.entry,
         max_instructions,
@@ -81,7 +81,7 @@ fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions:
     {
         use std::io::Write as _;
         let mut out = std::io::stdout();
-        let _ = out.write_all(&emulate::uart_bytes(&result.uart));
+        let _ = out.write_all(&emu::uart_bytes(&result.uart));
         let _ = out.flush();
     }
     println!("--- end UART ---");
@@ -277,7 +277,7 @@ pub(crate) fn verify_emulated(file: &str, oplist: &[Opcode], macro_list: &[macro
         return Err("assembly error".to_owned());
     };
 
-    let (result, _) = emulate::emulate_image(&image.to_ddr(), image.entry, max_instructions, false);
+    let (result, _) = emu::emulate_image(&image.to_ddr(), image.entry, max_instructions, false);
     let got: Vec<&str> = result
         .uart
         .lines()
@@ -342,7 +342,7 @@ mod tests {
         let mut failures: Vec<String> = Vec::new();
         for path in &files {
             let file = path.to_string_lossy();
-            match verify_emulated(&file, &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS) {
+            match verify_emulated(&file, &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS) {
                 Ok(Verdict::NotValidatable) => {}
                 Ok(Verdict::Pass { .. }) => passed.push(file.into_owned()),
                 other => failures.push(format!("{file}: {other:?}")),
@@ -366,7 +366,7 @@ mod tests {
         fs::write(&file, source).expect("write fixture");
 
         let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(
             verdict,
             Ok(Verdict::Fail {
@@ -383,7 +383,7 @@ mod tests {
         let file = dir.path().join("plain.kla");
         fs::write(&file, "// no expected values here\nHALT\n").expect("write fixture");
         let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(verdict, Ok(Verdict::NotValidatable));
     }
 
@@ -392,7 +392,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("missing.kla");
         let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert!(matches!(&verdict, Err(reason) if reason.starts_with("cannot read: ")), "{verdict:?}");
     }
 
@@ -402,7 +402,7 @@ mod tests {
         let file = dir.path().join("bad.kla");
         fs::write(&file, "//   00000001  (never printed)\nNOTANOPCODE A\nHALT\n").expect("write fixture");
         let (oplist, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emulate::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &oplist, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
         assert_eq!(verdict, Err("assembly error".to_owned()));
     }
 }

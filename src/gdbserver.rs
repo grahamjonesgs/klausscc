@@ -33,7 +33,7 @@
 //! unless `monitor mmio on` is given: some device reads have side effects,
 //! e.g. popping the UART RX FIFO, and debuggers read memory freely.
 
-use crate::emulate::{Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
+use crate::emu::{Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
 use crate::layout::is_mmio;
 use gdbstub::arch::{Arch, RegId, Registers};
 use gdbstub::common::{Endianness, Pid, Signal};
@@ -257,7 +257,7 @@ impl EmuTarget {
         let out = self.cpu.take_uart();
         if !out.is_empty() {
             let mut stdout = std::io::stdout();
-            let _ = stdout.write_all(&crate::emulate::uart_bytes(&out));
+            let _ = stdout.write_all(&crate::emu::uart_bytes(&out));
             let _ = stdout.flush();
         }
         let rx: Vec<u8> = self.uart_rx.try_iter().collect();

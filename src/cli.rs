@@ -4,7 +4,7 @@
 //! [`Cli::mode`] then decides, once and before any work is done, which of the
 //! tool's modes the command line asks for.
 
-use crate::emulate::DEFAULT_MAX_INSTRUCTIONS;
+use crate::emu::DEFAULT_MAX_INSTRUCTIONS;
 use crate::error::Error;
 use crate::loader::BinaryInput;
 use crate::netload::NETBOOT_DEFAULT_PORT;

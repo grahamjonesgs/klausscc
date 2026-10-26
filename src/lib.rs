@@ -3,7 +3,7 @@
 //!
 //! The library holds every part of the tool; the `klausscc` binary is
 //! [`run`], which reads the command line and runs the selected mode.  The
-//! golden-model [`emulate`] module is public so it can be driven directly.
+//! golden-model [`emu`] module is public so it can be driven directly.
 
 /// The assembler: `.kla` source in, addressed machine code out.
 mod asm;
@@ -13,8 +13,8 @@ mod cli;
 mod commands;
 /// Diagnostics: the errors, warnings and notes reported to the user.
 mod diag;
-/// Module: independent ISA emulator (golden-model trace generator).
-pub mod emulate;
+/// The independent ISA emulator (golden-model trace generator).
+pub mod emu;
 /// Module defining the crate error type and exit codes.
 mod error;
 /// GDB remote-protocol server for the emulator (`--gdbserver`).
