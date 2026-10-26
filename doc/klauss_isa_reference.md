@@ -1394,7 +1394,8 @@ SETR A #HELLO
 $TXSTR A                 // prints "Hello!" and a newline
 HALT
 
-#HELLO "Hello!\n"        // \n is stored as CR LF
+// \n is stored as CR LF. No comment may follow the closing quote.
+#HELLO "Hello!\n"
 !include uart_stubs.kla
 ```
 
