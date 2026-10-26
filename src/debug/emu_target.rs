@@ -24,13 +24,12 @@
 //! unless `monitor mmio on` is given: some device reads have side effects,
 //! e.g. popping the UART RX FIFO, and debuggers read memory freely.
 
-use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD, TRIPLE};
-use super::{GdbError, accept};
+use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD};
+use super::{GdbError, RunEvent, Session, accept, mmio_monitor_cmd, run_session, session_summary};
 use crate::emu::{Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
 use crate::layout::is_mmio;
-use gdbstub::common::{Endianness, Pid, Signal};
-use gdbstub::conn::ConnectionExt;
-use gdbstub::stub::{DisconnectReason, GdbStub, SingleThreadStopReason, run_blocking};
+use gdbstub::common::Signal;
+use gdbstub::stub::SingleThreadStopReason;
 use gdbstub::target::ext::base::BaseOps;
 use gdbstub::target::ext::base::single_register_access::{SingleRegisterAccess, SingleRegisterAccessOps};
 use gdbstub::target::ext::base::singlethread::{
@@ -39,9 +38,9 @@ use gdbstub::target::ext::base::singlethread::{
 use gdbstub::target::ext::breakpoints::{
     Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps, HwWatchpoint, HwWatchpointOps, SwBreakpoint, SwBreakpointOps, WatchKind,
 };
-use gdbstub::target::ext::host_info::{HostInfo, HostInfoOps, HostInfoResponse};
+use gdbstub::target::ext::host_info::HostInfoOps;
 use gdbstub::target::ext::monitor_cmd::{ConsoleOutput, MonitorCmd, MonitorCmdOps, outputln};
-use gdbstub::target::ext::process_info::{ProcessInfo, ProcessInfoOps, ProcessInfoResponse};
+use gdbstub::target::ext::process_info::ProcessInfoOps;
 use gdbstub::target::{Target, TargetError, TargetResult};
 use std::io::{Read as _, Write as _};
 use std::sync::mpsc;
@@ -53,12 +52,6 @@ const POLL_INTERVAL: u32 = 4096;
 enum ExecMode {
     Step,
     Continue,
-}
-
-/// What stopped a run, or debugger input waiting.
-enum RunEvent {
-    IncomingData,
-    Stop(SingleThreadStopReason<u32>),
 }
 
 /// The emulator plus the debugger's view of it.
@@ -206,17 +199,10 @@ impl Target for EmuTarget {
 
 impl MonitorCmd for EmuTarget {
     fn handle_monitor_cmd(&mut self, cmd: &[u8], mut out: ConsoleOutput<'_>) -> Result<(), Self::Error> {
-        match std::str::from_utf8(cmd).map(str::trim) {
-            Ok("mmio on") => {
-                self.allow_mmio = true;
-                outputln!(out, "MMIO access enabled: device reads have side effects (e.g. UART RX pops)");
-            }
-            Ok("mmio off") => {
-                self.allow_mmio = false;
-                outputln!(out, "MMIO access disabled");
-            }
-            Ok("mmio") => outputln!(out, "MMIO access is {}", if self.allow_mmio { "on" } else { "off" }),
-            Ok("irq") => {
+        // Not UTF-8: no command, so the help.
+        let cmd = std::str::from_utf8(cmd).map_or("", str::trim);
+        match cmd {
+            "irq" => {
                 let st = self.cpu.irq_state();
                 outputln!(
                     out,
@@ -237,6 +223,7 @@ impl MonitorCmd for EmuTarget {
                     st.cycles / 100_000
                 );
             }
+            _ if mmio_monitor_cmd(cmd, &mut self.allow_mmio, &mut out) => {}
             _ => {
                 outputln!(out, "klausscc gdbserver monitor commands:");
                 outputln!(out, "  mmio on|off   allow debugger reads/writes of 0xF000_0000+ (default off)");
@@ -442,50 +429,14 @@ impl HwWatchpoint for EmuTarget {
     }
 }
 
-impl HostInfo for EmuTarget {
-    fn host_info(&self, write_item: &mut dyn FnMut(&HostInfoResponse<'_>)) -> Result<(), Self::Error> {
-        write_item(&HostInfoResponse::Triple(TRIPLE));
-        write_item(&HostInfoResponse::Endianness(Endianness::Little));
-        write_item(&HostInfoResponse::PointerSize(4));
-        Ok(())
-    }
-}
+impl_host_process_info!(EmuTarget);
 
-impl ProcessInfo for EmuTarget {
-    fn process_info(&self, write_item: &mut dyn FnMut(&ProcessInfoResponse<'_>)) -> Result<(), Self::Error> {
-        if let Some(pid) = Pid::new(1) {
-            write_item(&ProcessInfoResponse::Pid(pid));
-        }
-        write_item(&ProcessInfoResponse::Triple(TRIPLE));
-        write_item(&ProcessInfoResponse::Endianness(Endianness::Little));
-        write_item(&ProcessInfoResponse::PointerSize(4));
-        Ok(())
-    }
-}
-
-// ---- event loop -------------------------------------------------------------
-
-enum EmuEventLoop {}
-
-impl run_blocking::BlockingEventLoop for EmuEventLoop {
-    type Target = EmuTarget;
-    type Connection = Box<dyn ConnectionExt<Error = std::io::Error>>;
-    type StopReason = SingleThreadStopReason<u32>;
-
-    fn wait_for_stop_reason(
-        target: &mut EmuTarget,
-        conn: &mut Self::Connection,
-    ) -> Result<run_blocking::Event<Self::StopReason>, run_blocking::WaitForStopReasonError<&'static str, std::io::Error>> {
-        match target.run(|| conn.peek().map_or(true, |b| b.is_some())) {
-            RunEvent::IncomingData => {
-                let byte = conn.read().map_err(run_blocking::WaitForStopReasonError::Connection)?;
-                Ok(run_blocking::Event::IncomingData(byte))
-            }
-            RunEvent::Stop(reason) => Ok(run_blocking::Event::TargetStopped(reason)),
-        }
+impl Session for EmuTarget {
+    fn run_until_event(&mut self, incoming_data: impl FnMut() -> bool) -> Result<RunEvent, Self::Error> {
+        Ok(self.run(incoming_data))
     }
 
-    fn on_interrupt(_target: &mut EmuTarget) -> Result<Option<Self::StopReason>, &'static str> {
+    fn on_interrupt(&mut self) -> Result<Option<SingleThreadStopReason<u32>>, Self::Error> {
         Ok(Some(SingleThreadStopReason::Signal(Signal::SIGINT)))
     }
 }
@@ -509,16 +460,9 @@ pub(crate) fn spawn_stdin_reader() -> mpsc::Receiver<u8> {
 ///
 /// Returns a one-line description of how the session ended.
 pub(crate) fn serve(cpu: Cpu, port: u16) -> Result<String, GdbError> {
-    let conn: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(accept(port)?);
-
+    let conn = accept(port)?;
     let mut target = EmuTarget::new(cpu, spawn_stdin_reader());
-    let result = GdbStub::new(conn).run_blocking::<EmuEventLoop>(&mut target);
+    let result = run_session(conn, &mut target);
     target.pump_uart();
-    match result {
-        Ok(DisconnectReason::Disconnect) => Ok("debugger disconnected".to_owned()),
-        Ok(DisconnectReason::TargetExited(code)) => Ok(format!("program halted (exit status {code})")),
-        Ok(DisconnectReason::TargetTerminated(sig)) => Ok(format!("program terminated with {sig}")),
-        Ok(DisconnectReason::Kill) => Ok("debugger killed the program".to_owned()),
-        Err(e) => Err(GdbError::Session(e.to_string())),
-    }
+    session_summary(result, "debugger disconnected", "debugger killed the program")
 }

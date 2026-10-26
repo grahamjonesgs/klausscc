@@ -20,13 +20,12 @@
 //! On detach the server removes its breakpoints, clears "attached" and lets
 //! the program run on.
 
-use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD, TRIPLE};
-use super::{GdbError, accept, access_last_addr};
+use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD};
+use super::{GdbError, RunEvent, Session, accept, access_last_addr, mmio_monitor_cmd, run_session, session_summary};
 use crate::jtag::{DmiReq, Jtag, JtagError};
 use crate::layout::is_mmio;
-use gdbstub::common::{Endianness, Pid, Signal};
-use gdbstub::conn::ConnectionExt;
-use gdbstub::stub::{DisconnectReason, GdbStub, SingleThreadStopReason, run_blocking};
+use gdbstub::common::Signal;
+use gdbstub::stub::SingleThreadStopReason;
 use gdbstub::target::ext::base::BaseOps;
 use gdbstub::target::ext::base::single_register_access::{SingleRegisterAccess, SingleRegisterAccessOps};
 use gdbstub::target::ext::base::singlethread::{
@@ -35,9 +34,9 @@ use gdbstub::target::ext::base::singlethread::{
 use gdbstub::target::ext::breakpoints::{
     Breakpoints, BreakpointsOps, HwBreakpoint, HwBreakpointOps, HwWatchpoint, HwWatchpointOps, SwBreakpoint, SwBreakpointOps, WatchKind,
 };
-use gdbstub::target::ext::host_info::{HostInfo, HostInfoOps, HostInfoResponse};
+use gdbstub::target::ext::host_info::HostInfoOps;
 use gdbstub::target::ext::monitor_cmd::{ConsoleOutput, MonitorCmd, MonitorCmdOps, outputln};
-use gdbstub::target::ext::process_info::{ProcessInfo, ProcessInfoOps, ProcessInfoResponse};
+use gdbstub::target::ext::process_info::ProcessInfoOps;
 use gdbstub::target::{Target, TargetError, TargetResult};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -377,12 +376,6 @@ fn clear_slots(board: &mut Board) -> BoardResult<()> {
 
 // ---- target -----------------------------------------------------------------
 
-/// What stopped a run, or debugger input waiting.
-enum RunEvent {
-    IncomingData,
-    Stop(SingleThreadStopReason<u32>),
-}
-
 /// A watchpoint slot.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Wp {
@@ -615,17 +608,10 @@ impl Target for BoardTarget {
 
 impl MonitorCmd for BoardTarget {
     fn handle_monitor_cmd(&mut self, cmd: &[u8], mut out: ConsoleOutput<'_>) -> Result<(), Self::Error> {
-        match std::str::from_utf8(cmd).map(str::trim) {
-            Ok("mmio on") => {
-                self.allow_mmio = true;
-                outputln!(out, "MMIO access enabled: device reads have side effects (e.g. UART RX pops)");
-            }
-            Ok("mmio off") => {
-                self.allow_mmio = false;
-                outputln!(out, "MMIO access disabled");
-            }
-            Ok("mmio") => outputln!(out, "MMIO access is {}", if self.allow_mmio { "on" } else { "off" }),
-            Ok("status") => match self.board.status() {
+        // Not UTF-8: no command, so the help.
+        let cmd = std::str::from_utf8(cmd).map_or("", str::trim);
+        match cmd {
+            "status" => match self.board.status() {
                 Ok(st) => outputln!(
                     out,
                     "DMSTATUS 0x{st:08X}: halted {} cause {} park_kind {}",
@@ -635,6 +621,7 @@ impl MonitorCmd for BoardTarget {
                 ),
                 Err(e) => outputln!(out, "DMSTATUS read failed: {e}"),
             },
+            _ if mmio_monitor_cmd(cmd, &mut self.allow_mmio, &mut out) => {}
             _ => {
                 outputln!(out, "klausscc gdbserver (board) monitor commands:");
                 outputln!(out, "  mmio on|off   allow debugger reads/writes of 0xF000_0000+ (default off)");
@@ -835,52 +822,17 @@ impl HwWatchpoint for BoardTarget {
     }
 }
 
-impl HostInfo for BoardTarget {
-    fn host_info(&self, write_item: &mut dyn FnMut(&HostInfoResponse<'_>)) -> Result<(), Self::Error> {
-        write_item(&HostInfoResponse::Triple(TRIPLE));
-        write_item(&HostInfoResponse::Endianness(Endianness::Little));
-        write_item(&HostInfoResponse::PointerSize(4));
-        Ok(())
-    }
-}
+impl_host_process_info!(BoardTarget);
 
-impl ProcessInfo for BoardTarget {
-    fn process_info(&self, write_item: &mut dyn FnMut(&ProcessInfoResponse<'_>)) -> Result<(), Self::Error> {
-        if let Some(pid) = Pid::new(1) {
-            write_item(&ProcessInfoResponse::Pid(pid));
-        }
-        write_item(&ProcessInfoResponse::Triple(TRIPLE));
-        write_item(&ProcessInfoResponse::Endianness(Endianness::Little));
-        write_item(&ProcessInfoResponse::PointerSize(4));
-        Ok(())
-    }
-}
-
-// ---- event loop -------------------------------------------------------------
-
-enum BoardEventLoop {}
-
-impl run_blocking::BlockingEventLoop for BoardEventLoop {
-    type Target = BoardTarget;
-    type Connection = Box<dyn ConnectionExt<Error = std::io::Error>>;
-    type StopReason = SingleThreadStopReason<u32>;
-
-    fn wait_for_stop_reason(
-        target: &mut BoardTarget,
-        conn: &mut Self::Connection,
-    ) -> Result<run_blocking::Event<Self::StopReason>, run_blocking::WaitForStopReasonError<BoardError, std::io::Error>> {
-        match target.run(|| conn.peek().map_or(true, |b| b.is_some())) {
-            Ok(RunEvent::IncomingData) => {
-                let byte = conn.read().map_err(run_blocking::WaitForStopReasonError::Connection)?;
-                Ok(run_blocking::Event::IncomingData(byte))
-            }
-            Ok(RunEvent::Stop(reason)) => Ok(run_blocking::Event::TargetStopped(reason)),
-            Err(e) => Err(run_blocking::WaitForStopReasonError::Target(BoardError::Lost(Box::new(e)))),
-        }
+impl Session for BoardTarget {
+    /// A debug module that stops answering while the program runs ends the
+    /// session ([`BoardError::Lost`]).
+    fn run_until_event(&mut self, incoming_data: impl FnMut() -> bool) -> BoardResult<RunEvent> {
+        self.run(incoming_data).map_err(|e| BoardError::Lost(Box::new(e)))
     }
 
-    fn on_interrupt(target: &mut BoardTarget) -> Result<Option<Self::StopReason>, BoardError> {
-        target.interrupt().map(Some)
+    fn on_interrupt(&mut self) -> BoardResult<Option<SingleThreadStopReason<u32>>> {
+        self.interrupt().map(Some)
     }
 }
 
@@ -916,17 +868,10 @@ pub(crate) fn attach(board: &mut Board, load: Option<&mut dyn FnMut() -> BoardRe
 
 /// Serve one debugging session for the halted `board` on `127.0.0.1:port`.
 pub(crate) fn serve(board: Board, port: u16) -> Result<String, GdbError> {
-    let conn: Box<dyn ConnectionExt<Error = std::io::Error>> = Box::new(accept(port)?);
-
+    let conn = accept(port)?;
     let mut target = BoardTarget::new(board);
-    let result = GdbStub::new(conn).run_blocking::<BoardEventLoop>(&mut target);
-    let summary = match result {
-        Ok(DisconnectReason::Disconnect) => Ok("debugger detached; the program runs on".to_owned()),
-        Ok(DisconnectReason::TargetExited(code)) => Ok(format!("program halted (exit status {code})")),
-        Ok(DisconnectReason::TargetTerminated(sig)) => Ok(format!("program terminated with {sig}")),
-        Ok(DisconnectReason::Kill) => Ok("debugger killed the session".to_owned()),
-        Err(e) => Err(GdbError::Session(e.to_string())),
-    };
+    let result = run_session(conn, &mut target);
+    let summary = session_summary(result, "debugger detached; the program runs on", "debugger killed the session");
     if let Err(e) = target.detach() {
         eprintln!("klausscc gdbserver: detach: {e}");
     }
