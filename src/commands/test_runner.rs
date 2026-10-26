@@ -67,8 +67,11 @@ pub(crate) fn run_test_mode(
     let expected_count = expected_values.len();
     msg_list.info(format!("Found {expected_count} expected UART values in source comments"));
 
-    // Send to board and keep port open
-    let open = match write_to_board(bin_string, port, reset, AwaitAck::Wait, msg_list) {
+    // Send to board and keep port open.  The loader's reply is left for the
+    // test monitor (which skips the "... Complete" line): a program that
+    // prints at once sends its first values in the same read as the reply,
+    // and reading the reply here would swallow them.
+    let open = match write_to_board(bin_string, port, reset, AwaitAck::Skip, msg_list) {
         Ok(open) => {
             msg_list.info("Wrote to serial port");
             open
@@ -235,8 +238,9 @@ pub(crate) fn run_test_list(
             continue;
         }
 
-        // Send to board and keep port open
-        let open = match write_to_board(&bin_string, port, reset, AwaitAck::Wait, &mut test_msg_list) {
+        // Send to board and keep port open (the reply is left for the test
+        // monitor, as in run_test_mode).
+        let open = match write_to_board(&bin_string, port, reset, AwaitAck::Skip, &mut test_msg_list) {
             Ok(open) => open,
             Err(err) => {
                 println!("  SKIP: serial port error \"{err}\"");

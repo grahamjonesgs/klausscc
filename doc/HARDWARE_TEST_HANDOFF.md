@@ -54,7 +54,28 @@ Findings, now fixed:
   `--emulate` reports a write while busy, and `--emulate-test` fails the
   file. All fixtures now poll before writing.
 
-## Phase B: to run
+## Phase B: done (klausscc 8674f21, bitstream cf01863)
+
+Every item passed and there were **no emulator/hardware mismatches**:
+- hw_alignment passed 102/102 on the board.
+- `-L` matched `--emulate-test` file for file (25/26, with 1 skipped).
+- The busy-write drop matched exactly: the emulator and the board both drop
+  all 3 unpolled bytes.
+- The C runtime, byte strings and the F1/F2 retests all passed.
+- `run_board_smoke.sh` passed.
+
+Netload was not run.
+
+One finding, now fixed:
+- **F3:** `-T`/`-L` consumed the loader's reply with a single read. A program
+  that prints immediately (test_directives) sends its values in the same read,
+  so they were lost and the test timed out. The test runners now leave the
+  reply to the test monitor, which already skips the "… Complete" line
+  (`AwaitAck::Skip`). Patch from the test session, verified on the board.
+
+The plan below is kept for re-runs.
+
+## Phase B plan
 
 Since Phase A the emulator has been aligned with `pipeline_core.sv`: flags
 for logic/MUL/DIV/MOD/ABS/rotates and F-bit ops, the full legality decode,
