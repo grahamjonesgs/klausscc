@@ -251,7 +251,7 @@ How big a value may be depends on the operand:
 | 32-bit immediate (`imm32`, `off32`, `addr32`, `target`, ...) | `-2147483648` to `4294967295`, or a label. A hex literal is read as a 64-bit pattern, so `0xFFFFFFFFFFFFFFFF` is `-1` and fits. The CPU sign- or zero-extends the word to 64 bits, depending on the instruction (see the tables). |
 | 64-bit immediate (`SETR64`, `PUSHV64`) | One literal from `-2^63` to `2^64 - 1`, or two 32-bit words (low, then high). |
 | Shift / bit count `n` | `0` to `63` |
-| Short immediate `imm8` | A literal only, `-128` to `255` for every `.S` form. Only `-128` to `127` keeps its value in the sign-extending forms, and only `0` to `255` in the zero-extending ones (see [ALU, Immediate](#alu-immediate)). |
+| Short immediate `imm8` | A literal only: `-128` to `127` for the sign-extending `.S` forms (`SETR.S`, `ADDI.S`, `CMPRV.S`), `0` to `255` for the zero-extending ones (`ADDV.S`, `MINUSV.S`, `ANDV.S`, `ORV.S`, `XORV.S`). Any other value is an error (see [ALU, Immediate](#alu-immediate)). |
 | `simm4` (fused branches) | A literal from `-8` to `7` |
 | `.word` | Any 64-bit value, negative or not; not a label |
 
@@ -1151,7 +1151,7 @@ IRET
 
 ## Emulator and Hardware Differences
 
-`--emulate` and `--emulate-test` run the built-in emulator. It follows the hardware closely, but differs in these places (checked against the KlaussCPU `pipeline_core.sv`):
+`--emulate` and `--emulate-test` run the built-in emulator. It was checked against the KlaussCPU `pipeline_core.sv`, and no difference in what an instruction does (its registers, flags and memory, and which encodings are illegal) is known. It differs in timing and devices, and one MMIO corner is unchecked:
 
 | Area | Hardware | Emulator |
 |------|----------|----------|
@@ -1160,6 +1160,7 @@ IRET
 | UART | Real transmit time, `TX_BUSY` | Instant, `TX_BUSY` always 0 |
 | Time, timer interrupts | 100 MHz clock | 2 cycles per instruction |
 | Devices other than UART, timer and three perf counters | Present | Read 0, writes ignored |
+| MMIO access at an address that is not a multiple of 8 | Up to the device's address decoder (not checked) | Decodes the exact address; no register is there, so it reads 0 or is ignored |
 
 ---
 
