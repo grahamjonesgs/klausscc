@@ -7,32 +7,25 @@ use crate::asm::macros;
 use crate::diag::{Diagnostics, print_messages};
 use crate::error::Error;
 use crate::isa::Opcode;
-use crate::link::serial::{run_test_monitor, write_to_board_keep_port};
+use crate::link::serial::{TestResult, parse_expected_uart_values, run_test_monitor, write_to_board_keep_port};
 use crate::output::filename_stem;
 use crate::output::listing::write_code_output_file;
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// Result of a single test in a batch run.
 struct BatchTestResult {
     /// File name of the test.
     file_name: String,
-    /// Number of expected values that matched.
-    passed: usize,
-    /// Number of expected values that did not match.
-    failed: usize,
-    /// True if the test timed out.
-    timed_out: bool,
-    /// Total number of expected values.
-    total: usize,
-    /// Whether the test ran, and if not, why.
+    /// Whether the test ran and how it went, and if not, why.
     outcome: Outcome,
 }
 
 /// Whether a test in a batch ran.
 enum Outcome {
-    /// The program ran on the board; the counts say how it went.
-    Ran,
+    /// The program ran on the board, with this result.
+    Ran(TestResult),
     /// Not run, for the given reason (no expected values, assembly or serial error).
     Skipped(String),
     /// Counted as a failure without counts: the file cannot be read, or the
@@ -50,7 +43,7 @@ pub(crate) fn run_test_mode(
     bin_string: &str,
     output_serial_port: &str,
     input_file_name: &str,
-    test_timeout: u64,
+    test_timeout: Duration,
     send_break: bool,
 ) -> Result<(), Error> {
     // Parse expected values from the raw source file
@@ -75,10 +68,10 @@ pub(crate) fn run_test_mode(
     msg_list.info(format!("Found {expected_count} expected UART values in source comments"));
 
     // Send to board and keep port open
-    let port = match write_to_board_keep_port(bin_string, output_serial_port, send_break, false, msg_list) {
-        Ok(port) => {
+    let open = match write_to_board_keep_port(bin_string, output_serial_port, send_break, false, msg_list) {
+        Ok(open) => {
             msg_list.info("Wrote to serial port");
-            port
+            open
         }
         Err(err) => return Err(send_failed(output_serial_port, err, msg_list)),
     };
@@ -87,7 +80,7 @@ pub(crate) fn run_test_mode(
 
     // Run test verification.  A serial read error is a failure of its own
     // (exit 1), not a timeout (exit 3); run_test_monitor has reported it.
-    let result = run_test_monitor(port, &expected_values, test_timeout, msg_list).map_err(|err| Error::SerialRead {
+    let result = run_test_monitor(open, &expected_values, test_timeout, msg_list).map_err(|err| Error::SerialRead {
         port: output_serial_port.to_owned(),
         source: err,
     })?;
@@ -176,7 +169,7 @@ pub(crate) fn run_test_list(
     macro_list: &[macros::Macro],
     list_file: &str,
     output_serial_port: &str,
-    test_timeout: u64,
+    test_timeout: Duration,
     send_break: bool,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
@@ -203,10 +196,6 @@ pub(crate) fn run_test_list(
                 println!("  FAIL: cannot read: {err}");
                 results.push(BatchTestResult {
                     file_name: test_file.clone(),
-                    passed: 0,
-                    failed: 0,
-                    timed_out: false,
-                    total: 0,
                     outcome: Outcome::Failed(format!("cannot read: {err}")),
                 });
                 println!();
@@ -220,10 +209,6 @@ pub(crate) fn run_test_list(
             print_messages(&test_msg_list);
             results.push(BatchTestResult {
                 file_name: test_file.clone(),
-                passed: 0,
-                failed: 0,
-                timed_out: false,
-                total: 0,
                 outcome: Outcome::Skipped("assembly error".to_owned()),
             });
             println!();
@@ -245,10 +230,6 @@ pub(crate) fn run_test_list(
             println!("  SKIP: no expected UART values in source comments");
             results.push(BatchTestResult {
                 file_name: test_file.clone(),
-                passed: 0,
-                failed: 0,
-                timed_out: false,
-                total: 0,
                 outcome: Outcome::Skipped("no expected values".to_owned()),
             });
             println!();
@@ -256,16 +237,12 @@ pub(crate) fn run_test_list(
         }
 
         // Send to board and keep port open
-        let port = match write_to_board_keep_port(&bin_string, output_serial_port, send_break, false, &mut test_msg_list) {
-            Ok(port) => port,
+        let open = match write_to_board_keep_port(&bin_string, output_serial_port, send_break, false, &mut test_msg_list) {
+            Ok(open) => open,
             Err(err) => {
                 println!("  SKIP: serial port error \"{err}\"");
                 results.push(BatchTestResult {
                     file_name: test_file.clone(),
-                    passed: 0,
-                    failed: 0,
-                    timed_out: false,
-                    total: 0,
                     outcome: Outcome::Skipped(format!("serial error: {err}")),
                 });
                 println!();
@@ -274,16 +251,12 @@ pub(crate) fn run_test_list(
         };
 
         // Run test verification.  A serial read error fails the test (it is not a timeout).
-        let result = match run_test_monitor(port, &expected_values, test_timeout, &mut test_msg_list) {
+        let result = match run_test_monitor(open, &expected_values, test_timeout, &mut test_msg_list) {
             Ok(result) => result,
             Err(err) => {
                 println!("  FAIL: serial read error \"{err}\"");
                 results.push(BatchTestResult {
                     file_name: test_file.clone(),
-                    passed: 0,
-                    failed: 0,
-                    timed_out: false,
-                    total: expected_values.len(),
                     outcome: Outcome::Failed(format!("serial read error: {err}")),
                 });
                 println!();
@@ -300,11 +273,7 @@ pub(crate) fn run_test_list(
 
         results.push(BatchTestResult {
             file_name: test_file.clone(),
-            passed: result.passed,
-            failed: result.failed,
-            timed_out: result.timed_out,
-            total: result.total,
-            outcome: Outcome::Ran,
+            outcome: Outcome::Ran(result),
         });
 
         println!();
@@ -326,27 +295,32 @@ fn report_batch(results: &[BatchTestResult], list_file: &str) -> Result<(), Erro
     let mut files_all_pass: usize = 0;
 
     for r in results {
-        if let Outcome::Skipped(reason) = &r.outcome {
-            total_skipped += 1;
-            println!("  SKIP  {} ({reason})", r.file_name);
-        } else if let Outcome::Failed(reason) = &r.outcome {
-            total_failed += 1;
-            println!("  FAIL  {} ({reason})", r.file_name);
-        } else if r.failed > 0 || r.timed_out {
-            total_failed += 1;
-            if r.timed_out {
-                total_timed_out += 1;
+        match &r.outcome {
+            Outcome::Skipped(reason) => {
+                total_skipped += 1;
+                println!("  SKIP  {} ({reason})", r.file_name);
             }
-            println!(
-                "  FAIL  {} ({}/{} passed{})",
-                r.file_name,
-                r.passed,
-                r.total,
-                if r.timed_out { ", timed out" } else { "" }
-            );
-        } else {
-            files_all_pass += 1;
-            println!("  PASS  {} ({}/{})", r.file_name, r.passed, r.total);
+            Outcome::Failed(reason) => {
+                total_failed += 1;
+                println!("  FAIL  {} ({reason})", r.file_name);
+            }
+            Outcome::Ran(result) if result.failed > 0 || result.timed_out => {
+                total_failed += 1;
+                if result.timed_out {
+                    total_timed_out += 1;
+                }
+                println!(
+                    "  FAIL  {} ({}/{} passed{})",
+                    r.file_name,
+                    result.passed,
+                    result.total,
+                    if result.timed_out { ", timed out" } else { "" }
+                );
+            }
+            Outcome::Ran(result) => {
+                files_all_pass += 1;
+                println!("  PASS  {} ({}/{})", r.file_name, result.passed, result.total);
+            }
         }
     }
 
@@ -375,39 +349,24 @@ fn report_batch(results: &[BatchTestResult], list_file: &str) -> Result<(), Erro
     }
 }
 
-/// Parse expected UART hex values from source file comment headers.
-///
-/// Extracts 8-digit uppercase hex values from lines matching the pattern `//   XXXXXXXX  (`.
-pub(super) fn parse_expected_uart_values(lines: &[String]) -> Vec<String> {
-    let mut expected: Vec<String> = Vec::new();
-    for line in lines {
-        let trimmed = line.trim();
-        if !trimmed.starts_with("//") {
-            continue;
-        }
-        let comment_body = trimmed.get(2..).unwrap_or("").trim();
-        if comment_body.len() >= 8 {
-            let candidate = comment_body.get(..8).unwrap_or("");
-            if candidate.len() == 8 && candidate.chars().all(|c| c.is_ascii_hexdigit()) && candidate == candidate.to_ascii_uppercase() {
-                expected.push(candidate.to_owned());
-            }
-        }
-    }
-    expected
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// A batch entry with the given counts and outcome.
-    fn batch_result(passed: usize, failed: usize, timed_out: bool, outcome: Outcome) -> BatchTestResult {
-        BatchTestResult {
-            file_name: "t.kla".to_owned(),
+    /// A batch entry for a test that ran, with the given counts.
+    fn ran(passed: usize, failed: usize, timed_out: bool) -> BatchTestResult {
+        batch_result(Outcome::Ran(TestResult {
             passed,
             failed,
             timed_out,
             total: passed + failed,
+        }))
+    }
+
+    /// A batch entry with the given outcome.
+    fn batch_result(outcome: Outcome) -> BatchTestResult {
+        BatchTestResult {
+            file_name: "t.kla".to_owned(),
             outcome,
         }
     }
@@ -416,17 +375,14 @@ mod tests {
 
     #[test]
     fn batch_with_all_tests_passing_succeeds() {
-        let results = [
-            batch_result(3, 0, false, Outcome::Ran),
-            batch_result(0, 0, false, Outcome::Skipped("x".to_owned())),
-        ];
+        let results = [ran(3, 0, false), batch_result(Outcome::Skipped("x".to_owned()))];
         assert!(report_batch(&results, "list.txt").is_ok());
     }
 
     #[test]
     fn batch_with_a_failed_or_timed_out_test_exits_2() {
-        for failing in [batch_result(1, 1, false, Outcome::Ran), batch_result(1, 0, true, Outcome::Ran)] {
-            let results = [batch_result(3, 0, false, Outcome::Ran), failing];
+        for failing in [ran(1, 1, false), ran(1, 0, true)] {
+            let results = [ran(3, 0, false), failing];
             let err = report_batch(&results, "list.txt").unwrap_err();
             assert!(matches!(err, Error::TestsFailed { failed: 1, total: 2, .. }), "{err:?}");
             assert_eq!(err.code(), 2);
@@ -435,66 +391,16 @@ mod tests {
 
     #[test]
     fn batch_with_an_unreadable_file_fails() {
-        let results = [
-            batch_result(3, 0, false, Outcome::Ran),
-            batch_result(0, 0, false, Outcome::Failed("cannot read".to_owned())),
-        ];
+        let results = [ran(3, 0, false), batch_result(Outcome::Failed("cannot read".to_owned()))];
         let err = report_batch(&results, "list.txt").unwrap_err();
         assert_eq!(err.code(), 2);
     }
 
     #[test]
     fn batch_with_nothing_validated_fails() {
-        let results = [batch_result(0, 0, false, Outcome::Skipped("no expected values".to_owned()))];
+        let results = [batch_result(Outcome::Skipped("no expected values".to_owned()))];
         let err = report_batch(&results, "list.txt").unwrap_err();
         assert!(matches!(err, Error::NoTests(_)), "{err:?}");
         assert_eq!(err.code(), 1);
-    }
-
-    #[test]
-    // Test parsing expected UART values from typical test file header
-    fn test_parse_expected_uart_values1() {
-        let lines = vec![
-            "// Test 05: Bit Manipulation".to_owned(),
-            "// Expected UART output:".to_owned(),
-            "//   00000080  (BSET: set bit 7)".to_owned(),
-            "//   000000FF  (result)".to_owned(),
-            "//   FF000000  (BITREV)".to_owned(),
-            "// Expected 7SEG: 0x05".to_owned(),
-            "_start".to_owned(),
-            "SETR A 0x0".to_owned(),
-        ];
-        let result = parse_expected_uart_values(&lines);
-        assert_eq!(result, vec!["00000080", "000000FF", "FF000000"]);
-    }
-
-    #[test]
-    // Test parsing returns empty vec when no expected values
-    fn test_parse_expected_uart_values2() {
-        let lines = vec!["// This is a comment".to_owned(), "// No hex values here".to_owned(), "_start".to_owned()];
-        let result = parse_expected_uart_values(&lines);
-        assert_eq!(result, Vec::<String>::new());
-    }
-
-    #[test]
-    // Test parsing ignores non-comment lines and short hex values
-    fn test_parse_expected_uart_values3() {
-        let lines = vec![
-            "00000080".to_owned(),                   // not a comment
-            "// 0x05".to_owned(),                    // too short
-            "//   ZZZZZZZZ  (invalid)".to_owned(),   // not hex
-            "//   0000abcd  (lowercase)".to_owned(), // lowercase hex - should not match
-            "//   0000ABCD  (uppercase)".to_owned(), // valid
-        ];
-        let result = parse_expected_uart_values(&lines);
-        assert_eq!(result, vec!["0000ABCD"]);
-    }
-
-    #[test]
-    // Test parsing with empty input
-    fn test_parse_expected_uart_values4() {
-        let lines: Vec<String> = Vec::new();
-        let result = parse_expected_uart_values(&lines);
-        assert_eq!(result, Vec::<String>::new());
     }
 }

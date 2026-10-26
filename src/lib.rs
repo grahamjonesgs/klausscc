@@ -49,6 +49,7 @@ use isa::Opcode;
 use output::listing::write_code_output_file;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 /// Run the `klausscc` command with the process's command line.
 ///
@@ -182,7 +183,8 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // Batch test list mode.
         Mode::TestList(path) => {
             let (oplist, macro_list) = opcode_tables(msg_list);
-            run_test_list(&oplist, &macro_list, path, cli.serial_port(), cli.test_timeout, !cli.no_break, msg_list)
+            let timeout = Duration::from_secs(cli.test_timeout);
+            run_test_list(&oplist, &macro_list, path, cli.serial_port(), timeout, !cli.no_break, msg_list)
         }
         // Emulator mode: build the flat DDR image from the assembled program
         // and run the golden-model.
@@ -247,7 +249,8 @@ fn run_assemble(
             if outcome.is_ok() && !output_serial_port.is_empty() {
                 if cli.test {
                     // Test mode: send to board, keep port open, then verify UART output
-                    return run_test_mode(msg_list, &bin_string, output_serial_port, input, cli.test_timeout, !cli.no_break);
+                    let timeout = Duration::from_secs(cli.test_timeout);
+                    return run_test_mode(msg_list, &bin_string, output_serial_port, input, timeout, !cli.no_break);
                 }
                 outcome = send_image(&bin_string, send, msg_list);
                 if cli.monitor {

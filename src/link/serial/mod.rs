@@ -7,7 +7,7 @@ mod uart_test;
 mod upload;
 
 pub(crate) use monitor::{monitor_serial, monitor_serial_port};
-pub(crate) use uart_test::run_test_monitor;
+pub(crate) use uart_test::{TestResult, hex_token, parse_expected_uart_values, run_test_monitor};
 pub(crate) use upload::{write_to_board, write_to_board_keep_port};
 
 /// Used to define if a port request was not defined so is for auto.
