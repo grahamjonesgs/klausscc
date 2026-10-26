@@ -4,25 +4,43 @@ use super::port::return_port;
 use crate::diag::Diagnostics;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use serialport::SerialPort;
+use std::borrow::Cow;
+use std::fmt::Write as _;
 use std::io::{self, Error, Write as _};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
-/// Print bytes to stderr (unbuffered), optionally showing each byte as hex alongside the character.
-fn print_bytes(data: &[u8], debug: bool) {
-    if debug {
-        for &b in data {
-            if b.is_ascii_graphic() || b == b' ' {
-                eprint!("{:02X}('{}') ", b, char::from(b));
-            } else {
-                eprint!("{b:02X} ");
-            }
-        }
-    } else {
-        eprint!("{}", String::from_utf8_lossy(data));
+/// How long each read of the monitored port waits, so the loop notices a stop.
+const MONITOR_READ_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// How long the keystroke forwarder waits for a key before checking whether to stop.
+const KEY_POLL: Duration = Duration::from_millis(100);
+
+/// The text the monitor shows for bytes received from the board: the bytes
+/// themselves or, with `debug`, each byte as hex (with the character beside it
+/// when printable).
+fn format_bytes(data: &[u8], debug: bool) -> Cow<'_, str> {
+    if !debug {
+        return String::from_utf8_lossy(data);
     }
+    let mut text = String::with_capacity(data.len() * 8);
+    for &b in data {
+        if b.is_ascii_graphic() || b == b' ' {
+            let _ = write!(text, "{b:02X}('{}') ", char::from(b));
+        } else {
+            let _ = write!(text, "{b:02X} ");
+        }
+    }
+    Cow::Owned(text)
+}
+
+/// Print bytes received from the board to stderr in one write (see [`format_bytes`]).
+fn print_bytes(data: &[u8], debug: bool) {
+    let mut stderr = io::stderr().lock();
+    let _ = stderr.write_all(format_bytes(data, debug).as_bytes());
+    let _ = stderr.flush();
 }
 
 /// Monitor serial port for incoming UART data from the FPGA board.
@@ -114,7 +132,7 @@ impl StdinForwarder {
         let handle = thread::spawn(move || {
             while thread_running.load(Ordering::Relaxed) {
                 // Poll with a short timeout so we can check `running` regularly.
-                if let Ok(true) = event::poll(Duration::from_millis(100))
+                if let Ok(true) = event::poll(KEY_POLL)
                     && let Ok(Event::Key(key)) = event::read()
                 {
                     match key_action(&key) {
@@ -169,7 +187,7 @@ fn flush_stdin() {
 /// that was used to upload the program, ensuring no UART output is missed.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
 pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
-    port.set_timeout(Duration::from_millis(500))?;
+    port.set_timeout(MONITOR_READ_TIMEOUT)?;
 
     let running = Arc::new(AtomicBool::new(true));
 
@@ -203,12 +221,10 @@ pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, ms
                 // sends ASCII text, 0x00 cannot appear in normal output.
                 if let Some(pos) = data.iter().position(|&b| b == 0x00) {
                     print_bytes(&data[..pos], debug);
-                    io::stderr().flush().unwrap_or(());
                     halt_received = true;
                     break 'monitor;
                 }
                 print_bytes(data, debug);
-                io::stderr().flush().unwrap_or(());
             }
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
@@ -233,6 +249,14 @@ pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, ms
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn received_bytes_are_shown_as_text_or_hex() {
+        assert_eq!(format_bytes(b"Hi\r\n", false), "Hi\r\n");
+        assert_eq!(format_bytes(b"\xFF", false), "\u{FFFD}");
+        assert_eq!(format_bytes(b"A \n\xFF", true), "41('A') 20(' ') 0A FF ");
+        assert_eq!(format_bytes(b"", true), "");
+    }
 
     fn key(code: KeyCode, modifiers: KeyModifiers, kind: KeyEventKind) -> KeyEvent {
         KeyEvent::new_with_kind(code, modifiers, kind)
