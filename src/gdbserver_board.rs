@@ -122,7 +122,14 @@ pub(crate) enum BoardError {
         len: usize,
     },
     /// Loading the program over the UART before attaching failed.
-    Load(String),
+    Load {
+        /// The program being loaded.
+        path: String,
+        /// The serial port it was sent over.
+        port: String,
+        /// Why the load failed (already reported to the user).
+        source: Box<crate::error::Error>,
+    },
     /// After the load the core halted for this cause instead of at the entry.
     WrongCause {
         /// The `DBG_CAUSE_*` value.
@@ -148,7 +155,7 @@ impl fmt::Display for BoardError {
             Self::HaltRequest(e) => write!(f, "{e}: is a program running on the board? (load one with -s)"),
             Self::MemCommand { status } => write!(f, "debug module memory command failed (DMSTATUS 0x{status:08X})"),
             Self::PastTop { addr, len } => write!(f, "{len} bytes at 0x{addr:08X} run past the end of the address space"),
-            Self::Load(text) => f.write_str(text),
+            Self::Load { path, port, source } => write!(f, "loading {path} over {port} failed ({source})"),
             Self::WrongCause { cause } => write!(f, "the core halted for cause {cause} instead of at the entry"),
             Self::Lost(e) => write!(f, "lost the debug module ({e})"),
             Self::Unsupported(text) => f.write_str(text),
@@ -161,6 +168,7 @@ impl std::error::Error for BoardError {
         match self {
             Self::Jtag(e) => Some(e),
             Self::HaltRequest(e) | Self::Lost(e) => Some(e.as_ref()),
+            Self::Load { source, .. } => Some(source.as_ref()),
             _ => None,
         }
     }
@@ -957,5 +965,11 @@ mod tests {
             "4 bytes at 0xFFFFFFFE run past the end of the address space"
         );
         assert_eq!(BoardError::from(JtagError::ReadTimeout).to_string(), "ftdi read timeout");
+        let load = BoardError::Load {
+            path: "prog.elf".to_owned(),
+            port: "/dev/ttyUSB1".to_owned(),
+            source: Box::new(crate::error::Error::Assembly(1)),
+        };
+        assert_eq!(load.to_string(), "loading prog.elf over /dev/ttyUSB1 failed (completed with 1 error)");
     }
 }

@@ -79,7 +79,11 @@ pub(crate) fn run_gdbserver_board(
         let mut load = || {
             let loaded = run_elf2serial(input, kbt_file_name, send, msg_list);
             msg_list.print_summary();
-            loaded.map_err(|err| BoardError::Load(format!("loading {} over {} failed ({err})", input.path, send.port)))
+            loaded.map_err(|err| BoardError::Load {
+                path: input.path.to_owned(),
+                port: send.port.to_owned(),
+                source: Box::new(err),
+            })
         };
         gdbserver_board::attach(&mut board, Some(&mut load)).map_err(fail)?
     };
