@@ -48,7 +48,7 @@ use error::Error;
 use isa::Opcode;
 use link::serial::SerialTarget;
 use output::listing::write_code_output_file;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
@@ -137,7 +137,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // mem-out mode: flatten an ELF (or take a flat binary) and write a
         // $readmemh image for the resident boot ROM (boot_rom.v). See
         // NETBOOT_PLAN.md Phase 2.
-        Mode::MemOut { input, ref mem_file } => run_mem_out(input, mem_file, msg_list),
+        Mode::MemOut { input, ref mem_file } => run_mem_out(input, Path::new(mem_file), msg_list),
         // ELF / flat binary input: debug, emulate, or convert directly to the
         // board wire format and optionally send it.  No opcode file is
         // required — the built-in table is only used for the .code
@@ -162,7 +162,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         Mode::EmulateBinary { input, trace } => run_emulate_elf(cli.binary_input(input), trace, cli.max_instructions, msg_list),
         Mode::SendBinary { input, ref kbt } => run_elf2serial(cli.binary_input(input), kbt, serial, send, msg_list),
         // .kbt input: already in board wire format — send and/or monitor verbatim.
-        Mode::SendKbt(input) => run_kbt_send(input, serial, send, msg_list),
+        Mode::SendKbt(input) => run_kbt_send(Path::new(input), serial, send, msg_list),
         Mode::Opcodes => {
             use output::docs::output_macros_opcodes_html;
 
@@ -183,13 +183,13 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // Emulator batch-verify mode: assemble + emulate each .kla and check UART.
         Mode::EmulateTest(path) => {
             let (oplist, macro_list) = opcode_tables(msg_list);
-            run_emulate_test(&oplist, &macro_list, path, cli.max_instructions, msg_list)
+            run_emulate_test(&oplist, &macro_list, Path::new(path), cli.max_instructions, msg_list)
         }
         // Batch test list mode.
         Mode::TestList { list, port } => {
             let (oplist, macro_list) = opcode_tables(msg_list);
             let timeout = Duration::from_secs(cli.test_timeout);
-            run_test_list(&oplist, &macro_list, list, port, timeout, send.reset, msg_list)
+            run_test_list(&oplist, &macro_list, Path::new(list), port, timeout, send.reset, msg_list)
         }
         // Emulator mode: build the flat DDR image from the assembled program
         // and run the golden-model.
@@ -250,14 +250,14 @@ fn run_assemble(
     let mut outcome: Result<(), Error> = Ok(());
     if msg_list.count(MessageType::Error) == 0 {
         if let Some(bin_string) = assembly.to_kbt(msg_list) {
-            outcome = write_binary_file(msg_list, binary_file_name, &bin_string);
+            outcome = write_binary_file(msg_list, Path::new(binary_file_name), &bin_string);
             if outcome.is_ok()
                 && let Some(port) = serial
             {
                 if cli.test {
                     // Test mode: send to board, keep port open, then verify UART output
                     let timeout = Duration::from_secs(cli.test_timeout);
-                    return run_test_mode(msg_list, &bin_string, port, input, timeout, send.reset);
+                    return run_test_mode(msg_list, &bin_string, port, Path::new(input), timeout, send.reset);
                 }
                 outcome = send_image(&bin_string, port, send, msg_list);
                 if cli.monitor {

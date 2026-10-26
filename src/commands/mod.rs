@@ -29,7 +29,7 @@ use crate::diag::{Diagnostics, MessageType};
 use crate::error::Error;
 use crate::link::serial::{AwaitAck, ResetMethod, SerialError, SerialTarget, monitor_serial, monitor_serial_port, write_to_board};
 use crate::output::write_binary_output_file;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Monitor the board's UART on `port` (and forward keystrokes) until the user quits.
 ///
@@ -117,12 +117,15 @@ pub(crate) fn send_image(wire: &str, port: SerialTarget<'_>, opts: SendOpts, msg
 /// Writes the `.kbt` wire-format string to `binary_file_name`, reporting (and
 /// returning) a failure.
 #[cfg(not(tarpaulin_include))] // Cannot test device write in tarpaulin
-pub(crate) fn write_binary_file(msg_list: &mut Diagnostics, binary_file_name: &str, bin_string: &str) -> Result<(), Error> {
-    msg_list.info(format!("Writing binary file to {binary_file_name}"));
+pub(crate) fn write_binary_file(msg_list: &mut Diagnostics, binary_file_name: &Path, bin_string: &str) -> Result<(), Error> {
+    msg_list.info(format!("Writing binary file to {}", binary_file_name.display()));
     write_binary_output_file(&binary_file_name, bin_string).map_err(|result_err| {
-        msg_list.error(format!("Unable to write to binary code file {binary_file_name:?}, error {result_err}"));
+        msg_list.error(format!(
+            "Unable to write to binary code file \"{}\", error {result_err}",
+            binary_file_name.display()
+        ));
         Error::Write {
-            path: PathBuf::from(binary_file_name),
+            path: binary_file_name.to_path_buf(),
             source: result_err,
         }
     })

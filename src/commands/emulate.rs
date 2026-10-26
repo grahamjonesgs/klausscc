@@ -15,7 +15,7 @@ use crate::num::human_bytes;
 use crate::output::filename_stem;
 use crate::output::image::Image;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Open the destination for the emulator's per-instruction trace.
 ///
@@ -154,14 +154,12 @@ pub(crate) fn run_emulate_elf(
 pub(crate) fn run_emulate_test(
     oplist: &[Opcode],
     macro_list: &[macros::Macro],
-    test_path: &str,
+    test_path: &Path,
     max_instructions: u64,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
-    use std::path::Path;
-
     // Resolve the list of .kla files to test.
-    let path = Path::new(test_path);
+    let path = test_path;
     let mut files: Vec<String> = Vec::new();
     if path.is_dir() {
         if let Ok(entries) = fs::read_dir(path) {
@@ -173,16 +171,16 @@ pub(crate) fn run_emulate_test(
             }
         }
         files.sort();
-    } else if test_path.ends_with(".kla") {
-        files.push(test_path.to_owned());
+    } else if let Some(file) = test_path.to_str().filter(|name| name.ends_with(".kla")) {
+        files.push(file.to_owned());
     } else {
         // treat as a test-list file
         files = read_test_list(test_path, msg_list);
     }
 
     if files.is_empty() {
-        msg_list.error(format!("No .kla files found for emulate-test at {test_path}"));
-        return Err(Error::NoTests(PathBuf::from(test_path)));
+        msg_list.error(format!("No .kla files found for emulate-test at {}", test_path.display()));
+        return Err(Error::NoTests(test_path.to_path_buf()));
     }
 
     println!("Emulator verification over {} file(s):\n", files.len());
@@ -220,8 +218,11 @@ pub(crate) fn run_emulate_test(
         }
     }
     if total_files == 0 {
-        msg_list.error(format!("No files with expected UART values found for emulate-test at {test_path}"));
-        return Err(Error::NoTests(PathBuf::from(test_path)));
+        msg_list.error(format!(
+            "No files with expected UART values found for emulate-test at {}",
+            test_path.display()
+        ));
+        return Err(Error::NoTests(test_path.to_path_buf()));
     }
     if total_pass == total_files {
         Ok(())

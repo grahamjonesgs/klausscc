@@ -12,7 +12,7 @@ use crate::loader::{BinaryInput, load_flat};
 use crate::output::image::readmemh;
 use crate::output::listing::write_code_output_file;
 use std::fs;
-use std::path::PathBuf;
+use std::path::Path;
 
 /// Flatten an ELF (or take a flat binary) and stream it to the board over TCP.
 ///
@@ -40,7 +40,7 @@ pub(crate) fn run_netload(input: BinaryInput<'_>, board_ip: &str, board_port: u1
 /// `boot_rom.v` (`DEPTH_DW` × 64-bit, `$readmemh`).  `boot_rom`'s copy FSM reads
 /// word 0 (`heap_start` = image byte length) to know how much to copy to DDR.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &Path, msg_list: &mut Diagnostics) -> Result<(), Error> {
     // mem-out writes a $readmemh image and does not need an entry point.
     let loaded = load_flat(
         BinaryInput {
@@ -54,14 +54,15 @@ pub(crate) fn run_mem_out(binary_path: &str, mem_file_name: &str, msg_list: &mut
     let image = loaded.image.to_ddr();
 
     if let Err(e) = fs::write(mem_file_name, readmemh(&image)) {
-        msg_list.error(format!("Failed to write boot ROM image {mem_file_name}: {e}"));
+        msg_list.error(format!("Failed to write boot ROM image {}: {e}", mem_file_name.display()));
         return Err(Error::Write {
-            path: PathBuf::from(mem_file_name),
+            path: mem_file_name.to_path_buf(),
             source: e,
         });
     }
     msg_list.info(format!(
-        "mem-out: {binary_path} → {mem_file_name} ({} doublewords, {} bytes)",
+        "mem-out: {binary_path} → {} ({} doublewords, {} bytes)",
+        mem_file_name.display(),
         image.len() / 8,
         image.len()
     ));
@@ -116,7 +117,7 @@ pub(crate) fn run_elf2serial(
      * files just adds several seconds for no benefit. */
     let mut outcome: Result<(), Error> = Ok(());
     if port.is_none() {
-        outcome = write_binary_file(msg_list, kbt_file_name, &out);
+        outcome = write_binary_file(msg_list, Path::new(kbt_file_name), &out);
     }
 
     // Optionally produce a .code disassembly listing alongside the .kbt, using
@@ -152,13 +153,13 @@ pub(crate) fn run_elf2serial(
 /// file and no re-encoding.  With `-m` and no `-s`, the serial port is
 /// auto-detected so a bare `-m` can both send and monitor.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_kbt_send(kbt_path: &str, port: Option<SerialTarget<'_>>, send: SendOpts, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn run_kbt_send(kbt_path: &Path, port: Option<SerialTarget<'_>>, send: SendOpts, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let wire = match fs::read_to_string(kbt_path) {
         Ok(contents) => contents,
         Err(e) => {
-            msg_list.error(format!("Cannot read kbt file {kbt_path}: {e}"));
+            msg_list.error(format!("Cannot read kbt file {}: {e}", kbt_path.display()));
             return Err(Error::Read {
-                path: PathBuf::from(kbt_path),
+                path: kbt_path.to_path_buf(),
                 source: e,
             });
         }
@@ -172,7 +173,7 @@ pub(crate) fn run_kbt_send(kbt_path: &str, port: Option<SerialTarget<'_>>, send:
         return Ok(());
     };
 
-    msg_list.info(format!("Sending pre-built image {kbt_path} to board"));
+    msg_list.info(format!("Sending pre-built image {} to board", kbt_path.display()));
 
     send_image(wire_trimmed, port, send, msg_list)
 }
