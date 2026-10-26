@@ -18,16 +18,17 @@ pub(crate) mod lexer;
 pub(crate) mod line;
 mod pass1;
 mod pass2;
+pub(crate) mod symbols;
 
 use crate::diag::Diagnostics;
 use crate::files::{read_file_to_vector, remove_block_comments};
 use crate::image::{Image, create_bin_string};
-use crate::labels::{find_duplicate_label, get_labels};
 use crate::macros::{Macro, apply_source_macros, expand_macros};
 use crate::opcodes::Opcode;
 use line::{Pass2, SourceLine};
 use pass1::get_pass1;
 use pass2::get_pass2;
+use symbols::{find_duplicate_label, get_labels};
 
 /// One assembled source file.
 #[derive(Debug)]

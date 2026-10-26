@@ -1,3 +1,6 @@
+//! The symbol table: the program's labels and their addresses, and turning
+//! an operand (a label or a literal) into its value.
+
 use crate::asm::lexer::{data_name_from_string, label_name_from_string, strip_comments};
 use crate::asm::line::Pass1;
 use crate::diag::Diagnostics;

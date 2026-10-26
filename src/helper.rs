@@ -332,8 +332,8 @@ pub(crate) fn trim_newline(input: &mut String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::asm::symbols::{Label, return_label_value};
     use crate::diag::MessageType;
-    use crate::labels::{Label, return_label_value};
 
     #[test]
     // Test that line is trimmed of newline

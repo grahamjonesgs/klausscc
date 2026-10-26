@@ -1,6 +1,6 @@
 use crate::asm::line::SourceLine;
+use crate::asm::symbols::{Label, convert_argument};
 use crate::diag::Diagnostics;
-use crate::labels::{Label, convert_argument};
 use crate::macros::{Macro, macro_from_string, return_macro};
 use crate::num::{parse_bits64, parse_int};
 use serde::{Deserialize, Serialize};
@@ -1029,7 +1029,6 @@ pub(crate) fn return_opcode(line: &str, opcodes: &[Opcode]) -> Option<String> {
 mod tests {
     use super::*;
     use crate::diag::MessageType;
-    use crate::labels;
 
     #[test]
     // Test that the correct number of registers is returned
@@ -1251,7 +1250,7 @@ mod tests {
     fn test_add_arguments1() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 0xFFFF");
-        let labels = Vec::<labels::Label>::new();
+        let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1271,7 +1270,7 @@ mod tests {
     fn test_add_arguments2() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1234");
-        let labels = Vec::<labels::Label>::new();
+        let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1291,7 +1290,7 @@ mod tests {
     fn test_add_arguments3() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH HELLO");
-        let labels = Vec::<labels::Label>::new();
+        let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1311,7 +1310,7 @@ mod tests {
     fn test_add_arguments4() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 0xF RRR");
-        let labels = Vec::<labels::Label>::new();
+        let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1331,7 +1330,7 @@ mod tests {
     fn test_add_arguments5() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1 0xF");
-        let labels = Vec::<labels::Label>::new();
+        let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1351,7 +1350,7 @@ mod tests {
     fn test_add_arguments6() {
         let mut msg_list = Diagnostics::new();
         let input = String::from("PUSH 1 0xF");
-        let labels = Vec::<labels::Label>::new();
+        let labels = Vec::<Label>::new();
         let opcodes = &mut Vec::<Opcode>::new();
         opcodes.push(Opcode {
             text_name: String::from("PUSH"),
@@ -1371,7 +1370,7 @@ mod tests {
     // Regression: one "Too many arguments" warning was pushed per extra token.
     fn test_add_arguments_extra_tokens_warn_once() {
         let mut msg_list = Diagnostics::new();
-        let labels = Vec::<labels::Label>::new();
+        let labels = Vec::<Label>::new();
         let opcodes = &mut v2_opcodes();
         let output = add_arguments(opcodes, "SETR A 1 2 3 4", &mut msg_list, 1, "test", &labels);
         assert_eq!(output, String::from("00000001"));

@@ -32,8 +32,6 @@ mod image;
 /// framing is also built for tests, so they run without libftdi.
 #[cfg(any(test, feature = "board"))]
 mod jtag;
-/// Module to manage labels.
-mod labels;
 /// The memory map: heap header, code base, heap start and the MMIO window.
 mod layout;
 /// Loading an ELF or flat binary as a board program.
