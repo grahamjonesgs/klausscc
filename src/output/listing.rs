@@ -3,58 +3,36 @@
 use crate::asm::line::{LineType, Pass2};
 use crate::diag::Diagnostics;
 use crate::layout::{CODE_BASE, heap_start};
+use itertools::Itertools as _;
 use std::fs::File;
-use std::io::{Error, Write as _};
+use std::io::{BufWriter, Error, Write};
 use std::path::Path;
 
-/// Format a given string, adding spaces between groups of 4.
+/// Format an instruction's hex as its 32-bit words separated by spaces.
 ///
-/// For string of 8 and 12 charters adds spaces between groups of 4 characters, otherwise returns original string.
+/// The caller pads the result to the listing's column width.
 fn format_opcodes(input: &str) -> String {
-    if input.len() == 4 {
-        return format!("{input}              ");
-    }
-    if input.len() == 8 {
-        let mut result = input.get(0..4).unwrap_or("    ").to_owned();
-        result.push_str(input.get(4..8).unwrap_or("    "));
-        result.push_str("         ");
-        return result;
-    }
-    if input.len() == 16 {
-        let mut result = input.get(0..4).unwrap_or("    ").to_owned();
-        result.push_str(input.get(4..8).unwrap_or("    "));
-        result.push(' ');
-        result.push_str(input.get(8..12).unwrap_or("    "));
-        result.push_str(input.get(12..16).unwrap_or("    "));
-        return result;
-    }
-    // 12-byte instruction: 32-bit opcode + 64-bit immediate (lo32 + hi32), e.g. SETR64
-    if input.len() == 24 {
-        let mut result = input.get(0..4).unwrap_or("    ").to_owned();
-        result.push_str(input.get(4..8).unwrap_or("    "));
-        result.push(' ');
-        result.push_str(input.get(8..12).unwrap_or("    "));
-        result.push_str(input.get(12..16).unwrap_or("    "));
-        result.push(' ');
-        result.push_str(input.get(16..20).unwrap_or("    "));
-        result.push_str(input.get(20..24).unwrap_or("    "));
-        return result;
-    }
-    input.to_owned()
+    input
+        .as_bytes()
+        .chunks(8)
+        .map(|word| std::str::from_utf8(word).unwrap_or_default())
+        .join(" ")
 }
 
 /// Output the code details file to given filename.
 ///
 /// Writes all data to the detailed code file.
-pub(crate) fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &[Pass2], msg_list: &mut Diagnostics) -> Result<(), Error> {
-    let mut file = match File::create(filename) {
-        Ok(file) => file,
-        #[cfg(not(tarpaulin_include))] // Can't test error creating file
-        Err(err) => return Err(err),
-    };
+pub(crate) fn write_code_output_file(filename: impl AsRef<Path>, pass2: &[Pass2], msg_list: &mut Diagnostics) -> Result<(), Error> {
+    let filename = filename.as_ref();
+    let mut file = BufWriter::new(File::create(filename)?);
+    msg_list.info(format!("Writing code file to {}", filename.display()));
+    write_listing(&mut file, pass2)?;
+    file.flush()
+}
 
-    let mut out_line = String::default();
-    msg_list.info(format!("Writing code file to {}", filename.as_ref().display()));
+/// Write the listing of `pass2` to `out`: the heap header, then every line
+/// with its address and encoding.
+fn write_listing(out: &mut impl Write, pass2: &[Pass2]) -> Result<(), Error> {
     // Compute heap_start from the first byte after the program, as the .kbt does.
     // program_counter is already a byte address; opcode.len()/8 = words, *4 = bytes → /2 total
     let program_end: u32 = pass2
@@ -73,46 +51,23 @@ pub(crate) fn write_code_output_file(filename: impl AsRef<Path> + Copy, pass2: &
         ("0000000000000000".to_owned(), "(reserved)"),
     ];
     for (i, (value, comment)) in heap_header.iter().enumerate() {
-        match file.write_all(format!("0x{:08X}: {value:<33} -- {comment}\n", i * 8).as_bytes()) {
-            Ok(()) => {}
-            #[cfg(not(tarpaulin_include))]
-            Err(err) => return Err(err),
-        }
+        writeln!(out, "0x{:08X}: {value:<33} -- {comment}", i * 8)?;
     }
 
     for pass in pass2 {
-        out_line.clear();
-        if pass.line_type == LineType::Opcode {
-            out_line = format!(
-                "0x{:08X}: {:<17} -- {}\n",
-                pass.program_counter,
-                format_opcodes(&pass.opcode),
-                pass.input_text_line
-            );
-        } else if pass.line_type == LineType::Data {
-            // One row per 64-bit word; a final part word gets a row of its own.
-            for (chunk, n) in pass.opcode.as_bytes().chunks(16).zip(0_u32..) {
-                out_line.push_str(
-                    format!(
-                        "0x{:08X}: {:<32}  -- {}\n",
-                        pass.program_counter + n * 8,
-                        std::str::from_utf8(chunk).unwrap_or_default(),
-                        pass.input_text_line
-                    )
-                    .as_str(),
-                );
+        let text = &pass.input_text_line;
+        match pass.line_type {
+            LineType::Opcode => writeln!(out, "0x{:08X}: {:<17} -- {text}", pass.program_counter, format_opcodes(&pass.opcode))?,
+            LineType::Data => {
+                // One row per 64-bit word; a final part word gets a row of its own.
+                for (chunk, n) in pass.opcode.as_bytes().chunks(16).zip(0_u32..) {
+                    let word = std::str::from_utf8(chunk).unwrap_or_default();
+                    writeln!(out, "0x{:08X}: {word:<32}  -- {text}", pass.program_counter + n * 8)?;
+                }
             }
-        } else if pass.line_type == LineType::Label {
-            out_line = format!("0x{:08X}:                   -- {}\n", pass.program_counter, pass.input_text_line);
-        } else if pass.line_type == LineType::Error {
-            out_line = format!("Error                         -- {}\n", pass.input_text_line);
-        } else {
-            out_line = format!("                              -- {}\n", pass.input_text_line);
-        }
-        match file.write_all(out_line.as_bytes()) {
-            Ok(()) => {}
-            #[cfg(not(tarpaulin_include))] // Can't test error writing to file
-            Err(err) => return Err(err),
+            LineType::Label => writeln!(out, "0x{:08X}:                   -- {text}", pass.program_counter)?,
+            LineType::Error => writeln!(out, "Error                         -- {text}")?,
+            LineType::Blank | LineType::Comment | LineType::Directive | LineType::Start => writeln!(out, "                              -- {text}")?,
         }
     }
     Ok(())
@@ -128,10 +83,11 @@ mod tests {
     // Check for formatting of codes used for debug file
     fn test_format_opcodes() {
         assert_eq!(format_opcodes("0000000000000000"), "00000000 00000000");
-        assert_eq!(format_opcodes("0000"), "0000              ");
+        assert_eq!(format_opcodes("0000"), "0000");
         assert_eq!(format_opcodes("0123456789ABCDEF"), "01234567 89ABCDEF");
-        assert_eq!(format_opcodes("12345678"), "12345678         ");
+        assert_eq!(format_opcodes("12345678"), "12345678");
         assert_eq!(format_opcodes("123"), "123");
+        assert_eq!(format_opcodes("8BD000000000004100000000"), "8BD00000 00000041 00000000");
     }
 
     #[test]

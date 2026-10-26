@@ -6,8 +6,8 @@ pub(crate) mod image;
 pub(crate) mod listing;
 
 use std::ffi::OsStr;
-use std::fs::File;
-use std::io::{Error, Write as _};
+use std::fs;
+use std::io::Error;
 use std::path::Path;
 
 /// Return the stem of given filename.
@@ -42,22 +42,7 @@ pub(crate) fn output_file_name(explicit: Option<&str>, input_file_name: &str, ex
 ///
 /// Based on the bitcode string outputs to file.
 pub(crate) fn write_binary_output_file(filename: &impl AsRef<Path>, output_string: &str) -> Result<(), Error> {
-    match File::create(filename) {
-        Ok(mut file) => {
-            match file.write_all(output_string.as_bytes()) {
-                Ok(()) => {}
-                #[cfg(not(tarpaulin_include))] // Can't test error writing to files
-                Err(err) => return Err(err),
-            }
-        }
-        #[cfg(not(tarpaulin_include))] // Can't test error creating
-        Err(err) => {
-            // code to execute if File::create returned an error
-            return Err(err);
-        }
-    }
-
-    Ok(())
+    fs::write(filename, output_string)
 }
 
 #[cfg(test)]
