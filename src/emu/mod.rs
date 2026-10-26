@@ -337,7 +337,8 @@ impl Cpu {
 
     /// One step of the machine: take a ready interrupt (entry is a step of
     /// its own), or wake from / finish a `WAIT`, or retire one instruction,
-    /// returning its `(pc, word)` for the trace.  With `allow_irq` false (a
+    /// returning its `(pc, word)` for the trace.  An illegal word stops the
+    /// machine without retiring.  With `allow_irq` false (a
     /// debugger single-step) no interrupt is taken, and a `WAIT` completes as
     /// if woken, leaving the interrupt pending for the next continue.
     fn step_inner(&mut self, allow_irq: bool) -> Option<(u32, u32)> {
@@ -369,6 +370,12 @@ impl Cpu {
         let word = self.read32(pc);
         self.last_write = None;
         self.execute(word);
+        if matches!(self.stop, Some(StopReason::InvalidOpcode(_))) {
+            // An illegal word parks without retiring: the RTL gives it no
+            // trace line (`pipeline_core.sv` :1564-1566) and `PERF_INSTR`
+            // counts only retirements (`KlaussCPU.sv` :2342-2343).
+            return None;
+        }
         self.instret += 1;
         self.tick(CYCLES_PER_INSTRUCTION);
         Some((pc, word))

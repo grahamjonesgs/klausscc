@@ -1398,3 +1398,22 @@ fn delay_advances_modelled_time() {
     let _ = cpu.run(10, None);
     assert_eq!(cpu.irq_state().cycles, 4 * CYCLES_PER_INSTRUCTION);
 }
+
+#[test]
+fn an_illegal_word_does_not_retire() {
+    // pipeline_core.sv:1564-1566: an illegal op parks with no trace line,
+    // and PERF_INSTR counts retirements only (KlaussCPU.sv:2342-2343).
+    // SETR A 1 ; <reserved: ADDR with F = 0>
+    let img = image_from_words(&[0x8BD0_0000, 1, 0x4400_0000, HALT]);
+    let mut buf = Vec::new();
+    let r = emulate_image(&img, CODE_BASE, 100, Some(&mut buf));
+    assert_eq!(r.stop, StopReason::InvalidOpcode(0x4400_0000));
+    assert_eq!(r.instructions, 1, "only the SETR retired");
+    assert_eq!(String::from_utf8(buf).expect("ASCII").lines().count(), 1);
+    let mut cpu = cpu_with(&img);
+    let _ = cpu.run(100, None);
+    assert_eq!(cpu.instret, 1);
+    // HALT does retire (and is traced).
+    let r = emulate_image(&image_from_words(&[HALT]), CODE_BASE, 100, None);
+    assert_eq!((r.stop, r.instructions), (StopReason::Halt, 1));
+}
