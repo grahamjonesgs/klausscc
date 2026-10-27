@@ -724,6 +724,12 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 | `LDIDX32R rd rs1 rs2` | 1 | rd = zext(mem32[(rs1 + rs2) & ~3]) | — |
 | `LDIDX32SR rd rs1 rs2` | 1 | rd = sext(mem32[(rs1 + rs2) & ~3]) | — |
 | `MEMREADR rd addr32` | 2 | rd = mem64[addr32]; addr32 is an address or label | — |
+| `LDABS8 rd addr32` | 2 | rd = zext(mem8[addr32]) | — |
+| `LDABS8S rd addr32` | 2 | rd = sext(mem8[addr32]) | — |
+| `LDABS16 rd addr32` | 2 | rd = zext(mem16[addr32 & ~1]) | — |
+| `LDABS16S rd addr32` | 2 | rd = sext(mem16[addr32 & ~1]) | — |
+| `LDABS32 rd addr32` | 2 | rd = zext(mem32[addr32 & ~3]) | — |
+| `LDABS32S rd addr32` | 2 | rd = sext(mem32[addr32 & ~3]) | — |
 | `LDIDX8.S rd rs1 off` | 1 | as `LDIDX8`, off −128..127 (v3) | — |
 | `LDIDX8_S.S rd rs1 off` | 1 | as `LDIDX8_S`, off −128..127 (v3) | — |
 | `LDIDX16.S rd rs1 off` | 1 | as `LDIDX16`, off even, −256..254 (v3) | — |
@@ -752,6 +758,9 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 | `STIDX16R rd rs1 rs2` | 1 | mem16[(rs1 + rs2) & ~1] = rd[15:0] | — |
 | `STIDX32R rd rs1 rs2` | 1 | mem32[(rs1 + rs2) & ~3] = rd[31:0] | — |
 | `MEMSETR rd addr32` | 2 | mem64[addr32] = rd; addr32 is an address or label | — |
+| `STABS8 rd addr32` | 2 | mem8[addr32] = rd[7:0] | — |
+| `STABS16 rd addr32` | 2 | mem16[addr32 & ~1] = rd[15:0] | — |
+| `STABS32 rd addr32` | 2 | mem32[addr32 & ~3] = rd[31:0] | — |
 | `STIDX8.S rd rs1 off` | 1 | as `STIDX8`, off −128..127 (v3) | — |
 | `STIDX16.S rd rs1 off` | 1 | as `STIDX16`, off even, −256..254 (v3) | — |
 | `STIDX32.S rd rs1 off` | 1 | as `STIDX32`, off a multiple of 4, −512..508 (v3) | — |
@@ -762,7 +771,7 @@ Stores take the value from `rd` and the address from `rs1`: `MEMSET8 D B` stores
 
 Byte accesses use the address as it is. 16- and 32-bit accesses clear the address bits below their size, except `MEMGET32`, which reads four bytes at any address. The `A` forms (`MEMGET64`, `MEMSET64`, `LDIDX64A`, `STIDX64A` and their `.S` forms) clear the low three address bits. The other 64-bit forms pass the address on unchanged, but the data cache ignores address bits 2:0, so every 64-bit memory access reaches the aligned doubleword that holds the address. The same goes for `PUSH`, `POP`, calls and returns when SP is not a multiple of 8. A device (MMIO) access without `A` keeps the address as it is. Keep the address of every 64-bit access 8-byte aligned, or use an `A` form.
 
-The `.S` forms are one word long and take a literal byte offset, which must be a multiple of the access size. Offsets in `off32` may be negative (`STIDX64 A P -8`). The `R` forms add two registers; the sign-extending ones are spelt `LDIDX8SR`, `LDIDX16SR` and `LDIDX32SR`, as the LLVM compiler names them, without the underscore of `LDIDX8_S`.
+The `.S` forms are one word long and take a literal byte offset, which must be a multiple of the access size. Offsets in `off32` may be negative (`STIDX64 A P -8`). The `R` forms add two registers; the sign-extending ones are spelt `LDIDX8SR`, `LDIDX16SR` and `LDIDX32SR`, as the LLVM compiler names them, without the underscore of `LDIDX8_S`. The `LDABS`/`STABS` forms take an absolute address at every width, as `MEMREADR`/`MEMSETR` do for 64 bits; the compiler uses them for device registers (`LDABS32S` is the sign-extending 32-bit one).
 
 Addresses with the top four bits set (`0xF000_0000` and up) reach the devices; see [Memory-Mapped I/O](#memory-mapped-io).
 

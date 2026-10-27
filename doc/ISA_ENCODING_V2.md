@@ -315,9 +315,16 @@ ABS of INT_MIN (`0x8000_0000_0000_0000`) returns INT_MIN and sets V.
 | LDIDX16SR | `0x59E0_0000` | 1 | rd rs1 rs2 | rs1+rs2, sext | — |
 | LDIDX32R  | `0x5A60_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
 | LDIDX32SR | `0x5AE0_0000` | 1 | rd rs1 rs2 | rs1+rs2, sext | — |
+| LDABS8    | `0x9840_0000` | 2 | rd imm32 | imm32 absolute | — |
+| LDABS8S   | `0x98C0_0000` | 2 | rd imm32 | imm32 absolute, sext | — |
+| LDABS16   | `0x9940_0000` | 2 | rd imm32 | imm32 absolute | — |
+| LDABS16S  | `0x99C0_0000` | 2 | rd imm32 | imm32 absolute, sext | — |
+| LDABS32   | `0x9A40_0000` | 2 | rd imm32 | imm32 absolute | — |
+| LDABS32S  | `0x9AC0_0000` | 2 | rd imm32 | imm32 absolute, sext | — |
 
-The sub-word reg+reg forms carry LLVM's names (`ldidx8sr`; the 2-word
-sign-extending loads keep the `_S` spelling). Loads write no flags. 16- and 32-bit loads align their address down to
+The sub-word reg+reg and absolute forms carry LLVM's names (`ldidx8sr`,
+`ldabs8s`; the 2-word sign-extending indexed loads keep the `_S`
+spelling). Loads write no flags. 16- and 32-bit loads align their address down to
 the access size (`& ~1`, `& ~3`), except **MEMGET32**, which reads the 4
 bytes at any address, even across a doubleword boundary. A 64-bit access
 with A=1 is forced to `& ~7`. With A=0 the core sends the address as is,
@@ -344,6 +351,9 @@ practice every 64-bit RAM access reads or writes the aligned doubleword
 | STIDX8R    | `0x5C60_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
 | STIDX16R   | `0x5D60_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
 | STIDX32R   | `0x5E60_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
+| STABS8     | `0x9C40_0000` | 2 | rd imm32 | imm32 absolute | — |
+| STABS16    | `0x9D40_0000` | 2 | rd imm32 | imm32 absolute | — |
+| STABS32    | `0x9E40_0000` | 2 | rd imm32 | imm32 absolute | — |
 
 The first operand is the **value**, the second the **address**:
 `MEMSET8 C B` stores the low byte of C at `[B]`. Sub-word stores align
@@ -661,7 +671,8 @@ and old discussions; the current rules are in §1–§3 and §7.
    combinations in §5 legal; the v3 forms in §3.10–3.14 were added; and
    the legal forms LLVM emits were given its mnemonics (SETRU, ANDI/ORI/
    XORI, CMPRVU, the boolean compare-immediates, the W boolean compares,
-   the sub-word reg+reg loads and stores, the 2-word PC-relative jumps).
+   the sub-word reg+reg and absolute loads and stores, the 2-word
+   PC-relative jumps).
    These v1 quirks remain: BTST-imm writes only Z while BTSTRR writes rd;
    GETF shows only Z/E/C/V; a rotate by any count other than an embedded
    N=1 does not write C.
@@ -687,10 +698,8 @@ emulator alike.
   POPCNT/CLZ/CTZ/GETF; SEXT with F=1 at all three sizes (Z+S). ABS/INC/DEC
   require F=1.
 - **Loads (class 6)**: the full SIZE × SGN × MODE × A space (A: 64-bit
-  only), e.g. MEMGET8_S/16_S and the sub-word absolute (mode 10) forms. SIZE=32 with MODE=00 is MEMGET32
-  and needs SGN=0.
-- **Stores (class 7)**: the full SIZE × MODE space (SGN must be 0): the
-  sub-word absolute forms.
+  only), e.g. MEMGET8_S/16_S. SIZE=32 with MODE=00 is MEMGET32 and needs
+  SGN=0.
 - **Mul/div (class A)**: MULHV/MULUV/MULHUV, DIVUV/MODUV; the immediate
   forms extend per the SGN bit.
 - **Branches (class 8)**: the 2-word PC-relative JMPO/JMPNO and
@@ -832,6 +841,12 @@ LDIDX32,0x9A200000,2,6,"rd,rs1",off32,,
 LDIDX64,0x9B200000,2,6,"rd,rs1",off32,,A=0
 LDIDX64A,0x9B300000,2,6,"rd,rs1",off32,,A=1
 MEMREADR,0x9B400000,2,6,rd,addr32,,
+LDABS8,0x98400000,2,6,rd,addr32,,
+LDABS16,0x99400000,2,6,rd,addr32,,EA=addr32&~1
+LDABS32,0x9A400000,2,6,rd,addr32,,EA=addr32&~3
+LDABS8S,0x98C00000,2,6,rd,addr32,,sext
+LDABS16S,0x99C00000,2,6,rd,addr32,,EA=addr32&~1; sext
+LDABS32S,0x9AC00000,2,6,rd,addr32,,EA=addr32&~3; sext
 LDIDX64R,0x5B600000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2
 LDIDX8R,0x58600000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2
 LDIDX16R,0x59600000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~1
@@ -850,6 +865,9 @@ STIDX32,0x9E200000,2,7,"rd,rs1",off32,,data=rd
 STIDX64,0x9F200000,2,7,"rd,rs1",off32,,data=rd; A=0
 STIDX64A,0x9F300000,2,7,"rd,rs1",off32,,data=rd; A=1
 MEMSETR,0x9F400000,2,7,rd,addr32,,data=rd
+STABS8,0x9C400000,2,7,rd,addr32,,data=rd
+STABS16,0x9D400000,2,7,rd,addr32,,data=rd; EA=addr32&~1
+STABS32,0x9E400000,2,7,rd,addr32,,data=rd; EA=addr32&~3
 STIDX64R,0x5F600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
 STIDX8R,0x5C600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
 STIDX16R,0x5D600000,1,7,"rd,rs1,rs2",,,data=rd; EA=(rs1+rs2)&~1

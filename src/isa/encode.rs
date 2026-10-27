@@ -499,6 +499,43 @@ mod tests {
     }
 
     #[test]
+    // The absolute (MODE=10) loads and stores encode to the words LLVM emits
+    // (`llvm-mc -show-encoding`: `ldabs8 r1, 4026597377` is 0x98400100,
+    // 0xF0010001), are two words with the value register in rd, rs1 and rs2
+    // zero and the address in word 1, and disassemble back to their name.
+    fn test_absolute_loads_and_stores_assemble() {
+        // (source, word 0, SIZE [25:24], SGN [23], store)
+        let cases = [
+            ("LDABS8 B 0xF0010001", 0x9840_0100, 0, false, false),
+            ("LDABS16 B 0xF0010002", 0x9940_0100, 1, false, false),
+            ("LDABS32 B 0xF0010004", 0x9A40_0100, 2, false, false),
+            ("LDABS8S B 0xF0010001", 0x98C0_0100, 0, true, false),
+            ("LDABS16S B 0xF0010002", 0x99C0_0100, 1, true, false),
+            ("LDABS32S B 0xF0010004", 0x9AC0_0100, 2, true, false),
+            ("STABS8 B 0xF0010001", 0x9C40_0100, 0, false, true),
+            ("STABS16 B 0xF0010002", 0x9D40_0100, 1, false, true),
+            ("STABS32 B 0xF0010004", 0x9E40_0100, 2, false, true),
+        ];
+        let disassembler = Disassembler::new(V2_OPCODES);
+        for (src, word, size, sgn, store) in cases {
+            let encoded = enc(src).unwrap();
+            let addr = u32::from_str_radix(&src[src.len() - 8..], 16).unwrap();
+            assert_eq!((encoded.word0, encoded.imm), (Some(word), vec![addr]), "{src}");
+            // LEN 10, class 6 (load) or 7 (store), MODE 10, A 0, and every
+            // field but SIZE/SGN and rd zero: the shape pipeline_core.sv
+            // decodes as an absolute access.
+            assert_eq!(word >> 30, 2, "{src}");
+            assert_eq!((word >> 26) & 0xF, if store { 7 } else { 6 }, "{src}");
+            assert_eq!(((word >> 24) & 3, (word >> 23) & 1 == 1), (size, sgn), "{src}");
+            assert_eq!(((word >> 21) & 3, (word >> 20) & 1, word & 0xF_F0FF), (2, 0, 0), "{src}");
+            let name = src.split(' ').take(2).collect::<Vec<_>>().join(" ");
+            assert_eq!(disassembler.word(word), Some((name, 1)), "{src}");
+        }
+        // Lower case, as LLVM prints them, with a decimal address.
+        assert_eq!(hex("ldabs16s d 4026597378"), "99C00300F0010002");
+    }
+
+    #[test]
     // The other forms LLVM emits that klausscc once had no name for encode to
     // the words `llvm-mc -show-encoding` gives for the same operands
     // (llvm/test/MC/KlaussCPU/encoding-coverage.s, with r1/r2/r3 as B/C/D).

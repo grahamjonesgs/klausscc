@@ -739,6 +739,56 @@ fn reg_offset_subword_loads_extend_and_stores_truncate() {
     assert_eq!(cpu.regs[10], 0x5566_7788_7788_88FF);
 }
 
+#[test]
+fn absolute_subword_loads_extend_and_stores_truncate() {
+    // LDABSn / LDABSnS / STABSn (MODE=10, EA = imm32 in word 1): loads zero-
+    // or sign-extend, stores write only the low bytes of rd, and 16/32-bit
+    // accesses align the EA down (pipeline_core.sv:1003, :1101-1113,
+    // :1186-1188). `abs` is `[template | rd<<8, addr]`.
+    const fn abs(template: u32, rd: u32, addr: u32) -> [u32; 2] {
+        [template | rd << 8, addr]
+    }
+    let (a, b) = (0, 1);
+    let mut w = Vec::new();
+    // [0x1000] = bytes FF EE DD CC 55 66 77 88; A = store data.
+    w.extend_from_slice(&setr(b, 0x1000));
+    w.extend_from_slice(&[0xCBC0_0B00, 0xCCDD_EEFF, 0x8877_6655]); // SETR64 L
+    w.push(0x5F10_0B10); // MEMSET64 L B
+    w.extend_from_slice(&[0xCBC0_0000, 0x5566_7788, 0x1122_3344]); // SETR64 A
+    w.extend_from_slice(&abs(0x9840_0000, 3, 0x1003)); // LDABS8   D = [0x1003]
+    w.extend_from_slice(&abs(0x98C0_0000, 4, 0x1003)); // LDABS8S  E = [0x1003]
+    w.extend_from_slice(&abs(0x9940_0000, 5, 0x1003)); // LDABS16  F = [0x1002]
+    w.extend_from_slice(&abs(0x99C0_0000, 6, 0x1003)); // LDABS16S G = [0x1002]
+    w.extend_from_slice(&abs(0x9A40_0000, 7, 0x1007)); // LDABS32  H = [0x1004]
+    w.extend_from_slice(&abs(0x9AC0_0000, 8, 0x1007)); // LDABS32S I = [0x1004]
+    w.extend_from_slice(&abs(0x98C0_0000, 12, 0x1004)); // LDABS8S M, a positive byte
+    // [0x1008] = all ones, then a byte, a halfword and a word of A over it.
+    w.extend_from_slice(&setr(9, 0xFFFF_FFFF)); // J = -1
+    w.extend_from_slice(&abs(0x9F40_0000, 9, 0x1008)); // MEMSETR J -> [0x1008]
+    w.extend_from_slice(&abs(0x9C40_0000, a, 0x1009)); // STABS8  A -> [0x1009]
+    w.extend_from_slice(&abs(0x9D40_0000, a, 0x100B)); // STABS16 A -> [0x100A]
+    w.extend_from_slice(&abs(0x9E40_0000, a, 0x100F)); // STABS32 A -> [0x100C]
+    w.extend_from_slice(&abs(0x9B40_0000, 10, 0x1008)); // MEMREADR K = [0x1008]
+    w.push(HALT);
+    let cpu = run_words(&w);
+    assert_eq!(cpu.stop, Some(StopReason::Halt));
+    assert_eq!(cpu.regs[3], 0xCC, "LDABS8 zero-extends");
+    assert_eq!(cpu.regs[4], 0xFFFF_FFFF_FFFF_FFCC, "LDABS8S sign-extends");
+    assert_eq!(cpu.regs[5], 0xCCDD, "LDABS16 zero-extends");
+    assert_eq!(cpu.regs[6], 0xFFFF_FFFF_FFFF_CCDD, "LDABS16S sign-extends");
+    assert_eq!(cpu.regs[7], 0x8877_6655, "LDABS32 zero-extends");
+    assert_eq!(cpu.regs[8], 0xFFFF_FFFF_8877_6655, "LDABS32S sign-extends");
+    assert_eq!(cpu.regs[12], 0x55, "LDABS8S keeps a positive byte positive");
+    assert_eq!(
+        ram16(&cpu, 0x1000),
+        [
+            0xFF, 0xEE, 0xDD, 0xCC, 0x55, 0x66, 0x77, 0x88, 0xFF, 0x88, 0x88, 0x77, 0x88, 0x77, 0x66, 0x55
+        ],
+        "each store wrote only its width of A's low bytes"
+    );
+    assert_eq!(cpu.regs[10], 0x5566_7788_7788_88FF);
+}
+
 /// Assemble `source` with the built-in table and macros and run it to its
 /// end (at most 10 000 instructions).
 fn run_source(source: &str) -> Cpu {

@@ -153,6 +153,14 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("LDIDX64", 0x9B20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("LDIDX64A", 0x9B30_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("MEMREADR", 0x9B40_0000, &[Operand::Rd, Operand::Imm]),
+    // The sub-word absolute (MODE=10) forms: EA = imm32, aligned down to the
+    // access size as LDIDX16/32 are. Named as LLVM prints and accepts them.
+    op("LDABS8", 0x9840_0000, &[Operand::Rd, Operand::Imm]),
+    op("LDABS16", 0x9940_0000, &[Operand::Rd, Operand::Imm]),
+    op("LDABS32", 0x9A40_0000, &[Operand::Rd, Operand::Imm]),
+    op("LDABS8S", 0x98C0_0000, &[Operand::Rd, Operand::Imm]),
+    op("LDABS16S", 0x99C0_0000, &[Operand::Rd, Operand::Imm]),
+    op("LDABS32S", 0x9AC0_0000, &[Operand::Rd, Operand::Imm]),
     op("LDIDX64R", 0x5B60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     // The sub-word reg+reg (MODE=11) forms: EA = rs1 + rs2, aligned down to
     // the access size as LDIDX16/32 are. Named as LLVM prints and accepts
@@ -174,6 +182,9 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("STIDX64", 0x9F20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("STIDX64A", 0x9F30_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("MEMSETR", 0x9F40_0000, &[Operand::Rd, Operand::Imm]),
+    op("STABS8", 0x9C40_0000, &[Operand::Rd, Operand::Imm]),
+    op("STABS16", 0x9D40_0000, &[Operand::Rd, Operand::Imm]),
+    op("STABS32", 0x9E40_0000, &[Operand::Rd, Operand::Imm]),
     op("STIDX64R", 0x5F60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("STIDX8R", 0x5C60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("STIDX16R", 0x5D60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),

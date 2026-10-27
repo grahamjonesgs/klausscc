@@ -124,7 +124,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 05 | `test_bits.kla` | Bit manipulation | BSET, BCLR, BTGL, POPCNT, CLZ, CTZ, BITREV |
 | 06 | `test_muldiv.kla` | Multiply/Divide | MULR, MULUR, DIVR, DIVUR, MODR, MODUR, MULV, DIVV, MODV |
 | 07 | `test_compare_jump.kla` | Comparison/Jumps | CMPRR, JMPZ, JMPNZ, JMPE, JMPNE, JMPS, JMPNS, JMPLT, JMPGT |
-| 08 | `test_memory.kla` | Memory access | MEMSET64RR, MEMREADRR, MEMSETR, MEMREADR |
+| 08 | `test_memory.kla` | Memory access | MEMSET64RR, MEMREADRR, MEMSETR, MEMREADR; the sub-word absolute LDABS8/16/32, LDABS8S/16S/32S, STABS8/16/32 |
 | 09 | `test_stack.kla` | Stack | PUSH, POP, PUSHV, LIFO ordering |
 | 10 | `test_call_ret.kla` | Subroutines | CALL, RET, nested calls, CALLE, CALLNE |
 | 11 | `test_io.kla` | Step sequence | Prints the step numbers 1 to 10, pausing after each; it does not use the LED, 7-segment, switch or RGB registers. No expected values, so it is skipped |
@@ -287,6 +287,15 @@ A wrong branch prints `FFFFFFFF` in place of its value.
 000000BB
 DEADBEEF
 00000003
+000000CC
+FFFFFFCC
+0000CCDD
+FFFFCCDD
+88776655
+00000000
+FFFFFFFF
+778888FF
+55667788
 ```
 
 ### test_stack (09)

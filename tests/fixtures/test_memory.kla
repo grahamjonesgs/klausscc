@@ -1,10 +1,21 @@
 // Test 08: Memory Operations
-// Tests: MEMSETRR, MEMREADRR, MEMSETR, MEMREADR
+// Tests: MEMSETRR, MEMREADRR, MEMSETR, MEMREADR, and the sub-word absolute
+// LDABS8/16/32, LDABS8S/16S/32S, STABS8/16/32, whose 16- and 32-bit forms
+// align the address down to their size
 // Expected UART output:
 //   000000AA  (MEMSETRR/MEMREADRR: write 0xAA, read back)
 //   000000BB  (MEMSETR/MEMREADR: write 0xBB to fixed addr, read back)
 //   DEADBEEF  (write 0xDEADBEEF to data area, read back)
 //   00000003  (sequential write 1,2,3 then read third value)
+//   000000CC  (LDABS8: byte at 0x10000B, zero-extended)
+//   FFFFFFCC  (LDABS8S: the same byte, sign-extended)
+//   0000CCDD  (LDABS16: 0x10000B aligned down to 0x10000A, zero-extended)
+//   FFFFCCDD  (LDABS16S: the same halfword, sign-extended)
+//   88776655  (LDABS32: 0x10000F aligned down to 0x10000C)
+//   00000000  (LDABS32: bits 63:32 of that load, zero-extended)
+//   FFFFFFFF  (LDABS32S: bits 63:32 of the same word, sign-extended)
+//   778888FF  (STABS8/16/32 over 0x100008: bits 31:0 of the doubleword)
+//   55667788  (bits 63:32: each store wrote only its width)
 
 _start
 DELAYV 0x0500
@@ -49,6 +60,48 @@ MEMSET64RR B A  // mem[BUF2+2] = 3
 SETR C 0x0
 MEMREADRR C A         // Read back last written (3)
 $TXR C  // Expect: 00000003
+$NEWLINE
+
+// [0x100008] = bytes FF EE DD CC 55 66 77 88
+SETR64 B 0x88776655CCDDEEFF
+MEMSETR B 0x100008
+
+// sub-word absolute loads
+LDABS8 D 0x10000B
+$TXR D  // Expect: 000000CC
+$NEWLINE
+LDABS8S D 0x10000B
+$TXR D  // Expect: FFFFFFCC
+$NEWLINE
+LDABS16 D 0x10000B
+$TXR D  // Expect: 0000CCDD
+$NEWLINE
+LDABS16S D 0x10000B
+$TXR D  // Expect: FFFFCCDD
+$NEWLINE
+LDABS32 D 0x10000F
+$TXR D  // Expect: 88776655
+$NEWLINE
+SHRV D 32
+$TXR D  // Expect: 00000000
+$NEWLINE
+LDABS32S D 0x10000F
+SHRV D 32
+$TXR D  // Expect: FFFFFFFF
+$NEWLINE
+
+// sub-word absolute stores over it: a byte at 0x100009, a halfword at
+// 0x10000B (aligned down to 0x10000A) and a word at 0x10000F (aligned down
+// to 0x10000C)
+SETR64 B 0x1122334455667788
+STABS8 B 0x100009
+STABS16 B 0x10000B
+STABS32 B 0x10000F
+MEMREADR D 0x100008  // = bytes FF 88 88 77 88 77 66 55
+$TXR D  // Expect: 778888FF
+$NEWLINE
+SHRV D 32
+$TXR D  // Expect: 55667788
 $NEWLINE
 
 HALT
