@@ -1,11 +1,22 @@
-// Test: indexed 64-bit memory (base + immediate offset, base + register offset).
+// Test: indexed memory (base + immediate offset, base + register offset).
 // 64-bit loads/stores are 8-byte aligned, so array elements are one doubleword
-// (8 bytes) apart. Offsets 0, 8, 16 address distinct slots.
+// (8 bytes) apart. Offsets 0, 8, 16 address distinct slots; slot 3 (base+24)
+// holds the sub-word register-offset accesses, whose 16- and 32-bit forms
+// align the address down to their size.
 // Expected UART output:
 //   000000AA  (STIDX64/LDIDX64: store 0xAA at base+0, load back)
 //   000000BB  (STIDX64/LDIDX64: store 0xBB at base+8, load back)
 //   000000CC  (STIDX64R/LDIDX64R: register-offset store and load at base+16)
 //   000000BB  (LDIDX64: verify base+8 still intact after the base+16 write)
+//   000000CC  (LDIDX8R: byte at base+27, zero-extended)
+//   FFFFFFCC  (LDIDX8SR: the same byte, sign-extended)
+//   0000CCDD  (LDIDX16R: base+27 aligned down to base+26, zero-extended)
+//   FFFFCCDD  (LDIDX16SR: the same halfword, sign-extended)
+//   88776655  (LDIDX32R: base+31 aligned down to base+28)
+//   00000000  (LDIDX32R: bits 63:32 of that load, zero-extended)
+//   FFFFFFFF  (LDIDX32SR: bits 63:32 of the same word, sign-extended)
+//   778888FF  (STIDX8R/16R/32R over slot 3: bits 31:0 of the doubleword)
+//   55667788  (bits 63:32: each store wrote only its width)
 
 _start
 DELAYV 0x0500
@@ -42,6 +53,54 @@ $NEWLINE
 SETR D 0x0
 LDIDX64 D A 0x8
 $TXR D  // Expect: 000000BB
+$NEWLINE
+
+// slot 3 (base + 24) = bytes FF EE DD CC 55 66 77 88
+SETR C 0x18
+SETR64 B 0x88776655CCDDEEFF
+STIDX64R B A C
+
+// sub-word register-offset loads
+SETR C 0x1B
+LDIDX8R D A C
+$TXR D  // Expect: 000000CC
+$NEWLINE
+LDIDX8SR D A C
+$TXR D  // Expect: FFFFFFCC
+$NEWLINE
+LDIDX16R D A C
+$TXR D  // Expect: 0000CCDD
+$NEWLINE
+LDIDX16SR D A C
+$TXR D  // Expect: FFFFCCDD
+$NEWLINE
+SETR C 0x1F
+LDIDX32R D A C
+$TXR D  // Expect: 88776655
+$NEWLINE
+SHRV D 32
+$TXR D  // Expect: 00000000
+$NEWLINE
+LDIDX32SR D A C
+SHRV D 32
+$TXR D  // Expect: FFFFFFFF
+$NEWLINE
+
+// sub-word register-offset stores over slot 3: a byte at +1, a halfword at
+// +3 (aligned down to +2) and a word at +7 (aligned down to +4)
+SETR64 B 0x1122334455667788
+SETR C 0x19
+STIDX8R B A C
+SETR C 0x1B
+STIDX16R B A C
+SETR C 0x1F
+STIDX32R B A C
+SETR C 0x18
+LDIDX64R D A C  // slot 3 = bytes FF 88 88 77 88 77 66 55
+$TXR D  // Expect: 778888FF
+$NEWLINE
+SHRV D 32
+$TXR D  // Expect: 55667788
 $NEWLINE
 
 HALT

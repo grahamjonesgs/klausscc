@@ -682,6 +682,162 @@ fn test_v3_short_load_store_scaled() {
 }
 
 #[test]
+fn reg_offset_subword_loads_extend_and_stores_truncate() {
+    // LDIDXnR / LDIDXnSR / STIDXnR (MODE=11, EA = rs1 + rs2): loads zero- or
+    // sign-extend, stores write only the low bytes of rd, and 16/32-bit
+    // accesses align the EA down (pipeline_core.sv:1004, :1101-1113,
+    // :1186-1188). `rrr` is `template | rd<<8 | rs1<<4 | rs2`.
+    const fn rrr(template: u32, rd: u32, rs1: u32, rs2: u32) -> u32 {
+        template | rd << 8 | rs1 << 4 | rs2
+    }
+    let (a, b, c) = (0, 1, 2);
+    let mut w = Vec::new();
+    // [0x1000] = bytes FF EE DD CC 55 66 77 88; A = store data.
+    w.extend_from_slice(&setr(b, 0x1000));
+    w.extend_from_slice(&[0xCBC0_0B00, 0xCCDD_EEFF, 0x8877_6655]); // SETR64 L
+    w.push(0x5F10_0B10); // MEMSET64 L B
+    w.extend_from_slice(&[0xCBC0_0000, 0x5566_7788, 0x1122_3344]); // SETR64 A
+    w.extend_from_slice(&setr(c, 3));
+    w.push(rrr(0x5860_0000, 3, b, c)); // LDIDX8R   D = [B+3]
+    w.push(rrr(0x58E0_0000, 4, b, c)); // LDIDX8SR  E = [B+3]
+    w.push(rrr(0x5960_0000, 5, b, c)); // LDIDX16R  F = [B+2] (B+3 aligned down)
+    w.push(rrr(0x59E0_0000, 6, b, c)); // LDIDX16SR G = [B+2]
+    w.extend_from_slice(&setr(c, 7));
+    w.push(rrr(0x5A60_0000, 7, b, c)); // LDIDX32R  H = [B+4] (B+7 aligned down)
+    w.push(rrr(0x5AE0_0000, 8, b, c)); // LDIDX32SR I = [B+4]
+    w.extend_from_slice(&setr(c, 4));
+    w.push(rrr(0x58E0_0000, 12, b, c)); // LDIDX8SR  M = [B+4], a positive byte
+    // [0x1008] = all ones, then a byte, a halfword and a word of A over it.
+    w.extend_from_slice(&setr(9, 0xFFFF_FFFF)); // J = -1
+    w.extend_from_slice(&setr(c, 8));
+    w.push(rrr(0x5F60_0000, 9, b, c)); // STIDX64R J -> [B+8]
+    w.extend_from_slice(&setr(c, 9));
+    w.push(rrr(0x5C60_0000, a, b, c)); // STIDX8R  A -> [B+9]
+    w.extend_from_slice(&setr(c, 11));
+    w.push(rrr(0x5D60_0000, a, b, c)); // STIDX16R A -> [B+10] (B+11 aligned down)
+    w.extend_from_slice(&setr(c, 15));
+    w.push(rrr(0x5E60_0000, a, b, c)); // STIDX32R A -> [B+12] (B+15 aligned down)
+    w.extend_from_slice(&setr(c, 8));
+    w.push(rrr(0x5B60_0000, 10, b, c)); // LDIDX64R K = [B+8]
+    w.push(HALT);
+    let cpu = run_words(&w);
+    assert_eq!(cpu.stop, Some(StopReason::Halt));
+    assert_eq!(cpu.regs[3], 0xCC, "LDIDX8R zero-extends");
+    assert_eq!(cpu.regs[4], 0xFFFF_FFFF_FFFF_FFCC, "LDIDX8SR sign-extends");
+    assert_eq!(cpu.regs[5], 0xCCDD, "LDIDX16R zero-extends");
+    assert_eq!(cpu.regs[6], 0xFFFF_FFFF_FFFF_CCDD, "LDIDX16SR sign-extends");
+    assert_eq!(cpu.regs[7], 0x8877_6655, "LDIDX32R zero-extends");
+    assert_eq!(cpu.regs[8], 0xFFFF_FFFF_8877_6655, "LDIDX32SR sign-extends");
+    assert_eq!(cpu.regs[12], 0x55, "LDIDX8SR keeps a positive byte positive");
+    assert_eq!(
+        ram16(&cpu, 0x1000),
+        [
+            0xFF, 0xEE, 0xDD, 0xCC, 0x55, 0x66, 0x77, 0x88, 0xFF, 0x88, 0x88, 0x77, 0x88, 0x77, 0x66, 0x55
+        ],
+        "each store wrote only its width of A's low bytes"
+    );
+    assert_eq!(cpu.regs[10], 0x5566_7788_7788_88FF);
+}
+
+/// Assemble `source` with the built-in table and macros and run it to its
+/// end (at most 10 000 instructions).
+fn run_source(source: &str) -> Cpu {
+    use crate::asm::assemble_lines;
+    use crate::asm::line::SourceLine;
+    use crate::asm::macros::{builtin_macros, expand_embedded_macros};
+    use crate::diag::Diagnostics;
+    use crate::isa::Isa;
+    let mut msg_list = Diagnostics::new();
+    let macro_list = expand_embedded_macros(builtin_macros(), &mut msg_list);
+    let lines = (1..)
+        .zip(source.lines())
+        .map(|(line_counter, line)| SourceLine {
+            file_name: "test.kla".to_owned(),
+            input_text_line: line.to_owned(),
+            line_counter,
+        })
+        .collect();
+    let assembly = assemble_lines(lines, &Isa::v2(), &macro_list, &mut msg_list);
+    assert!(!msg_list.has_errors(), "{:?}", msg_list.messages());
+    let image = assembly.image().expect("the source has a _start");
+    assert_eq!(image.entry, CODE_BASE);
+    let mut cpu = cpu_with(&image.to_ddr());
+    cpu.run(10_000, None);
+    assert_eq!(cpu.stop, Some(StopReason::Halt));
+    cpu
+}
+
+#[test]
+fn llvm_immediate_forms_extend_as_named() {
+    // The opposite-SGN class-2 forms and the boolean compare-immediates, as
+    // klausscc assembles them: SETRU zero-extends, ANDI/ORI/XORI and the
+    // CMPxxV immediates sign-extend (pipeline_core.sv:399, :761-762).
+    let cpu = run_source(
+        "_start
+SETRU A 0xF0010000
+SETRU.S B 200
+SETR C 0xFFFFFFFF
+ANDI D C -16
+ANDI.S E C -8
+SETR F 0
+ORI F F -129
+ORI.S G B -128
+XORI H C 0x100
+XORI.S I C 127
+CMPLTV J C 0
+CMPULTV K C 5
+CMPUGEV L C -1
+HALT",
+    );
+    let want: [u64; 12] = [
+        0xF001_0000,
+        200,
+        u64::MAX,
+        0xFFFF_FFFF_FFFF_FFF0,
+        0xFFFF_FFFF_FFFF_FFF8,
+        0xFFFF_FFFF_FFFF_FF7F,
+        0xFFFF_FFFF_FFFF_FFC8,
+        0xFFFF_FFFF_FFFF_FEFF,
+        0xFFFF_FFFF_FFFF_FF80,
+        1, // -1 < 0
+        0, // 2^64-1 is not unsigned-below 5
+        1, // the -1 immediate is 2^64-1, so C >= it unsigned
+    ];
+    assert_eq!(cpu.regs[..12], want);
+}
+
+#[test]
+fn llvm_w_compares_and_pc_relative_branches() {
+    // CMPxxRW / CMPxxVW compare the low 32 bits; CMPRVU zero-extends its
+    // immediate; JMPxxREL / CALLREL jump to PC + imm32.
+    let cpu = run_source(
+        "_start
+SETR64 A 0x100000005
+SETR B 5
+CMPEQRW C A B
+CMPEQR D A B
+CMPGTVW E A 4
+CMPLEVW F A 4
+SETRU G 0xFFFFFFFF
+SETR H 0
+CMPRVU G 0xFFFFFFFF
+JMPZREL EQUAL:
+SETR H 1
+EQUAL:
+CALLREL SUB:
+JMPREL END:
+SETR I 0x99
+SUB:
+SETR J 0x77
+RET
+END:
+HALT",
+    );
+    assert_eq!(cpu.regs[2..10], [1, 0, 1, 0, 0xFFFF_FFFF, 0, 0, 0x77]);
+    assert_eq!(cpu.sp, TEST_STACK_TOP, "CALLREL's return address was popped");
+}
+
+#[test]
 fn test_v3_enter_leave() {
     // R15 = 0x77; ENTER 3 (0x6600_0003); SETR A,5; LEAVE (0x6640_0000).
     let cpu = run_words(&[0x4BD7_7F00, 0x6600_0003, 0x4BD0_5000, 0x6640_0000, HALT]);
@@ -1265,7 +1421,7 @@ fn every_assembler_form_executes() {
             Operand::Simm4 => &[0xF, 0, 7],
             Operand::Rel18 => &[1, 0, 0x3_FFFF],
             Operand::Rel13 => &[1, 0, 0x1FFF],
-            Operand::Imm | Operand::Imm64 => &[0],
+            Operand::Imm | Operand::Imm64 | Operand::Rel32 => &[0],
         }
     }
     for opcode in V2_OPCODES {

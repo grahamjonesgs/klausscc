@@ -153,8 +153,14 @@ MIN/MAX compare signed, MINU/MAXU unsigned.
 | LEAPC  | `0x8B80_0000` | rd imm32 | — | 0x0000_099x — `rd = PC + imm32` |
 | SETR   | `0x8BD0_0000` | rd imm32 (sext) | — | 0x0000_080x (MOV, SGN=1) |
 | SETR64 | `0xCBC0_0000` | rd imm64 | — | 0x0000_0FEx (MOV, LEN=11) |
+| SETRU  | `0x8BC0_0000` | rd imm32 (zext) | — | — (MOV, SGN=0) |
+| ANDI   | `0x8910_0000` | rd rs1 imm32 (sext) | — | — |
+| ORI    | `0x8950_0000` | rd rs1 imm32 (sext) | — | — |
+| XORI   | `0x8990_0000` | rd rs1 imm32 (sext) | — | — |
 
-LEA/MOV do not read rs1 (the field is ignored).
+LEA/MOV do not read rs1 (the field is ignored). SETRU, ANDI, ORI and XORI
+are the opposite-SGN forms of SETR, ANDV, ORV and XORV, with LLVM's names;
+they take separate rd and rs1.
 
 LEAPC adds imm32 to its own address. The assembler stores the operand
 unchanged, so `LEAPC A LABEL:` gives A = PC + (address of LABEL), **not**
@@ -177,9 +183,22 @@ address, use `SETR A LABEL:`.
 | CMPUGER | `0x4DE0_0000` | rd rs1 rs2 | rd=0/1, no flags | 0x0039_0xxx (ULT+INV) |
 | CMPULER | `0x4E20_0000` | rd rs1 rs2 | rd=0/1, no flags | 0x0037_0xxx |
 | CMPUGTR | `0x4E60_0000` | rd rs1 rs2 | rd=0/1, no flags | 0x0038_0xxx (ULE+INV) |
+| CMPRVU | `0x8C00_0000` | rs1 imm32 (zext) | Z,S,C,V of `rs1 - imm` | — |
+| CMPEQV | `0x8C30_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPNEV | `0x8C70_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPLTV | `0x8CB0_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPGEV | `0x8CF0_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPLEV | `0x8D30_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPGTV | `0x8D70_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPULTV | `0x8DB0_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPUGEV | `0x8DF0_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPULEV | `0x8E30_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
+| CMPUGTV | `0x8E70_0000` | rd rs1 imm32 (sext) | rd=0/1, no flags | — |
 
-CMPRR/CMPRV are a SUB that discards its result (§7). The W (32-bit)
-compares are in §3.13.
+CMPRR/CMPRV/CMPRVU are a SUB that discards its result (§7). The `…V`
+boolean compares are the 2-word `…R` forms with the immediate in place of
+rs2; the unsigned ones compare against the sign-extended immediate as an
+unsigned value. The W (32-bit) compares are in §3.13.
 
 ### 3.4 Shift / rotate / bit (class 4)
 
@@ -290,8 +309,15 @@ ABS of INT_MIN (`0x8000_0000_0000_0000`) returns INT_MIN and sets V.
 | LDIDX64A  | `0x9B30_0000` | 2 | rd rs1 imm32 | rs1+imm32 (A=1) | 0x0000_FCxx |
 | MEMREADR  | `0x9B40_0000` | 2 | rd imm32 | imm32 absolute | 0x0000_721x |
 | LDIDX64R  | `0x5B60_0000` | **1** | rd rs1 rs2 | rs1+rs2 | 0x0000_0Exx (was 2 words) |
+| LDIDX8R   | `0x5860_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
+| LDIDX8SR  | `0x58E0_0000` | 1 | rd rs1 rs2 | rs1+rs2, sext | — |
+| LDIDX16R  | `0x5960_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
+| LDIDX16SR | `0x59E0_0000` | 1 | rd rs1 rs2 | rs1+rs2, sext | — |
+| LDIDX32R  | `0x5A60_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
+| LDIDX32SR | `0x5AE0_0000` | 1 | rd rs1 rs2 | rs1+rs2, sext | — |
 
-Loads write no flags. 16- and 32-bit loads align their address down to
+The sub-word reg+reg forms carry LLVM's names (`ldidx8sr`; the 2-word
+sign-extending loads keep the `_S` spelling). Loads write no flags. 16- and 32-bit loads align their address down to
 the access size (`& ~1`, `& ~3`), except **MEMGET32**, which reads the 4
 bytes at any address, even across a doubleword boundary. A 64-bit access
 with A=1 is forced to `& ~7`. With A=0 the core sends the address as is,
@@ -315,6 +341,9 @@ practice every 64-bit RAM access reads or writes the aligned doubleword
 | STIDX64A   | `0x9F30_0000` | 2 | rd rs1 imm32 | rs1+imm32 (A=1) | 0x0000_FDxx |
 | MEMSETR    | `0x9F40_0000` | 2 | rd imm32 | imm32 absolute | 0x0000_720x |
 | STIDX64R   | `0x5F60_0000` | **1** | rd rs1 rs2 | rs1+rs2 | 0x0000_73xx (was 2 words) |
+| STIDX8R    | `0x5C60_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
+| STIDX16R   | `0x5D60_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
+| STIDX32R   | `0x5E60_0000` | 1 | rd rs1 rs2 | rs1+rs2 | — |
 
 The first operand is the **value**, the second the **address**:
 `MEMSET8 C B` stores the low byte of C at `[B]`. Sub-word stores align
@@ -352,12 +381,28 @@ A call pushes the zero-extended return address (the next instruction:
 PC+8 for the 2-word forms, PC+4 for CALLR) and only when it is taken.
 JMPE/JMPNE test the same Z flag as JMPZ/JMPNZ.
 
-**2-word PC-relative forms (CPU only).** REL=1 with LEN=10 gives
-`target = PC + imm32`, for example `0xA100_0000` (JMP rel) and
-`0xA300_0000` (CALL rel), with any COND. The CPU and the emulator execute
-them, but **klausscc has no mnemonics** for them: the old JMPREL/CALLREL
-family was not carried into the assembler's v2 table. For PC-relative code,
-use the v3 short forms in §3.11.
+**2-word PC-relative forms.** REL=1 with LEN=10 gives
+`target = PC + imm32`, with any COND. The assembler has the forms LLVM
+emits, with LLVM's names. The operand is a label or an address, and the
+assembler stores its displacement from the instruction, so they reach the
+whole address space; the disassembler shows the displacement (`PC+288`).
+LLVM also uses the `…REL` names for the short forms (§3.11) when the
+target is near, as `JMPZ.S` here.
+
+| Symbol | Template | Symbol | Template |
+|---|---|---|---|
+| JMPREL    | `0xA100_0000` | JMPLEREL  | `0xA130_0000` |
+| JMPZREL   | `0xA108_0000` | JMPGTREL  | `0xA134_0000` |
+| JMPNZREL  | `0xA10C_0000` | JMPULTREL | `0xA138_0000` |
+| JMPCREL   | `0xA110_0000` | JMPUGEREL | `0xA13C_0000` |
+| JMPNCREL  | `0xA114_0000` | JMPULEREL | `0xA140_0000` |
+| JMPSREL   | `0xA120_0000` | JMPUGTREL | `0xA144_0000` |
+| JMPNSREL  | `0xA124_0000` | JMPEREL   | `0xA148_0000` |
+| JMPLTREL  | `0xA128_0000` | JMPNEREL  | `0xA14C_0000` |
+| JMPGEREL  | `0xA12C_0000` | CALLREL   | `0xA300_0000` |
+
+The overflow conditions (`0xA118`/`0xA11C`) and conditional PC-relative
+calls have no mnemonic (§5).
 
 (v1 history: JMP family 0x0000_1000-101C, REL 0x0000_1030-1040, JMPR
 0x0000_102x, CALLR 0x0000_407x.)
@@ -426,6 +471,10 @@ reports an error if the value does not fit.
 | ANDV.S   | `0x4900_0000` | r imm8 | zero-extended |
 | ORV.S    | `0x4940_0000` | r imm8 | zero-extended |
 | XORV.S   | `0x4980_0000` | r imm8 | zero-extended |
+| SETRU.S  | `0x4BC0_0000` | rd imm8 | zero-extended |
+| ANDI.S   | `0x4910_0000` | rd rs1 imm8 | sign-extended |
+| ORI.S    | `0x4950_0000` | rd rs1 imm8 | sign-extended |
+| XORI.S   | `0x4990_0000` | rd rs1 imm8 | sign-extended |
 | CMPRV.S  | `0x4C10_0000` | rs1 imm8 | sign-extended (always) |
 
 The CPU extends the byte as the table says (`pipeline_core.sv:761-762`:
@@ -529,10 +578,17 @@ W `[19]` makes an operation 32-bit:
 | MULW   | `0x6888_0000` | 1 | rd rs1 rs2 | Z,S,V |
 | CMPRRW | `0x4C08_0000` | 1 | rs1 rs2 | Z,S,C,V |
 | CMPRVW | `0x8C18_0000` | 2 | rs1 imm32 (sext) | Z,S,C,V |
+| CMPEQRW … CMPUGTRW | `0x4C28_0000` … `0x4E68_0000` | 1 | rd rs1 rs2 | rd=0/1, no flags |
+| CMPEQVW … CMPUGTVW | `0x8C38_0000` … `0x8E78_0000` | 2 | rd rs1 imm32 (sext) | rd=0/1, no flags |
 
-W is legal only on these (and on the boolean compares, which have no
-klausscc mnemonic). The short forms use `[19:12]` for their immediate, so
-they have no W.
+The W boolean compares are the `…R` and `…V` boolean compares (§3.3) with
+W set, comparing the low 32 bits: `CMPEQRW` `0x4C28_0000`, `CMPNERW`
+`0x4C68_0000`, `CMPLTRW` `0x4CA8_0000`, `CMPGERW` `0x4CE8_0000`, `CMPLERW`
+`0x4D28_0000`, `CMPGTRW` `0x4D68_0000`, `CMPULTRW` `0x4DA8_0000`,
+`CMPUGERW` `0x4DE8_0000`, `CMPULERW` `0x4E28_0000`, `CMPUGTRW`
+`0x4E68_0000`, and the `…VW` forms at the same templates `| 0x8010_0000`.
+W is legal only on these. The short forms use `[19:12]` for their
+immediate, so they have no W.
 
 ### 3.14 v3 fused compare-and-branch (class D, LEN=01)
 
@@ -602,7 +658,10 @@ and old discussions; the current rules are in §1–§3 and §7.
 8. **What changed after the v2 checkpoint.** The first v2 build kept v1
    semantics exactly. Since then the flags were unified to `Z S C V`, so
    CMP now drives Z and JMPE ≡ JMPZ (§7); the field-driven decode made the
-   combinations in §5 legal; and the v3 forms in §3.10–3.14 were added.
+   combinations in §5 legal; the v3 forms in §3.10–3.14 were added; and
+   the legal forms LLVM emits were given its mnemonics (SETRU, ANDI/ORI/
+   XORI, CMPRVU, the boolean compare-immediates, the W boolean compares,
+   the sub-word reg+reg loads and stores, the 2-word PC-relative jumps).
    These v1 quirks remain: BTST-imm writes only Z while BTSTRR writes rd;
    GETF shows only Z/E/C/V; a rotate by any count other than an embedded
    N=1 does not write C.
@@ -611,15 +670,15 @@ and old discussions; the current rules are in §1–§3 and §7.
 
 The decoder is field-driven (each attribute bit selects behaviour in a
 shared datapath), so these combinations are **architecturally legal**.
-LLVM can emit them. klausscc has no mnemonics for them. The emulator
+klausscc has no mnemonics for them; it names every form LLVM emits. The emulator
 executes them as the RTL does (see `EMULATOR_ISA_SEMANTICS.md`).
 Everything not listed here and not in §3 traps, in the RTL and the
 emulator alike.
 
-- **ALU-imm (class 2)**: ADC/SBC with imm32; both SGN values on every OP
-  (e.g. sign-extended SUB-imm, zero-extended MOV).
-- **Compare (class 3)**: boolean compare-immediate (B=1, LEN=10, rd=0/1),
-  either SGN; W on the boolean forms.
+- **ALU-imm (class 2)**: ADC/SBC with imm32; SUB-imm and LEAPC with
+  SGN=1 (a sign-extended immediate).
+- **Compare (class 3)**: boolean compare-immediate with SGN=0 (a
+  zero-extended immediate).
 - **Shift/bit (class 4)**: the F bit is honoured (Z is written when F=1)
   for SHL/SHR/SAR/ROL/ROR/BSET/BCLR/BTGL/BTSTRR, with any embedded N.
   ROL/ROR with SRC=1, N=1, F=1 is the rotate-by-1 that also writes C;
@@ -628,14 +687,14 @@ emulator alike.
   POPCNT/CLZ/CTZ/GETF; SEXT with F=1 at all three sizes (Z+S). ABS/INC/DEC
   require F=1.
 - **Loads (class 6)**: the full SIZE × SGN × MODE × A space (A: 64-bit
-  only), e.g. MEMGET8_S/16_S, sub-word reg+reg (mode 11) and absolute
-  (mode 10) forms. SIZE=32 with MODE=00 is MEMGET32 and needs SGN=0.
-- **Stores (class 7)**: the full SIZE × MODE space (SGN must be 0):
-  sub-word reg+reg and absolute forms.
+  only), e.g. MEMGET8_S/16_S and the sub-word absolute (mode 10) forms. SIZE=32 with MODE=00 is MEMGET32
+  and needs SGN=0.
+- **Stores (class 7)**: the full SIZE × MODE space (SGN must be 0): the
+  sub-word absolute forms.
 - **Mul/div (class A)**: MULHV/MULUV/MULHUV, DIVUV/MODUV; the immediate
   forms extend per the SGN bit.
-- **Branches (class 8)**: the 2-word PC-relative jumps and calls (§3.8)
-  with any COND; conditional register-indirect jumps/calls (RIND=1, any
+- **Branches (class 8)**: the 2-word PC-relative JMPO/JMPNO and
+  conditional calls (§3.8); conditional register-indirect jumps/calls (RIND=1, any
   COND); conditional short calls (§3.11). COND 10–15 and INV with COND=0
   trap.
 
@@ -667,8 +726,13 @@ XORV,0x89800000,2,2,"rd,rs1",zext32,,in place (rd=rs1)
 LEAPC,0x8B800000,2,2,rd,pc32,,rd=PC+imm32
 SETR,0x8BD00000,2,2,rd,sext32,,
 SETR64,0xCBC00000,3,2,rd,imm64,,
+SETRU,0x8BC00000,2,2,rd,zext32,,MOV with SGN=0
+ANDI,0x89100000,2,2,"rd,rs1",sext32,,
+ORI,0x89500000,2,2,"rd,rs1",sext32,,
+XORI,0x89900000,2,2,"rd,rs1",sext32,,
 CMPRR,0x4C000000,1,3,"rs1,rs2",,ZSCV,SUB without writeback
 CMPRV,0x8C100000,2,3,rs1,sext32,ZSCV,SUB without writeback
+CMPRVU,0x8C000000,2,3,rs1,zext32,ZSCV,SUB without writeback
 CMPEQR,0x4C200000,1,3,"rd,rs1,rs2",,,rd=0/1
 CMPNER,0x4C600000,1,3,"rd,rs1,rs2",,,rd=0/1
 CMPLTR,0x4CA00000,1,3,"rd,rs1,rs2",,,rd=0/1
@@ -679,6 +743,36 @@ CMPULTR,0x4DA00000,1,3,"rd,rs1,rs2",,,rd=0/1
 CMPUGER,0x4DE00000,1,3,"rd,rs1,rs2",,,rd=0/1
 CMPULER,0x4E200000,1,3,"rd,rs1,rs2",,,rd=0/1
 CMPUGTR,0x4E600000,1,3,"rd,rs1,rs2",,,rd=0/1
+CMPEQV,0x8C300000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPNEV,0x8C700000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPLTV,0x8CB00000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPGEV,0x8CF00000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPLEV,0x8D300000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPGTV,0x8D700000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPULTV,0x8DB00000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPUGEV,0x8DF00000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPULEV,0x8E300000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPUGTV,0x8E700000,2,3,"rd,rs1",sext32,,rd=0/1
+CMPEQRW,0x4C280000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPNERW,0x4C680000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPLTRW,0x4CA80000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPGERW,0x4CE80000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPLERW,0x4D280000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPGTRW,0x4D680000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPULTRW,0x4DA80000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPUGERW,0x4DE80000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPULERW,0x4E280000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPUGTRW,0x4E680000,1,3,"rd,rs1,rs2",,,rd=0/1; low 32 bits (v3 D2)
+CMPEQVW,0x8C380000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPNEVW,0x8C780000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPLTVW,0x8CB80000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPGEVW,0x8CF80000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPLEVW,0x8D380000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPGTVW,0x8D780000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPULTVW,0x8DB80000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPUGEVW,0x8DF80000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPULEVW,0x8E380000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
+CMPUGTVW,0x8E780000,2,3,"rd,rs1",sext32,,rd=0/1; low 32 bits (v3 D2)
 SHLR,0x50004000,1,4,"rd,rs1,rs2",,Z,count=rs2[5:0]
 SHRR,0x50404000,1,4,"rd,rs1,rs2",,Z,count=rs2[5:0]
 SARR,0x50804000,1,4,"rd,rs1,rs2",,Z,count=rs2[5:0]
@@ -739,6 +833,12 @@ LDIDX64,0x9B200000,2,6,"rd,rs1",off32,,A=0
 LDIDX64A,0x9B300000,2,6,"rd,rs1",off32,,A=1
 MEMREADR,0x9B400000,2,6,rd,addr32,,
 LDIDX64R,0x5B600000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2
+LDIDX8R,0x58600000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2
+LDIDX16R,0x59600000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~1
+LDIDX32R,0x5A600000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~3
+LDIDX8SR,0x58E00000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2; sext
+LDIDX16SR,0x59E00000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~1; sext
+LDIDX32SR,0x5AE00000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~3; sext
 MEMSET8,0x5C000000,1,7,"rd,rs1",,,data=rd
 MEMSET16,0x5D000000,1,7,"rd,rs1",,,data=rd
 MEMSET32,0x5E000000,1,7,"rd,rs1",,,data=rd
@@ -751,6 +851,9 @@ STIDX64,0x9F200000,2,7,"rd,rs1",off32,,data=rd; A=0
 STIDX64A,0x9F300000,2,7,"rd,rs1",off32,,data=rd; A=1
 MEMSETR,0x9F400000,2,7,rd,addr32,,data=rd
 STIDX64R,0x5F600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
+STIDX8R,0x5C600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
+STIDX16R,0x5D600000,1,7,"rd,rs1,rs2",,,data=rd; EA=(rs1+rs2)&~1
+STIDX32R,0x5E600000,1,7,"rd,rs1,rs2",,,data=rd; EA=(rs1+rs2)&~3
 LDIDX32_S,0x9AA00000,2,6,"rd,rs1",off32,,sext (v3 D1)
 ADDW,0x44280000,1,1,"rd,rs1,rs2",,ZSCV,sext32 result (v3 D3)
 SUBW,0x44680000,1,1,"rd,rs1,rs2",,ZSCV,sext32 result (v3 D3)
@@ -765,6 +868,10 @@ MINUSV.S,0x48600000,1,2,"rd,rs1",zext8[19:12],ZSCV,v3 A5; in place
 ANDV.S,0x49000000,1,2,"rd,rs1",zext8[19:12],,v3 A5; in place
 ORV.S,0x49400000,1,2,"rd,rs1",zext8[19:12],,v3 A5; in place
 XORV.S,0x49800000,1,2,"rd,rs1",zext8[19:12],,v3 A5; in place
+SETRU.S,0x4BC00000,1,2,rd,zext8[19:12],,v3 A5
+ANDI.S,0x49100000,1,2,"rd,rs1",sext8[19:12],,v3 A5
+ORI.S,0x49500000,1,2,"rd,rs1",sext8[19:12],,v3 A5
+XORI.S,0x49900000,1,2,"rd,rs1",sext8[19:12],,v3 A5
 CMPRV.S,0x4C100000,1,3,rs1,sext8[19:12],ZSCV,v3 A3
 LDIDX8.S,0x58200000,1,6,"rd,rs1",simm8<<0,,v3 A4
 LDIDX8_S.S,0x58A00000,1,6,"rd,rs1",simm8<<0,,v3 A4; sext
@@ -850,6 +957,24 @@ CALLO,0xA2180000,2,8,,target32,,
 CALLNO,0xA21C0000,2,8,,target32,,
 CALLE,0xA2480000,2,8,,target32,,
 CALLNE,0xA24C0000,2,8,,target32,,
+JMPREL,0xA1000000,2,8,,rel32,,target=PC+imm32
+JMPZREL,0xA1080000,2,8,,rel32,,target=PC+imm32
+JMPNZREL,0xA10C0000,2,8,,rel32,,target=PC+imm32
+JMPCREL,0xA1100000,2,8,,rel32,,target=PC+imm32
+JMPNCREL,0xA1140000,2,8,,rel32,,target=PC+imm32
+JMPSREL,0xA1200000,2,8,,rel32,,target=PC+imm32
+JMPNSREL,0xA1240000,2,8,,rel32,,target=PC+imm32
+JMPLTREL,0xA1280000,2,8,,rel32,,target=PC+imm32
+JMPGEREL,0xA12C0000,2,8,,rel32,,target=PC+imm32
+JMPLEREL,0xA1300000,2,8,,rel32,,target=PC+imm32
+JMPGTREL,0xA1340000,2,8,,rel32,,target=PC+imm32
+JMPULTREL,0xA1380000,2,8,,rel32,,target=PC+imm32
+JMPUGEREL,0xA13C0000,2,8,,rel32,,target=PC+imm32
+JMPULEREL,0xA1400000,2,8,,rel32,,target=PC+imm32
+JMPUGTREL,0xA1440000,2,8,,rel32,,target=PC+imm32
+JMPEREL,0xA1480000,2,8,,rel32,,target=PC+imm32
+JMPNEREL,0xA14C0000,2,8,,rel32,,target=PC+imm32
+CALLREL,0xA3000000,2,8,,rel32,,target=PC+imm32; pushes PC+8
 JMPR,0x60800000,1,8,rs2,,,target=rs2
 CALLR,0x62800000,1,8,rs2,,,target=rs2; pushes PC+4
 PUSH,0x64000000,1,9,rs1,,,

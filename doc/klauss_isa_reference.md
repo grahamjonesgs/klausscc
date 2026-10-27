@@ -510,7 +510,11 @@ MINUR A A B       // A = unsigned min(A, B)
 | `ANDV r imm32` | 2 | r = r AND zext(imm32) | — |
 | `ORV r imm32` | 2 | r = r OR zext(imm32) | — |
 | `XORV r imm32` | 2 | r = r XOR zext(imm32) | — |
+| `ANDI rd rs1 imm32` | 2 | rd = rs1 AND sext(imm32) | — |
+| `ORI rd rs1 imm32` | 2 | rd = rs1 OR sext(imm32) | — |
+| `XORI rd rs1 imm32` | 2 | rd = rs1 XOR sext(imm32) | — |
 | `SETR rd imm32` | 2 | rd = sext(imm32); a literal that needs more than 32 bits is assembled as `SETR64` | — |
+| `SETRU rd imm32` | 2 | rd = zext(imm32) | — |
 | `SETR64 rd imm64` | 3 | rd = imm64 (one 64-bit literal, or two words: low then high) | — |
 | `LEAPC rd offset` | 2 | rd = address of this instruction + offset (a 32-bit result, zero-extended) | — |
 | `SETR.S rd imm8` | 1 | rd = sext(imm8); imm8 −128..127 (v3) | — |
@@ -520,12 +524,16 @@ MINUR A A B       // A = unsigned min(A, B)
 | `ANDV.S r imm8` | 1 | r = r AND zext(imm8); imm8 0..255 (v3) | — |
 | `ORV.S r imm8` | 1 | r = r OR zext(imm8); imm8 0..255 (v3) | — |
 | `XORV.S r imm8` | 1 | r = r XOR zext(imm8); imm8 0..255 (v3) | — |
+| `SETRU.S rd imm8` | 1 | rd = zext(imm8); imm8 0..255 (v3) | — |
+| `ANDI.S rd rs1 imm8` | 1 | rd = rs1 AND sext(imm8); imm8 −128..127 (v3) | — |
+| `ORI.S rd rs1 imm8` | 1 | rd = rs1 OR sext(imm8); imm8 −128..127 (v3) | — |
+| `XORI.S rd rs1 imm8` | 1 | rd = rs1 XOR sext(imm8); imm8 −128..127 (v3) | — |
 
 ¹ See [ALU, Register-Register](#alu-register-register).
 
-`ADDI` and the in-place forms differ in the extension: `ADDI` sign-extends its immediate, while `ADDV`, `MINUSV`, `ANDV`, `ORV` and `XORV` zero-extend theirs. `ADDV A -1` therefore adds `0xFFFF_FFFF`, not -1; use `ADDI A A -1` or `DECR A`.
+`ADDI` and the in-place forms differ in the extension: `ADDI` sign-extends its immediate, while `ADDV`, `MINUSV`, `ANDV`, `ORV` and `XORV` zero-extend theirs. `ADDV A -1` therefore adds `0xFFFF_FFFF`, not -1; use `ADDI A A -1` or `DECR A`. `ANDI`, `ORI` and `XORI` are the sign-extending forms of `ANDV`, `ORV` and `XORV` (`ANDI B A -8` clears the low three bits of A into B), and `SETRU` the zero-extending form of `SETR`; these four have the names the LLVM compiler gives them.
 
-The `.S` forms are one word long and take a literal only. Each takes the values its extension can give: -128 to 127 for `SETR.S`, `ADDI.S` and `CMPRV.S`, which sign-extend, and 0 to 255 for the other `.S` forms, which zero-extend. Any other value is an assembly error, so `SETR.S A 200` and `ADDV.S A -1` do not assemble; use the 2-word form.
+The `.S` forms are one word long and take a literal only. Each takes the values its extension can give: -128 to 127 for `SETR.S`, `ADDI.S`, `ANDI.S`, `ORI.S`, `XORI.S` and `CMPRV.S`, which sign-extend, and 0 to 255 for the other `.S` forms, which zero-extend. Any other value is an assembly error, so `SETR.S A 200` and `ADDV.S A -1` do not assemble; use the 2-word form.
 
 ```
 SETR A 0xFF       // A = 0xFF
@@ -542,6 +550,7 @@ SETR.S C -5       // one word: C = -5
 | `CMPRR rs1 rs2` | 1 | flags from rs1 − rs2 (nothing written) | Z S C V |
 | `CMPRV rs1 imm32` | 2 | flags from rs1 − sext(imm32) | Z S C V |
 | `CMPRV.S rs1 imm8` | 1 | flags from rs1 − sext(imm8); imm8 −128..127 (v3) | Z S C V |
+| `CMPRVU rs1 imm32` | 2 | flags from rs1 − zext(imm32) | Z S C V |
 | `CMPRRW rs1 rs2` | 1 | flags from the 32-bit compare of the low halves of rs1 and rs2 (v3) | Z S C V |
 | `CMPRVW rs1 imm32` | 2 | flags from the 32-bit compare of the low halves of rs1 and sext(imm32) (v3) | Z S C V |
 | `CMPEQR rd rs1 rs2` | 1 | rd = 1 if rs1 = rs2, else 0 | — |
@@ -554,8 +563,11 @@ SETR.S C -5       // one word: C = -5
 | `CMPULER rd rs1 rs2` | 1 | rd = 1 if rs1 ≤ rs2 (unsigned), else 0 | — |
 | `CMPUGTR rd rs1 rs2` | 1 | rd = 1 if rs1 > rs2 (unsigned), else 0 | — |
 | `CMPUGER rd rs1 rs2` | 1 | rd = 1 if rs1 ≥ rs2 (unsigned), else 0 | — |
+| `CMPEQV rd rs1 imm32` … `CMPUGEV rd rs1 imm32` | 2 | as `CMPEQR` … `CMPUGER`, comparing rs1 with sext(imm32) | — |
+| `CMPEQRW rd rs1 rs2` … `CMPUGERW rd rs1 rs2` | 1 | as `CMPEQR` … `CMPUGER`, comparing the low 32 bits (v3) | — |
+| `CMPEQVW rd rs1 imm32` … `CMPUGEVW rd rs1 imm32` | 2 | as `CMPEQV` … `CMPUGEV`, comparing the low 32 bits (v3) | — |
 
-`CMPRR` and `CMPRV` set the flags exactly as a subtraction would, without writing a register. Follow them with any conditional jump: `JMPE`/`JMPNE` for equality, `JMPLT`/`JMPGE`/`JMPLE`/`JMPGT` for signed order, `JMPULT`/`JMPUGE`/`JMPULE`/`JMPUGT` for unsigned order. The `CMP..R` boolean forms write 0 or 1 to `rd` and leave the flags alone.
+`CMPRR`, `CMPRV` and `CMPRVU` set the flags exactly as a subtraction would, without writing a register. Follow them with any conditional jump: `JMPE`/`JMPNE` for equality, `JMPLT`/`JMPGE`/`JMPLE`/`JMPGT` for signed order, `JMPULT`/`JMPUGE`/`JMPULE`/`JMPUGT` for unsigned order. The `CMP..R` boolean forms write 0 or 1 to `rd` and leave the flags alone, and so do their immediate (`CMP..V`) and 32-bit (`CMP..RW`, `CMP..VW`) forms, for all ten conditions `EQ`, `NE`, `LT`, `LE`, `GT`, `GE`, `ULT`, `ULE`, `UGT` and `UGE`. The unsigned immediate forms compare with the sign-extended immediate as an unsigned number, so `CMPULTV C A -1` is 1 unless A is all ones.
 
 ```
 CMPRV A 10        // flags from A - 10
@@ -705,6 +717,12 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 | `LDIDX64 rd rs1 off32` | 2 | rd = mem64[rs1 + off32] | — |
 | `LDIDX64A rd rs1 off32` | 2 | rd = mem64[(rs1 + off32) & ~7] | — |
 | `LDIDX64R rd rs1 rs2` | 1 | rd = mem64[rs1 + rs2] | — |
+| `LDIDX8R rd rs1 rs2` | 1 | rd = zext(mem8[rs1 + rs2]) | — |
+| `LDIDX8SR rd rs1 rs2` | 1 | rd = sext(mem8[rs1 + rs2]) | — |
+| `LDIDX16R rd rs1 rs2` | 1 | rd = zext(mem16[(rs1 + rs2) & ~1]) | — |
+| `LDIDX16SR rd rs1 rs2` | 1 | rd = sext(mem16[(rs1 + rs2) & ~1]) | — |
+| `LDIDX32R rd rs1 rs2` | 1 | rd = zext(mem32[(rs1 + rs2) & ~3]) | — |
+| `LDIDX32SR rd rs1 rs2` | 1 | rd = sext(mem32[(rs1 + rs2) & ~3]) | — |
 | `MEMREADR rd addr32` | 2 | rd = mem64[addr32]; addr32 is an address or label | — |
 | `LDIDX8.S rd rs1 off` | 1 | as `LDIDX8`, off −128..127 (v3) | — |
 | `LDIDX8_S.S rd rs1 off` | 1 | as `LDIDX8_S`, off −128..127 (v3) | — |
@@ -730,6 +748,9 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 | `STIDX64 rd rs1 off32` | 2 | mem64[rs1 + off32] = rd | — |
 | `STIDX64A rd rs1 off32` | 2 | mem64[(rs1 + off32) & ~7] = rd | — |
 | `STIDX64R rd rs1 rs2` | 1 | mem64[rs1 + rs2] = rd | — |
+| `STIDX8R rd rs1 rs2` | 1 | mem8[rs1 + rs2] = rd[7:0] | — |
+| `STIDX16R rd rs1 rs2` | 1 | mem16[(rs1 + rs2) & ~1] = rd[15:0] | — |
+| `STIDX32R rd rs1 rs2` | 1 | mem32[(rs1 + rs2) & ~3] = rd[31:0] | — |
 | `MEMSETR rd addr32` | 2 | mem64[addr32] = rd; addr32 is an address or label | — |
 | `STIDX8.S rd rs1 off` | 1 | as `STIDX8`, off −128..127 (v3) | — |
 | `STIDX16.S rd rs1 off` | 1 | as `STIDX16`, off even, −256..254 (v3) | — |
@@ -741,7 +762,7 @@ Stores take the value from `rd` and the address from `rs1`: `MEMSET8 D B` stores
 
 Byte accesses use the address as it is. 16- and 32-bit accesses clear the address bits below their size, except `MEMGET32`, which reads four bytes at any address. The `A` forms (`MEMGET64`, `MEMSET64`, `LDIDX64A`, `STIDX64A` and their `.S` forms) clear the low three address bits. The other 64-bit forms pass the address on unchanged, but the data cache ignores address bits 2:0, so every 64-bit memory access reaches the aligned doubleword that holds the address. The same goes for `PUSH`, `POP`, calls and returns when SP is not a multiple of 8. A device (MMIO) access without `A` keeps the address as it is. Keep the address of every 64-bit access 8-byte aligned, or use an `A` form.
 
-The `.S` forms are one word long and take a literal byte offset, which must be a multiple of the access size. Offsets in `off32` may be negative (`STIDX64 A P -8`).
+The `.S` forms are one word long and take a literal byte offset, which must be a multiple of the access size. Offsets in `off32` may be negative (`STIDX64 A P -8`). The `R` forms add two registers; the sign-extending ones are spelt `LDIDX8SR`, `LDIDX16SR` and `LDIDX32SR`, as the LLVM compiler names them, without the underscore of `LDIDX8_S`.
 
 Addresses with the top four bits set (`0xF000_0000` and up) reach the devices; see [Memory-Mapped I/O](#memory-mapped-io).
 
@@ -793,10 +814,12 @@ HALT
 | `CALLNO target` | 2 | call if not V; pushes the address of the next instruction | — |
 | `CALLE target` | 2 | call if equal (= Z); pushes the address of the next instruction | — |
 | `CALLNE target` | 2 | call if not equal (= not Z); pushes the address of the next instruction | — |
+| `JMPREL target` … `JMPNEREL target` | 2 | as `JMP` … `JMPNE`, PC-relative | — |
+| `CALLREL target` | 2 | as `CALL`, PC-relative | — |
 | `JMPR rs2` | 1 | jump to the address in rs2 | — |
 | `CALLR rs2` | 1 | call the address in rs2; pushes the address of the next instruction | — |
 
-`target` is a label or an absolute address. A call pushes the address of the instruction after it (8 bytes on the stack) and jumps; `RET` pops it. The condition codes read the flags as follows:
+`target` is a label or an absolute address. The `REL` forms (`JMPREL`, `JMPZREL`, … `JMPNEREL` for every condition but `O` and `NO`, and `CALLREL`) store the target's distance from the instruction instead of its address, so the code runs wherever it is loaded; they reach any address, and the `.code` listing of a disassembled program shows the distance (`CALLREL PC+288`). A call pushes the address of the instruction after it (8 bytes on the stack) and jumps; `RET` pops it. The condition codes read the flags as follows:
 
 | Suffix | Taken when | Use after `CMPRR a b` |
 |--------|-----------|------------------------|

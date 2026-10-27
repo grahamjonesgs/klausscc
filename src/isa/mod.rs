@@ -66,6 +66,10 @@ pub(crate) enum Operand {
     /// ISA v3 fused branch target (label or address) → simm13 word
     /// displacement from this instruction, `word0[20:8]`. Filled in pass 2.
     Rel13,
+    /// 2-word PC-relative branch target (label or address) → byte
+    /// displacement from this instruction, appended at PC+4 (`target = PC +
+    /// imm32`, the LEN=10 REL=1 class-8 forms). Filled in pass 2.
+    Rel32,
 }
 
 impl Operand {
@@ -82,20 +86,20 @@ impl Operand {
             Self::Frame22 => 0x3F_FFFF,
             Self::Rel18 => 0x3_FFFF,
             Self::Rel13 => 0x1FFF << 8,
-            Self::Imm | Self::Imm64 => 0,
+            Self::Imm | Self::Imm64 | Self::Rel32 => 0,
         }
     }
 
     /// Whether the operand is a field of word 0, taking one source token,
     /// rather than an immediate appended after it.
     pub(crate) const fn is_word0(self) -> bool {
-        !matches!(self, Self::Imm | Self::Imm64)
+        !matches!(self, Self::Imm | Self::Imm64 | Self::Rel32)
     }
 
     /// The number of 32-bit words appended after word 0 for this operand.
     pub(crate) const fn imm_words(self) -> u32 {
         match self {
-            Self::Imm => 1,
+            Self::Imm | Self::Rel32 => 1,
             Self::Imm64 => 2,
             _ => 0,
         }
@@ -204,10 +208,11 @@ mod tests {
         assert_eq!(Operand::Count.mask(), 0x001F_8000);
         assert_eq!(Operand::Off8(3).mask(), Operand::Imm8.mask());
         assert_eq!(Operand::Rel13.mask(), 0x001F_FF00);
-        for op in [Operand::Imm, Operand::Imm64] {
+        for op in [Operand::Imm, Operand::Imm64, Operand::Rel32] {
             assert_eq!((op.mask(), op.is_word0()), (0, false), "{op:?}");
         }
         assert_eq!((Operand::Imm.imm_words(), Operand::Imm64.imm_words(), Operand::Rd.imm_words()), (1, 2, 0));
+        assert_eq!(Operand::Rel32.imm_words(), 1);
         assert!(Operand::Rel18.is_word0());
     }
 

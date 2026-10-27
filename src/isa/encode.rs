@@ -113,7 +113,7 @@ pub(crate) fn encode(opcode: &Opcode, line: &str, pc: u32, symbols: &SymbolTable
         faults.push(fault);
         0
     });
-    let (imm, extra_tokens) = immediates(opcode, &tokens, symbols, &mut faults);
+    let (imm, extra_tokens) = immediates(opcode, &tokens, pc, symbols, &mut faults);
     let encoded = Encoded {
         word0: word0.map(|word0| word0 | rel),
         imm,
@@ -176,7 +176,7 @@ fn word0_fields(opcode: &Opcode, tokens: &[&str]) -> Result<u32, EncodeFault> {
                 None => ok = false,
             },
             // PC-relative targets need this instruction's address.
-            Operand::Rel18 | Operand::Rel13 | Operand::Imm | Operand::Imm64 => {}
+            Operand::Rel18 | Operand::Rel13 | Operand::Rel32 | Operand::Imm | Operand::Imm64 => {}
         }
     }
     if ok { Ok(word0) } else { Err(EncodeFault::Registers) }
@@ -209,8 +209,10 @@ fn pc_relative_bits(opcode: &Opcode, tokens: &[&str], pc: u32, symbols: &SymbolT
 
 /// The immediate words, from the tokens after the word-0 operands, and
 /// whether there are tokens beyond them.  A token with no value is a fault
-/// and encodes as 0; fewer tokens than words is a fault too.
-fn immediates(opcode: &Opcode, tokens: &[&str], symbols: &SymbolTable, faults: &mut Vec<EncodeFault>) -> (Vec<u32>, bool) {
+/// and encodes as 0; fewer tokens than words is a fault too.  A
+/// [`Operand::Rel32`] target becomes its byte displacement from `pc`, which
+/// reaches any 32-bit address.
+fn immediates(opcode: &Opcode, tokens: &[&str], pc: u32, symbols: &SymbolTable, faults: &mut Vec<EncodeFault>) -> (Vec<u32>, bool) {
     let first = opcode.reg_tokens() as usize + 1;
     let count = opcode.imm_words() as usize;
 
@@ -223,15 +225,19 @@ fn immediates(opcode: &Opcode, tokens: &[&str], symbols: &SymbolTable, faults: &
         return (vec![value as u32, (value >> 32) as u32], false);
     }
 
+    let base = if opcode.ops.contains(&Operand::Rel32) { pc } else { 0 };
     let imm: Vec<u32> = tokens
         .iter()
         .skip(first)
         .take(count)
         .map(|token| {
-            resolve_operand(&token.to_uppercase(), symbols).unwrap_or_else(|error| {
-                faults.push(EncodeFault::Operand(error));
-                0
-            })
+            resolve_operand(&token.to_uppercase(), symbols).map_or_else(
+                |error| {
+                    faults.push(EncodeFault::Operand(error));
+                    0
+                },
+                |value| value.wrapping_sub(base),
+            )
         })
         .collect();
     if imm.len() != count {
@@ -457,6 +463,141 @@ mod tests {
     }
 
     #[test]
+    // The reg+reg (MODE=11) loads and stores encode to the words LLVM emits
+    // (`llvm-mc -show-encoding`: `ldidx8r r1, r2, r3` is 0x58600123), are one
+    // word with the value register in rd, base in rs1 and offset in rs2, and
+    // disassemble back to their source line.
+    fn test_reg_offset_loads_and_stores_assemble() {
+        // (source, word, SIZE [25:24], SGN [23], store)
+        let cases = [
+            ("LDIDX8R B C D", 0x5860_0123, 0, false, false),
+            ("LDIDX16R B C D", 0x5960_0123, 1, false, false),
+            ("LDIDX32R B C D", 0x5A60_0123, 2, false, false),
+            ("LDIDX64R B C D", 0x5B60_0123, 3, false, false),
+            ("LDIDX8SR B C D", 0x58E0_0123, 0, true, false),
+            ("LDIDX16SR B C D", 0x59E0_0123, 1, true, false),
+            ("LDIDX32SR B C D", 0x5AE0_0123, 2, true, false),
+            ("STIDX8R B C D", 0x5C60_0123, 0, false, true),
+            ("STIDX16R B C D", 0x5D60_0123, 1, false, true),
+            ("STIDX32R B C D", 0x5E60_0123, 2, false, true),
+            ("STIDX64R B C D", 0x5F60_0123, 3, false, true),
+        ];
+        let disassembler = Disassembler::new(V2_OPCODES);
+        for (src, word, size, sgn, store) in cases {
+            let encoded = enc(src).unwrap();
+            assert_eq!((encoded.word0, encoded.imm.len()), (Some(word), 0), "{src}");
+            // LEN 01, class 6 (load) or 7 (store), MODE 11, A 0 and [19:12]
+            // zero: the shape pipeline_core.sv decodes as a reg+reg access.
+            assert_eq!(word >> 30, 1, "{src}");
+            assert_eq!((word >> 26) & 0xF, if store { 7 } else { 6 }, "{src}");
+            assert_eq!(((word >> 24) & 3, (word >> 23) & 1 == 1), (size, sgn), "{src}");
+            assert_eq!(((word >> 21) & 3, (word >> 20) & 1, (word >> 12) & 0xFF), (3, 0, 0), "{src}");
+            assert_eq!(disassembler.word(word), Some((src.to_owned(), 0)), "{src}");
+        }
+        // Lower case, as LLVM prints them, assembles too.
+        assert_eq!(hex("ldidx16sr p a o"), "59E00F0E");
+    }
+
+    #[test]
+    // The other forms LLVM emits that klausscc once had no name for encode to
+    // the words `llvm-mc -show-encoding` gives for the same operands
+    // (llvm/test/MC/KlaussCPU/encoding-coverage.s, with r1/r2/r3 as B/C/D).
+    fn test_llvm_forms_assemble_to_llvm_words() {
+        let cases = [
+            ("SETRU B 0xF0010000", "8BC00100F0010000"),
+            ("SETRU.S B 200", "4BCC8100"),
+            ("ANDI B C -4096", "89100120FFFFF000"),
+            ("ANDI.S B C -8", "491F8120"),
+            ("ORI B C -129", "89500120FFFFFF7F"),
+            ("ORI.S B C -128", "49580120"),
+            ("XORI B C -100000", "89900120FFFE7960"),
+            ("XORI.S B C 127", "4997F120"),
+            ("CMPRVU C 0xFFFFFFFF", "8C000020FFFFFFFF"),
+            ("CMPEQV B C 5", "8C30012000000005"),
+            ("CMPNEV B C -1", "8C700120FFFFFFFF"),
+            ("CMPLTV B C 100000", "8CB00120000186A0"),
+            ("CMPGEV B C -100000", "8CF00120FFFE7960"),
+            ("CMPLEV B C 127", "8D3001200000007F"),
+            ("CMPGTV B C -128", "8D700120FFFFFF80"),
+            ("CMPULTV B C 2147483647", "8DB001207FFFFFFF"),
+            ("CMPUGEV B C -2147483648", "8DF0012080000000"),
+            ("CMPULEV B C 0", "8E30012000000000"),
+            ("CMPUGTV B C 65535", "8E7001200000FFFF"),
+            ("CMPEQRW B C D", "4C280123"),
+            ("CMPNERW B C D", "4C680123"),
+            ("CMPLTRW B C D", "4CA80123"),
+            ("CMPGERW B C D", "4CE80123"),
+            ("CMPLERW B C D", "4D280123"),
+            ("CMPGTRW B C D", "4D680123"),
+            ("CMPULTRW B C D", "4DA80123"),
+            ("CMPUGERW B C D", "4DE80123"),
+            ("CMPULERW B C D", "4E280123"),
+            ("CMPUGTRW B C D", "4E680123"),
+            ("CMPEQVW B C -3", "8C380120FFFFFFFD"),
+            ("CMPNEVW B C 7", "8C78012000000007"),
+            ("CMPLTVW B C 1000", "8CB80120000003E8"),
+            ("CMPGEVW B C -1000", "8CF80120FFFFFC18"),
+            ("CMPLEVW B C 1", "8D38012000000001"),
+            ("CMPGTVW B C -2147483648", "8D78012080000000"),
+            ("CMPULTVW B C 2147483647", "8DB801207FFFFFFF"),
+            ("CMPUGEVW B C 255", "8DF80120000000FF"),
+            ("CMPULEVW B C -1", "8E380120FFFFFFFF"),
+            ("CMPUGTVW B C 12345", "8E78012000003039"),
+        ];
+        for (src, want) in cases {
+            assert_eq!(hex(src), want, "{src}");
+        }
+        // `jmprel 64` .. `callrel -64` at 0x20: the target is an address or
+        // label, and word 1 its displacement from the instruction.
+        let jumps = [
+            ("JMPREL", "A1000000"),
+            ("JMPZREL", "A1080000"),
+            ("JMPNZREL", "A10C0000"),
+            ("JMPCREL", "A1100000"),
+            ("JMPNCREL", "A1140000"),
+            ("JMPSREL", "A1200000"),
+            ("JMPNSREL", "A1240000"),
+            ("JMPLTREL", "A1280000"),
+            ("JMPGEREL", "A12C0000"),
+            ("JMPLEREL", "A1300000"),
+            ("JMPGTREL", "A1340000"),
+            ("JMPULTREL", "A1380000"),
+            ("JMPUGEREL", "A13C0000"),
+            ("JMPULEREL", "A1400000"),
+            ("JMPUGTREL", "A1440000"),
+            ("JMPEREL", "A1480000"),
+            ("JMPNEREL", "A14C0000"),
+        ];
+        for (name, word0) in jumps {
+            assert_eq!(hex(&format!("{name} 0x60")), format!("{word0}00000040"), "{name}");
+        }
+        assert_eq!(hex("CALLREL 0x0"), "A3000000FFFFFFE0");
+    }
+
+    #[test]
+    // A 2-word PC-relative target is resolved against the instruction's
+    // address, reaches the whole 32-bit space, and disassembles as PC±n.
+    fn test_rel32_targets() {
+        let labels = SymbolTable::from_pairs(&[("LOOP:", 0x28), ("FAR:", 0xF000_0000)]);
+        let words = |line: &str, pc| enc_at(line, pc, &labels).map(|e| e.hex());
+        assert_eq!(words("JMPNEREL LOOP:", 0x40), Ok("A14C0000FFFFFFE8".to_owned()));
+        assert_eq!(words("CALLREL FAR:", 0x20), Ok("A3000000EFFFFFE0".to_owned()));
+        let error = enc_at("JMPREL NOWHERE:", 0x30, &labels).unwrap_err();
+        assert_eq!(error.faults, [EncodeFault::Operand(OperandError::UnknownLabel("NOWHERE:".to_owned()))]);
+        let disassembler = Disassembler::new(V2_OPCODES);
+        let bytes: Vec<u8> = [0xA14C_0000_u32, 0xFFFF_FFE8, 0xA300_0000, 0x0000_0120]
+            .iter()
+            .flat_map(|w| w.to_le_bytes())
+            .collect();
+        let shown: Vec<String> = disassembler
+            .flat_to_pass2(&bytes, 0x40)
+            .into_iter()
+            .map(|line| line.input_text_line)
+            .collect();
+        assert_eq!(shown, ["JMPNEREL PC-24", "CALLREL PC+288"]);
+    }
+
+    #[test]
     // Regression: every imm8 .S form took -128..=255, so SETR.S A 200 set -56
     // and ADDV.S A -1 added 255. Each now takes only the values its
     // extension can give (pipeline_core.sv:761-762).
@@ -471,6 +612,10 @@ mod tests {
             ("ANDV.S A", false, 0x4900_0000),
             ("ORV.S A", false, 0x4940_0000),
             ("XORV.S A", false, 0x4980_0000),
+            ("SETRU.S A", false, 0x4BC0_0000),
+            ("ANDI.S A B", true, 0x4910_0010),
+            ("ORI.S A B", true, 0x4950_0010),
+            ("XORI.S A B", true, 0x4990_0010),
             ("CMPRV.S B", true, 0x4C10_0010),
         ];
         let imm8_forms: Vec<&str> = V2_OPCODES.iter().filter(|o| o.ops.contains(&Operand::Imm8)).map(|o| o.name).collect();

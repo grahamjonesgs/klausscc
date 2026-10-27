@@ -131,7 +131,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 12 | `test_strings.kla` | String data | `#name "string"` data layout, read back a byte at a time with LDIDX8 |
 | 13 | `test_edge_cases.kla` | Edge cases | Zero wrap, max values, sign boundary, all 16 registers |
 | 14 | `test_sign_extend.kla` | Type conversion | SEXTB, SEXTH, ZEXTB, ZEXTH |
-| 15 | `test_indexed_mem.kla` | Indexed memory | STIDX64, LDIDX64, STIDX64R, LDIDX64R |
+| 15 | `test_indexed_mem.kla` | Indexed memory | STIDX64, LDIDX64, STIDX64R, LDIDX64R; the sub-word register-offset LDIDX8R/16R/32R, LDIDX8SR/16SR/32SR, STIDX8R/16R/32R |
 | 16 | `test_loop_patterns.kla` | Algorithms | Countdown, sum, factorial, find-max |
 | 17 | `test_boundary.kla` | Stress | Boundary values, overflow, MULHR, MULHUR |
 | 18 | `test_rotate.kla` | Shifts/Rotates | ROLR1, RORR1, ROLV, RORV, ROLR, RORR |
@@ -349,6 +349,15 @@ FFFF8000
 000000BB
 000000CC
 000000BB
+000000CC
+FFFFFFCC
+0000CCDD
+FFFFCCDD
+88776655
+00000000
+FFFFFFFF
+778888FF
+55667788
 ```
 
 ### test_loop_patterns (16)

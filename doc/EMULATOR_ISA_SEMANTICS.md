@@ -121,8 +121,8 @@ and `len = 0` is empty.
 - A call pushes the zero-extended return address (the next instruction:
   PC+8 for 2-word calls, PC+4 for CALLR and CALL.S), and only when taken.
   RET and IRET take the PC from bits `[31:0]` of the popped doubleword.
-- The 2-word PC-relative jumps/calls (REL=1, LEN=10), which have no
-  klausscc mnemonic, are executed: target = PC + imm32.
+- The 2-word PC-relative jumps/calls (REL=1, LEN=10; `JMPREL` … `CALLREL`)
+  are executed with any COND: target = PC + imm32.
 - v3 forms: the short immediates, short branches, fused compare-and-branch
   (no flags), W ops, `LDIDX32_S`, `ENTER`/`LEAVE`/`LEAVERET`.
 - `RESET` jumps to PC = 0x4. In a klausscc image that address holds the

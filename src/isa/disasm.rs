@@ -57,7 +57,7 @@ impl Disassembler {
                 Operand::Simm4 => write!(text, " {}", (((word & 0xF) << 28) as i32) >> 28),
                 Operand::Rel18 => write!(text, " PC{:+}", (((word << 14) as i32) >> 14) * 4),
                 Operand::Rel13 => write!(text, " PC{:+}", (((word << 11) as i32) >> 19) * 4),
-                Operand::Imm | Operand::Imm64 => Ok(()),
+                Operand::Imm | Operand::Imm64 | Operand::Rel32 => Ok(()),
             };
         }
         Some((text, opcode.imm_words()))
@@ -84,6 +84,9 @@ impl Disassembler {
             let pc = base_addr.saturating_add(i as u32);
 
             let (base_text, vars) = self.word(word).unwrap_or_else(|| (format!("??? (0x{word:08X})"), 0_u32));
+            // A 2-word PC-relative target shows as its displacement, as the
+            // short branches' does.
+            let rel32 = self.opcode(word).is_some_and(|opcode| opcode.ops.contains(&Operand::Rel32));
 
             let mut display_text = base_text;
 
@@ -98,6 +101,7 @@ impl Disassembler {
                 })
                 .collect();
             match *args.as_slice() {
+                [av] if rel32 => _ = write!(display_text, " PC{:+}", av as i32),
                 [av] if arg_word_count == 1 => _ = write!(display_text, " 0x{av:X}"),
                 [lo, hi] => _ = write!(display_text, " 0x{:X}", (u64::from(hi) << 32) | u64::from(lo)),
                 [lo] => _ = write!(display_text, " 0x{lo:08X}"),
@@ -160,7 +164,7 @@ mod tests {
                 }
                 Operand::Frame22 => ("12345".to_owned(), "12345".to_owned()),
                 Operand::Simm4 => ("-3".to_owned(), "-3".to_owned()),
-                Operand::Rel18 | Operand::Rel13 => ("0x10".to_owned(), "PC-16".to_owned()),
+                Operand::Rel18 | Operand::Rel13 | Operand::Rel32 => ("0x10".to_owned(), "PC-16".to_owned()),
                 Operand::Imm => ("0x1234".to_owned(), "0x1234".to_owned()),
                 Operand::Imm64 => ("0x500000006".to_owned(), "0x500000006".to_owned()),
             };
