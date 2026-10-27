@@ -13,6 +13,7 @@ pub(crate) mod encode;
 pub(crate) mod table;
 
 use serde::Serialize;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
 use table::V2_OPCODES;
@@ -39,9 +40,12 @@ pub(crate) enum Operand {
     Rs1,
     /// Second source / offset register → `word0[3:0]`.
     Rs2,
-    /// In-place register: one source token drives BOTH `rd[11:8]` and `rs1[7:4]`.
-    /// v1's in-place forms (`ADDV A 5`, `NEGR A`, `SHLV A 4`) become v2's
-    /// 3-operand encodings with `rd == rs1`.
+    /// Destination register with an optional separate first source:
+    /// `rd[11:8]`, then `rs1[7:4]`.  One register token drives both fields,
+    /// v1's in-place forms (`ADDV A 5`, `NEGR A`, `SHLV A 4`: `rd == rs1`);
+    /// a second register token right after it is `rs1`, LLVM's 3-operand
+    /// form (`ADDV A B 5` is `A = B + 5`, as `addv r0, r1, 5`).  See
+    /// [`Opcode::layout`] for how a line picks the form.
     RdRs1,
     /// Embedded 6-bit shift/bit count or position → `word0[20:15]`.
     Count,
@@ -60,6 +64,10 @@ pub(crate) enum Operand {
     Frame22,
     /// ISA v3 fused branch: literal simm4 compare immediate → `word0[3:0]`.
     Simm4,
+    /// ISA v3 fused-branch condition, as LLVM's `fbr`/`fbri` write it:
+    /// `PRED | INV << 3` (0..=4 or 8..=12) → PRED `word0[25:23]`, INV
+    /// `word0[22]`.  PRED 5..=7 is not an instruction (the CPU traps).
+    Cond,
     /// ISA v3 short branch target (label or address) → simm18 word
     /// displacement from this instruction, `word0[17:0]`. Filled in pass 2.
     Rel18,
@@ -81,6 +89,7 @@ impl Operand {
             Self::Rs1 => 0xF << 4,
             Self::Rs2 | Self::Simm4 => 0xF,
             Self::RdRs1 => 0xFF << 4,
+            Self::Cond => 0xF << 22,
             Self::Count => 0x3F << 15,
             Self::Imm8 | Self::Off8(_) => 0xFF << 12,
             Self::Frame22 => 0x3F_FFFF,
@@ -94,6 +103,28 @@ impl Operand {
     /// rather than an immediate appended after it.
     pub(crate) const fn is_word0(self) -> bool {
         !matches!(self, Self::Imm | Self::Imm64 | Self::Rel32)
+    }
+
+    /// Whether `word`'s field for this operand holds a value the operand can
+    /// take: false only for a fused-branch [`Cond`](Self::Cond) whose PRED
+    /// is 5..=7, which no instruction has.
+    pub(crate) const fn accepts(self, word: u32) -> bool {
+        !matches!(self, Self::Cond) || (word >> 23) & 7 <= 4
+    }
+
+    /// The fused-branch condition `cc` (`PRED | INV << 3`) as its word-0
+    /// bits, or `None` when `cc` is not one (PRED 5..=7, or above 15).
+    pub(crate) const fn cond_bits(cc: u32) -> Option<u32> {
+        if cc > 15 || cc & 7 > 4 {
+            None
+        } else {
+            Some((cc & 7) << 23 | (cc >> 3) << 22)
+        }
+    }
+
+    /// The fused-branch condition (`PRED | INV << 3`) in `word`.
+    pub(crate) const fn cond_value(word: u32) -> u32 {
+        (word >> 23) & 7 | ((word >> 22) & 1) << 3
     }
 
     /// The number of 32-bit words appended after word 0 for this operand.
@@ -133,6 +164,29 @@ impl Opcode {
     /// (imm32 → 1, imm64 → 2).
     pub(crate) fn imm_words(&self) -> u32 {
         self.ops.iter().map(|op| op.imm_words()).sum()
+    }
+
+    /// The operand layout the source line `tokens` (mnemonic first) is
+    /// written in.  An [`Operand::RdRs1`] followed by another register
+    /// token, on a line with more tokens than the in-place form takes, is
+    /// the 3-operand form: `rd` then a separate `rs1` (`ADDV A B 5`,
+    /// `NEGR A B`, `SHLV A B 4`, as LLVM writes them).  Otherwise the one
+    /// token is both, so every 2-operand line keeps its encoding (`ADDV A B`
+    /// still adds the label `B`).
+    pub(crate) fn layout(&self, tokens: &[&str]) -> Cow<'static, [Operand]> {
+        let Some(at) = self.ops.iter().position(|&op| op == Operand::RdRs1) else {
+            return Cow::Borrowed(self.ops);
+        };
+        // RdRs1 opcodes take one token per operand: the immediates are one
+        // imm32 each, never an Imm64 written as one literal.
+        let in_place = self.ops.len();
+        let three_operand = tokens.len() > in_place + 1 && tokens.get(at + 2).is_some_and(|token| reg_index(token).is_some());
+        if !three_operand {
+            return Cow::Borrowed(self.ops);
+        }
+        let mut ops = self.ops.to_vec();
+        ops.splice(at..=at, [Operand::Rd, Operand::Rs1]);
+        Cow::Owned(ops)
     }
 
     /// Whether this opcode's ISA v3 [`Operand::Imm8`] byte is sign-extended.

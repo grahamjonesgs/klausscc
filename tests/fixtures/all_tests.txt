@@ -8,6 +8,7 @@ test_logic.kla
 test_shifts.kla
 test_bits.kla
 test_muldiv.kla
+test_three_operand.kla
 
 // Comparison and flow control
 test_compare_jump.kla

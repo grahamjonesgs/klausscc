@@ -33,6 +33,8 @@ Where the built-in emulator and the hardware disagree, this document describes t
   - [Stack](#stack)
   - [Multiply and Divide](#multiply-and-divide)
   - [System and LCD](#system-and-lcd)
+  - [Separate Source Registers](#separate-source-registers)
+  - [LLVM Names](#llvm-names)
 - [CPU Flags](#cpu-flags)
 - [Memory Layout](#memory-layout)
 - [Memory-Mapped I/O](#memory-mapped-io)
@@ -461,7 +463,7 @@ Operands are separated by spaces and written in the order shown. Register operan
 |------|---------|
 | `rd` | Destination register (for stores, the register whose value is stored) |
 | `rs1`, `rs2` | Source registers. For loads and stores, `rs1` is the base address. |
-| `r` | One register that is both source and destination (`ADDV A 5` is A = A + 5) |
+| `rd [rs1]` | A destination register, then optionally a separate source. Written with one register it is both (`ADDV A 5` is A = A + 5); with two it is LLVM's 3-operand form (`ADDV B A 5` is B = A + 5, LLVM's `addv r1, r0, 5`). See [Separate Source Registers](#separate-source-registers) |
 | `imm32`, `off32`, `addr32`, `target`, `offset`, `field` | A 32-bit immediate word after the instruction: a literal or a label |
 | `imm64` | A 64-bit immediate (two words) |
 | `n` | A literal count or bit number, 0 to 63 (for `ENTER`, a frame size in 8-byte words) |
@@ -469,7 +471,7 @@ Operands are separated by spaces and written in the order shown. Register operan
 
 Notation: `sext(x)` / `zext(x)` sign- / zero-extend `x` to 64 bits. `sext32(x)` sign-extends the low 32 bits of `x`. `memN[a]` is the N-bit value at byte address `a`. "Words" is the instruction's length in 32-bit words. The Flags column lists the flags the instruction writes; the others keep their values. "(v3)" marks the ISA v3 additions.
 
-The register-register forms take three independent registers, so `ADDR C A B` (C = A + B) leaves A and B unchanged. The `r` forms work in place.
+The register-register forms take three independent registers, so `ADDR C A B` (C = A + B) leaves A and B unchanged. The `rd [rs1]` forms work in place when given one register.
 
 ### ALU, Register-Register
 
@@ -505,11 +507,11 @@ MINUR A A B       // A = unsigned min(A, B)
 |---|---|---|---|
 | `ADDI rd rs1 imm32` | 2 | rd = rs1 + sext(imm32) | Z S C V |
 | `ADDIW rd rs1 imm32` | 2 | rd = sext32(rs1 + sext(imm32)) (v3) | Z S C V ¹ |
-| `ADDV r imm32` | 2 | r = r + zext(imm32) | Z S C V |
-| `MINUSV r imm32` | 2 | r = r − zext(imm32) | Z S C V |
-| `ANDV r imm32` | 2 | r = r AND zext(imm32) | — |
-| `ORV r imm32` | 2 | r = r OR zext(imm32) | — |
-| `XORV r imm32` | 2 | r = r XOR zext(imm32) | — |
+| `ADDV rd [rs1] imm32` | 2 | rd = rs1 + zext(imm32) | Z S C V |
+| `MINUSV rd [rs1] imm32` | 2 | rd = rs1 − zext(imm32) | Z S C V |
+| `ANDV rd [rs1] imm32` | 2 | rd = rs1 AND zext(imm32) | — |
+| `ORV rd [rs1] imm32` | 2 | rd = rs1 OR zext(imm32) | — |
+| `XORV rd [rs1] imm32` | 2 | rd = rs1 XOR zext(imm32) | — |
 | `ANDI rd rs1 imm32` | 2 | rd = rs1 AND sext(imm32) | — |
 | `ORI rd rs1 imm32` | 2 | rd = rs1 OR sext(imm32) | — |
 | `XORI rd rs1 imm32` | 2 | rd = rs1 XOR sext(imm32) | — |
@@ -519,11 +521,11 @@ MINUR A A B       // A = unsigned min(A, B)
 | `LEAPC rd offset` | 2 | rd = address of this instruction + offset (a 32-bit result, zero-extended) | — |
 | `SETR.S rd imm8` | 1 | rd = sext(imm8); imm8 −128..127 (v3) | — |
 | `ADDI.S rd rs1 imm8` | 1 | rd = rs1 + sext(imm8); imm8 −128..127 (v3) | Z S C V |
-| `ADDV.S r imm8` | 1 | r = r + zext(imm8); imm8 0..255 (v3) | Z S C V |
-| `MINUSV.S r imm8` | 1 | r = r − zext(imm8); imm8 0..255 (v3) | Z S C V |
-| `ANDV.S r imm8` | 1 | r = r AND zext(imm8); imm8 0..255 (v3) | — |
-| `ORV.S r imm8` | 1 | r = r OR zext(imm8); imm8 0..255 (v3) | — |
-| `XORV.S r imm8` | 1 | r = r XOR zext(imm8); imm8 0..255 (v3) | — |
+| `ADDV.S rd [rs1] imm8` | 1 | rd = rs1 + zext(imm8); imm8 0..255 (v3) | Z S C V |
+| `MINUSV.S rd [rs1] imm8` | 1 | rd = rs1 − zext(imm8); imm8 0..255 (v3) | Z S C V |
+| `ANDV.S rd [rs1] imm8` | 1 | rd = rs1 AND zext(imm8); imm8 0..255 (v3) | — |
+| `ORV.S rd [rs1] imm8` | 1 | rd = rs1 OR zext(imm8); imm8 0..255 (v3) | — |
+| `XORV.S rd [rs1] imm8` | 1 | rd = rs1 XOR zext(imm8); imm8 0..255 (v3) | — |
 | `SETRU.S rd imm8` | 1 | rd = zext(imm8); imm8 0..255 (v3) | — |
 | `ANDI.S rd rs1 imm8` | 1 | rd = rs1 AND sext(imm8); imm8 −128..127 (v3) | — |
 | `ORI.S rd rs1 imm8` | 1 | rd = rs1 OR sext(imm8); imm8 −128..127 (v3) | — |
@@ -538,6 +540,7 @@ The `.S` forms are one word long and take a literal only. Each takes the values 
 ```
 SETR A 0xFF       // A = 0xFF
 ADDV A 0x10       // A = A + 16
+ADDV B A 0x10     // B = A + 16 (A unchanged)
 ADDI B A -1       // B = A - 1 (A unchanged)
 ANDV A 0xF        // A = A AND 0xF
 SETR.S C -5       // one word: C = -5
@@ -603,6 +606,10 @@ These v3 instructions compare two registers, or a register and a small literal, 
 | `BULEI rs1 simm4 target` | 1 | branch if rs1 ≤ simm4 (unsigned); simm4 −8..7, sign-extended | — |
 | `BUGT rs1 rs2 target` | 1 | branch if rs1 > rs2 (unsigned) | — |
 | `BUGTI rs1 simm4 target` | 1 | branch if rs1 > simm4 (unsigned); simm4 −8..7, sign-extended | — |
+| `FBR rs1 rs2 cc target` | 1 | LLVM's spelling of `BEQ` … `BUGT`: cc 0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE; plus 8 for the inverse (NE, GE, GT, UGE, UGT) | — |
+| `FBRI rs1 simm4 cc target` | 1 | LLVM's spelling of `BEQI` … `BUGTI`, cc as for `FBR` | — |
+
+`FBR` and `FBRI` are the names the LLVM compiler prints (`fbr r14, r12, 8, …` is `BNE O M …`). They assemble to the same words as the named branches, a cc of 5 to 7 or 13 to 15 is an error (the CPU traps on it), and a disassembly listing shows the named branch.
 
 ```
 SETR B 10
@@ -621,19 +628,19 @@ BNEI B 0 LOOP:    // loop while B != 0
 | `SARR rd rs1 rs2` | 1 | rd = rs1 >> rs2[5:0] (arithmetic) | Z |
 | `ROLR rd rs1 rs2` | 1 | rd = rs1 rotated left by rs2[5:0] | Z ³ |
 | `RORR rd rs1 rs2` | 1 | rd = rs1 rotated right by rs2[5:0] | Z ³ |
-| `SHLV r n` | 1 | r = r << n; n 0..63 | Z |
-| `SHRV r n` | 1 | r = r >> n (logical) | Z |
-| `SHRAV r n` | 1 | r = r >> n (arithmetic) | Z |
-| `ROLV r n` | 1 | r = r rotated left by n | Z; n = 1: Z C |
-| `RORV r n` | 1 | r = r rotated right by n | Z; n = 1: Z C |
-| `SHLR1 r` | 1 | r = r << 1 | — |
-| `SHLAR r` | 1 | r = r << 1 (same encoding as `SHLR1`) | — |
-| `SHRR1 r` | 1 | r = r >> 1 (logical) | — |
-| `SHRAR r` | 1 | r = r >> 1 (arithmetic) | — |
-| `ROLR1 r` | 1 | r = r rotated left by 1; C = the bit rotated out | Z C |
-| `RORR1 r` | 1 | r = r rotated right by 1; C = the bit rotated out | Z C |
-| `ROLCR r` | 1 | rotate r left by 1 through carry (C in at bit 0, bit 63 out to C) | Z C |
-| `RORCR r` | 1 | rotate r right by 1 through carry (C in at bit 63, bit 0 out to C) | Z C |
+| `SHLV rd [rs1] n` | 1 | rd = rs1 << n; n 0..63 | Z |
+| `SHRV rd [rs1] n` | 1 | rd = rs1 >> n (logical) | Z |
+| `SHRAV rd [rs1] n` | 1 | rd = rs1 >> n (arithmetic) | Z |
+| `ROLV rd [rs1] n` | 1 | rd = rs1 rotated left by n | Z; n = 1: Z C |
+| `RORV rd [rs1] n` | 1 | rd = rs1 rotated right by n | Z; n = 1: Z C |
+| `SHLR1 rd [rs1]` | 1 | rd = rs1 << 1 | — |
+| `SHLAR rd [rs1]` | 1 | rd = rs1 << 1 (same encoding as `SHLR1`) | — |
+| `SHRR1 rd [rs1]` | 1 | rd = rs1 >> 1 (logical) | — |
+| `SHRAR rd [rs1]` | 1 | rd = rs1 >> 1 (arithmetic) | — |
+| `ROLR1 rd [rs1]` | 1 | rd = rs1 rotated left by 1; C = the bit rotated out | Z C |
+| `RORR1 rd [rs1]` | 1 | rd = rs1 rotated right by 1; C = the bit rotated out | Z C |
+| `ROLCR rd [rs1]` | 1 | rd = rs1 rotated left by 1 through carry (C in at bit 0, bit 63 out to C) | Z C |
+| `RORCR rd [rs1]` | 1 | rd = rs1 rotated right by 1 through carry (C in at bit 63, bit 0 out to C) | Z C |
 
 Counts held in a register use its low 6 bits (`rs2[5:0]`), so a count of 64 shifts by 0.
 
@@ -641,6 +648,7 @@ Counts held in a register use its low 6 bits (`rs2[5:0]`), so a count of 64 shif
 
 ```
 SHLV A 4          // A = A << 4
+SHLV C A 4        // C = A << 4 (A unchanged)
 SHRAV B 8         // B = B >> 8, keeping the sign
 SHRR C A B        // C = A >> B[5:0] (logical)
 ROLR1 D           // rotate D left 1; C = old bit 63
@@ -650,9 +658,9 @@ ROLR1 D           // rotate D left 1; C = old bit 63
 
 | Instruction | Words | Operation | Flags |
 |---|---|---|---|
-| `BSET r n` | 1 | r = r with bit n set | — |
-| `BCLR r n` | 1 | r = r with bit n cleared | — |
-| `BTGL r n` | 1 | r = r with bit n inverted | — |
+| `BSET rd [rs1] n` | 1 | rd = rs1 with bit n set | — |
+| `BCLR rd [rs1] n` | 1 | rd = rs1 with bit n cleared | — |
+| `BTGL rd [rs1] n` | 1 | rd = rs1 with bit n inverted | — |
 | `BTST rs1 n` | 1 | Z = 1 if bit n of rs1 is 0; no register is written | Z |
 | `BSETRR rd rs1 rs2` | 1 | rd = rs1 with bit rs2[5:0] set | — |
 | `BCLRRR rd rs1 rs2` | 1 | rd = rs1 with bit rs2[5:0] cleared | — |
@@ -677,27 +685,27 @@ BSET A 4                 // A = 0xABDD
 | Instruction | Words | Operation | Flags |
 |---|---|---|---|
 | `COPY rd rs1` | 1 | rd = rs1 | — |
-| `NEGR r` | 1 | r = −r | Z |
-| `NOTR r` | 1 | r = NOT r | Z |
-| `ABSR r` | 1 | r = \|r\| (signed; 0x8000…0000 stays as it is) | Z V ⁴ |
-| `SEXTB r` | 1 | r = r[7:0] sign-extended | Z S |
-| `SEXTH r` | 1 | r = r[15:0] sign-extended | Z S |
-| `SEXTW r` | 1 | r = r[31:0] sign-extended | — |
-| `ZEXTB r` | 1 | r = r[7:0] zero-extended | Z |
-| `ZEXTH r` | 1 | r = r[15:0] zero-extended | Z |
-| `ZEXTW r` | 1 | r = r[31:0] zero-extended | — |
-| `BSWAP r` | 1 | r = r with its 8 bytes reversed | — |
-| `BITREV r` | 1 | r = r with its 64 bits reversed | — |
-| `POPCNT r` | 1 | r = number of 1 bits in r | Z |
-| `CLZ r` | 1 | r = number of leading zero bits (64 for 0) | — |
-| `CTZ r` | 1 | r = number of trailing zero bits (64 for 0) | — |
-| `INCR r` | 1 | r = r + 1 | Z S C V |
-| `DECR r` | 1 | r = r − 1 | Z S C V |
+| `NEGR rd [rs1]` | 1 | rd = −rs1 | Z |
+| `NOTR rd [rs1]` | 1 | rd = NOT rs1 | Z |
+| `ABSR rd [rs1]` | 1 | rd = \|rs1\| (signed; 0x8000…0000 stays as it is) | Z V ⁴ |
+| `SEXTB rd [rs1]` | 1 | rd = rs1[7:0] sign-extended | Z S |
+| `SEXTH rd [rs1]` | 1 | rd = rs1[15:0] sign-extended | Z S |
+| `SEXTW rd [rs1]` | 1 | rd = rs1[31:0] sign-extended | — |
+| `ZEXTB rd [rs1]` | 1 | rd = rs1[7:0] zero-extended | Z |
+| `ZEXTH rd [rs1]` | 1 | rd = rs1[15:0] zero-extended | Z |
+| `ZEXTW rd [rs1]` | 1 | rd = rs1[31:0] zero-extended | — |
+| `BSWAP rd [rs1]` | 1 | rd = rs1 with its 8 bytes reversed | — |
+| `BITREV rd [rs1]` | 1 | rd = rs1 with its 64 bits reversed | — |
+| `POPCNT rd [rs1]` | 1 | rd = number of 1 bits in rs1 | Z |
+| `CLZ rd [rs1]` | 1 | rd = number of leading zero bits of rs1 (64 for 0) | — |
+| `CTZ rd [rs1]` | 1 | rd = number of trailing zero bits of rs1 (64 for 0) | — |
+| `INCR rd [rs1]` | 1 | rd = rs1 + 1 | Z S C V |
+| `DECR rd [rs1]` | 1 | rd = rs1 − 1 | Z S C V |
 | `SETFR rd` | 1 | rd = the flags in bits 63:60 as {Z, Z, C, V}, bits 59:0 zero | — |
 
 ⁴ V is set when the operand was `0x8000_0000_0000_0000`, whose absolute value does not fit, and cleared otherwise.
 
-All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy first to keep the original: `COPY D C` then `NEGR D`.
+All of these except `COPY` and `SETFR` work in place when given one register (`NEGR C` is C = -C), and leave the source unchanged when given two (`NEGR D C` is D = -C).
 
 ### Loads
 
@@ -714,7 +722,7 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 | `LDIDX16_S rd rs1 off32` | 2 | rd = sext(mem16[(rs1 + off32) & ~1]) | — |
 | `LDIDX32 rd rs1 off32` | 2 | rd = zext(mem32[(rs1 + off32) & ~3]) | — |
 | `LDIDX32_S rd rs1 off32` | 2 | rd = sext(mem32[(rs1 + off32) & ~3]) (v3) | — |
-| `LDIDX64 rd rs1 off32` | 2 | rd = mem64[rs1 + off32] | — |
+| `LDIDX64 rd rs1 off32` | 2 | rd = mem64[rs1 + off32]; also spelt `LDIDX64U` ⚠ | — |
 | `LDIDX64A rd rs1 off32` | 2 | rd = mem64[(rs1 + off32) & ~7] | — |
 | `LDIDX64R rd rs1 rs2` | 1 | rd = mem64[rs1 + rs2] | — |
 | `LDIDX8R rd rs1 rs2` | 1 | rd = zext(mem8[rs1 + rs2]) | — |
@@ -736,7 +744,7 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 | `LDIDX16_S.S rd rs1 off` | 1 | as `LDIDX16_S`, off even, −256..254 (v3) | — |
 | `LDIDX32.S rd rs1 off` | 1 | as `LDIDX32`, off a multiple of 4, −512..508 (v3) | — |
 | `LDIDX32_S.S rd rs1 off` | 1 | as `LDIDX32_S`, off a multiple of 4, −512..508 (v3) | — |
-| `LDIDX64.S rd rs1 off` | 1 | as `LDIDX64`, off a multiple of 8, −1024..1016 (v3) | — |
+| `LDIDX64.S rd rs1 off` | 1 | as `LDIDX64`, off a multiple of 8, −1024..1016 (v3); also spelt `LDIDX64U.S` ⚠ | — |
 | `LDIDX64A.S rd rs1 off` | 1 | as `LDIDX64A`, off a multiple of 8, −1024..1016 (v3) | — |
 
 ### Stores
@@ -751,7 +759,7 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 | `STIDX8 rd rs1 off32` | 2 | mem8[rs1 + off32] = rd[7:0] | — |
 | `STIDX16 rd rs1 off32` | 2 | mem16[(rs1 + off32) & ~1] = rd[15:0] | — |
 | `STIDX32 rd rs1 off32` | 2 | mem32[(rs1 + off32) & ~3] = rd[31:0] | — |
-| `STIDX64 rd rs1 off32` | 2 | mem64[rs1 + off32] = rd | — |
+| `STIDX64 rd rs1 off32` | 2 | mem64[rs1 + off32] = rd; also spelt `STIDX64U` ⚠ | — |
 | `STIDX64A rd rs1 off32` | 2 | mem64[(rs1 + off32) & ~7] = rd | — |
 | `STIDX64R rd rs1 rs2` | 1 | mem64[rs1 + rs2] = rd | — |
 | `STIDX8R rd rs1 rs2` | 1 | mem8[rs1 + rs2] = rd[7:0] | — |
@@ -764,14 +772,16 @@ All of these except `COPY` and `SETFR` work in place (`NEGR C` is C = -C). Copy 
 | `STIDX8.S rd rs1 off` | 1 | as `STIDX8`, off −128..127 (v3) | — |
 | `STIDX16.S rd rs1 off` | 1 | as `STIDX16`, off even, −256..254 (v3) | — |
 | `STIDX32.S rd rs1 off` | 1 | as `STIDX32`, off a multiple of 4, −512..508 (v3) | — |
-| `STIDX64.S rd rs1 off` | 1 | as `STIDX64`, off a multiple of 8, −1024..1016 (v3) | — |
+| `STIDX64.S rd rs1 off` | 1 | as `STIDX64`, off a multiple of 8, −1024..1016 (v3); also spelt `STIDX64U.S` ⚠ | — |
 | `STIDX64A.S rd rs1 off` | 1 | as `STIDX64A`, off a multiple of 8, −1024..1016 (v3) | — |
 
 Stores take the value from `rd` and the address from `rs1`: `MEMSET8 D B` stores the low byte of D at the address in B.
 
 Byte accesses use the address as it is. 16- and 32-bit accesses clear the address bits below their size, except `MEMGET32`, which reads four bytes at any address. The `A` forms (`MEMGET64`, `MEMSET64`, `LDIDX64A`, `STIDX64A` and their `.S` forms) clear the low three address bits. The other 64-bit forms pass the address on unchanged, but the data cache ignores address bits 2:0, so every 64-bit memory access reaches the aligned doubleword that holds the address. The same goes for `PUSH`, `POP`, calls and returns when SP is not a multiple of 8. A device (MMIO) access without `A` keeps the address as it is. Keep the address of every 64-bit access 8-byte aligned, or use an `A` form.
 
-The `.S` forms are one word long and take a literal byte offset, which must be a multiple of the access size. Offsets in `off32` may be negative (`STIDX64 A P -8`). The `R` forms add two registers; the sign-extending ones are spelt `LDIDX8SR`, `LDIDX16SR` and `LDIDX32SR`, as the LLVM compiler names them, without the underscore of `LDIDX8_S`. The `LDABS`/`STABS` forms take an absolute address at every width, as `MEMREADR`/`MEMSETR` do for 64 bits; the compiler uses them for device registers (`LDABS32S` is the sign-extending 32-bit one).
+The `.S` forms are one word long and take a literal byte offset, which must be a multiple of the access size. Offsets in `off32` may be negative (`STIDX64 A P -8`). The `R` forms add two registers; the sign-extending ones are spelt `LDIDX8SR`, `LDIDX16SR` and `LDIDX32SR`, as the LLVM compiler names them, without the underscore of `LDIDX8_S`. The 2-word and `.S` sign-extending loads also take LLVM's spelling without the underscore (`LDIDX8S`, `LDIDX16S.S`, …). The `LDABS`/`STABS` forms take an absolute address at every width, as `MEMREADR`/`MEMSETR` do for 64 bits; the compiler uses them for device registers (`LDABS32S` is the sign-extending 32-bit one).
+
+> **⚠ `LDIDX64` and `STIDX64` mean different instructions here and in LLVM.** klausscc's `LDIDX64`/`STIDX64` are the A=0 forms (address as computed), which LLVM calls `ldidx64u`/`stidx64u`. LLVM's `ldidx64`/`stidx64` are the A=1 forms (address `& ~7`), klausscc's `LDIDX64A`/`STIDX64A`. The two only differ for an address that is not 8-byte aligned, but a line copied from LLVM output with the name unchanged assembles to the other encoding. klausscc keeps its meaning so existing sources assemble as before. Write `LDIDX64U`/`STIDX64U` (accepted here as the same A=0 forms) or `LDIDX64A`/`STIDX64A` (LLVM accepts `ldidx64a`/`stidx64a`) to mean the same thing in both; a disassembly listing uses only those names.
 
 Addresses with the top four bits set (`0xF000_0000` and up) reach the devices; see [Memory-Mapped I/O](#memory-mapped-io).
 
@@ -884,6 +894,8 @@ One-word, PC-relative forms of the jumps (v3). The target is a label (or address
 | `JMPNE.S target` | 1 | as `JMPNE`, PC-relative, within ±512 KB (v3) | — |
 | `CALL.S target` | 1 | as `CALL`, PC-relative, within ±512 KB (v3) | — |
 
+The LLVM compiler prints a short jump with the name of the 2-word PC-relative form (`jmprel`, `jmpzrel`, …; `jmpo`/`jmpno` for O and NO) and chooses the length itself. klausscc's `JMPREL`, `JMPZREL`, … are always 2 words; write `JMP.S`, `JMPZ.S`, … for the 1-word form. LLVM has no `CALL.S`.
+
 ### Stack
 
 | Instruction | Words | Operation | Flags |
@@ -929,13 +941,13 @@ LEAVERET                 // SP = P; pop P; return
 | `MULHR rd rs1 rs2` | 1 | rd = high 64 bits of rs1 × rs2 (signed) | Z S V ⁵ |
 | `MULHUR rd rs1 rs2` | 1 | rd = high 64 bits of rs1 × rs2 (unsigned) | Z S V ⁵ |
 | `MULW rd rs1 rs2` | 1 | rd = sext32(low 32 bits of rs1 × rs2) (v3) | Z S V ⁵ |
-| `MULV r imm32` | 2 | r = r × sext(imm32) (signed) | Z S V ⁵ |
+| `MULV rd [rs1] imm32` | 2 | rd = rs1 × sext(imm32) (signed) | Z S V ⁵ |
 | `DIVR rd rs1 rs2` | 1 | rd = rs1 ÷ rs2 (signed) | Z V ⁵ |
 | `DIVUR rd rs1 rs2` | 1 | rd = rs1 ÷ rs2 (unsigned) | Z V ⁵ |
-| `DIVV r imm32` | 2 | r = r ÷ sext(imm32) (signed) | Z V ⁵ |
+| `DIVV rd [rs1] imm32` | 2 | rd = rs1 ÷ sext(imm32) (signed) | Z V ⁵ |
 | `MODR rd rs1 rs2` | 1 | rd = rs1 mod rs2 (signed remainder) | Z V ⁵ |
 | `MODUR rd rs1 rs2` | 1 | rd = rs1 mod rs2 (unsigned) | Z V ⁵ |
-| `MODV r imm32` | 2 | r = r mod sext(imm32) (signed) | Z V ⁵ |
+| `MODV rd [rs1] imm32` | 2 | rd = rs1 mod sext(imm32) (signed) | Z V ⁵ |
 
 ⁵ The multiplies set Z from the value written, S from bit 63 of the 64-bit half they produce (for `MULW`, of the full low half before sign-extension) and V = 1 when the low-half product does not fit in 64 bits (always 0 for `MULHR`/`MULHUR`). Divide and modulo set Z and clear V. Divide by zero does not trap: `DIV..` gives `0xFFFF_FFFF_FFFF_FFFF`, `MOD..` gives the dividend, V = 1 and Z is unchanged.
 
@@ -956,11 +968,42 @@ LEAVERET                 // SP = P; pop P; return
 | `LCDDATAR rs1` | 1 | send rs1 to the LCD as data | — |
 | `LCDCMDV imm32` | 2 | send imm32 to the LCD as a command | — |
 | `LCDDATAV imm32` | 2 | send imm32 to the LCD as data | — |
-| `LCDRST imm32` | 2 | drive the LCD reset line from imm32 bit 0 | — |
+| `LCDRST imm32` | 2 | drive the LCD reset line from imm32 bit 0; LLVM's name `LCD` is accepted too | — |
 
 `HALT` stops the CPU for good (the emulator stops with `Halt`). `TRAP` stops it as a software abort (the emulator stops with `Trap`). `RESET` jumps to address `0x4`, which in an assembled image is inside the heap header, not code. `DELAYR`/`DELAYV` busy-wait in the CPU; the emulator does not wait, but advances its clock (timer, millisecond clock, cycle counter) by the same number of cycles. The LCD instructions drive the board's SPI LCD and are no-ops in the emulator.
 
 ---
+
+### Separate Source Registers
+
+The CPU encodes `rd` (bits 11:8) and `rs1` (bits 7:4) separately in every instruction listed above as `rd [rs1]`: `ADDV`, `MINUSV`, `ANDV`, `ORV`, `XORV` and their `.S` forms, `MULV`, `DIVV`, `MODV`, the shifts, rotates and bit operations by a count (`SHLV`, `BSET`, …, `ROLR1`, `ROLCR`, …) and the unary operations (`NEGR`, `SEXTB`, `INCR`, `CLZ`, …). The assembler accepts both forms:
+
+- one register is both destination and source, as it always was: `ADDV A 5` is A = A + 5;
+- two registers are the destination, then the source, in the order the LLVM compiler writes them: `ADDV B A 5` is B = A + 5 (`addv r1, r0, 5`), `NEGR D C` is D = -C (`negr r3, r2`), `SHLV C A 3` is C = A << 3 (`shlv r2, r0, 3`).
+
+The second token is the source register only when it is a register name and the line has one more token than the one-register form takes. `ADDV A B` therefore still adds the value of the label `B`, so every program written for the one-register form assembles to the same words.
+
+A disassembly listing (the `.code` file written for an ELF or flat binary) shows one register when `rd` = `rs1` and both otherwise. Compiled code often uses a separate source: `ADDV B C 0x1F4` is B = C + 500, and leaves C unchanged.
+
+### LLVM Names
+
+The LLVM compiler's assembler writes registers as `r0`–`r15` (`A`–`P` here) and separates operands with commas; otherwise most of its names and operand orders are the ones used here. These differ:
+
+| LLVM | klausscc | Notes |
+|---|---|---|
+| `addv r1, r2, 5`, `negr r1, r2`, … | `ADDV B C 5`, `NEGR B C`, … | Both forms are accepted; see [Separate Source Registers](#separate-source-registers) |
+| **`ldidx64`, `stidx64`** | **`LDIDX64A`, `STIDX64A`** | **⚠ Same name, different instruction.** klausscc's `LDIDX64`/`STIDX64` are LLVM's `ldidx64u`/`stidx64u`; see [Loads](#loads) |
+| `ldidx64u`, `stidx64u` | `LDIDX64U`, `STIDX64U` (= `LDIDX64`, `STIDX64`) | Accepted, with their `.S` forms; the listing uses these names |
+| `ldidx8s`, `ldidx16s`, `ldidx32s` | `LDIDX8_S`, … (or `LDIDX8S`, …) | Both spellings are accepted, and by LLVM too |
+| `fbr rs1, rs2, cc, target`, `fbri rs1, simm4, cc, target` | `BEQ` … `BUGTI`, or `FBR`/`FBRI` | See [Fused Compare-and-Branch](#fused-compare-and-branch) |
+| `lcd` | `LCDRST` (or `LCD`) | |
+| `rolr1`, `rorr1` | `ROLR1`, `RORR1` (= `ROLV r 1`, `RORV r 1`) | One encoding; the listing shows `ROLR1`/`RORR1`, as LLVM does |
+| `shlar` | `SHLAR` (= `SHLR1`) | One encoding; the listing shows `SHLR1`, as LLVM does |
+| `setr`, `setru`, `addv`, `addi`, `andi`, `ldidx32`, `stidx64`, `cmprv`, … with a small literal | the `.S` form (`SETR.S`, `ADDV.S`, …) | **⚠ Same name, different length.** LLVM picks the 1-word form when the literal fits and prints it under the 2-word name; here the name chooses the length, so `SETR A 5` is always 2 words. LLVM's `setr rX, 128..255` is the 1-word `SETRU.S` |
+| `jmprel`, `jmpzrel`, … `jmpo`, `jmpno` to a near target | `JMP.S`, `JMPZ.S`, … `JMPO.S`, `JMPNO.S` | **⚠ Same name, different length**, as above: `JMPREL` here is always 2 words |
+| (none) | `CALL.S` | LLVM has no 1-word call |
+
+The aliases change nothing an existing program assembles to: each is a name that klausscc did not have before. The names that mean something else in LLVM (`LDIDX64`, `STIDX64`, and the 2-word names LLVM also uses for 1-word forms) keep their klausscc meaning.
 
 ## CPU Flags
 
@@ -1348,6 +1391,7 @@ The `tests/fixtures/` directory holds the test corpus; `cargo test` runs every f
 | `test_bits.kla` | `BSET`, `BCLR`, `BTGL`, `POPCNT`, `CLZ`, `CTZ`, `BITREV` |
 | `test_sign_extend.kla` | `SEXTB`, `SEXTH`, `ZEXTB`, `ZEXTH` |
 | `test_muldiv.kla` | Multiply, divide and modulo |
+| `test_three_operand.kla` | The in-place instructions with a separate source register, and the LLVM names `FBR`, `FBRI`, `LDIDX64U`, `STIDX64U`, `LDIDX8S` |
 | `test_compare_jump.kla` | Compares and conditional jumps |
 | `test_compare_ext.kla` | Signed and unsigned compares, min/max |
 | `test_memory.kla` | 64-bit loads and stores |
@@ -1577,6 +1621,8 @@ the listing is:
 - A data line shows one row per 8 bytes: two 32-bit words in memory order (lower address first), each as its 32-bit value. A `.word 7` shows as `0000000700000000`.
 - A label shows its address. Comments, blank lines, `_start` and directives show only their text.
 - A line that could not be assembled shows `Error` in place of its address, for example `Error                         -- ADDR A, B, C`.
+
+For an ELF or flat binary, the listing is a disassembly: each instruction is shown as the assembler would write it, with branch targets as distances (`BNE O M PC-8`). An instruction with a separate source register shows both registers (`ADDV B C 0x1F4`, see [Separate Source Registers](#separate-source-registers)), and the names follow LLVM's where the same name means the same instruction in both (see [LLVM Names](#llvm-names)). A word that is no instruction shows as `??? (0x...)`.
 
 ### The `.kbt` Image
 

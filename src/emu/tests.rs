@@ -1469,6 +1469,8 @@ fn every_assembler_form_executes() {
             Operand::Imm8 | Operand::Off8(_) => &[0x80, 0, 0xFF, 0x7F],
             Operand::Frame22 => &[0, 3, 0x3F_FFFF],
             Operand::Simm4 => &[0xF, 0, 7],
+            // PRED << 1 | INV: PRED 1 INV 1, PRED 0, PRED 4 INV 1.
+            Operand::Cond => &[0b0011, 0, 0b1001],
             Operand::Rel18 => &[1, 0, 0x3_FFFF],
             Operand::Rel13 => &[1, 0, 0x1FFF],
             Operand::Imm | Operand::Imm64 | Operand::Rel32 => &[0],

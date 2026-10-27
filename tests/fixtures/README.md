@@ -140,6 +140,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 21 | `test_benchmark.kla` | Stress | Binary search, bit ops, high multiply, carry flags, indexed memory |
 | 22 | `test_txstr.kla` | String data | `#name "string"` printed with `$TXSTR`: several words, `\n`, an empty string |
 | 23 | `hw_alignment.kla` | Emulator vs hardware | Every behaviour the emulator was recently aligned with the RTL; see [The emulator-vs-hardware check](#the-emulator-vs-hardware-check) |
+| 24 | `test_three_operand.kla` | Separate source registers | The in-place instructions written `rd rs1` (ADDV, ADDV.S, MINUSV, ANDV.S, ORV, XORV, MULV, DIVV, MODV, SHLV, SHRV, SHRAV, ROLR1, RORV, BSET, BCLR, BTGL, NEGR, NOTR, INCR, DECR, SEXTB, ZEXTB) leave `rs1` unchanged; LLVM's names FBR, FBRI, STIDX64U, LDIDX64U, LDIDX8S |
 | — | `test_directives.kla` | Directives | `.global`, `.extern`, `.text`, `.word`, `.comm` |
 | — | `hello_world.kla` | Compiled C | Arithmetic, factorial, GCD, Fibonacci, primes |
 | — | `test_64bit.kla` | Compiled C | 33 64-bit checks; expects main's return value (the failure count) `00000000` |
@@ -467,11 +468,47 @@ CAFEF00D
 ### hw_alignment (23)
 102 values; see the file's header, which labels each one with its check.
 
+### test_three_operand (24)
+```
+00000030
+00000015
+0000000F
+00000010
+0000001F
+000000EF
+00000030
+00000004
+00000001
+00000100
+00000004
+00000008
+00000020
+00000001
+00000011
+00000000
+00000012
+FFFFFFF0
+FFFFFFEF
+00000011
+0000000F
+FFFFFF80
+000000FF
+00000080
+00000055
+00000055
+00000055
+00000010
+FFFFFF80
+00000010
+```
+
 ## Notes
 
 - Register-register ALU instructions take three registers, `rd rs1 rs2`
   (`MULR C A B` sets `C = A * B`). The immediate and single-register forms
-  (`ADDV A 1`, `NEGR A`, `SHLV A 4`) work in place. `klausscc --opcodes` lists
+  (`ADDV A 1`, `NEGR A`, `SHLV A 4`) work in place when given one register,
+  and write `rd` from a separate `rs1` when given two (`ADDV B A 1`,
+  `NEGR B A`, `SHLV B A 4`; see `test_three_operand.kla`). `klausscc --opcodes` lists
   every mnemonic and its operands.
 - Some expected values depend on exact flag behaviour. If a test passes on the
   emulator but fails on the board, compare the flag rules in

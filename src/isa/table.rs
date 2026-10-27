@@ -19,8 +19,14 @@ const fn op(name: &'static str, template: u32, ops: &'static [Operand]) -> Opcod
 /// This is the authoritative symbol → number map the assembler emits; it
 /// replaces the external `opcode_select.vh` file the toolchain used to read on
 /// the command line.  Register fields follow the uniform v2 layout
-/// (`rd[11:8]`, `rs1[7:4]`, `rs2[3:0]`); [`Operand::RdRs1`] reproduces v1's
-/// in-place forms and [`Operand::Count`] carries the embedded shift/bit count.
+/// (`rd[11:8]`, `rs1[7:4]`, `rs2[3:0]`); [`Operand::RdRs1`] takes v1's
+/// in-place forms and LLVM's 3-operand ones, and [`Operand::Count`] carries
+/// the embedded shift/bit count.
+///
+/// Where two names share an encoding the disassembler shows the first in
+/// table order, so the listing uses the name LLVM prints wherever that name
+/// means the same encoding in both (`ROLR1` for `ROLV _ 1`, `LDIDX64U` for
+/// `LDIDX64`); the later names still assemble.
 pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("ADDR", 0x4420_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("SUBR", 0x4460_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
@@ -102,14 +108,16 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("SHLV", 0x5020_4000, &[Operand::RdRs1, Operand::Count]),
     op("SHRV", 0x5060_4000, &[Operand::RdRs1, Operand::Count]),
     op("SHRAV", 0x50A0_4000, &[Operand::RdRs1, Operand::Count]),
+    // ROLR1/RORR1 are ROLV/RORV by 1; ahead of them, so the listing shows
+    // a rotate by 1 as LLVM does.
+    op("ROLR1", 0x50E0_C000, &[Operand::RdRs1]),
+    op("RORR1", 0x5120_C000, &[Operand::RdRs1]),
     op("ROLV", 0x50E0_4000, &[Operand::RdRs1, Operand::Count]),
     op("RORV", 0x5120_4000, &[Operand::RdRs1, Operand::Count]),
     op("SHLR1", 0x5020_8000, &[Operand::RdRs1]),
     op("SHLAR", 0x5020_8000, &[Operand::RdRs1]),
     op("SHRR1", 0x5060_8000, &[Operand::RdRs1]),
     op("SHRAR", 0x50A0_8000, &[Operand::RdRs1]),
-    op("ROLR1", 0x50E0_C000, &[Operand::RdRs1]),
-    op("RORR1", 0x5120_C000, &[Operand::RdRs1]),
     op("ROLCR", 0x5160_C000, &[Operand::RdRs1]),
     op("RORCR", 0x51A0_C000, &[Operand::RdRs1]),
     op("BSETRR", 0x5200_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
@@ -147,9 +155,16 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("MEMGET64", 0x5B10_0000, &[Operand::Rd, Operand::Rs1]),
     op("LDIDX8", 0x9820_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("LDIDX8_S", 0x98A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+    op("LDIDX8S", 0x98A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("LDIDX16", 0x9920_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("LDIDX16_S", 0x99A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+    op("LDIDX16S", 0x99A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("LDIDX32", 0x9A20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+    // LLVM's `ldidx64u`/`stidx64u` (A=0) are klausscc's LDIDX64/STIDX64,
+    // and LLVM's `ldidx64`/`stidx64` are LDIDX64A/STIDX64A (A=1): the same
+    // name, another encoding (doc/klauss_isa_reference.md).  The listing
+    // shows LLVM's `u` names and the `A` names, which mean the same in both.
+    op("LDIDX64U", 0x9B20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("LDIDX64", 0x9B20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("LDIDX64A", 0x9B30_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("MEMREADR", 0x9B40_0000, &[Operand::Rd, Operand::Imm]),
@@ -179,6 +194,7 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("STIDX8", 0x9C20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("STIDX16", 0x9D20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("STIDX32", 0x9E20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+    op("STIDX64U", 0x9F20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("STIDX64", 0x9F20_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("STIDX64A", 0x9F30_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     op("MEMSETR", 0x9F40_0000, &[Operand::Rd, Operand::Imm]),
@@ -192,6 +208,7 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     // ---- ISA v3 (ISA_V3_PROPOSAL.md): D1/D2 long forms, short 1-word
     //      immediates (".S", literal immediates only), ENTER/LEAVE ----
     op("LDIDX32_S", 0x9AA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
+    op("LDIDX32S", 0x9AA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
     // v3 D3: 32-bit W ops (result = sext of the low 32 bits)
     op("ADDW", 0x4428_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("SUBW", 0x4468_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
@@ -213,15 +230,20 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("CMPRV.S", 0x4C10_0000, &[Operand::Rs1, Operand::Imm8]),
     op("LDIDX8.S", 0x5820_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
     op("LDIDX8_S.S", 0x58A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
+    op("LDIDX8S.S", 0x58A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
     op("LDIDX16.S", 0x5920_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(1)]),
     op("LDIDX16_S.S", 0x59A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(1)]),
+    op("LDIDX16S.S", 0x59A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(1)]),
     op("LDIDX32.S", 0x5A20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(2)]),
     op("LDIDX32_S.S", 0x5AA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(2)]),
+    op("LDIDX32S.S", 0x5AA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(2)]),
+    op("LDIDX64U.S", 0x5B20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
     op("LDIDX64.S", 0x5B20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
     op("LDIDX64A.S", 0x5B30_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
     op("STIDX8.S", 0x5C20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
     op("STIDX16.S", 0x5D20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(1)]),
     op("STIDX32.S", 0x5E20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(2)]),
+    op("STIDX64U.S", 0x5F20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
     op("STIDX64.S", 0x5F20_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
     op("STIDX64A.S", 0x5F30_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(3)]),
     op("ENTER", 0x6600_0000, &[Operand::Frame22]),
@@ -269,6 +291,11 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("BULEI", 0x7620_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
     op("BUGT", 0x7640_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
     op("BUGTI", 0x7660_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+    // LLVM's spelling of the same fused branches, with the condition as a
+    // number (PRED | INV << 3): `FBR A B 0 target` is `BEQ A B target`.
+    // Listed as BEQ..BUGTI.
+    op("FBR", 0x7400_0000, &[Operand::Rs1, Operand::Rs2, Operand::Cond, Operand::Rel13]),
+    op("FBRI", 0x7420_0000, &[Operand::Rs1, Operand::Simm4, Operand::Cond, Operand::Rel13]),
     op("JMP", 0xA000_0000, &[Operand::Imm]),
     op("JMPZ", 0xA008_0000, &[Operand::Imm]),
     op("JMPNZ", 0xA00C_0000, &[Operand::Imm]),
@@ -351,4 +378,6 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("LCDCMDV", 0xB000_0000, &[Operand::Imm]),
     op("LCDDATAV", 0xB100_0000, &[Operand::Imm]),
     op("LCDRST", 0xB200_0000, &[Operand::Imm]),
+    // LLVM's name for LCDRST.
+    op("LCD", 0xB200_0000, &[Operand::Imm]),
 ];

@@ -99,6 +99,16 @@ failed, `3` a test timed out.
 A failed build still writes the `.code` listing, so you can see where the
 errors are; the `.kbt` is not written.
 
+Converting an ELF or a flat binary (without `-s`) writes a `.code`
+disassembly listing next to the `.kbt`, in the assembler's syntax with
+LLVM's operand order. An instruction whose source register differs from
+its destination shows both: `ADDV B C 5` is B = C + 5 (LLVM's
+`addv r1, r2, 5`), and `NEGR B C` is B = -C. The assembler accepts that
+form as well as the in-place `ADDV B 5`. Some names differ from LLVM's,
+and klausscc's `LDIDX64`/`STIDX64` are LLVM's `ldidx64u`/`stidx64u`, not
+its `ldidx64`/`stidx64`: see
+[LLVM Names](doc/klauss_isa_reference.md#llvm-names).
+
 ## Testing
 
 ```sh

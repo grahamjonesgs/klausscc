@@ -1,0 +1,163 @@
+// Test 24: Separate source registers and LLVM names
+// The in-place instructions written with a separate source register, rd
+// then rs1, as the LLVM compiler emits them (`ADDV B A 0x20` is LLVM's
+// `addv r1, r0, 0x20`): each writes rd and leaves rs1 unchanged. Then the
+// names klausscc accepts from LLVM: FBR/FBRI and LDIDX64U/STIDX64U/LDIDX8S.
+// A holds 0x10 throughout and is printed at the end.
+// Expected UART output:
+//   00000030  (ADDV B A 0x20)
+//   00000015  (ADDV.S C A 5)
+//   0000000F  (MINUSV D A 1)
+//   00000010  (ANDV.S E A 0x18)
+//   0000001F  (ORV F A 0x0F)
+//   000000EF  (XORV G A 0xFF)
+//   00000030  (MULV B A 3)
+//   00000004  (DIVV C A 4)
+//   00000001  (MODV D A 3)
+//   00000100  (SHLV B A 4)
+//   00000004  (SHRV C A 2)
+//   00000008  (SHRAV D A 1)
+//   00000020  (ROLR1 E A)
+//   00000001  (RORV F A 4)
+//   00000011  (BSET B A 0)
+//   00000000  (BCLR C A 4)
+//   00000012  (BTGL D A 1)
+//   FFFFFFF0  (NEGR B A)
+//   FFFFFFEF  (NOTR C A)
+//   00000011  (INCR D A)
+//   0000000F  (DECR E A)
+//   FFFFFF80  (SEXTB F H, H = 0x80)
+//   000000FF  (ZEXTB G I, I = -1)
+//   00000080  (H unchanged)
+//   00000055  (FBR A A 0: BEQ, taken)
+//   00000055  (FBRI A 7 8: BNEI, taken)
+//   00000055  (FBR A A 8: BNE, not taken)
+//   00000010  (STIDX64U then LDIDX64U)
+//   FFFFFF80  (LDIDX8S of the byte 0x80)
+//   00000010  (A unchanged)
+
+_start
+DELAYV 0x0500
+$NEWLINE
+SETR A 0x10
+
+// Immediate ALU forms
+ADDV B A 0x20
+$TXR B  // Expect: 00000030
+$NEWLINE
+ADDV.S C A 5
+$TXR C  // Expect: 00000015
+$NEWLINE
+MINUSV D A 1
+$TXR D  // Expect: 0000000F
+$NEWLINE
+ANDV.S E A 0x18
+$TXR E  // Expect: 00000010
+$NEWLINE
+ORV F A 0x0F
+$TXR F  // Expect: 0000001F
+$NEWLINE
+XORV G A 0xFF
+$TXR G  // Expect: 000000EF
+$NEWLINE
+
+// Multiply and divide by an immediate
+MULV B A 3
+$TXR B  // Expect: 00000030
+$NEWLINE
+DIVV C A 4
+$TXR C  // Expect: 00000004
+$NEWLINE
+MODV D A 3
+$TXR D  // Expect: 00000001
+$NEWLINE
+
+// Shifts, rotates and bits by a count
+SHLV B A 4
+$TXR B  // Expect: 00000100
+$NEWLINE
+SHRV C A 2
+$TXR C  // Expect: 00000004
+$NEWLINE
+SHRAV D A 1
+$TXR D  // Expect: 00000008
+$NEWLINE
+ROLR1 E A
+$TXR E  // Expect: 00000020
+$NEWLINE
+RORV F A 4
+$TXR F  // Expect: 00000001
+$NEWLINE
+BSET B A 0
+$TXR B  // Expect: 00000011
+$NEWLINE
+BCLR C A 4
+$TXR C  // Expect: 00000000
+$NEWLINE
+BTGL D A 1
+$TXR D  // Expect: 00000012
+$NEWLINE
+
+// Unary
+NEGR B A
+$TXR B  // Expect: FFFFFFF0
+$NEWLINE
+NOTR C A
+$TXR C  // Expect: FFFFFFEF
+$NEWLINE
+INCR D A
+$TXR D  // Expect: 00000011
+$NEWLINE
+DECR E A
+$TXR E  // Expect: 0000000F
+$NEWLINE
+SETR H 0x80
+SEXTB F H
+$TXR F  // Expect: FFFFFF80
+$NEWLINE
+SETR I -1
+ZEXTB G I
+$TXR G  // Expect: 000000FF
+$NEWLINE
+$TXR H  // Expect: 00000080
+$NEWLINE
+
+// LLVM's fused-branch spelling: cc 0 is EQ, 8 is NE
+SETR B 0x55
+FBR A A 0 FBR_EQ:
+SETR B 0xBAD
+FBR_EQ:
+$TXR B  // Expect: 00000055
+$NEWLINE
+FBRI A 7 8 FBRI_NE:
+SETR B 0xBAD
+FBRI_NE:
+$TXR B  // Expect: 00000055
+$NEWLINE
+FBR A A 8 FBR_NOT_TAKEN:
+JMP FBR_DONE:
+FBR_NOT_TAKEN:
+SETR B 0xBAD
+FBR_DONE:
+$TXR B  // Expect: 00000055
+$NEWLINE
+
+// LLVM's names for the A=0 64-bit accesses and the sign-extending byte load
+SETR C #BUF
+STIDX64U A C 0
+LDIDX64U D C 0
+$TXR D  // Expect: 00000010
+$NEWLINE
+STIDX8 H C 8
+LDIDX8S E C 8
+$TXR E  // Expect: FFFFFF80
+$NEWLINE
+
+$TXR A  // Expect: 00000010
+$NEWLINE
+HALT
+
+// v2 MMIO UART output helpers ($TXR / $NEWLINE / $TXSTR / $TXMEMCHAR)
+!include uart_stubs.kla
+
+#BUF 2

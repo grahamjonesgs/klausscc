@@ -106,10 +106,15 @@ embedded counts and the short-form fields in §3.
 separated by spaces:
 
 - `rd`, `rs1`, `rs2`: a register `A`–`P` (R0–R15), placed in that field.
-- `r`: one register written **in place**. The assembler puts it in both
-  `rd` and `rs1` (`ADDV A 5` is `A = A + 5`). The CPU itself has separate
-  fields, so `rd ≠ rs1` is a valid encoding, but the assembler has no
-  syntax for it.
+- `r`: `rd`, optionally followed by a separate `rs1`. One register is
+  written **in place**: the assembler puts it in both `rd` and `rs1`
+  (`ADDV A 5` is `A = A + 5`). Two registers are `rd` then `rs1`, LLVM's
+  3-operand form (`ADDV B A 5` is `B = A + 5`, LLVM's `addv r1, r0, 5`;
+  `NEGR D C` is `D = -C`). The second token is `rs1` only when it is a
+  register name and the line has one token more than the in-place form,
+  so `ADDV A B` still adds the label `B` and every in-place line keeps its
+  encoding. The disassembler shows one register when `rd = rs1` and both
+  otherwise.
 - `imm32`: a number or a label (`LOOP:`), stored in the word after word 0.
   "sext"/"zext" is how the CPU extends it to 64 bits.
 - `imm64`: one 64-bit literal, or two 32-bit tokens (lo then hi).
@@ -305,7 +310,7 @@ ABS of INT_MIN (`0x8000_0000_0000_0000`) returns INT_MIN and sets V.
 | LDIDX16_S | `0x99A0_0000` | 2 | rd rs1 imm32 | rs1+imm32, sext | 0x0000_C7xx |
 | LDIDX32   | `0x9A20_0000` | 2 | rd rs1 imm32 | rs1+imm32 | 0x0000_C0xx |
 | LDIDX32_S | `0x9AA0_0000` | 2 | rd rs1 imm32 | rs1+imm32, sext | — (v3 D1) |
-| LDIDX64   | `0x9B20_0000` | 2 | rd rs1 imm32 | rs1+imm32 (A=0) | 0x0000_0Cxx |
+| LDIDX64 ⚠ | `0x9B20_0000` | 2 | rd rs1 imm32 | rs1+imm32 (A=0) | 0x0000_0Cxx |
 | LDIDX64A  | `0x9B30_0000` | 2 | rd rs1 imm32 | rs1+imm32 (A=1) | 0x0000_FCxx |
 | MEMREADR  | `0x9B40_0000` | 2 | rd imm32 | imm32 absolute | 0x0000_721x |
 | LDIDX64R  | `0x5B60_0000` | **1** | rd rs1 rs2 | rs1+rs2 | 0x0000_0Exx (was 2 words) |
@@ -323,8 +328,19 @@ ABS of INT_MIN (`0x8000_0000_0000_0000`) returns INT_MIN and sets V.
 | LDABS32S  | `0x9AC0_0000` | 2 | rd imm32 | imm32 absolute, sext | — |
 
 The sub-word reg+reg and absolute forms carry LLVM's names (`ldidx8sr`,
-`ldabs8s`; the 2-word sign-extending indexed loads keep the `_S`
-spelling). Loads write no flags. 16- and 32-bit loads align their address down to
+`ldabs8s`; the 2-word
+sign-extending loads keep the `_S` spelling, and also take LLVM's
+`LDIDX8S`/`LDIDX16S`/`LDIDX32S`, with their `.S` forms).
+
+> **⚠ LDIDX64 / STIDX64 collide with LLVM's names.** klausscc's
+> `LDIDX64`/`STIDX64` (`0x9B20_0000`/`0x9F20_0000`, A=0) are LLVM's
+> `ldidx64u`/`stidx64u`; LLVM's `ldidx64`/`stidx64` are `0x9B30_0000`/
+> `0x9F30_0000` (A=1), klausscc's `LDIDX64A`/`STIDX64A`. The same holds
+> for the `.S` forms. klausscc keeps its meaning, so existing sources
+> assemble unchanged, and accepts `LDIDX64U`/`STIDX64U` (and `.S`) as the
+> A=0 forms. The disassembler shows `LDIDX64U`/`STIDX64U` and
+> `LDIDX64A`/`STIDX64A`, names that mean the same encoding in both
+> assemblers (LLVM accepts `ldidx64a`/`stidx64a`). Loads write no flags. 16- and 32-bit loads align their address down to
 the access size (`& ~1`, `& ~3`), except **MEMGET32**, which reads the 4
 bytes at any address, even across a doubleword boundary. A 64-bit access
 with A=1 is forced to `& ~7`. With A=0 the core sends the address as is,
@@ -344,7 +360,7 @@ practice every 64-bit RAM access reads or writes the aligned doubleword
 | STIDX8     | `0x9C20_0000` | 2 | rd rs1 imm32 | rs1+imm32 | 0x0000_C5xx |
 | STIDX16    | `0x9D20_0000` | 2 | rd rs1 imm32 | rs1+imm32 | 0x0000_C3xx |
 | STIDX32    | `0x9E20_0000` | 2 | rd rs1 imm32 | rs1+imm32 | 0x0000_C1xx |
-| STIDX64    | `0x9F20_0000` | 2 | rd rs1 imm32 | rs1+imm32 (A=0) | 0x0000_0Dxx |
+| STIDX64 ⚠  | `0x9F20_0000` | 2 | rd rs1 imm32 | rs1+imm32 (A=0) | 0x0000_0Dxx |
 | STIDX64A   | `0x9F30_0000` | 2 | rd rs1 imm32 | rs1+imm32 (A=1) | 0x0000_FDxx |
 | MEMSETR    | `0x9F40_0000` | 2 | rd imm32 | imm32 absolute | 0x0000_720x |
 | STIDX64R   | `0x5F60_0000` | **1** | rd rs1 rs2 | rs1+rs2 | 0x0000_73xx (was 2 words) |
@@ -460,6 +476,7 @@ Divide by zero does not trap (§7.2).
 | LCDCMDV  | `0xB000_0000` | 2 | imm32 | 0x0000_2021 |
 | LCDDATAV | `0xB100_0000` | 2 | imm32 | 0x0000_2022 |
 | LCDRST   | `0xB200_0000` | 2 | imm32 (bit 0) | 0x0000_2023 |
+| LCD      | `0xB200_0000` | 2 | imm32 (bit 0) | LLVM's name for LCDRST |
 
 SP is a separate 32-bit register, not one of R0–R15. Every stack slot is
 8 bytes, and the stack grows down. RET and IRET take the PC from bits
@@ -623,6 +640,14 @@ is out of range.
 | BULE | `0x7600_0000` | BULEI | `0x7620_0000` | unsigned <= |
 | BUGT | `0x7640_0000` | BUGTI | `0x7660_0000` | unsigned > |
 
+LLVM spells these `fbr rs1, rs2, cc, target` and `fbri rs1, simm4, cc,
+target`, with `cc` = PRED | INV<<3 (`[25:23]`, `[22]`): 0 EQ, 1 LT, 2 LE,
+3 ULT, 4 ULE, plus 8 for NE, GE, GT, UGE, UGT. The assembler accepts
+`FBR rs1 rs2 cc target` and `FBRI rs1 simm4 cc target` and rejects a
+`cc` with PRED 5..7, which the CPU traps on; the disassembler shows the
+named form (`fbr r14, r12, 8, …` is `BNE O M …`) and does not decode
+PRED 5..7.
+
 ```
 _start
 SETR.S A 0
@@ -656,7 +681,8 @@ and old discussions; the current rules are in §1–§3 and §7.
    (count/position at word0[20:15]). LDIDX64R/STIDX64R became **1 word**
    (offset register in rs2). Everything else kept its v1 length.
 4. **Aliases.** SHLAR ≡ SHLR1 (one encoding). `ROLV r 1` ≡ ROLR1 and
-   `RORV r 1` ≡ RORR1.
+   `RORV r 1` ≡ RORR1 (the disassembler shows SHLR1, ROLR1 and RORR1, as
+   LLVM does).
 5. **Immediate extension** is explicit per encoding (the SGN bit):
    ADDI/CMPRV/SETR/MULV/DIVV/MODV/ADDSP sign-extend; ADDV/MINUSV/ANDV/
    ORV/XORV/PUSHV zero-extend. This kept v1 behaviour.
@@ -711,7 +737,9 @@ emulator alike.
 
 Every mnemonic the assembler accepts, in its table order. `regs` lists the
 word-0 register fields an instruction encodes; for an in-place operand
-(`r` in §3) that is `rd,rs1` with one source token. `flags` uses Z S C V.
+(`r` in §3) that is `rd,rs1`, written as one source token (in place) or
+two (`rd` then `rs1`). Where two mnemonics share an encoding the
+disassembler shows the first. `flags` uses Z S C V.
 
 ```csv
 symbol,template,words,class,regs,imm,flags,notes
@@ -790,14 +818,14 @@ RORR,0x51004000,1,4,"rd,rs1,rs2",,Z,count=rs2[5:0]; never writes C
 SHLV,0x50204000,1,4,"rd,rs1",N<<15,Z,in place
 SHRV,0x50604000,1,4,"rd,rs1",N<<15,Z,in place
 SHRAV,0x50A04000,1,4,"rd,rs1",N<<15,Z,in place
+ROLR1,0x50E0C000,1,4,"rd,rs1",,ZC,in place; N=1 fixed (= ROLV r 1)
+RORR1,0x5120C000,1,4,"rd,rs1",,ZC,in place; N=1 fixed (= RORV r 1)
 ROLV,0x50E04000,1,4,"rd,rs1",N<<15,Z,in place; N=1 also writes C (=ROLR1)
 RORV,0x51204000,1,4,"rd,rs1",N<<15,Z,in place; N=1 also writes C (=RORR1)
 SHLR1,0x50208000,1,4,"rd,rs1",,,in place; N=1 fixed
 SHLAR,0x50208000,1,4,"rd,rs1",,,same encoding as SHLR1
 SHRR1,0x50608000,1,4,"rd,rs1",,,in place; N=1 fixed
 SHRAR,0x50A08000,1,4,"rd,rs1",,,in place; N=1 fixed
-ROLR1,0x50E0C000,1,4,"rd,rs1",,ZC,in place; N=1 fixed
-RORR1,0x5120C000,1,4,"rd,rs1",,ZC,in place; N=1 fixed
 ROLCR,0x5160C000,1,4,"rd,rs1",,ZC,in place; rotate left through C
 RORCR,0x51A0C000,1,4,"rd,rs1",,ZC,in place; rotate right through C
 BSETRR,0x52000000,1,4,"rd,rs1,rs2",,,pos=rs2[5:0]
@@ -835,10 +863,13 @@ MEMREADRR,0x5B000000,1,6,"rd,rs1",,,64-bit A=0
 MEMGET64,0x5B100000,1,6,"rd,rs1",,,64-bit A=1
 LDIDX8,0x98200000,2,6,"rd,rs1",off32,,
 LDIDX8_S,0x98A00000,2,6,"rd,rs1",off32,,sext
+LDIDX8S,0x98A00000,2,6,"rd,rs1",off32,,LLVM's name for LDIDX8_S
 LDIDX16,0x99200000,2,6,"rd,rs1",off32,,
 LDIDX16_S,0x99A00000,2,6,"rd,rs1",off32,,sext
+LDIDX16S,0x99A00000,2,6,"rd,rs1",off32,,LLVM's name for LDIDX16_S
 LDIDX32,0x9A200000,2,6,"rd,rs1",off32,,
-LDIDX64,0x9B200000,2,6,"rd,rs1",off32,,A=0
+LDIDX64U,0x9B200000,2,6,"rd,rs1",off32,,A=0; LLVM's name for LDIDX64
+LDIDX64,0x9B200000,2,6,"rd,rs1",off32,,A=0 (LLVM's ldidx64 is LDIDX64A)
 LDIDX64A,0x9B300000,2,6,"rd,rs1",off32,,A=1
 MEMREADR,0x9B400000,2,6,rd,addr32,,
 LDABS8,0x98400000,2,6,rd,addr32,,
@@ -862,7 +893,8 @@ MEMSET64,0x5F100000,1,7,"rd,rs1",,,data=rd; A=1
 STIDX8,0x9C200000,2,7,"rd,rs1",off32,,data=rd
 STIDX16,0x9D200000,2,7,"rd,rs1",off32,,data=rd
 STIDX32,0x9E200000,2,7,"rd,rs1",off32,,data=rd
-STIDX64,0x9F200000,2,7,"rd,rs1",off32,,data=rd; A=0
+STIDX64U,0x9F200000,2,7,"rd,rs1",off32,,data=rd; A=0; LLVM's name for STIDX64
+STIDX64,0x9F200000,2,7,"rd,rs1",off32,,data=rd; A=0 (LLVM's stidx64 is STIDX64A)
 STIDX64A,0x9F300000,2,7,"rd,rs1",off32,,data=rd; A=1
 MEMSETR,0x9F400000,2,7,rd,addr32,,data=rd
 STABS8,0x9C400000,2,7,rd,addr32,,data=rd
@@ -873,6 +905,7 @@ STIDX8R,0x5C600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
 STIDX16R,0x5D600000,1,7,"rd,rs1,rs2",,,data=rd; EA=(rs1+rs2)&~1
 STIDX32R,0x5E600000,1,7,"rd,rs1,rs2",,,data=rd; EA=(rs1+rs2)&~3
 LDIDX32_S,0x9AA00000,2,6,"rd,rs1",off32,,sext (v3 D1)
+LDIDX32S,0x9AA00000,2,6,"rd,rs1",off32,,LLVM's name for LDIDX32_S
 ADDW,0x44280000,1,1,"rd,rs1,rs2",,ZSCV,sext32 result (v3 D3)
 SUBW,0x44680000,1,1,"rd,rs1,rs2",,ZSCV,sext32 result (v3 D3)
 MULW,0x68880000,1,10,"rd,rs1,rs2",,ZSV,low half sext32 (v3 D3)
@@ -893,15 +926,20 @@ XORI.S,0x49900000,1,2,"rd,rs1",sext8[19:12],,v3 A5
 CMPRV.S,0x4C100000,1,3,rs1,sext8[19:12],ZSCV,v3 A3
 LDIDX8.S,0x58200000,1,6,"rd,rs1",simm8<<0,,v3 A4
 LDIDX8_S.S,0x58A00000,1,6,"rd,rs1",simm8<<0,,v3 A4; sext
+LDIDX8S.S,0x58A00000,1,6,"rd,rs1",simm8<<0,,LLVM's name for LDIDX8_S.S
 LDIDX16.S,0x59200000,1,6,"rd,rs1",simm8<<1,,v3 A4
 LDIDX16_S.S,0x59A00000,1,6,"rd,rs1",simm8<<1,,v3 A4; sext
+LDIDX16S.S,0x59A00000,1,6,"rd,rs1",simm8<<1,,LLVM's name for LDIDX16_S.S
 LDIDX32.S,0x5A200000,1,6,"rd,rs1",simm8<<2,,v3 A4
 LDIDX32_S.S,0x5AA00000,1,6,"rd,rs1",simm8<<2,,v3 A4; sext
+LDIDX32S.S,0x5AA00000,1,6,"rd,rs1",simm8<<2,,LLVM's name for LDIDX32_S.S
+LDIDX64U.S,0x5B200000,1,6,"rd,rs1",simm8<<3,,v3 A4; A=0; LLVM's name for LDIDX64.S
 LDIDX64.S,0x5B200000,1,6,"rd,rs1",simm8<<3,,v3 A4; A=0
 LDIDX64A.S,0x5B300000,1,6,"rd,rs1",simm8<<3,,v3 A4; A=1
 STIDX8.S,0x5C200000,1,7,"rd,rs1",simm8<<0,,v3 A4; data=rd
 STIDX16.S,0x5D200000,1,7,"rd,rs1",simm8<<1,,v3 A4; data=rd
 STIDX32.S,0x5E200000,1,7,"rd,rs1",simm8<<2,,v3 A4; data=rd
+STIDX64U.S,0x5F200000,1,7,"rd,rs1",simm8<<3,,v3 A4; data=rd; A=0; LLVM's name for STIDX64.S
 STIDX64.S,0x5F200000,1,7,"rd,rs1",simm8<<3,,v3 A4; data=rd; A=0
 STIDX64A.S,0x5F300000,1,7,"rd,rs1",simm8<<3,,v3 A4; data=rd; A=1
 ENTER,0x66000000,1,9,,N[21:0],,v3 C; push R15; R15=SP; SP-=8N
@@ -947,6 +985,8 @@ BULE,0x76000000,1,13,"rs1,rs2",simm13[20:8],,v3 B
 BULEI,0x76200000,1,13,rs1,"simm4[3:0],simm13[20:8]",,v3 B
 BUGT,0x76400000,1,13,"rs1,rs2",simm13[20:8],,v3 B
 BUGTI,0x76600000,1,13,rs1,"simm4[3:0],simm13[20:8]",,v3 B
+FBR,0x74000000,1,13,"rs1,rs2","cc[25:22],simm13[20:8]",,LLVM's name for BEQ..BUGT; cc=PRED|INV<<3
+FBRI,0x74200000,1,13,rs1,"simm4[3:0],cc[25:22],simm13[20:8]",,LLVM's name for BEQI..BUGTI
 JMP,0xA0000000,2,8,,target32,,
 JMPZ,0xA0080000,2,8,,target32,,
 JMPNZ,0xA00C0000,2,8,,target32,,
@@ -1027,6 +1067,7 @@ LCDDATAR,0x71000000,1,12,rs1,,,
 LCDCMDV,0xB0000000,2,12,,imm32,,
 LCDDATAV,0xB1000000,2,12,,imm32,,
 LCDRST,0xB2000000,2,12,,imm32,,
+LCD,0xB2000000,2,12,,imm32,,LLVM's name for LCDRST
 ```
 
 ## 7. Flags and conditions

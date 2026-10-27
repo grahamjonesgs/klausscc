@@ -101,19 +101,21 @@ fn parse_simm(token: &str) -> Option<i128> {
 ///
 /// Word 0 is the template with each word-0 operand packed into its field
 /// per `doc/ISA_ENCODING_V2.md` (`rd<<8 | rs1<<4 | rs2`, in-place
-/// `rd==rs1`, embedded `N<<15`, the ISA v3 short literals and PC-relative
-/// targets); an opcode without operands is its template.  The immediate
+/// `rd==rs1` or a separate `rs1` ([`Opcode::layout`]), embedded `N<<15`,
+/// the ISA v3 short literals and PC-relative targets); an opcode without
+/// operands is its template.  The immediate
 /// words follow.  Tokens beyond the operands are ignored and flagged in
 /// [`Encoded::extra_tokens`].
 pub(crate) fn encode(opcode: &Opcode, line: &str, pc: u32, symbols: &SymbolTable) -> Result<Encoded, EncodeError> {
     let tokens: Vec<&str> = line.split_whitespace().collect();
+    let ops = opcode.layout(&tokens);
     let mut faults = Vec::new();
-    let word0 = word0_fields(opcode, &tokens).map_err(|fault| faults.push(fault)).ok();
-    let rel = pc_relative_bits(opcode, &tokens, pc, symbols).unwrap_or_else(|fault| {
+    let word0 = word0_fields(opcode, &ops, &tokens).map_err(|fault| faults.push(fault)).ok();
+    let rel = pc_relative_bits(&ops, &tokens, pc, symbols).unwrap_or_else(|fault| {
         faults.push(fault);
         0
     });
-    let (imm, extra_tokens) = immediates(opcode, &tokens, pc, symbols, &mut faults);
+    let (imm, extra_tokens) = immediates(&ops, &tokens, pc, symbols, &mut faults);
     let encoded = Encoded {
         word0: word0.map(|word0| word0 | rel),
         imm,
@@ -127,12 +129,13 @@ pub(crate) fn encode(opcode: &Opcode, line: &str, pc: u32, symbols: &SymbolTable
 }
 
 /// Word 0: the template with the register, count and short-literal
-/// operands packed in.  PC-relative targets are [`pc_relative_bits`].
-fn word0_fields(opcode: &Opcode, tokens: &[&str]) -> Result<u32, EncodeFault> {
+/// operands of the line's layout `ops` packed in.  PC-relative targets are
+/// [`pc_relative_bits`].
+fn word0_fields(opcode: &Opcode, ops: &[Operand], tokens: &[&str]) -> Result<u32, EncodeFault> {
     let mut word0 = opcode.template;
     let mut token_idx = 1_usize; // first operand token (after the mnemonic)
     let mut ok = true;
-    for op in opcode.ops {
+    for op in ops {
         if !op.is_word0() {
             continue; // appended words, not word 0
         }
@@ -164,6 +167,10 @@ fn word0_fields(opcode: &Opcode, tokens: &[&str]) -> Result<u32, EncodeFault> {
                 Some(v) if (-8..=7).contains(&v) => word0 |= (v as u32) & 0xF,
                 _ => ok = false,
             },
+            Operand::Cond => match value.and_then(|v| u32::try_from(v).ok()).and_then(Operand::cond_bits) {
+                Some(bits) => word0 |= bits,
+                None => ok = false,
+            },
             // The N field is 6 bits: report a bigger count rather than masking it.
             Operand::Count => match (token, value) {
                 (_, Some(count @ 0..=63)) => word0 |= (count as u32) << 15,
@@ -186,8 +193,8 @@ fn word0_fields(opcode: &Opcode, tokens: &[&str]) -> Result<u32, EncodeFault> {
 /// branches): the word-0 bits for the target token, given the instruction's
 /// byte address `pc`.  The target is a label (`name:`) or an absolute
 /// address; a missing target leaves the field clear.
-fn pc_relative_bits(opcode: &Opcode, tokens: &[&str], pc: u32, symbols: &SymbolTable) -> Result<u32, EncodeFault> {
-    for (i, op) in opcode.ops.iter().enumerate() {
+fn pc_relative_bits(ops: &[Operand], tokens: &[&str], pc: u32, symbols: &SymbolTable) -> Result<u32, EncodeFault> {
+    for (i, op) in ops.iter().enumerate() {
         let what = match op {
             Operand::Rel18 => "short branch",
             Operand::Rel13 => "fused branch",
@@ -212,9 +219,9 @@ fn pc_relative_bits(opcode: &Opcode, tokens: &[&str], pc: u32, symbols: &SymbolT
 /// and encodes as 0; fewer tokens than words is a fault too.  A
 /// [`Operand::Rel32`] target becomes its byte displacement from `pc`, which
 /// reaches any 32-bit address.
-fn immediates(opcode: &Opcode, tokens: &[&str], pc: u32, symbols: &SymbolTable, faults: &mut Vec<EncodeFault>) -> (Vec<u32>, bool) {
-    let first = opcode.reg_tokens() as usize + 1;
-    let count = opcode.imm_words() as usize;
+fn immediates(ops: &[Operand], tokens: &[&str], pc: u32, symbols: &SymbolTable, faults: &mut Vec<EncodeFault>) -> (Vec<u32>, bool) {
+    let first = ops.iter().filter(|op| op.is_word0()).count() + 1;
+    let count = ops.iter().map(|op| op.imm_words()).sum::<u32>() as usize;
 
     // Two words written as one 64-bit literal (e.g. SETR64): lo32 goes at
     // PC+4 and hi32 at PC+8.
@@ -225,7 +232,7 @@ fn immediates(opcode: &Opcode, tokens: &[&str], pc: u32, symbols: &SymbolTable, 
         return (vec![value as u32, (value >> 32) as u32], false);
     }
 
-    let base = if opcode.ops.contains(&Operand::Rel32) { pc } else { 0 };
+    let base = if ops.contains(&Operand::Rel32) { pc } else { 0 };
     let imm: Vec<u32> = tokens
         .iter()
         .skip(first)
@@ -609,6 +616,89 @@ mod tests {
             assert_eq!(hex(&format!("{name} 0x60")), format!("{word0}00000040"), "{name}");
         }
         assert_eq!(hex("CALLREL 0x0"), "A3000000FFFFFFE0");
+    }
+
+    #[test]
+    // The in-place opcodes take LLVM's 3-operand form, rd then a separate
+    // rs1, and encode to the words `llvm-mc -show-encoding` gives for it
+    // (r1/r2 as B/C); the 2-operand form is rd == rs1, as it always was.
+    fn test_three_operand_in_place_forms() {
+        let cases = [
+            // addv r1, r2, 500 / addv r1, r2, 5 (short form)
+            ("ADDV B C 500", "88200120000001F4"),
+            ("ADDV.S B C 5", "48205120"),
+            ("ADDV B 500", "88200110000001F4"),
+            ("ADDV B B 500", "88200110000001F4"),
+            ("ADDV.S B 5", "48205110"),
+            ("MINUSV C B 7", "8860021000000007"),
+            ("ANDV.S C B 0xFF", "490FF210"),
+            ("mulv b c -5", "A8800120FFFFFFFB"),
+            ("DIVV B C 3", "A980012000000003"),
+            ("MODV B C 3", "AA80012000000003"),
+            // shlv r1, r2, 3 / bset r1, r2, 3 / rorv r1, r2, 1 / shrav r1, r2, 1
+            ("SHLV B C 3", "5021C120"),
+            ("SHLV B 3", "5021C110"),
+            ("BSET B C 3", "52218120"),
+            ("RORV B C 1", "5120C120"),
+            ("SHRAV B C 1", "50A0C120"),
+            // negr r1, r2 / shrar r1, r2 / rolr1 r1, r2 / shlar r1, r2
+            ("NEGR B C", "54480120"),
+            ("NEGR B", "54480110"),
+            ("SHRAR B C", "50A08120"),
+            ("ROLR1 B C", "50E0C120"),
+            ("SHLAR B C", "50208120"),
+            ("CLZ P A", "56400F00"),
+        ];
+        for (src, want) in cases {
+            let encoded = enc(src).unwrap_or_else(|e| panic!("{src}: {e:?}"));
+            assert_eq!((encoded.hex().as_str(), encoded.extra_tokens), (want, false), "{src}");
+        }
+        // A register name is rs1 only on a line longer than the 2-operand
+        // form: `ADDV A B` still adds the label B, as it always did.
+        let labels = SymbolTable::from_pairs(&[("B:", 0x40)]);
+        assert_eq!(enc_at("ADDV A B", 0x20, &labels).map(|e| e.hex()), Ok("8820000000000040".to_owned()));
+        assert_eq!(enc_at("ADDV A B 5", 0x20, &labels).map(|e| e.hex()), Ok("8820001000000005".to_owned()));
+        // A literal after rd is the 2-operand form with an extra token.
+        let encoded = enc("ADDV A 5 6").unwrap();
+        assert_eq!((encoded.hex().as_str(), encoded.extra_tokens), ("8820000000000005", true));
+        let encoded = enc("NEGR A B C").unwrap();
+        assert_eq!((encoded.hex().as_str(), encoded.extra_tokens), ("54480010", true));
+        // A 3-operand line missing its immediate or count is an error.
+        assert_eq!(faults("SHLV A B C").1, ["Incorrect register definition - \"SHLV A B C\""]);
+        assert_eq!(faults("ADDV A B C").0.hex(), "8820001000000000");
+    }
+
+    #[test]
+    // LLVM's names for klausscc opcodes assemble to the same words
+    // (`llvm-mc -show-encoding`), and LLVM's `fbr`/`fbri` to the fused branch
+    // their condition names.
+    fn test_llvm_names_assemble() {
+        let cases = [
+            ("LCD 5", "B200000000000005"),
+            ("LDIDX64U B C 8000", "9B20012000001F40"),
+            ("LDIDX64U.S B C 8", "5B201120"),
+            ("STIDX64U B C 8000", "9F20012000001F40"),
+            ("STIDX64U.S B C 8", "5F201120"),
+            ("LDIDX8S B C 1", "98A0012000000001"),
+            ("LDIDX16S.S B C 2", "59A01120"),
+            ("LDIDX32S.S B C 4", "5AA01120"),
+        ];
+        for (src, want) in cases {
+            assert_eq!(hex(src), want, "{src}");
+            // ... the same words as klausscc's own name for the opcode.
+            let own = src
+                .replace("LCD", "LCDRST")
+                .replace("64U", "64")
+                .replace("8S", "8_S")
+                .replace("16S", "16_S")
+                .replace("32S", "32_S");
+            assert_eq!(hex(&own), want, "{own}");
+        }
+        // fbr r1, r2, 12, . / fbri r1, -3, 4, . (target the instruction itself)
+        assert_eq!(hex("FBR B C 12 0x20"), "76400012");
+        assert_eq!(hex("FBRI B -3 4 0x20"), "7620001D");
+        assert_eq!(hex("FBR B C 12 0x20"), hex("BUGT B C 0x20"));
+        assert_eq!(faults("FBR B C 5 0x20").1, ["Incorrect register definition - \"FBR B C 5 0x20\""]);
     }
 
     #[test]
