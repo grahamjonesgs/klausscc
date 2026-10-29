@@ -45,3 +45,8 @@ test_64bit.kla
 // with the RTL (flags, divide by zero, unaligned 64-bit, BEXTR/BDEP, .S imm8,
 // strings, inline data)
 hw_alignment.kla
+
+// RTL squash fixes in klaussCPU 9ad6614: a divide squashed by a taken fused
+// branch, and a busy divide during a self-modifying-code squash
+hw_div_fbr.kla
+hw_div_smc.kla

@@ -95,8 +95,11 @@ That is the rate the bitstream fixes for the board UART.
 - `emulator_corpus_passes` (in `src/commands/emulate.rs`) assembles every
   `.kla` here that lists expected values and checks them on the emulator. It
   is the same check as `klausscc --emulate-test tests/fixtures`. It also fails
-  if fewer than 25 files pass, so a test that stops declaring its values is
+  if fewer than 28 files pass, so a test that stops declaring its values is
   noticed.
+- `rtl_squash_fixtures_keep_their_shape` (in `src/asm/corpus_tests.rs`)
+  checks the code layout the two RTL squash tests depend on; see
+  [The RTL squash tests](#the-rtl-squash-tests).
 - `every_kla_file_assembles` (in `src/asm/corpus_tests.rs`) assembles every
   `.kla` here and in `runtime/` and fails on any error. A file that is only
   meant to be included (`uart_stubs.kla`, `string_print.kla` and the runtime
@@ -141,6 +144,8 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 22 | `test_txstr.kla` | String data | `#name "string"` printed with `$TXSTR`: several words, `\n`, an empty string |
 | 23 | `hw_alignment.kla` | Emulator vs hardware | Every behaviour the emulator was recently aligned with the RTL; see [The emulator-vs-hardware check](#the-emulator-vs-hardware-check) |
 | 24 | `test_three_operand.kla` | Separate source registers | The in-place instructions written `rd rs1` (ADDV, ADDV.S, MINUSV, ANDV.S, ORV, XORV, MULV, DIVV, MODV, SHLV, SHRV, SHRAV, ROLR1, RORV, BSET, BCLR, BTGL, NEGR, NOTR, INCR, DECR, SEXTB, ZEXTB) leave `rs1` unchanged; LLVM's names FBR, FBRI, STIDX64U, LDIDX64U, LDIDX8S |
+| 25 | `hw_div_fbr.kla` | RTL regression | A DIVR squashed by a taken FBR must not leave the divider running for the next DIVR; see [The RTL squash tests](#the-rtl-squash-tests) |
+| 26 | `hw_div_smc.kla` | RTL regression | A DIVR busy in EX must survive a self-modifying-code squash of ID; see [The RTL squash tests](#the-rtl-squash-tests) |
 | — | `test_directives.kla` | Directives | `.global`, `.extern`, `.text`, `.word`, `.comm` |
 | — | `hello_world.kla` | Compiled C | Arithmetic, factorial, GCD, Fibonacci, primes |
 | — | `test_64bit.kla` | Compiled C | 33 64-bit checks; expects main's return value (the failure count) `00000000` |
@@ -195,6 +200,29 @@ shows its old value. The comments by each check derive its values from
 `pipeline_core.sv` (with line numbers), so they can be checked without the
 emulator. If `--emulate-test` passes and the board run (`-T`) fails, the
 first wrong line names the behaviour that differs.
+
+## The RTL squash tests
+
+`hw_div_fbr.kla` and `hw_div_smc.kla` are the board tests for two of the
+squash fixes in klaussCPU 9ad6614 (`pipeline_core: squash fixes for the LCD
+strobe, the divider and busy EX ops`):
+
+- `hw_div_fbr`: a taken fused branch (`FBR`) squashes the `DIVR` behind it
+  after that `DIVR` has started the divider. Before 9ad6614 the divider ran
+  on, and the `DIVR` at the branch target printed `0000008E` (1000 / 7, the
+  squashed divide) in place of `00000021` (100 / 3) on every pass.
+- `hw_div_smc`: a `MEMSET64` rewrites, with the same bytes, the code
+  doubleword after a `DIVR` that is busy in EX. Before 9ad6614 the SMC squash
+  dropped the busy `DIVR`, and the test printed `00000055` (the register's
+  old value) in place of `0000008E`.
+
+The emulator does not model the pipeline, so it passes both whatever the
+core does; only a board run tests the fix. Both depend on their exact code
+layout (the `DIVR` directly behind the `FBR`; `NEXT` 8-byte aligned with the
+`DIVR` just before it), which `rtl_squash_fixtures_keep_their_shape` (in
+`src/asm/corpus_tests.rs`) checks. The LLVM backend relies on the first fix:
+it fuses a compare and branch directly in front of a divide, so compiled
+code needs klaussCPU 9ad6614 or later.
 
 ## Expected Output Quick Reference
 
@@ -500,6 +528,18 @@ FFFFFF80
 00000010
 FFFFFF80
 00000010
+```
+
+### hw_div_fbr (25)
+```
+00000021
+00000021
+00000021
+```
+
+### hw_div_smc (26)
+```
+0000008E
 ```
 
 ## Notes

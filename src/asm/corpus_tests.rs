@@ -8,6 +8,9 @@
 //! included.  A library whose driver calls it is also run on the emulator,
 //! started as a UART-loaded program, and must print what the driver expects
 //! without storing to the UART while it is busy.
+//!
+//! The two RTL squash tests (`hw_div_fbr.kla`, `hw_div_smc.kla`) are also
+//! checked for the code layout their board check depends on.
 
 use super::source::read_file_to_vector;
 use super::*;
@@ -209,4 +212,67 @@ fn non_programs_do_not_build_alone() {
     let mut msg_list = Diagnostics::new();
     let lines = read("tests/fixtures/uart_stubs.kla", &mut msg_list);
     assert_eq!(build_errors(lines, msg_list), ["No start address found"]);
+}
+
+/// The code lines (instructions and labels) of a fixture, assembled, with
+/// their addresses and their text up to any `//` comment.
+fn code_lines(file: &str) -> Vec<(u32, LineType, String)> {
+    let mut msg_list = Diagnostics::new();
+    let lines = read(file, &mut msg_list);
+    let isa = Isa::v2();
+    let macro_list = expand_embedded_macros(builtin_macros(), &mut msg_list);
+    let assembly = assemble_lines(lines, &isa, &macro_list, &mut msg_list);
+    assert!(!msg_list.has_errors(), "{file}: {:?}", msg_list.messages());
+    assembly
+        .lines
+        .iter()
+        .filter(|line| matches!(line.line_type, LineType::Opcode | LineType::Label))
+        .map(|line| {
+            let text = line.input_text_line.split("//").next().unwrap_or_default();
+            (
+                line.program_counter,
+                line.line_type,
+                text.split_whitespace().collect::<Vec<_>>().join(" "),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn rtl_squash_fixtures_keep_their_shape() {
+    // The emulator does not model the pipeline, so it passes these two board
+    // tests whatever their layout; they only test the RTL while the code is
+    // laid out as below.
+
+    // hw_div_fbr: the taken FBR is directly followed by the wrong-path DIVR.
+    let fbr = code_lines("tests/fixtures/hw_div_fbr.kla");
+    let at = fbr
+        .iter()
+        .position(|(_, _, text)| text.starts_with("FBR "))
+        .expect("hw_div_fbr has an FBR");
+    let (fbr_pc, _, _) = fbr[at];
+    let (next_pc, next_type, next_text) = &fbr[at + 1];
+    assert_eq!(*next_type, LineType::Opcode, "hw_div_fbr: a label right after the FBR");
+    assert!(next_text.starts_with("DIVR "), "hw_div_fbr: the FBR is followed by {next_text:?}");
+    assert_eq!(*next_pc, fbr_pc + 4, "hw_div_fbr: the DIVR is not in the FBR's shadow");
+
+    // hw_div_smc: NEXT starts a doubleword and the busy DIVR is the last
+    // instruction of the one before it, right behind the MEMSET64.
+    let smc = code_lines("tests/fixtures/hw_div_smc.kla");
+    let at = smc
+        .iter()
+        .position(|(_, line_type, text)| *line_type == LineType::Label && text == "NEXT:")
+        .expect("hw_div_smc has NEXT:");
+    let (next_pc, _, _) = smc[at];
+    assert_eq!(next_pc % 8, 0, "hw_div_smc: NEXT is at {next_pc:#x}, not 8-byte aligned");
+    let (div_pc, _, div_text) = &smc[at - 1];
+    let (store_pc, _, store_text) = &smc[at - 2];
+    assert!(
+        div_text.starts_with("DIVR ") && *div_pc + 4 == next_pc,
+        "hw_div_smc: {div_text:?} at {div_pc:#x} before NEXT"
+    );
+    assert!(
+        store_text.starts_with("MEMSET64 ") && *store_pc + 4 == *div_pc,
+        "hw_div_smc: {store_text:?} before the DIVR"
+    );
 }

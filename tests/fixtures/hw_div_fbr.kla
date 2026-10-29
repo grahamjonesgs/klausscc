@@ -1,0 +1,47 @@
+// Test 25: A divide squashed by a taken fused branch
+// klaussCPU 9ad6614 fixed this; it is the hardware session's board test.
+// A taken FBR resolves in MEM and squashes the instruction behind it, which
+// is then in EX. If that instruction is a DIVR that has already started the
+// divider (MD_IDLE -> MD_PREP on the same edge), cores before 9ad6614 left
+// the divider running on the dead operands, and the next DIVR within about
+// 64 cycles got their quotient: here 1000 / 7 = 0x8E in place of
+// 100 / 3 = 0x21. 9ad6614 resets the divider on a taken FBR (and on an EX
+// squash), so the DIVR at the target gets its own quotient.
+//
+// Keep the FBR directly followed by the wrong-path DIVR, and the second DIVR
+// at the target soon after; corpus_tests.rs checks that shape, because the
+// emulator does not model the pipeline and passes either way. Three passes,
+// the later ones from a warm I-cache.
+//
+// Expected UART output:
+//   00000021  (100 / 3, pass 1)
+//   00000021  (pass 2)
+//   00000021  (pass 3)
+
+_start
+SETR P 0xFFFFF
+COPY O P
+SETR A 1
+SETR B 1
+SETR C 1000
+SETR D 7
+SETR E 100
+SETR F 3
+SETR J 3
+AGAIN:
+SETR G 0x55
+SETR H 0x55
+NOP
+FBR A B 0 TGT:      // A == B: taken, resolves in MEM
+DIVR G C D          // wrong path: in EX when the branch redirects
+NOP
+NOP
+TGT:
+DIVR H E F          // 100 / 3 = 0x21
+$TXR H
+$NEWLINE
+DECR J
+JMPNZ AGAIN:
+HALT
+
+!include uart_stubs.kla

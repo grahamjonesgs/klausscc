@@ -377,7 +377,7 @@ mod tests {
         assert!(failures.is_empty(), "emulator corpus failures: {failures:#?}");
         // Guards against the corpus silently shrinking (e.g. a file that stops
         // declaring its expected values).
-        assert!(passed.len() >= 25, "only {} validated files passed: {passed:#?}", passed.len());
+        assert!(passed.len() >= 28, "only {} validated files passed: {passed:#?}", passed.len());
     }
 
     /// `all_tests.txt` is what a board run (`-L`) checks, so it must list every

@@ -1,0 +1,39 @@
+// Test 26: A busy divide survives a self-modifying-code squash
+// klaussCPU 9ad6614 fixed this; it is the hardware session's board test.
+// A store that writes the code doubleword holding the instruction in ID
+// squashes ID and refetches it (the SMC squash). Cores before 9ad6614 also
+// cleared EX, so a multicycle op still busy there (DIV/MUL, DELAY, an LCD
+// wait) was dropped and never re-executed: G kept 0x55. 9ad6614 clears EX
+// only when EX itself is squashed or has advanced.
+//
+// The MEMSET64 rewrites, with the same bytes, the doubleword that starts at
+// NEXT, while the DIVR in the doubleword before it is busy in EX. That needs
+// NEXT to be 8-byte aligned with the DIVR directly before it; corpus_tests.rs
+// checks this, because the emulator does not model the pipeline and passes
+// either way. An instruction added or removed above PAD moves NEXT.
+//
+// Expected UART output:
+//   0000008E  (1000 / 7)
+
+_start
+SETR P 0xFFFFF
+COPY O P
+SETR C 1000
+SETR D 7
+SETR G 0x55
+SETR B NEXT:
+MEMGET64 E B        // E = the code doubleword holding NEXT (8-byte aligned load)
+NOP
+NOP
+NOP
+NOP
+PAD:
+MEMSET64 E B        // rewrite that doubleword with the same bytes: SMC squash of ID
+DIVR G C D          // busy in EX when the store completes
+NEXT:
+NOP                 // must start a new doubleword (NEXT % 8 == 0)
+$TXR G
+$NEWLINE
+HALT
+
+!include uart_stubs.kla
