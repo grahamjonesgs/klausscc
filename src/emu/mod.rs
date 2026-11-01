@@ -96,6 +96,10 @@ const MEM_SIZE: usize = 128 * 1024 * 1024;
 const CTX_FLAGS_SHIFT: u32 = 32;
 /// Interrupt context word: where the 4-bit `INT_MASK` starts.
 const CTX_INT_MASK_SHIFT: u32 = 39;
+/// Interrupt context word: the `DI`/`EI` bit, in disable sense (1 =
+/// disabled), so a software-built frame with it clear resumes enabled
+/// (`pipeline_core.sv` IRQ frame push, `IRET` restore).
+const CTX_IRQ_DISABLED_SHIFT: u32 = 43;
 /// Initial stack pointer — top of DDR2, grows down. The loader sets SP near the
 /// top of memory; we use a generous value below the 128 MiB ceiling so PUSH
 /// never wraps. Matches the board's full-descending stack convention.
@@ -169,6 +173,10 @@ pub struct Cpu {
     watch_hit: Option<WatchHit>,
     /// `INT_MASK`: per-source interrupt enables (4 bits).
     int_mask: u8,
+    /// The core's interrupt-disable bit (`DI` sets it, `EI` clears it from
+    /// rs1[0], `IRET` restores it from the context word; clear at reset).
+    /// While set no interrupt is taken, but `WAIT` still wakes.
+    irq_disabled: bool,
     /// `INT_VEC0..3`: handler addresses (0 disables a source).
     int_vec: [u32; 4],
     /// Source 0 pending (`r_timer_interrupt`), cleared when it is dispatched.
@@ -226,6 +234,7 @@ impl Cpu {
             watches: Vec::new(),
             watch_hit: None,
             int_mask: 0,
+            irq_disabled: false,
             int_vec: [0; 4],
             timer_pending: false,
             timer_period: TIMER_PERIOD_RESET,
@@ -376,8 +385,14 @@ impl Cpu {
             }
         }
         if allow_irq && let Some(src) = self.irq_ready() {
-            self.take_irq(src);
-            return None;
+            if !self.irq_disabled {
+                self.take_irq(src);
+                return None;
+            }
+            // DI: no interrupt is taken, but a WAIT wakes (WFI) and the
+            // instruction after it runs (`pipeline_core.sv` irq_take vs
+            // irq_ok).
+            self.waiting = false;
         }
         let pc = self.pc;
         if (pc as usize) + 4 > self.mem.len() {
@@ -387,10 +402,11 @@ impl Cpu {
         let word = self.read32(pc);
         self.last_write = None;
         self.execute(word);
-        if matches!(self.stop, Some(StopReason::InvalidOpcode(_))) {
-            // An illegal word parks without retiring: the RTL gives it no
-            // trace line (`pipeline_core.sv` :1564-1566) and `PERF_INSTR`
-            // counts only retirements (`KlaussCPU.sv` :2342-2343).
+        if matches!(self.stop, Some(StopReason::InvalidOpcode(_) | StopReason::Misaligned(_))) {
+            // An illegal word or a misaligned access parks without retiring:
+            // the RTL gives it no trace line (`pipeline_core.sv` WB park,
+            // kinds 2 and 5) and `PERF_INSTR` counts only retirements
+            // (`KlaussCPU.sv` :2342-2343).
             return None;
         }
         self.instret += 1;

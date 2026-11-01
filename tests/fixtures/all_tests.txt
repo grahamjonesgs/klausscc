@@ -50,3 +50,7 @@ hw_alignment.kla
 // branch, and a busy divide during a self-modifying-code squash
 hw_div_fbr.kla
 hw_div_smc.kla
+
+// The hw-proposals instructions (klaussCPU master 3508f87): W and imm32
+// fused branches, CMPRVW.S, MULV.S/MULUV.S/MULUV, LEAPC.S, DI/EI
+hw_proposals.kla

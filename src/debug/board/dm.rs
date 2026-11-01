@@ -165,11 +165,11 @@ impl DmStatus {
         self.0 & (1 << 7) != 0
     }
 
-    /// The core stopped on its own (HALT, TRAP or an illegal instruction,
-    /// park kinds 0-2) with no debugger attached: a halt request cannot
-    /// reach it.  A WAIT (kind 3) still takes one.
+    /// The core stopped on its own (HALT, TRAP, an illegal instruction or a
+    /// misaligned access, park kinds 0-2 and 5) with no debugger attached: a
+    /// halt request cannot reach it.  A WAIT (kind 3) still takes one.
     pub(crate) const fn stopped(self) -> bool {
-        self.parked() && !self.halted() && self.park_kind() <= 2
+        self.parked() && !self.halted() && (self.park_kind() <= 2 || self.park_kind() == 5)
     }
 
     /// The core has halted since DMSTATUS was last read.
@@ -223,6 +223,17 @@ mod tests {
         assert_eq!(DmStatus::from_raw(0x0024_1000).info(), None, "no signature");
         assert!(DmStatus::from_raw(4).busy());
         assert_eq!(DmStatus::from_raw(0x70).cause(), Cause::Unknown(7));
+    }
+
+    #[test]
+    // Parked on its own (HALT, TRAP, illegal, misaligned) and not halted: a
+    // halt request cannot reach it; a WAIT (3) or a debug park (4) can.
+    fn stopped_park_kinds() {
+        for kind in 0..8_u64 {
+            let st = DmStatus::from_raw(1 << 7 | kind << 8);
+            assert_eq!(st.stopped(), matches!(kind, 0..=2 | 5), "park kind {kind}");
+        }
+        assert!(!DmStatus::from_raw(1 << 7 | 5 << 8 | 1).stopped(), "halted");
     }
 
     #[test]

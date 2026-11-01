@@ -1,8 +1,9 @@
 // Test: indexed memory (base + immediate offset, base + register offset).
 // 64-bit loads/stores are 8-byte aligned, so array elements are one doubleword
 // (8 bytes) apart. Offsets 0, 8, 16 address distinct slots; slot 3 (base+24)
-// holds the sub-word register-offset accesses, whose 16- and 32-bit forms
-// align the address down to their size.
+// holds the sub-word register-offset accesses.  A 16- or 32-bit access must
+// be aligned to its size (klaussCPU hw-proposals 8: a misaligned one stops
+// the CPU, ERR=0A, and the emulator with stop = Misaligned).
 // Expected UART output:
 //   000000AA  (STIDX64/LDIDX64: store 0xAA at base+0, load back)
 //   000000BB  (STIDX64/LDIDX64: store 0xBB at base+8, load back)
@@ -10,9 +11,9 @@
 //   000000BB  (LDIDX64: verify base+8 still intact after the base+16 write)
 //   000000CC  (LDIDX8R: byte at base+27, zero-extended)
 //   FFFFFFCC  (LDIDX8SR: the same byte, sign-extended)
-//   0000CCDD  (LDIDX16R: base+27 aligned down to base+26, zero-extended)
+//   0000CCDD  (LDIDX16R: the halfword at base+26, zero-extended)
 //   FFFFCCDD  (LDIDX16SR: the same halfword, sign-extended)
-//   88776655  (LDIDX32R: base+31 aligned down to base+28)
+//   88776655  (LDIDX32R: the word at base+28)
 //   00000000  (LDIDX32R: bits 63:32 of that load, zero-extended)
 //   FFFFFFFF  (LDIDX32SR: bits 63:32 of the same word, sign-extended)
 //   778888FF  (STIDX8R/16R/32R over slot 3: bits 31:0 of the doubleword)
@@ -68,13 +69,14 @@ $NEWLINE
 LDIDX8SR D A C
 $TXR D  // Expect: FFFFFFCC
 $NEWLINE
+SETR C 0x1A
 LDIDX16R D A C
 $TXR D  // Expect: 0000CCDD
 $NEWLINE
 LDIDX16SR D A C
 $TXR D  // Expect: FFFFCCDD
 $NEWLINE
-SETR C 0x1F
+SETR C 0x1C
 LDIDX32R D A C
 $TXR D  // Expect: 88776655
 $NEWLINE
@@ -87,13 +89,13 @@ $TXR D  // Expect: FFFFFFFF
 $NEWLINE
 
 // sub-word register-offset stores over slot 3: a byte at +1, a halfword at
-// +3 (aligned down to +2) and a word at +7 (aligned down to +4)
+// +2 and a word at +4
 SETR64 B 0x1122334455667788
 SETR C 0x19
 STIDX8R B A C
-SETR C 0x1B
+SETR C 0x1A
 STIDX16R B A C
-SETR C 0x1F
+SETR C 0x1C
 STIDX32R B A C
 SETR C 0x18
 LDIDX64R D A C  // slot 3 = bytes FF 88 88 77 88 77 66 55

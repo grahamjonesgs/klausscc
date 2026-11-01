@@ -1,7 +1,7 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
 //! the performance counters.
 
-use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CYCLES_PER_MS, Cpu, PerfBase};
+use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, CYCLES_PER_MS, Cpu, PerfBase};
 
 /// Interrupt controller / timer device select (`addr[27:16]`).
 const IRQ_DEV_SELECT: u32 = 0x00F;
@@ -293,7 +293,10 @@ impl Cpu {
     /// Interrupt entry (`pipeline_core.sv` IRQ sequencer): push the context
     /// word at SP-8, mask the source, acknowledge it, jump to its vector.
     pub(super) fn take_irq(&mut self, src: usize) {
-        let ctx = (u64::from(self.int_mask) << CTX_INT_MASK_SHIFT) | (u64::from(self.flags.to_ctx()) << CTX_FLAGS_SHIFT) | u64::from(self.pc);
+        let ctx = (u64::from(self.irq_disabled) << CTX_IRQ_DISABLED_SHIFT)
+            | (u64::from(self.int_mask) << CTX_INT_MASK_SHIFT)
+            | (u64::from(self.flags.to_ctx()) << CTX_FLAGS_SHIFT)
+            | u64::from(self.pc);
         self.push(ctx);
         self.int_mask &= !(1 << src);
         if src == 0 {

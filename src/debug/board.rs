@@ -145,6 +145,7 @@ impl fmt::Display for BoardError {
                 match status.park_kind() {
                     0 => "HALT",
                     1 => "TRAP",
+                    5 => "misaligned access",
                     _ => "illegal instruction",
                 }
             ),
@@ -525,12 +526,16 @@ impl<D: Dmi> BoardTarget<D> {
                     .map_or(WatchKind::Write, |w| w.kind);
                 SingleThreadStopReason::Watch { tid: (), kind, addr }
             }
+            // The core reports a misaligned 16/32-bit access (park kind 5)
+            // as a trap too, with the PC on the access instead of a TRAP.
             Cause::Trap => {
                 let pc = self.board.read_reg(KlaussRegId::Pc)? as u32;
                 if self.sw_breakpoints.contains_key(&pc) {
                     SingleThreadStopReason::SwBreak(())
-                } else {
+                } else if self.read_word(pc)? == TRAP_WORD {
                     SingleThreadStopReason::Signal(Signal::SIGTRAP)
+                } else {
+                    SingleThreadStopReason::Signal(Signal::SIGBUS)
                 }
             }
             Cause::Illegal => SingleThreadStopReason::Signal(Signal::SIGILL),

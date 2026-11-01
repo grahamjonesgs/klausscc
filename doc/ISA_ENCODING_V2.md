@@ -340,9 +340,11 @@ sign-extending loads keep the `_S` spelling, and also take LLVM's
 > assemble unchanged, and accepts `LDIDX64U`/`STIDX64U` (and `.S`) as the
 > A=0 forms. The disassembler shows `LDIDX64U`/`STIDX64U` and
 > `LDIDX64A`/`STIDX64A`, names that mean the same encoding in both
-> assemblers (LLVM accepts `ldidx64a`/`stidx64a`). Loads write no flags. 16- and 32-bit loads align their address down to
-the access size (`& ~1`, `& ~3`), except **MEMGET32**, which reads the 4
-bytes at any address, even across a doubleword boundary. A 64-bit access
+> assemblers (LLVM accepts `ldidx64a`/`stidx64a`). Loads write no flags. A 16- or 32-bit load or store must be aligned to
+its size, except **MEMGET32**, which reads the 4 bytes at any address,
+even across a doubleword boundary: a misaligned one stops the CPU (crash
+dump `ERR=0A`) before it happens (§3.15; cores before klaussCPU 3508f87
+aligned the address down instead). A 64-bit access
 with A=1 is forced to `& ~7`. With A=0 the core sends the address as is,
 but the data cache picks the doubleword from address bits `[4:3]`, so in
 practice every 64-bit RAM access reads or writes the aligned doubleword
@@ -463,7 +465,7 @@ Divide by zero does not trap (§7.2).
 | SETSP   | `0x6500_0000` | 1 | rs1 | 0x0000_404x |
 | ADDSP   | `0xA540_0000` | 2 | imm32 (sext) | 0x0000_4050 |
 | RET     | `0x6580_0000` | 1 | — | 0x0000_1012 |
-| IRET    | `0x65C0_0000` | 1 | — (restores Z,S,C,V and INT_MASK) | 0x0000_6011 |
+| IRET    | `0x65C0_0000` | 1 | — (restores Z,S,C,V, INT_MASK and the DI bit) | 0x0000_6011 |
 | NOP     | `0x6C00_0000` | 1 | — | 0x0000_F010 |
 | HALT    | `0x6C01_0000` | 1 | — | 0x0000_F011 |
 | WAIT    | `0x6C02_0000` | 1 | — | 0x0000_6012 |
@@ -640,13 +642,13 @@ is out of range.
 | BULE | `0x7600_0000` | BULEI | `0x7620_0000` | unsigned <= |
 | BUGT | `0x7640_0000` | BUGTI | `0x7660_0000` | unsigned > |
 
-LLVM spells these `fbr rs1, rs2, cc, target` and `fbri rs1, simm4, cc,
+PRED 5..7 and the 2-word form are §3.15's.  LLVM spells these `fbr rs1,
+rs2, cc, target`, `fbri rs1, simm4, cc, target` and `fbrv rs1, imm32, cc,
 target`, with `cc` = PRED | INV<<3 (`[25:23]`, `[22]`): 0 EQ, 1 LT, 2 LE,
-3 ULT, 4 ULE, plus 8 for NE, GE, GT, UGE, UGT. The assembler accepts
-`FBR rs1 rs2 cc target` and `FBRI rs1 simm4 cc target` and rejects a
-`cc` with PRED 5..7, which the CPU traps on; the disassembler shows the
-named form (`fbr r14, r12, 8, …` is `BNE O M …`) and does not decode
-PRED 5..7.
+3 ULT, 4 ULE, 5 EQW, 6 LTW, 7 ULTW, plus 8 for NE, GE, GT, UGE, UGT, NEW,
+GEW, UGEW. The assembler accepts `FBR rs1 rs2 cc target`, `FBRI rs1
+simm4 cc target` and `FBRV rs1 imm32 cc target` (any `cc` 0..15); the
+disassembler shows the named form (`fbr r14, r12, 8, …` is `BNE O M …`).
 
 ```
 _start
@@ -663,6 +665,73 @@ HALT
 
 Class D can be left out of the RTL with its `EN_FBR` switch, which is on
 in the current core. A core built without it traps these instructions.
+
+### 3.15 hw-proposals additions (klaussCPU 3508f87)
+
+From klaussCPU's `hw-proposals` branch, merged in 3508f87 (its
+`ISA_ENCODING_V2_MAP.md` §8; `pipeline_core.sv` `EN_FBR_W`, `EN_DIEI`,
+`EN_SHORT9`, `EN_MISAL_TRAP`). Older cores trap every one of these words.
+
+**Fused branch on the low 32 bits** (class D, PRED 5..7): EQW, LTW
+(signed), ULTW compare `rs1[31:0]` with `rhs[31:0]` as `CMPRRW` does; INV
+gives NEW, GEW, UGEW. Register or simm4 rhs (the simm4 compared as a 32-bit
+value). There is no LE/GT pair: swap the operands of LT/GE.
+
+| Symbol | Template | Symbol | Template | Branch if |
+|---|---|---|---|---|
+| BEQW  | `0x7680_0000` | BEQWI  | `0x76A0_0000` | rs1[31:0] == rhs[31:0] |
+| BNEW  | `0x76C0_0000` | BNEWI  | `0x76E0_0000` | rs1[31:0] != rhs[31:0] |
+| BLTW  | `0x7700_0000` | BLTWI  | `0x7720_0000` | signed < (32 bits) |
+| BGEW  | `0x7740_0000` | BGEWI  | `0x7760_0000` | signed >= (32 bits) |
+| BULTW | `0x7780_0000` | BULTWI | `0x77A0_0000` | unsigned < (32 bits) |
+| BUGEW | `0x77C0_0000` | BUGEWI | `0x77E0_0000` | unsigned >= (32 bits) |
+
+**2-word fused branch** (`LEN=10`, `IMM=1`, `[3:0]=0`): rhs =
+sext(imm32) from word 1, any PRED 0..7, the simm13 word displacement still
+in word 0 `[20:8]` from the branch's own address; not taken, execution
+goes on at PC + 8. Template `0xB420_0000 | PRED<<23 | INV<<22`: `BEQV`
+`0xB420_0000`, `BNEV` `0xB460_0000`, `BLTV` `0xB4A0_0000`, `BGEV`
+`0xB4E0_0000`, `BLEV` `0xB520_0000`, `BGTV` `0xB560_0000`, `BULTV`
+`0xB5A0_0000`, `BUGEV` `0xB5E0_0000`, `BULEV` `0xB620_0000`, `BUGTV`
+`0xB660_0000`, `BEQWV` `0xB6A0_0000`, `BNEWV` `0xB6E0_0000`, `BLTWV`
+`0xB720_0000`, `BGEWV` `0xB760_0000`, `BULTWV` `0xB7A0_0000`, `BUGEWV`
+`0xB7E0_0000`. Operands `rs1 imm32 target`, in LLVM's order.
+
+**Interrupt disable / enable** (class B, 1 word, no flags):
+
+| Symbol | Template | Operands | Operation |
+|---|---|---|---|
+| DI | `0x6C06_0000` | rd | rd = the old enable bit (0/1); disable interrupts |
+| EI | `0x6C07_0000` | rs1 | enable = rs1[0], so `DI r` … `EI r` restores |
+
+A core-internal bit, separate from `INT_MASK` (1 = enabled at reset). No
+interrupt is taken between a `DI` and the `EI` that enables again; a
+pending one still wakes a `WAIT` (which then goes on without running the
+handler). The interrupt context word saves it at bit **[43]** (1 =
+disabled) and `IRET` restores it, so a frame built by software with bit 43
+clear resumes enabled. Not atomic against the second core.
+
+**Short forms** (1 word; literal immediates, `LEAPC.S` a target):
+
+| Symbol | Template | Operands | Operation | Flags |
+|---|---|---|---|---|
+| CMPRVW.S | `0x4C50_0000` | rs1 imm8 | as CMPRVW with sext(imm8): the short CMP with INV=1 | Z,S,C,V |
+| MULV.S   | `0x6B80_0000` | r imm8 | rd = rs1 × sext(imm8) (class A OP=3, SGN=1) | Z,S,V |
+| MULUV.S  | `0x6B00_0000` | r imm8 | rd = rs1 × zext(imm8) (SGN=0) | Z,S,V |
+| LEAPC.S  | `0x4BA0_0000` | rd target | rd = PC + sext({`[19:12]`, `[7:0]`}), ±32 KiB | — |
+| MULUV    | `0xA800_0000` | r imm32 | rd = rs1 × zext(imm32) (the 2-word twin of MULUV.S) | Z,S,V |
+
+`LEAPC.S` takes a label or address (the assembler stores its distance from
+the instruction); the 2-word `LEAPC` keeps a literal displacement.
+
+**Misaligned accesses trap.** A 16-bit load or store at an odd address, or
+a 32-bit one not at a multiple of 4, in any MODE (`[rs1]`, `rs1 + imm`,
+the `.S` forms, absolute, `rs1 + rs2`), stops the CPU before it happens:
+`park_kind` 5, then the crash dump with `ERR=0A` (with a debugger attached,
+a trap halt with the PC on the access). It does not execute or retire.
+`MEMGET32`, byte accesses, 64-bit accesses (A=0 still reaches the aligned
+doubleword) and the stack ops are exempt. The emulator stops with
+`Misaligned(EA)`.
 
 ## 4. History: v1 → v2 migration notes
 
@@ -726,8 +795,8 @@ emulator alike.
 - **Loads (class 6)**: the full SIZE × SGN × MODE × A space (A: 64-bit
   only), e.g. MEMGET8_S/16_S. SIZE=32 with MODE=00 is MEMGET32 and needs
   SGN=0.
-- **Mul/div (class A)**: MULHV/MULUV/MULHUV, DIVUV/MODUV; the immediate
-  forms extend per the SGN bit.
+- **Mul/div (class A)**: MULHV/MULHUV, DIVUV/MODUV; the immediate
+  forms extend per the SGN bit (MULUV has a mnemonic since §3.15).
 - **Branches (class 8)**: the 2-word PC-relative JMPO/JMPNO and
   conditional calls (§3.8); conditional register-indirect jumps/calls (RIND=1, any
   COND); conditional short calls (§3.11). COND 10–15 and INV with COND=0
@@ -873,18 +942,18 @@ LDIDX64,0x9B200000,2,6,"rd,rs1",off32,,A=0 (LLVM's ldidx64 is LDIDX64A)
 LDIDX64A,0x9B300000,2,6,"rd,rs1",off32,,A=1
 MEMREADR,0x9B400000,2,6,rd,addr32,,
 LDABS8,0x98400000,2,6,rd,addr32,,
-LDABS16,0x99400000,2,6,rd,addr32,,EA=addr32&~1
-LDABS32,0x9A400000,2,6,rd,addr32,,EA=addr32&~3
+LDABS16,0x99400000,2,6,rd,addr32,,EA=addr32 (aligned)
+LDABS32,0x9A400000,2,6,rd,addr32,,EA=addr32 (aligned)
 LDABS8S,0x98C00000,2,6,rd,addr32,,sext
-LDABS16S,0x99C00000,2,6,rd,addr32,,EA=addr32&~1; sext
-LDABS32S,0x9AC00000,2,6,rd,addr32,,EA=addr32&~3; sext
+LDABS16S,0x99C00000,2,6,rd,addr32,,EA=addr32 (aligned); sext
+LDABS32S,0x9AC00000,2,6,rd,addr32,,EA=addr32 (aligned); sext
 LDIDX64R,0x5B600000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2
 LDIDX8R,0x58600000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2
-LDIDX16R,0x59600000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~1
-LDIDX32R,0x5A600000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~3
+LDIDX16R,0x59600000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2 (aligned)
+LDIDX32R,0x5A600000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2 (aligned)
 LDIDX8SR,0x58E00000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2; sext
-LDIDX16SR,0x59E00000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~1; sext
-LDIDX32SR,0x5AE00000,1,6,"rd,rs1,rs2",,,EA=(rs1+rs2)&~3; sext
+LDIDX16SR,0x59E00000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2 (aligned); sext
+LDIDX32SR,0x5AE00000,1,6,"rd,rs1,rs2",,,EA=rs1+rs2 (aligned); sext
 MEMSET8,0x5C000000,1,7,"rd,rs1",,,data=rd
 MEMSET16,0x5D000000,1,7,"rd,rs1",,,data=rd
 MEMSET32,0x5E000000,1,7,"rd,rs1",,,data=rd
@@ -898,12 +967,12 @@ STIDX64,0x9F200000,2,7,"rd,rs1",off32,,data=rd; A=0 (LLVM's stidx64 is STIDX64A)
 STIDX64A,0x9F300000,2,7,"rd,rs1",off32,,data=rd; A=1
 MEMSETR,0x9F400000,2,7,rd,addr32,,data=rd
 STABS8,0x9C400000,2,7,rd,addr32,,data=rd
-STABS16,0x9D400000,2,7,rd,addr32,,data=rd; EA=addr32&~1
-STABS32,0x9E400000,2,7,rd,addr32,,data=rd; EA=addr32&~3
+STABS16,0x9D400000,2,7,rd,addr32,,data=rd; EA=addr32 (aligned)
+STABS32,0x9E400000,2,7,rd,addr32,,data=rd; EA=addr32 (aligned)
 STIDX64R,0x5F600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
 STIDX8R,0x5C600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
-STIDX16R,0x5D600000,1,7,"rd,rs1,rs2",,,data=rd; EA=(rs1+rs2)&~1
-STIDX32R,0x5E600000,1,7,"rd,rs1,rs2",,,data=rd; EA=(rs1+rs2)&~3
+STIDX16R,0x5D600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2 (aligned)
+STIDX32R,0x5E600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2 (aligned)
 LDIDX32_S,0x9AA00000,2,6,"rd,rs1",off32,,sext (v3 D1)
 LDIDX32S,0x9AA00000,2,6,"rd,rs1",off32,,LLVM's name for LDIDX32_S
 ADDW,0x44280000,1,1,"rd,rs1,rs2",,ZSCV,sext32 result (v3 D3)
@@ -924,6 +993,10 @@ ANDI.S,0x49100000,1,2,"rd,rs1",sext8[19:12],,v3 A5
 ORI.S,0x49500000,1,2,"rd,rs1",sext8[19:12],,v3 A5
 XORI.S,0x49900000,1,2,"rd,rs1",sext8[19:12],,v3 A5
 CMPRV.S,0x4C100000,1,3,rs1,sext8[19:12],ZSCV,v3 A3
+CMPRVW.S,0x4C500000,1,3,rs1,sext8[19:12],ZSCV,32-bit compare (hw-proposals 9)
+MULV.S,0x6B800000,1,10,"rd,rs1",sext8[19:12],ZSV,in place (hw-proposals 9)
+MULUV.S,0x6B000000,1,10,"rd,rs1",zext8[19:12],ZSV,in place (hw-proposals 9)
+LEAPC.S,0x4BA00000,1,2,rd,"simm16{[19:12],[7:0]}",,rd=PC+simm16 (hw-proposals 9)
 LDIDX8.S,0x58200000,1,6,"rd,rs1",simm8<<0,,v3 A4
 LDIDX8_S.S,0x58A00000,1,6,"rd,rs1",simm8<<0,,v3 A4; sext
 LDIDX8S.S,0x58A00000,1,6,"rd,rs1",simm8<<0,,LLVM's name for LDIDX8_S.S
@@ -985,8 +1058,37 @@ BULE,0x76000000,1,13,"rs1,rs2",simm13[20:8],,v3 B
 BULEI,0x76200000,1,13,rs1,"simm4[3:0],simm13[20:8]",,v3 B
 BUGT,0x76400000,1,13,"rs1,rs2",simm13[20:8],,v3 B
 BUGTI,0x76600000,1,13,rs1,"simm4[3:0],simm13[20:8]",,v3 B
-FBR,0x74000000,1,13,"rs1,rs2","cc[25:22],simm13[20:8]",,LLVM's name for BEQ..BUGT; cc=PRED|INV<<3
-FBRI,0x74200000,1,13,rs1,"simm4[3:0],cc[25:22],simm13[20:8]",,LLVM's name for BEQI..BUGTI
+BEQW,0x76800000,1,13,"rs1,rs2",simm13[20:8],,32-bit compare (hw-proposals 6)
+BEQWI,0x76A00000,1,13,rs1,"simm4[3:0],simm13[20:8]",,32-bit compare (hw-proposals 6)
+BNEW,0x76C00000,1,13,"rs1,rs2",simm13[20:8],,32-bit compare (hw-proposals 6)
+BNEWI,0x76E00000,1,13,rs1,"simm4[3:0],simm13[20:8]",,32-bit compare (hw-proposals 6)
+BLTW,0x77000000,1,13,"rs1,rs2",simm13[20:8],,32-bit compare (hw-proposals 6)
+BLTWI,0x77200000,1,13,rs1,"simm4[3:0],simm13[20:8]",,32-bit compare (hw-proposals 6)
+BGEW,0x77400000,1,13,"rs1,rs2",simm13[20:8],,32-bit compare (hw-proposals 6)
+BGEWI,0x77600000,1,13,rs1,"simm4[3:0],simm13[20:8]",,32-bit compare (hw-proposals 6)
+BULTW,0x77800000,1,13,"rs1,rs2",simm13[20:8],,32-bit compare (hw-proposals 6)
+BULTWI,0x77A00000,1,13,rs1,"simm4[3:0],simm13[20:8]",,32-bit compare (hw-proposals 6)
+BUGEW,0x77C00000,1,13,"rs1,rs2",simm13[20:8],,32-bit compare (hw-proposals 6)
+BUGEWI,0x77E00000,1,13,rs1,"simm4[3:0],simm13[20:8]",,32-bit compare (hw-proposals 6)
+BEQV,0xB4200000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BNEV,0xB4600000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BLTV,0xB4A00000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BGEV,0xB4E00000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BLEV,0xB5200000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BGTV,0xB5600000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BULTV,0xB5A00000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BUGEV,0xB5E00000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BULEV,0xB6200000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BUGTV,0xB6600000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BEQWV,0xB6A00000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BNEWV,0xB6E00000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BLTWV,0xB7200000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BGEWV,0xB7600000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BULTWV,0xB7A00000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+BUGEWV,0xB7E00000,2,13,rs1,"sext32,simm13[20:8]",,rhs = word 1 (hw-proposals 6)
+FBR,0x74000000,1,13,"rs1,rs2","cc[25:22],simm13[20:8]",,LLVM's name for BEQ..BUGEW; cc=PRED|INV<<3
+FBRI,0x74200000,1,13,rs1,"simm4[3:0],cc[25:22],simm13[20:8]",,LLVM's name for BEQI..BUGEWI
+FBRV,0xB4200000,2,13,rs1,"sext32,cc[25:22],simm13[20:8]",,LLVM's name for BEQV..BUGEWV
 JMP,0xA0000000,2,8,,target32,,
 JMPZ,0xA0080000,2,8,,target32,,
 JMPNZ,0xA00C0000,2,8,,target32,,
@@ -1049,6 +1151,7 @@ MULHUR,0x68400000,1,10,"rd,rs1,rs2",,ZSV,V=0
 MULR,0x68800000,1,10,"rd,rs1,rs2",,ZSV,
 MULHR,0x68C00000,1,10,"rd,rs1,rs2",,ZSV,V=0
 MULV,0xA8800000,2,10,"rd,rs1",sext32,ZSV,in place
+MULUV,0xA8000000,2,10,"rd,rs1",zext32,ZSV,in place
 DIVUR,0x69000000,1,10,"rd,rs1,rs2",,ZV,V=1 and Z kept on /0
 DIVR,0x69800000,1,10,"rd,rs1,rs2",,ZV,V=1 and Z kept on /0
 DIVV,0xA9800000,2,10,"rd,rs1",sext32,ZV,in place; V=1 and Z kept on /0
@@ -1060,6 +1163,8 @@ HALT,0x6C010000,1,11,,,,
 WAIT,0x6C020000,1,11,,,,
 RESET,0x6C030000,1,11,,,,PC=0x4
 TRAP,0x6C040000,1,11,,,,
+DI,0x6C060000,1,11,rd,,,rd = old enable; disable (hw-proposals 7a)
+EI,0x6C070000,1,11,rs1,,,enable = rs1[0] (hw-proposals 7a)
 DELAYR,0x6C050000,1,11,rs1,,,
 DELAYV,0xAC050000,2,11,,imm32,,
 LCDCMDR,0x70000000,1,12,rs1,,,

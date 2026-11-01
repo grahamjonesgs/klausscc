@@ -133,14 +133,14 @@ pub(crate) fn encode(opcode: &Opcode, line: &str, pc: u32, symbols: &SymbolTable
 /// [`pc_relative_bits`].
 fn word0_fields(opcode: &Opcode, ops: &[Operand], tokens: &[&str]) -> Result<u32, EncodeFault> {
     let mut word0 = opcode.template;
-    let mut token_idx = 1_usize; // first operand token (after the mnemonic)
     let mut ok = true;
-    for op in ops {
+    // Each operand is one token, in order after the mnemonic (a 64-bit
+    // immediate, which may be two, is always the last).
+    for (i, op) in ops.iter().enumerate() {
         if !op.is_word0() {
             continue; // appended words, not word 0
         }
-        let token = tokens.get(token_idx).copied();
-        token_idx += 1;
+        let token = tokens.get(i + 1).copied();
         let value = token.and_then(parse_simm);
         match op {
             // Report a value the byte's extension cannot give rather than
@@ -183,27 +183,36 @@ fn word0_fields(opcode: &Opcode, ops: &[Operand], tokens: &[&str]) -> Result<u32
                 None => ok = false,
             },
             // PC-relative targets need this instruction's address.
-            Operand::Rel18 | Operand::Rel13 | Operand::Rel32 | Operand::Imm | Operand::Imm64 => {}
+            Operand::Rel18 | Operand::Rel13 | Operand::Rel16 | Operand::Rel32 | Operand::Imm | Operand::Imm64 => {}
         }
     }
     if ok { Ok(word0) } else { Err(EncodeFault::Registers) }
 }
 
 /// ISA v3 PC-relative targets (`Rel18` short branches, `Rel13` fused
-/// branches): the word-0 bits for the target token, given the instruction's
-/// byte address `pc`.  The target is a label (`name:`) or an absolute
-/// address; a missing target leaves the field clear.
+/// branches, `Rel16` `LEAPC.S`): the word-0 bits for the target token, given
+/// the instruction's byte address `pc`.  The target is a label (`name:`) or
+/// an absolute address; a missing target leaves the field clear.
 fn pc_relative_bits(ops: &[Operand], tokens: &[&str], pc: u32, symbols: &SymbolTable) -> Result<u32, EncodeFault> {
     for (i, op) in ops.iter().enumerate() {
         let what = match op {
             Operand::Rel18 => "short branch",
             Operand::Rel13 => "fused branch",
+            Operand::Rel16 => "LEAPC.S",
             _ => continue,
         };
-        let (bits, shift) = (op.mask().count_ones(), op.mask().trailing_zeros());
         let Some(token) = tokens.get(i + 1) else { return Ok(0) };
         let target = resolve_operand(token, symbols).map_err(EncodeFault::Operand)?;
         let delta = i64::from(target) - i64::from(pc);
+        if *op == Operand::Rel16 {
+            // A byte displacement, split: high byte [19:12], low byte [7:0].
+            if !(-0x8000..0x8000).contains(&delta) {
+                return Err(EncodeFault::BranchRange { what, delta });
+            }
+            let d = delta as u32 & 0xFFFF;
+            return Ok((d >> 8) << 12 | (d & 0xFF));
+        }
+        let (bits, shift) = (op.mask().count_ones(), op.mask().trailing_zeros());
         let words = delta / 4;
         let lim = 1_i64 << (bits - 1);
         if delta % 4 != 0 || words < -lim || words >= lim {
@@ -214,14 +223,22 @@ fn pc_relative_bits(ops: &[Operand], tokens: &[&str], pc: u32, symbols: &SymbolT
     Ok(0)
 }
 
-/// The immediate words, from the tokens after the word-0 operands, and
-/// whether there are tokens beyond them.  A token with no value is a fault
-/// and encodes as 0; fewer tokens than words is a fault too.  A
+/// The immediate words, from the token of the (one) appended operand, and
+/// whether there are tokens beyond the operands.  A token with no value is a
+/// fault and encodes as 0; fewer tokens than words is a fault too.  A
 /// [`Operand::Rel32`] target becomes its byte displacement from `pc`, which
-/// reaches any 32-bit address.
+/// reaches any 32-bit address.  A 64-bit immediate, the last operand, is
+/// one literal or two 32-bit tokens.
 fn immediates(ops: &[Operand], tokens: &[&str], pc: u32, symbols: &SymbolTable, faults: &mut Vec<EncodeFault>) -> (Vec<u32>, bool) {
-    let first = ops.iter().filter(|op| op.is_word0()).count() + 1;
-    let count = ops.iter().map(|op| op.imm_words()).sum::<u32>() as usize;
+    let Some(at) = ops.iter().position(|op| !op.is_word0()) else {
+        return (Vec::new(), tokens.len() > ops.len() + 1);
+    };
+    // The appended operand's token, and how many words it fills.
+    let first = at + 1;
+    let count = ops[at].imm_words() as usize;
+    // Tokens a well-formed line has: one per operand, or two for a 64-bit
+    // immediate written as its halves.
+    let expected = ops.len() + 1 + usize::from(count == 2 && tokens.len() > ops.len() + 1);
 
     // Two words written as one 64-bit literal (e.g. SETR64): lo32 goes at
     // PC+4 and hi32 at PC+8.
@@ -250,7 +267,7 @@ fn immediates(ops: &[Operand], tokens: &[&str], pc: u32, symbols: &SymbolTable, 
     if imm.len() != count {
         faults.push(EncodeFault::Arguments);
     }
-    (imm, tokens.len() > first + count)
+    (imm, tokens.len() > expected)
 }
 
 #[cfg(test)]
@@ -698,7 +715,26 @@ mod tests {
         assert_eq!(hex("FBR B C 12 0x20"), "76400012");
         assert_eq!(hex("FBRI B -3 4 0x20"), "7620001D");
         assert_eq!(hex("FBR B C 12 0x20"), hex("BUGT B C 0x20"));
-        assert_eq!(faults("FBR B C 5 0x20").1, ["Incorrect register definition - \"FBR B C 5 0x20\""]);
+        assert_eq!(faults("FBR B C 16 0x20").1, ["Incorrect register definition - \"FBR B C 16 0x20\""]);
+        // The hw-proposals forms, each against the word llvm-mc
+        // -show-encoding gives for LLVM's spelling (in the comment).
+        let cases = [
+            ("FBR B C 5 0x20", "76800012"),                 // fbr r1, r2, 5, .
+            ("FBRI B -3 15 0x20", "77E0001D"),              // fbri r1, -3, 15, .
+            ("FBRV B 0x1234 0 0x20", "B420001000001234"),   // fbrv r1, 4660, 0, .
+            ("FBRV B -100000 13 0x28", "B6E00210FFFE7960"), // fbrv r1, -100000, 13, .+8
+            ("CMPRVW.S B -3", "4C5FD010"),                  // cmprvw r1, -3
+            ("MULV.S C B -6", "6B8FA210"),                  // mulv r2, r1, -6
+            ("MULUV.S C B 250", "6B0FA210"),                // muluv r2, r1, 250
+            ("MULUV C B 300", "A80002100000012C"),          // muluv r2, r1, 300
+            ("LEAPC.S B 0x1254", "4BA12134"),               // leapc r1, 4660
+            ("DI D", "6C060300"),                           // di r3
+            ("EI D", "6C070030"),                           // ei r3
+        ];
+        for (src, want) in cases {
+            assert_eq!(hex(src), want, "{src}");
+        }
+        assert_eq!(hex("FBRV B -100000 13 0x28"), hex("BNEWV B -100000 0x28"));
     }
 
     #[test]
@@ -744,6 +780,9 @@ mod tests {
             ("ORI.S A B", true, 0x4950_0010),
             ("XORI.S A B", true, 0x4990_0010),
             ("CMPRV.S B", true, 0x4C10_0010),
+            ("CMPRVW.S B", true, 0x4C50_0010),
+            ("MULV.S A B", true, 0x6B80_0010),
+            ("MULUV.S A B", false, 0x6B00_0010),
         ];
         let imm8_forms: Vec<&str> = V2_OPCODES.iter().filter(|o| o.ops.contains(&Operand::Imm8)).map(|o| o.name).collect();
         let listed: Vec<&str> = forms.iter().map(|(form, _, _)| form.split(' ').next().unwrap()).collect();

@@ -684,9 +684,10 @@ fn test_v3_short_load_store_scaled() {
 #[test]
 fn reg_offset_subword_loads_extend_and_stores_truncate() {
     // LDIDXnR / LDIDXnSR / STIDXnR (MODE=11, EA = rs1 + rs2): loads zero- or
-    // sign-extend, stores write only the low bytes of rd, and 16/32-bit
-    // accesses align the EA down (pipeline_core.sv:1004, :1101-1113,
-    // :1186-1188). `rrr` is `template | rd<<8 | rs1<<4 | rs2`.
+    // sign-extend and stores write only the low bytes of rd (pipeline_core.sv
+    // :1004, :1101-1113).  The 16/32-bit accesses are aligned (a misaligned
+    // one traps, `misaligned_subword_accesses_stop`).  `rrr` is `template |
+    // rd<<8 | rs1<<4 | rs2`.
     const fn rrr(template: u32, rd: u32, rs1: u32, rs2: u32) -> u32 {
         template | rd << 8 | rs1 << 4 | rs2
     }
@@ -700,10 +701,11 @@ fn reg_offset_subword_loads_extend_and_stores_truncate() {
     w.extend_from_slice(&setr(c, 3));
     w.push(rrr(0x5860_0000, 3, b, c)); // LDIDX8R   D = [B+3]
     w.push(rrr(0x58E0_0000, 4, b, c)); // LDIDX8SR  E = [B+3]
-    w.push(rrr(0x5960_0000, 5, b, c)); // LDIDX16R  F = [B+2] (B+3 aligned down)
+    w.extend_from_slice(&setr(c, 2));
+    w.push(rrr(0x5960_0000, 5, b, c)); // LDIDX16R  F = [B+2]
     w.push(rrr(0x59E0_0000, 6, b, c)); // LDIDX16SR G = [B+2]
-    w.extend_from_slice(&setr(c, 7));
-    w.push(rrr(0x5A60_0000, 7, b, c)); // LDIDX32R  H = [B+4] (B+7 aligned down)
+    w.extend_from_slice(&setr(c, 4));
+    w.push(rrr(0x5A60_0000, 7, b, c)); // LDIDX32R  H = [B+4]
     w.push(rrr(0x5AE0_0000, 8, b, c)); // LDIDX32SR I = [B+4]
     w.extend_from_slice(&setr(c, 4));
     w.push(rrr(0x58E0_0000, 12, b, c)); // LDIDX8SR  M = [B+4], a positive byte
@@ -713,10 +715,10 @@ fn reg_offset_subword_loads_extend_and_stores_truncate() {
     w.push(rrr(0x5F60_0000, 9, b, c)); // STIDX64R J -> [B+8]
     w.extend_from_slice(&setr(c, 9));
     w.push(rrr(0x5C60_0000, a, b, c)); // STIDX8R  A -> [B+9]
-    w.extend_from_slice(&setr(c, 11));
-    w.push(rrr(0x5D60_0000, a, b, c)); // STIDX16R A -> [B+10] (B+11 aligned down)
-    w.extend_from_slice(&setr(c, 15));
-    w.push(rrr(0x5E60_0000, a, b, c)); // STIDX32R A -> [B+12] (B+15 aligned down)
+    w.extend_from_slice(&setr(c, 10));
+    w.push(rrr(0x5D60_0000, a, b, c)); // STIDX16R A -> [B+10]
+    w.extend_from_slice(&setr(c, 12));
+    w.push(rrr(0x5E60_0000, a, b, c)); // STIDX32R A -> [B+12]
     w.extend_from_slice(&setr(c, 8));
     w.push(rrr(0x5B60_0000, 10, b, c)); // LDIDX64R K = [B+8]
     w.push(HALT);
@@ -742,9 +744,9 @@ fn reg_offset_subword_loads_extend_and_stores_truncate() {
 #[test]
 fn absolute_subword_loads_extend_and_stores_truncate() {
     // LDABSn / LDABSnS / STABSn (MODE=10, EA = imm32 in word 1): loads zero-
-    // or sign-extend, stores write only the low bytes of rd, and 16/32-bit
-    // accesses align the EA down (pipeline_core.sv:1003, :1101-1113,
-    // :1186-1188). `abs` is `[template | rd<<8, addr]`.
+    // or sign-extend and stores write only the low bytes of rd
+    // (pipeline_core.sv:1003, :1101-1113); the 16/32-bit accesses are
+    // aligned. `abs` is `[template | rd<<8, addr]`.
     const fn abs(template: u32, rd: u32, addr: u32) -> [u32; 2] {
         [template | rd << 8, addr]
     }
@@ -757,17 +759,17 @@ fn absolute_subword_loads_extend_and_stores_truncate() {
     w.extend_from_slice(&[0xCBC0_0000, 0x5566_7788, 0x1122_3344]); // SETR64 A
     w.extend_from_slice(&abs(0x9840_0000, 3, 0x1003)); // LDABS8   D = [0x1003]
     w.extend_from_slice(&abs(0x98C0_0000, 4, 0x1003)); // LDABS8S  E = [0x1003]
-    w.extend_from_slice(&abs(0x9940_0000, 5, 0x1003)); // LDABS16  F = [0x1002]
-    w.extend_from_slice(&abs(0x99C0_0000, 6, 0x1003)); // LDABS16S G = [0x1002]
-    w.extend_from_slice(&abs(0x9A40_0000, 7, 0x1007)); // LDABS32  H = [0x1004]
-    w.extend_from_slice(&abs(0x9AC0_0000, 8, 0x1007)); // LDABS32S I = [0x1004]
+    w.extend_from_slice(&abs(0x9940_0000, 5, 0x1002)); // LDABS16  F = [0x1002]
+    w.extend_from_slice(&abs(0x99C0_0000, 6, 0x1002)); // LDABS16S G = [0x1002]
+    w.extend_from_slice(&abs(0x9A40_0000, 7, 0x1004)); // LDABS32  H = [0x1004]
+    w.extend_from_slice(&abs(0x9AC0_0000, 8, 0x1004)); // LDABS32S I = [0x1004]
     w.extend_from_slice(&abs(0x98C0_0000, 12, 0x1004)); // LDABS8S M, a positive byte
     // [0x1008] = all ones, then a byte, a halfword and a word of A over it.
     w.extend_from_slice(&setr(9, 0xFFFF_FFFF)); // J = -1
     w.extend_from_slice(&abs(0x9F40_0000, 9, 0x1008)); // MEMSETR J -> [0x1008]
     w.extend_from_slice(&abs(0x9C40_0000, a, 0x1009)); // STABS8  A -> [0x1009]
-    w.extend_from_slice(&abs(0x9D40_0000, a, 0x100B)); // STABS16 A -> [0x100A]
-    w.extend_from_slice(&abs(0x9E40_0000, a, 0x100F)); // STABS32 A -> [0x100C]
+    w.extend_from_slice(&abs(0x9D40_0000, a, 0x100A)); // STABS16 A -> [0x100A]
+    w.extend_from_slice(&abs(0x9E40_0000, a, 0x100C)); // STABS32 A -> [0x100C]
     w.extend_from_slice(&abs(0x9B40_0000, 10, 0x1008)); // MEMREADR K = [0x1008]
     w.push(HALT);
     let cpu = run_words(&w);
@@ -1241,11 +1243,11 @@ fn reserved_encodings_stop_without_moving_the_pc() {
         (0x5000_0000 | (7 << 22), "shift op 7"),
         (0x5400_0000 | (11 << 22), "unary op 11"),
         (0x6000_0000 | (10 << 19), "branch COND 10"),
-        (0x6800_0000 | (3 << 24), "mul/div op 3"),
-        (0x6C00_0000 | (6 << 16), "system op 6"),
-        (0x7400_0000 | (5 << 23), "fused branch PRED 5"),
+        (0xA800_0000 | (3 << 24), "2-word mul/div op 3"),
+        (0x6C00_0000 | (8 << 16), "system op 8"),
         (0x7C00_0000, "class F"),
-        (0xB400_0000, "fused branch is 1 word only"),
+        (0xB400_0000, "2-word fused branch without IMM"),
+        (0xF420_0000, "3-word fused branch"),
     ];
     for (word, why) in table {
         let mut cpu = cpu_with(&image_from_words(&[word, HALT]));
@@ -1473,6 +1475,7 @@ fn every_assembler_form_executes() {
             Operand::Cond => &[0b0011, 0, 0b1001],
             Operand::Rel18 => &[1, 0, 0x3_FFFF],
             Operand::Rel13 => &[1, 0, 0x1FFF],
+            Operand::Rel16 => &[0x0_1004, 0, 0xF_F0FF],
             Operand::Imm | Operand::Imm64 | Operand::Rel32 => &[0],
         }
     }
@@ -1574,6 +1577,19 @@ fn rtl_reserved_encodings_trap() {
         (0x6940_0000, "DIV with HIGH", 659),
         (0x6908_0000, "W on DIVR", 651),
         (0xA880_0001, "MULV with rs2 set", 652),
+        // hw-proposals (klaussCPU master 3508f87 pipeline_core.sv)
+        (0x6B90_0000, "MULV.S with [20] set", 730),
+        (0x6BC0_0000, "MULV.S with H", 730),
+        (0x6B80_0001, "MULV.S with rs2 set", 731),
+        (0x4CD0_0000, "CMPRVW.S with PRED 1", 527),
+        (0x4C50_0100, "CMPRVW.S with rd set", 527),
+        (0x8C50_0000, "2-word flag CMP with INV", 528),
+        (0x6C06_0010, "DI with rs1 set", 763),
+        (0x6C07_0100, "EI with rd set", 765),
+        (0x6C06_1000, "DI with [15:12] set", 759),
+        (0x6C07_0001, "EI with rs2 set", 759),
+        (0xB420_0001, "2-word fused branch with [3:0] set", 791),
+        (0x4BB0_0001, "LEAPC.S with SGN and rs2 set", 481),
         (0xE880_0000, "3-word MUL", 652),
         (0x6C00_0010, "NOP with rs1 set", 675),
         (0xAC01_0000, "2-word HALT", 683),
@@ -1697,4 +1713,319 @@ fn an_illegal_word_does_not_retire() {
     // HALT does retire (and is traced).
     let r = emulate_image(&image_from_words(&[HALT]), CODE_BASE, 100, None);
     assert_eq!((r.stop, r.instructions), (StopReason::Halt, 1));
+}
+
+// ---- hw-proposals (klaussCPU master 3508f87, ISA_ENCODING_V2_MAP §8) -------
+
+/// The value `branch` leaves in D: 2 when it is taken (to SETR D 2), 1 when
+/// it falls through (SETR D 1), with A = `a` and B = `b`.  `branch` is the
+/// branch's words; its target is 3 words past its end (the taken arm).
+fn branch_result(branch: &[u32], a: u64, b: u64) -> u64 {
+    let mut cpu = cpu_with(&image_from_words(&[branch, &[0x4BD0_1300, 0x6100_0002, 0x4BD0_2300, HALT]].concat()));
+    let mut regs = cpu.debug_regs();
+    regs.r[0] = a;
+    regs.r[1] = b;
+    cpu.set_debug_regs(&regs);
+    let _ = cpu.run(10, None);
+    assert_eq!(cpu.stop, Some(StopReason::Halt));
+    cpu.regs[3]
+}
+
+/// A predicate on a fused branch's two operands.
+type Holds = fn(u64, u64) -> bool;
+
+/// The low 32 bits of `v` as `i32`.
+const fn s32(v: u64) -> i32 {
+    v as u32 as i32
+}
+
+#[test]
+fn fused_branch_w_predicates_compare_the_low_halves() {
+    // PRED 5/6/7 = EQW/LTW/ULTW (pipeline_core.sv f_fbr_pred, the id_w
+    // shift); INV gives NEW/GEW/UGEW; register and simm4 rhs.  The taken
+    // target is 3 words on: disp13 = 3 -> 0x300.
+    let vals = [
+        0,
+        1,
+        5,
+        0x7FFF_FFFF,
+        0x8000_0000,
+        0xFFFF_FFFF,
+        0x1_0000_0005,
+        0xFFFF_FFFF_0000_0005,
+        0x8000_0000_0000_0000,
+        u64::MAX,
+        0x1234_5678_ABCD_EF01,
+        (-100_000_i64) as u64,
+    ];
+    let preds: [(u32, Holds); 3] = [
+        (5, |a, b| a as u32 == b as u32),
+        (6, |a, b| s32(a) < s32(b)),
+        (7, |a, b| (a as u32) < (b as u32)),
+    ];
+    for (pred, holds) in preds {
+        for inv in [false, true] {
+            let cond = pred << 23 | u32::from(inv) << 22;
+            for (i, &a) in vals.iter().enumerate() {
+                let b = vals[(i * 5 + 3) % vals.len()];
+                let want = if holds(a, b) ^ inv { 2 } else { 1 };
+                assert_eq!(branch_result(&[0x7400_0301 | cond], a, b), want, "PRED {pred} INV {inv} {a:x} {b:x}");
+                // A simm4 rhs is compared as a 32-bit value.
+                for imm in [-8_i64, -1, 0, 5, 7] {
+                    let word = 0x7420_0300 | cond | (imm as u32 & 0xF);
+                    let want = if holds(a, imm as u64) ^ inv { 2 } else { 1 };
+                    assert_eq!(branch_result(&[word], a, 0), want, "PRED {pred} INV {inv} {a:x} simm4 {imm}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn fused_branch_imm32_compares_with_sign_extended_word_1() {
+    // LEN=10, IMM=1, [3:0]=0: rhs = sext(imm32) from word 1, any PRED; the
+    // simm13 displacement is from the branch itself; not taken falls
+    // through to PC + 8.  The taken target is 3 words past the branch's
+    // two (disp13 = 4 -> 0x400).
+    let preds: [(u32, Holds); 8] = [
+        (0, |a, b| a == b),
+        (1, |a, b| (a as i64) < (b as i64)),
+        (2, |a, b| (a as i64) <= (b as i64)),
+        (3, |a, b| a < b),
+        (4, |a, b| a <= b),
+        (5, |a, b| a as u32 == b as u32),
+        (6, |a, b| s32(a) < s32(b)),
+        (7, |a, b| (a as u32) < (b as u32)),
+    ];
+    for (pred, holds) in preds {
+        for inv in [false, true] {
+            for imm in [0_i32, 1000, -100_000, i32::MAX, -1] {
+                for a in [
+                    0,
+                    999,
+                    1000,
+                    (-100_000_i64) as u64,
+                    0x7FFF_FFFF,
+                    0x8000_0000,
+                    u64::MAX,
+                    0x0000_0123_FFFF_FFFB,
+                ] {
+                    let word = 0xB420_0400 | pred << 23 | u32::from(inv) << 22;
+                    let rhs = i64::from(imm) as u64;
+                    let want = if holds(a, rhs) ^ inv { 2 } else { 1 };
+                    assert_eq!(branch_result(&[word, imm as u32], a, 0), want, "PRED {pred} INV {inv} {a:x} imm {imm}");
+                }
+            }
+        }
+    }
+    // Backwards, and the flags are left alone: A = 3; loop: DECR A;
+    // BNEV A 0 -1 word (to the DECR).  The DECR wrote the flags last.
+    let cpu = run_words(&[0x4BD0_3000, 0x57C8_0000, 0xB47F_FF00, 0, HALT]);
+    assert_eq!(cpu.regs[0], 0);
+    assert!(cpu.flags.zero(), "the last DECR's Z");
+}
+
+#[test]
+fn cmprvw_short_is_the_32_bit_compare() {
+    // CMPRVW.S A, simm8 (0x4C50_0000, class 3 short CMP with INV = 1): the
+    // flags of CMPRVW (2-word, 0x8C18_0000), a 32-bit subtract (`id_w`).
+    for a in [0x1_0000_0005_u64, 0xFFFF_FFFD, 0x7FFF_FFFF, 0x8000_0000, 5, 0xFFFF_FF80] {
+        for imm in [-128_i32, -3, 0, 5, 127] {
+            let short = exec_one(0x4C50_0000 | (imm as u32 & 0xFF) << 12, a, 0, 0).flags;
+            let mut long = cpu_with(&image_from_words(&[0x8C18_0000, imm as u32, HALT]));
+            let mut regs = long.debug_regs();
+            regs.r[0] = a;
+            long.set_debug_regs(&regs);
+            let _ = long.run(10, None);
+            assert_eq!(short.to_nibble(), long.flags.to_nibble(), "{a:x} {imm}");
+            let (diff, borrow) = (a as u32).overflowing_sub(imm as u32);
+            assert_eq!(short.zero(), diff == 0, "{a:x} {imm}");
+            assert_eq!(short.carry(), borrow, "{a:x} {imm}");
+            assert_eq!(short.less(), s32(a) < imm, "{a:x} {imm}");
+        }
+    }
+}
+
+#[test]
+fn mulv_short_extends_its_imm8_by_sgn() {
+    // MULV.S (SGN = 1) / MULUV.S (SGN = 0): rd = rs1 * ext(imm8), the low
+    // half, flags as MUL.  rd = C, rs1 = A.
+    let cases: [(u64, i64, bool); 8] = [
+        (7, 6, true),
+        (7, -6, true),
+        ((-3_i64) as u64, 100, true),
+        ((1 << 40) + 3, -128, true),
+        (5, 0xF0, false),
+        (1 << 63, 2, true),
+        (0x1_2345_6789, 127, false),
+        (u64::MAX, -1, true),
+    ];
+    for (a, imm, signed) in cases {
+        let word = if signed { 0x6B80_0200 } else { 0x6B00_0200 } | (imm as u32 & 0xFF) << 12;
+        let cpu = exec_one(word, a, 0, 0);
+        let want = a.wrapping_mul(imm as u64);
+        assert_eq!(cpu.regs[2], want, "{word:08x} {a:x}");
+        assert_eq!(cpu.flags.zero(), want == 0);
+        assert_eq!(cpu.flags.sign(), want >> 63 == 1);
+        let overflow = if signed {
+            (a as i64).checked_mul(imm).is_none()
+        } else {
+            a.checked_mul(imm as u64).is_none()
+        };
+        assert_eq!(cpu.flags.overflow(), overflow, "{word:08x} {a:x}");
+    }
+    // The 2-word unsigned twin, MULUV (0xA800_0000), zero-extends its imm32.
+    let cpu = run_words(&[0x4BDF_F000, 0xA800_0200, 0xFFFF_FFFF, HALT]); // A = -1
+    assert_eq!(cpu.regs[2], u64::MAX.wrapping_mul(0xFFFF_FFFF));
+}
+
+#[test]
+fn leapc_short_adds_its_simm16_to_the_pc() {
+    // LEAPC.S D, off (0x4BA0_0000): D = PC + sext({[19:12], [7:0]}), a
+    // 32-bit address; the instruction is at 0x20.
+    for off in [0_i32, 8, 0x7FF0, -0x8000, -4, 0x1234, 0x7FFF] {
+        let d = off as u32 & 0xFFFF;
+        let cpu = exec_one(0x4BA0_0300 | (d >> 8) << 12 | (d & 0xFF), 0, 0, 0);
+        assert_eq!(cpu.regs[3], u64::from(0x20_u32.wrapping_add(off as u32)), "{off}");
+    }
+    // The RTL also decodes it with SGN [20] set when rs2 [3:0] is zero
+    // (its generic short ALU path), with the same offset.
+    let cpu = exec_one(0x4BB1_2330, 0, 0, 0);
+    assert_eq!(cpu.regs[3], 0x20 + 0x1230);
+}
+
+#[test]
+fn di_ei_return_and_set_the_enable_bit() {
+    // DI D (0x6C06_0300): D = old enable (1 after reset), disable; DI E
+    // again: E = 0; EI D (0x6C07_0030): enable = D[0] = 1; DI F: F = 1.
+    // EI with an even register disables.
+    let cpu = run_words(&[0x6C06_0300, 0x6C06_0400, 0x6C07_0030, 0x6C06_0500, 0x4BD0_2600, 0x6C07_0060, HALT]);
+    assert_eq!((cpu.regs[3], cpu.regs[4], cpu.regs[5]), (1, 0, 1));
+    assert!(cpu.irq_disabled, "EI with rs1[0] = 0 disables");
+    assert!(
+        !cpu.flags.zero() && !cpu.flags.carry() && !cpu.flags.sign() && !cpu.flags.overflow(),
+        "no flags"
+    );
+}
+
+/// `timer_program` with `pre` in front of its WAIT (at 0x5C), the rest of
+/// the program moved on by its length; the handler sets C = 0x77 and IRETs.
+fn timer_program_with(pre: &[u32]) -> Vec<u32> {
+    let mut w = timer_program();
+    let at = (0x5C - 0x20) / 4;
+    let tail = w.split_off(at);
+    w.extend_from_slice(pre);
+    w.extend(tail);
+    // INT_VEC0 (word 1 of the first SETR) follows the handler.
+    w[1] += 4 * pre.len() as u32;
+    w
+}
+
+#[test]
+fn di_blocks_interrupts_but_wait_still_wakes() {
+    // DI D ; WAIT: the timer wakes the WAIT (WFI) but its handler does not
+    // run; the program halts with the interrupt still pending.
+    let mut cpu = cpu_with(&image_from_words(&timer_program_with(&[0x6C06_0300])));
+    let result = cpu.run(1000, None);
+    assert_eq!(result.stop, StopReason::Halt);
+    assert_eq!(cpu.regs[3], 0x55, "resumed after the WAIT");
+    assert_eq!(cpu.regs[2], 0, "the handler never ran");
+    assert_eq!(cpu.irq_state().pending, 1, "the interrupt is still pending");
+    // DI D ; EI D ; WAIT: enabled again, the handler runs.
+    let mut cpu = cpu_with(&image_from_words(&timer_program_with(&[0x6C06_0300, 0x6C07_0030])));
+    let _ = cpu.run(1000, None);
+    assert_eq!(cpu.regs[2], 0x77, "the handler ran");
+}
+
+#[test]
+fn the_irq_frame_saves_and_iret_restores_the_disable_bit() {
+    // Taken while enabled, the frame's bit 43 is 0 and IRET leaves the core
+    // enabled.
+    let mut cpu = cpu_with(&image_from_words(&timer_program()));
+    let _ = cpu.run(1000, None);
+    let ctx = cpu.peek64(TEST_STACK_TOP - 8);
+    assert_eq!((ctx >> 43) & 1, 0, "pushed: enabled");
+    assert!(!cpu.irq_disabled);
+    // A software-built frame with bit 43 set resumes disabled, and with it
+    // clear resumes enabled: PUSHV64 {bit 43, PC 0x38} ; DI D ; IRET to
+    // DI E.
+    for (bit, disabled) in [(1_u32 << 11, true), (0, false)] {
+        let cpu = run_words(&[0xE440_0000, 0x38, bit, 0x6C06_0300, IRET, HALT, 0x6C06_0400, HALT]);
+        assert_eq!(cpu.regs[4], u64::from(!disabled), "the enable bit IRET restored");
+        assert_eq!(cpu.stop, Some(StopReason::Halt));
+    }
+}
+
+#[test]
+fn misaligned_subword_accesses_stop() {
+    // A 16-bit access at an odd address or a 32-bit one not 4-aligned stops
+    // with Misaligned(EA) before it happens: no retire, no trace line, the
+    // PC on it (pipeline_core.sv ex_misal, park kind 5).  B = 0x1001,
+    // C = 0x1002, D = 2.  Every MODE: [rs1], rs1 + imm (2-word and short),
+    // [imm], rs1 + rs2.
+    let traps: [(&[u32], u32); 16] = [
+        (&[0x5900_0010], 0x1001),              // MEMGET16 A [B]
+        (&[0x9920_0020, 1], 0x1003),           // LDIDX16 A C 1
+        (&[0x99A0_0020, 0xFFFF_FFFF], 0x1001), // LDIDX16_S A C -1
+        (&[0x5920_1020], 0x1004),              // LDIDX16.S A C 2: aligned
+        (&[0x9A20_0020, 0], 0x1002),           // LDIDX32 A C 0
+        (&[0x5A20_1010], 0x1005),              // LDIDX32.S A B 4
+        (&[0x9AA0_0010, 3], 0x1004),           // LDIDX32_S A B 3: aligned
+        (&[0x9940_0000, 0x2001], 0x2001),      // LDABS16 A 0x2001
+        (&[0x9AC0_0000, 0x2006], 0x2006),      // LDABS32S A 0x2006
+        (&[0x5960_0013], 0x1003),              // LDIDX16R A B D
+        (&[0x5A60_0023], 0x1004),              // LDIDX32R A C D: aligned
+        (&[0x5D00_0010], 0x1001),              // MEMSET16 A [B]
+        (&[0x5E00_0020], 0x1002),              // MEMSET32 A [C]
+        (&[0x9E20_0010, 1], 0x1002),           // STIDX32 A B 1
+        (&[0x9D40_0000, 0x3003], 0x3003),      // STABS16 A 0x3003
+        (&[0x5E60_0013], 0x1003),              // STIDX32R A B D
+    ];
+    for (access, ea) in traps {
+        let words = [&setr(1, 0x1001)[..], &setr(2, 0x1002), &setr(3, 2), access, &[HALT]].concat();
+        let img = image_from_words(&words);
+        let mut buf = Vec::new();
+        let r = emulate_image(&img, CODE_BASE, 100, Some(&mut buf));
+        let misaligned = match access[0] >> 24 & 3 {
+            1 => ea & 1 != 0,
+            _ => ea & 3 != 0,
+        };
+        if !misaligned {
+            assert_eq!(r.stop, StopReason::Halt, "{:08x} at {ea:x}", access[0]);
+            continue;
+        }
+        assert_eq!(r.stop, StopReason::Misaligned(ea), "{:08x}", access[0]);
+        assert_eq!(r.instructions, 3, "{:08x}: only the SETRs retired", access[0]);
+        assert_eq!(String::from_utf8(buf).expect("ASCII").lines().count(), 3, "{:08x}", access[0]);
+        let mut cpu = cpu_with(&img);
+        let _ = cpu.run(100, None);
+        assert_eq!(cpu.pc, CODE_BASE + 24, "{:08x}: the PC stays on the access", access[0]);
+        assert_eq!(cpu.peek64(0x1000), 0, "{:08x}: nothing stored", access[0]);
+        assert_eq!(cpu.peek64(0x3000), 0, "{:08x}: nothing stored", access[0]);
+    }
+}
+
+#[test]
+fn memget32_byte_64bit_and_stack_accesses_never_stop_misaligned() {
+    // MEMGET32 ([rs1], 32-bit) reads the unaligned word; byte accesses,
+    // 64-bit ones (A = 0 uses the aligned doubleword) and the stack ops at an
+    // unaligned SP are exempt (hw-proposals 8).
+    let mut w = Vec::new();
+    w.extend_from_slice(&setr(1, 0x1001)); // B
+    w.extend_from_slice(&[0xCBC0_0000, 0x4433_2211, 0x8877_6655]); // SETR64 A
+    w.push(0x5F10_0010); // MEMSET64 A [B] -> the doubleword at 0x1000
+    w.push(0x5A00_0310); // MEMGET32 D [B]
+    w.push(0x5800_0410); // MEMGET8 E [B]
+    w.push(0x5C00_0010); // MEMSET8 A [B]
+    w.push(0x5B10_0510); // MEMGET64 F [B]
+    w.extend_from_slice(&setr(6, 0x2003)); // G
+    w.push(0x6500_0060); // SETSP G (unaligned)
+    w.push(0x6400_0000); // PUSH A
+    w.push(0x6480_0700); // POP H
+    w.push(HALT);
+    let cpu = run_words(&w);
+    assert_eq!(cpu.stop, Some(StopReason::Halt));
+    assert_eq!(cpu.regs[3], 0x5544_3322, "MEMGET32 at 0x1001");
+    assert_eq!(cpu.regs[4], 0x22, "MEMGET8 at 0x1001");
+    assert_eq!(cpu.regs[7], 0x8877_6655_4433_2211, "POP at an unaligned SP");
 }

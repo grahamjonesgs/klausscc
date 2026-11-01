@@ -20,6 +20,12 @@ pub enum StopReason {
     PcOutOfRange(u32),
     /// `WAIT` with no interrupt source able to wake it (PC after the WAIT).
     WaitForever(u32),
+    /// A 16-bit load or store at an odd address, or a 32-bit one not 4-byte
+    /// aligned (the effective address).  The access does not happen and the
+    /// instruction does not retire; the PC stays on it.  The board parks
+    /// (`park_kind` 5) and prints the crash dump with `ERR=0A`.  `MEMGET32`,
+    /// byte, 64-bit and stack accesses never stop with it.
+    Misaligned(u32),
 }
 
 /// Data access a debugger watchpoint triggers on.

@@ -28,21 +28,30 @@ impl Disassembler {
     }
 
     /// The opcode `word` is an instance of: the first in table order whose
-    /// template matches `word` in every bit its operands do not occupy, and
-    /// whose operand fields hold values they can take ([`Operand::accepts`]).
+    /// template matches `word` in every bit its operands do not occupy.
     pub(crate) fn opcode(&self, word: u32) -> Option<&'static Opcode> {
         self.entries
             .iter()
-            .find(|&&(mask, opcode)| word & mask == opcode.template & mask && opcode.ops.iter().all(|op| op.accepts(word)))
+            .find(|&&(mask, opcode)| word & mask == opcode.template & mask)
             .map(|&(_, opcode)| opcode)
     }
 
     /// Disassemble a 32-bit instruction word.
     ///
     /// Returns `(mnemonic_with_operands, variables_count)`, the operands in
-    /// source order, or `None` if no opcode matches.
+    /// source order without the immediate words, or `None` if no opcode
+    /// matches.
+    #[cfg(test)]
     pub(crate) fn word(&self, word: u32) -> Option<(String, u32)> {
         let opcode = self.opcode(word)?;
+        Some((Self::text(opcode, word, None), opcode.imm_words()))
+    }
+
+    /// The text of `opcode` with word 0 `word`, its operands in source
+    /// order.  `imm` is the text of the appended immediate, shown in its
+    /// operand's place (`FBRV A 0x1234 0 PC+8`, as LLVM's operand order);
+    /// with `None` it is left out.
+    fn text(opcode: &Opcode, word: u32, imm: Option<&str>) -> String {
         let mut text = opcode.name.to_owned();
         for op in opcode.ops {
             let _ = match op {
@@ -63,10 +72,14 @@ impl Disassembler {
                 Operand::Cond => write!(text, " {}", Operand::cond_value(word)),
                 Operand::Rel18 => write!(text, " PC{:+}", (((word << 14) as i32) >> 14) * 4),
                 Operand::Rel13 => write!(text, " PC{:+}", (((word << 11) as i32) >> 19) * 4),
-                Operand::Imm | Operand::Imm64 | Operand::Rel32 => Ok(()),
+                Operand::Rel16 => write!(text, " PC{:+}", i32::from((((word >> 4) & 0xFF00) | (word & 0xFF)) as u16 as i16)),
+                Operand::Imm | Operand::Imm64 | Operand::Rel32 => match imm {
+                    Some(imm) => write!(text, " {imm}"),
+                    None => Ok(()),
+                },
             };
         }
-        Some((text, opcode.imm_words()))
+        text
     }
 
     /// Disassemble a flat byte slice into a `Vec<Pass2>` for use with `write_code_output_file`.
@@ -89,30 +102,29 @@ impl Disassembler {
             let word = u32::from_le_bytes([binary[i], binary[i + 1], binary[i + 2], binary[i + 3]]);
             let pc = base_addr.saturating_add(i as u32);
 
-            let (base_text, vars) = self.word(word).unwrap_or_else(|| (format!("??? (0x{word:08X})"), 0_u32));
+            let opcode = self.opcode(word);
             // A 2-word PC-relative target shows as its displacement, as the
             // short branches' does.
-            let rel32 = self.opcode(word).is_some_and(|opcode| opcode.ops.contains(&Operand::Rel32));
-
-            let mut display_text = base_text;
+            let rel32 = opcode.is_some_and(|opcode| opcode.ops.contains(&Operand::Rel32));
 
             // Consume argument words that immediately follow the instruction word.
-            // vars == 1 → one 32-bit immediate at PC+4.
-            // vars == 2 → two 32-bit words at PC+4 (lo32) and PC+8 (hi32), forming a 64-bit value.
-            let arg_word_count = vars.min(2) as usize;
+            // One 32-bit immediate at PC+4, or two words at PC+4 (lo32) and
+            // PC+8 (hi32) forming a 64-bit value.
+            let arg_word_count = opcode.map_or(0, |opcode| opcode.imm_words().min(2) as usize);
             let args: Vec<u32> = (0..arg_word_count)
                 .map_while(|n| {
                     let off = i + 4 + n * 4;
                     binary.get(off..off + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)
                 })
                 .collect();
-            match *args.as_slice() {
-                [av] if rel32 => _ = write!(display_text, " PC{:+}", av as i32),
-                [av] if arg_word_count == 1 => _ = write!(display_text, " 0x{av:X}"),
-                [lo, hi] => _ = write!(display_text, " 0x{:X}", (u64::from(hi) << 32) | u64::from(lo)),
-                [lo] => _ = write!(display_text, " 0x{lo:08X}"),
-                _ => {}
-            }
+            let imm = match *args.as_slice() {
+                [av] if rel32 => Some(format!("PC{:+}", av as i32)),
+                [av] if arg_word_count == 1 => Some(format!("0x{av:X}")),
+                [lo, hi] => Some(format!("0x{:X}", (u64::from(hi) << 32) | u64::from(lo))),
+                [lo] => Some(format!("0x{lo:08X}")),
+                _ => None,
+            };
+            let mut display_text = opcode.map_or_else(|| format!("??? (0x{word:08X})"), |opcode| Self::text(opcode, word, imm.as_deref()));
             if args.len() < arg_word_count {
                 display_text.push_str(" (truncated)");
             }
@@ -164,25 +176,28 @@ mod tests {
     /// a rotate by 1 shows as LLVM shows it, any other count as ROLV/RORV.
     const SPECIAL_CASES: &[(&str, &str)] = &[("ROLR1", "ROLV"), ("RORR1", "RORV")];
 
-    /// The fused branches by condition (`PRED | INV << 3`), register and
-    /// simm4 forms: LLVM's `FBR`/`FBRI` show as these.
-    const FUSED: [(&str, &str); 10] = [
-        ("BEQ", "BEQI"),
-        ("BLT", "BLTI"),
-        ("BLE", "BLEI"),
-        ("BULT", "BULTI"),
-        ("BULE", "BULEI"),
-        ("BNE", "BNEI"),
-        ("BGE", "BGEI"),
-        ("BGT", "BGTI"),
-        ("BUGE", "BUGEI"),
-        ("BUGT", "BUGTI"),
+    /// The fused branches by condition (`PRED | INV << 3`, 0..=15), in the
+    /// register, simm4 and imm32 forms: LLVM's `FBR`/`FBRI`/`FBRV` show as
+    /// these.  PRED 5..=7 (EQW, LTW, ULTW) and their inverses have no
+    /// register-swapped LE/GT, so no `BLEW`/`BGTW`/`BULEW`/`BUGTW`.
+    const FUSED: [(&str, &str, &str); 16] = [
+        ("BEQ", "BEQI", "BEQV"),
+        ("BLT", "BLTI", "BLTV"),
+        ("BLE", "BLEI", "BLEV"),
+        ("BULT", "BULTI", "BULTV"),
+        ("BULE", "BULEI", "BULEV"),
+        ("BEQW", "BEQWI", "BEQWV"),
+        ("BLTW", "BLTWI", "BLTWV"),
+        ("BULTW", "BULTWI", "BULTWV"),
+        ("BNE", "BNEI", "BNEV"),
+        ("BGE", "BGEI", "BGEV"),
+        ("BGT", "BGTI", "BGTV"),
+        ("BUGE", "BUGEI", "BUGEV"),
+        ("BUGT", "BUGTI", "BUGTV"),
+        ("BNEW", "BNEWI", "BNEWV"),
+        ("BGEW", "BGEWI", "BGEWV"),
+        ("BUGEW", "BUGEWI", "BUGEWV"),
     ];
-
-    /// The fused-branch condition `cc` names, by `FUSED` entry.
-    fn fused_cc(index: usize) -> u32 {
-        (index % 5) as u32 | ((index / 5) as u32) << 3
-    }
 
     /// A source token for each operand of `opcode`, as an instruction at
     /// 0x20 would be written, and the text the disassembler shows for it.
@@ -213,7 +228,7 @@ mod tests {
                 Operand::Frame22 => ("12345".to_owned(), "12345".to_owned()),
                 Operand::Simm4 => ("-3".to_owned(), "-3".to_owned()),
                 Operand::Cond => ("9".to_owned(), "9".to_owned()),
-                Operand::Rel18 | Operand::Rel13 | Operand::Rel32 => ("0x10".to_owned(), "PC-16".to_owned()),
+                Operand::Rel18 | Operand::Rel13 | Operand::Rel16 | Operand::Rel32 => ("0x10".to_owned(), "PC-16".to_owned()),
                 Operand::Imm => ("0x1234".to_owned(), "0x1234".to_owned()),
                 Operand::Imm64 => ("0x500000006".to_owned(), "0x500000006".to_owned()),
             };
@@ -243,8 +258,8 @@ mod tests {
             }
         }
         let mut want: Vec<(&str, &str)> = ALIASES.iter().chain(SPECIAL_CASES).copied().collect();
-        for (reg, imm) in FUSED {
-            want.extend([(reg, "FBR"), (imm, "FBRI")]);
+        for (reg, imm, imm32) in FUSED {
+            want.extend([(reg, "FBR"), (imm, "FBRI"), (imm32, "FBRV")]);
         }
         overlaps.sort_unstable();
         want.sort_unstable();
@@ -262,32 +277,37 @@ mod tests {
     }
 
     #[test]
-    // LLVM's `fbr`/`fbri` encode to the fused branch their condition names,
-    // and a condition no branch has (PRED 5..7) is rejected and does not
-    // disassemble.
+    // LLVM's `fbr`/`fbri`/`fbrv` encode to the fused branch their condition
+    // (`PRED | INV << 3`, every value 0..=15) names, and disassemble as it,
+    // the imm32 in its place; a condition above 15 is rejected.
     fn test_fbr_conditions() {
         let disassembler = Disassembler::new(V2_OPCODES);
         let symbols = SymbolTable::default();
-        for (index, (reg, imm)) in FUSED.iter().enumerate() {
-            let cc = fused_cc(index);
-            for (form, name, second) in [("FBR", reg, "D"), ("FBRI", imm, "-3")] {
+        for (cc, (reg, imm, imm32)) in (0..).zip(FUSED) {
+            for (form, name, second) in [("FBR", reg, "D"), ("FBRI", imm, "-3"), ("FBRV", imm32, "0x1234")] {
                 let line = format!("{form} C {second} {cc} 0x40");
-                let word = encode(named(form), &line, 0x20, &symbols).unwrap().word0.unwrap();
+                let words = encode(named(form), &line, 0x20, &symbols).unwrap().into_words().unwrap();
                 let plain = format!("{name} C {second} 0x40");
-                assert_eq!(Some(word), encode(named(name), &plain, 0x20, &symbols).unwrap().word0, "{line}");
-                assert_eq!(disassembler.word(word).unwrap().0, format!("{name} C {second} PC+32"), "{line}");
+                assert_eq!(
+                    Some(words.clone()),
+                    encode(named(name), &plain, 0x20, &symbols).unwrap().into_words(),
+                    "{line}"
+                );
+                let listed = disassembler.flat_to_pass2(&le_bytes(&words), 0x20);
+                assert_eq!(listed[0].input_text_line, format!("{name} C {second} PC+32"), "{line}");
             }
         }
-        for cc in [5, 6, 7, 13, 14, 15, 16, -1] {
+        for cc in [16, -1] {
             let line = format!("FBR C D {cc} 0x40");
             assert!(encode(named("FBR"), &line, 0x20, &symbols).is_err(), "{line}");
         }
-        // PRED 5..7, either INV, in either form: no instruction.
-        for pred in 5..=7 {
-            for word in [0x7400_0000 | pred << 23, 0x7460_0000 | pred << 23] {
-                assert_eq!(disassembler.word(word), None, "{word:08X}");
-            }
-        }
+        // The spec's examples (ISA_ENCODING_V2_MAP §8.3): `EQW r1,r2,.` and
+        // `FBR.EQ r1,#0x1234,.`.
+        assert_eq!(encode(named("BEQW"), "BEQW B C 0x20", 0x20, &symbols).unwrap().hex(), "76800012");
+        assert_eq!(
+            encode(named("BEQV"), "BEQV B 0x1234 0x20", 0x20, &symbols).unwrap().hex(),
+            "B420001000001234"
+        );
     }
 
     #[test]
@@ -332,7 +352,8 @@ mod tests {
                         .iter()
                         .chain(SPECIAL_CASES)
                         .any(|&(alias, hidden)| (alias, hidden) == (name, opcode.name))
-                        || (["FBR", "FBRI"].contains(&opcode.name) && FUSED.iter().any(|&(reg, imm)| name == reg || name == imm));
+                        || (["FBR", "FBRI", "FBRV"].contains(&opcode.name)
+                            && FUSED.iter().any(|&(reg, imm, imm32)| [reg, imm, imm32].contains(&name)));
                     assert!(expected, "{line} shown as {text}");
                     // (with the branch target as the source wrote it).
                     let again = encode(named(name), &text.replace("PC-16", "0x10"), 0x20, &symbols).unwrap();

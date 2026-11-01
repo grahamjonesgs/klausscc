@@ -102,9 +102,13 @@ and `len = 0` is empty.
 - Little-endian throughout: byte lane `n` of a doubleword is bits
   `[8n+7:8n]`.
 - `MEMGET32` reads the 4 bytes at **any** address, including across a
-  doubleword boundary. `LDIDX32`, `LDIDX32_S` and the other 32-bit loads
-  align down to 4, 16-bit loads to 2. Sub-word stores align down to their
-  size.
+  doubleword boundary. Every other 16-bit load or store at an odd
+  address, and 32-bit one not at a multiple of 4, in any MODE, stops the
+  machine with `Misaligned(EA)` before it happens (klaussCPU hw-proposals
+  8: `ex_misal` in `pipeline_core.sv`, park kind 5, crash dump `ERR=0A`):
+  no memory changes, the instruction does not retire (no trace line, not
+  in `PERF_INSTR`) and the PC stays on it. Byte, 64-bit and stack accesses
+  never stop. (Cores before 3508f87 aligned the address down instead.)
 - 64-bit accesses with A=1 (`MEMGET64`, `LDIDX64A`, `MEMSET64`,
   `STIDX64A`) align the address down to 8. The other 64-bit forms issue it
   unaligned, as do PUSH, POP, CALL, RET, IRET, ENTER and LEAVE with an
@@ -125,6 +129,15 @@ and `len = 0` is empty.
   are executed with any COND: target = PC + imm32.
 - v3 forms: the short immediates, short branches, fused compare-and-branch
   (no flags), W ops, `LDIDX32_S`, `ENTER`/`LEAVE`/`LEAVERET`.
+- hw-proposals forms (klaussCPU 3508f87, `ISA_ENCODING_V2.md` §3.15): the
+  fused branch's PRED 5..7 compare `{x[31:0], 0}` (the low halves, signed
+  or unsigned, as `CMPRRW`), its 2-word form compares with sext(imm32)
+  from word 1 and falls through to PC + 8; `CMPRVW.S` is the short CMP with
+  INV set, a 32-bit compare; `MULV.S`/`MULUV.S` multiply by the imm8
+  extended by SGN `[23]`, signed or unsigned as `MULV`/`MULUV`; `LEAPC.S`
+  adds sext({`[19:12]`, `[7:0]`}) to the PC. The RTL also decodes a
+  `LEAPC.S` word with SGN `[20]` set when rs2 `[3:0]` is zero (its generic
+  short ALU path), and so does the emulator.
 - `RESET` jumps to PC = 0x4. In a klausscc image that address holds the
   upper half of the `heap_start` header word.
 - SP starts at `0x0800_0000`, the top of the 128 MiB DDR (the RTL's
@@ -152,13 +165,18 @@ only). HALT and TRAP do retire.
 - `SETFR rd` (GETF): `rd = {Z, E, C, V}` in bits `[63:60]`, with E = Z.
 - Interrupt entry pushes one doubleword: `[31:0]` = the PC to resume at,
   `[38:32]` = `{Z, E, C, V, S, L, U}` (bit 38 = Z … bit 32 = U, the last
-  three derived), `[42:39]` = `INT_MASK`, `[63:43]` = 0. It then clears
-  that source's mask bit and jumps to its vector. `IRET` restores PC,
-  `INT_MASK` and **only Z, S, C, V** (bits 38, 34, 36, 35).
+  three derived), `[42:39]` = `INT_MASK`, `[43]` = the `DI` bit (1 =
+  disabled), `[63:44]` = 0. It then clears that source's mask bit and
+  jumps to its vector. `IRET` restores PC, `INT_MASK`, the `DI` bit and
+  **only Z, S, C, V** (bits 38, 34, 36, 35).
 - The interrupt controller is at `0xF00F_0000` (`INT_MASK`,
   `INT_PENDING`, `INT_VEC0..3`, `TIMER_PERIOD`, `TIMER_COUNT`, the
   millisecond clock), with source 0 the periodic timer. `WAIT` sleeps
   until a source is ready.
+- `DI rd` sets rd to the old enable bit (1 = enabled, as at reset) and
+  disables; `EI rs1` sets enable = rs1[0]. No interrupt is taken while
+  disabled (`irq_take`), but a ready source still wakes a `WAIT`, and the
+  instruction after it runs without entering the handler (`irq_ok`, WFI).
 
 ## Differences from the RTL
 

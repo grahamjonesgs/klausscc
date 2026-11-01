@@ -64,9 +64,10 @@ pub(crate) enum Operand {
     Frame22,
     /// ISA v3 fused branch: literal simm4 compare immediate → `word0[3:0]`.
     Simm4,
-    /// ISA v3 fused-branch condition, as LLVM's `fbr`/`fbri` write it:
-    /// `PRED | INV << 3` (0..=4 or 8..=12) → PRED `word0[25:23]`, INV
-    /// `word0[22]`.  PRED 5..=7 is not an instruction (the CPU traps).
+    /// ISA v3 fused-branch condition, as LLVM's `fbr`/`fbri`/`fbrv` write
+    /// it: `PRED | INV << 3` (0..=15) → PRED `word0[25:23]`, INV
+    /// `word0[22]`.  PRED 0..=4 are EQ, LT, LE, ULT, ULE (64-bit), 5..=7
+    /// EQW, LTW, ULTW (the low 32 bits).
     Cond,
     /// ISA v3 short branch target (label or address) → simm18 word
     /// displacement from this instruction, `word0[17:0]`. Filled in pass 2.
@@ -78,6 +79,10 @@ pub(crate) enum Operand {
     /// displacement from this instruction, appended at PC+4 (`target = PC +
     /// imm32`, the LEN=10 REL=1 class-8 forms). Filled in pass 2.
     Rel32,
+    /// `LEAPC.S` target (label or address) → simm16 byte displacement from
+    /// this instruction, high byte in `word0[19:12]` and low byte in
+    /// `word0[7:0]`. Filled in pass 2.
+    Rel16,
 }
 
 impl Operand {
@@ -95,6 +100,7 @@ impl Operand {
             Self::Frame22 => 0x3F_FFFF,
             Self::Rel18 => 0x3_FFFF,
             Self::Rel13 => 0x1FFF << 8,
+            Self::Rel16 => 0xFF << 12 | 0xFF,
             Self::Imm | Self::Imm64 | Self::Rel32 => 0,
         }
     }
@@ -105,21 +111,10 @@ impl Operand {
         !matches!(self, Self::Imm | Self::Imm64 | Self::Rel32)
     }
 
-    /// Whether `word`'s field for this operand holds a value the operand can
-    /// take: false only for a fused-branch [`Cond`](Self::Cond) whose PRED
-    /// is 5..=7, which no instruction has.
-    pub(crate) const fn accepts(self, word: u32) -> bool {
-        !matches!(self, Self::Cond) || (word >> 23) & 7 <= 4
-    }
-
     /// The fused-branch condition `cc` (`PRED | INV << 3`) as its word-0
-    /// bits, or `None` when `cc` is not one (PRED 5..=7, or above 15).
+    /// bits, or `None` when `cc` is not one (above 15).
     pub(crate) const fn cond_bits(cc: u32) -> Option<u32> {
-        if cc > 15 || cc & 7 > 4 {
-            None
-        } else {
-            Some((cc & 7) << 23 | (cc >> 3) << 22)
-        }
+        if cc > 15 { None } else { Some((cc & 7) << 23 | (cc >> 3) << 22) }
     }
 
     /// The fused-branch condition (`PRED | INV << 3`) in `word`.
@@ -191,15 +186,19 @@ impl Opcode {
 
     /// Whether this opcode's ISA v3 [`Operand::Imm8`] byte is sign-extended.
     /// The RTL forms the short immediate in `f_short_imm`
-    /// (`pipeline_core.sv:761-762`): class 3 (`CMPRV.S`) always
-    /// sign-extends, and class 2 sign-extends when SGN `[20]` is set
+    /// (`pipeline_core.sv`): class 3 (`CMPRV.S`, `CMPRVW.S`) always
+    /// sign-extends, class 2 sign-extends when SGN `[20]` is set
     /// (`SETR.S`, `ADDI.S`) and zero-extends otherwise (`ADDV.S`,
-    /// `MINUSV.S`, `ANDV.S`, `ORV.S`, `XORV.S`). The 32-bit value then
-    /// widens to 64 bits by the same SGN bit (`pipeline_core.sv:399,
-    /// 1954, 2007`), so the extension holds for the whole register.
+    /// `MINUSV.S`, `ANDV.S`, `ORV.S`, `XORV.S`), and class A (`MULV.S`,
+    /// `MULUV.S`) by its SGN `[23]`. The 32-bit value then widens to 64
+    /// bits by the same SGN bit, so the extension holds for the whole
+    /// register.
     pub(crate) const fn imm8_signed(&self) -> bool {
-        let class = (self.template >> 26) & 0xF;
-        class == 3 || self.template & (1 << 20) != 0
+        match (self.template >> 26) & 0xF {
+            3 => true,
+            0xA => self.template & (1 << 23) != 0,
+            _ => self.template & (1 << 20) != 0,
+        }
     }
 
     /// The literal values this opcode's [`Operand::Imm8`] accepts: those the
@@ -262,6 +261,8 @@ mod tests {
         assert_eq!(Operand::Count.mask(), 0x001F_8000);
         assert_eq!(Operand::Off8(3).mask(), Operand::Imm8.mask());
         assert_eq!(Operand::Rel13.mask(), 0x001F_FF00);
+        assert_eq!(Operand::Rel16.mask(), 0x000F_F0FF);
+        assert!(Operand::Rel16.is_word0());
         for op in [Operand::Imm, Operand::Imm64, Operand::Rel32] {
             assert_eq!((op.mask(), op.is_word0()), (0, false), "{op:?}");
         }
@@ -271,8 +272,10 @@ mod tests {
     }
 
     #[test]
-    // Every opcode's operand fields are disjoint and clear in its template,
-    // and its immediates come after all of its word-0 operands.
+    // Every opcode's operand fields are disjoint and clear in its template;
+    // it has at most one appended immediate, and a 64-bit one (which may be
+    // written as two tokens) is its last operand.  A 32-bit one may come
+    // before word-0 operands, as LLVM writes `fbrv rs1, imm, cc, target`.
     fn test_table_operand_fields_are_disjoint() {
         for opcode in V2_OPCODES {
             let mut fields = 0;
@@ -281,8 +284,10 @@ mod tests {
                 fields |= op.mask();
             }
             assert_eq!(opcode.template & fields, 0, "{}", opcode.name);
-            let first_imm = opcode.ops.iter().position(|op| !op.is_word0()).unwrap_or(opcode.ops.len());
-            assert!(opcode.ops[first_imm..].iter().all(|op| !op.is_word0()), "{}", opcode.name);
+            assert!(opcode.ops.iter().filter(|op| !op.is_word0()).count() <= 1, "{}", opcode.name);
+            if let Some(at) = opcode.ops.iter().position(|&op| op == Operand::Imm64) {
+                assert_eq!(at + 1, opcode.ops.len(), "{}", opcode.name);
+            }
         }
     }
 

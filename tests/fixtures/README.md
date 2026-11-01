@@ -146,6 +146,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 24 | `test_three_operand.kla` | Separate source registers | The in-place instructions written `rd rs1` (ADDV, ADDV.S, MINUSV, ANDV.S, ORV, XORV, MULV, DIVV, MODV, SHLV, SHRV, SHRAV, ROLR1, RORV, BSET, BCLR, BTGL, NEGR, NOTR, INCR, DECR, SEXTB, ZEXTB) leave `rs1` unchanged; LLVM's names FBR, FBRI, STIDX64U, LDIDX64U, LDIDX8S |
 | 25 | `hw_div_fbr.kla` | RTL regression | A DIVR squashed by a taken FBR must not leave the divider running for the next DIVR; see [The RTL squash tests](#the-rtl-squash-tests) |
 | 26 | `hw_div_smc.kla` | RTL regression | A DIVR busy in EX must survive a self-modifying-code squash of ID; see [The RTL squash tests](#the-rtl-squash-tests) |
+| 27 | `hw_proposals.kla` | New instructions | The klaussCPU 3508f87 (hw-proposals) forms: BEQW/BLTWI/BUGEW, BNEV/BGTV/BULTWV/BLEV, FBR and FBRV with a W condition, CMPRVW.S, MULV.S, MULUV.S, MULUV, LEAPC.S, DI, EI; every one is an illegal instruction on an older core |
 | — | `test_directives.kla` | Directives | `.global`, `.extern`, `.text`, `.word`, `.comm` |
 | — | `hello_world.kla` | Compiled C | Arithmetic, factorial, GCD, Fibonacci, primes |
 | — | `test_64bit.kla` | Compiled C | 33 64-bit checks; expects main's return value (the failure count) `00000000` |
@@ -540,6 +541,31 @@ FFFFFF80
 ### hw_div_smc (26)
 ```
 0000008E
+```
+
+### hw_proposals (27)
+```
+00000001
+00000000
+00000001
+00000000
+00000000
+00000001
+00000000
+00000001
+00000001
+00000000
+00000001
+00000001
+00000000
+FFFFFFE2
+00000258
+00000001
+00000002
+00000000
+00000001
+00000000
+00000001
 ```
 
 ## Notes

@@ -1,0 +1,176 @@
+// Test 27: the hw-proposals instructions (klaussCPU master 3508f87)
+// Every form klaussCPU's hw-proposals branch added to the ISA
+// (ISA_ENCODING_V2_MAP.md §8), with values chosen so that the 64-bit and the
+// 32-bit reading differ, and the misaligned-access trap left out (it stops
+// the CPU; see hwprop_misal in klaussCPU tools/board).  On a bitstream
+// without them every one of these words is an illegal instruction.
+//
+//   a) fused branches on the low 32 bits (PRED 5..7: BEQW, BLTW, BULTW and
+//      their inverses), register and simm4 forms
+//   b) the 2-word fused branch with a sign-extended imm32 (BxxV, FBRV)
+//   c) CMPRVW.S: the 32-bit compare against a simm8
+//   d) MULV.S / MULUV.S / MULUV: multiply by an imm8 extended by SGN, and by
+//      a zero-extended imm32
+//   e) LEAPC.S: rd = PC + simm16
+//   f) DI / EI: the old enable bit, and restoring it
+//
+// A branch line prints 00000001 when the branch is taken and 00000000 when
+// it falls through.
+//
+// Expected UART output:
+//   00000001  a1 BEQW A B: low halves equal (A = 0x1_0000_0005, B = 5)
+//   00000000  a2 BEQ A B: the 64-bit values differ
+//   00000001  a3 BLTWI C -1: low half 0xFFFFFFFE is -2 (C = 0xFFFFFFFE)
+//   00000000  a4 BLTI C -1: as 64 bits C is positive
+//   00000000  a5 BUGEW D B: low half 1 <u 5 (D = 0xFFFFFFFF_00000001)
+//   00000001  a6 FBR A B 5: LLVM's spelling of BEQW
+//   00000000  b1 BNEV E 0x12345678: equal (E = 0x12345678)
+//   00000001  b2 BGTV B -100000
+//   00000001  b3 BULTWV A 7: low half 5 <u 7
+//   00000000  b4 FBRV A 5 13 (BNEWV): low halves equal
+//   00000001  b5 BLEV E 0x12345678: equal, so less-or-equal
+//   00000001  c1 CMPRVW.S F -3 sets Z (F = 0x7_FFFFFFFD)
+//   00000000  c2 CMPRV.S F -3 does not
+//   FFFFFFE2  d1 MULV.S G B -6: 5 * -6 = -30 (the imm8 sign-extended)
+//   00000258  d2 MULUV.S G H 200 (H = 3)
+//   00000001  d3 MULUV G H 0xAAAAAAAB: 3 * 0xAAAAAAAB = 0x2_00000001
+//   00000002  d4 its bits 63:32 (the imm32 zero-extended)
+//   00000000  e1 LEAPC.S to a label minus SETR of that label
+//   00000001  f1 DI: interrupts were enabled
+//   00000000  f2 DI again: now disabled
+//   00000001  f3 EI with the first DI's value, then DI: enabled again
+
+_start
+DELAYV 0x0500
+$NEWLINE
+SETR64 A 0x100000005
+SETR B 5
+SETRU C 0xFFFFFFFE
+SETR64 D 0xFFFFFFFF00000001
+SETR E 0x12345678
+SETR64 F 0x7FFFFFFFD
+SETR H 3
+
+// a) W predicates
+SETR I 1
+BEQW A B A1:
+SETR I 0
+A1:
+$TXR I
+$NEWLINE
+SETR I 1
+BEQ A B A2:
+SETR I 0
+A2:
+$TXR I
+$NEWLINE
+SETR I 1
+BLTWI C -1 A3:
+SETR I 0
+A3:
+$TXR I
+$NEWLINE
+SETR I 1
+BLTI C -1 A4:
+SETR I 0
+A4:
+$TXR I
+$NEWLINE
+SETR I 1
+BUGEW D B A5:
+SETR I 0
+A5:
+$TXR I
+$NEWLINE
+SETR I 1
+FBR A B 5 A6:
+SETR I 0
+A6:
+$TXR I
+$NEWLINE
+
+// b) the 2-word fused branch
+SETR I 1
+BNEV E 0x12345678 B1:
+SETR I 0
+B1:
+$TXR I
+$NEWLINE
+SETR I 1
+BGTV B -100000 B2:
+SETR I 0
+B2:
+$TXR I
+$NEWLINE
+SETR I 1
+BULTWV A 7 B3:
+SETR I 0
+B3:
+$TXR I
+$NEWLINE
+SETR I 1
+FBRV A 5 13 B4:
+SETR I 0
+B4:
+$TXR I
+$NEWLINE
+SETR I 1
+BLEV E 0x12345678 B5:
+SETR I 0
+B5:
+$TXR I
+$NEWLINE
+
+// c) CMPRVW.S
+SETR I 1
+CMPRVW.S F -3
+JMPZ.S C1:
+SETR I 0
+C1:
+$TXR I
+$NEWLINE
+SETR I 1
+CMPRV.S F -3
+JMPZ.S C2:
+SETR I 0
+C2:
+$TXR I
+$NEWLINE
+
+// d) MULV.S / MULUV.S / MULUV
+MULV.S G B -6
+$TXR G
+$NEWLINE
+MULUV.S G H 200
+$TXR G
+$NEWLINE
+MULUV G H 0xAAAAAAAB
+$TXR G
+$NEWLINE
+SHRV G 32
+$TXR G
+$NEWLINE
+
+// e) LEAPC.S
+E1:
+LEAPC.S G E1:
+SETR J E1:
+SUBR G G J
+$TXR G
+$NEWLINE
+
+// f) DI / EI
+DI K
+DI L
+EI K
+DI M
+$TXR K
+$NEWLINE
+$TXR L
+$NEWLINE
+$TXR M
+$NEWLINE
+EI M
+HALT
+
+!include uart_stubs.kla

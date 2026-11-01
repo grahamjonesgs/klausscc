@@ -151,6 +151,8 @@ impl EmuTarget {
             StopReason::Halt => SingleThreadStopReason::Exited((self.cpu.debug_regs().r[12] & 0xFF) as u8),
             StopReason::Trap => SingleThreadStopReason::Signal(Signal::SIGTRAP),
             StopReason::InvalidOpcode(_) => SingleThreadStopReason::Signal(Signal::SIGILL),
+            // The PC stays on the access, as on the board.
+            StopReason::Misaligned(_) => SingleThreadStopReason::Signal(Signal::SIGBUS),
             StopReason::PcOutOfRange(_) => SingleThreadStopReason::Signal(Signal::SIGSEGV),
             StopReason::InstructionCap => SingleThreadStopReason::Signal(Signal::SIGXCPU),
             StopReason::WaitForever(pc) => {

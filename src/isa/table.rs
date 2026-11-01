@@ -228,6 +228,13 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("ORI.S", 0x4950_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm8]),
     op("XORI.S", 0x4990_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm8]),
     op("CMPRV.S", 0x4C10_0000, &[Operand::Rs1, Operand::Imm8]),
+    // hw-proposals 9 (ISA_ENCODING_V2_MAP §8.3): the short CMP with INV = 1
+    // is the 32-bit CMPRVW; class A OP = 3 is MULV / MULUV with an imm8
+    // extended by SGN [23]; LEAPC.S reaches +-32 KiB.
+    op("CMPRVW.S", 0x4C50_0000, &[Operand::Rs1, Operand::Imm8]),
+    op("MULV.S", 0x6B80_0000, &[Operand::RdRs1, Operand::Imm8]),
+    op("MULUV.S", 0x6B00_0000, &[Operand::RdRs1, Operand::Imm8]),
+    op("LEAPC.S", 0x4BA0_0000, &[Operand::Rd, Operand::Rel16]),
     op("LDIDX8.S", 0x5820_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
     op("LDIDX8_S.S", 0x58A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
     op("LDIDX8S.S", 0x58A0_0000, &[Operand::Rd, Operand::Rs1, Operand::Off8(0)]),
@@ -291,11 +298,45 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("BULEI", 0x7620_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
     op("BUGT", 0x7640_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
     op("BUGTI", 0x7660_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+    // hw-proposals 6 (ISA_ENCODING_V2_MAP §8.1): PRED 5..7 compare the low
+    // 32 bits (EQW, LTW, ULTW; INV gives NEW, GEW, UGEW).
+    op("BEQW", 0x7680_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+    op("BEQWI", 0x76A0_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+    op("BNEW", 0x76C0_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+    op("BNEWI", 0x76E0_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+    op("BLTW", 0x7700_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+    op("BLTWI", 0x7720_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+    op("BGEW", 0x7740_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+    op("BGEWI", 0x7760_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+    op("BULTW", 0x7780_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+    op("BULTWI", 0x77A0_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+    op("BUGEW", 0x77C0_0000, &[Operand::Rs1, Operand::Rs2, Operand::Rel13]),
+    op("BUGEWI", 0x77E0_0000, &[Operand::Rs1, Operand::Simm4, Operand::Rel13]),
+    // The 2-word fused branch (LEN=10, IMM=1): rhs = sext(imm32) in word 1,
+    // the target still a simm13 word displacement from the branch.
+    op("BEQV", 0xB420_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BNEV", 0xB460_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BLTV", 0xB4A0_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BGEV", 0xB4E0_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BLEV", 0xB520_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BGTV", 0xB560_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BULTV", 0xB5A0_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BUGEV", 0xB5E0_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BULEV", 0xB620_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BUGTV", 0xB660_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BEQWV", 0xB6A0_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BNEWV", 0xB6E0_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BLTWV", 0xB720_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BGEWV", 0xB760_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BULTWV", 0xB7A0_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
+    op("BUGEWV", 0xB7E0_0000, &[Operand::Rs1, Operand::Imm, Operand::Rel13]),
     // LLVM's spelling of the same fused branches, with the condition as a
-    // number (PRED | INV << 3): `FBR A B 0 target` is `BEQ A B target`.
-    // Listed as BEQ..BUGTI.
+    // number (PRED | INV << 3): `FBR A B 0 target` is `BEQ A B target`,
+    // `FBRV A 1000 13 target` is `BNEWV A 1000 target`.  Listed as
+    // BEQ..BUGEWV.
     op("FBR", 0x7400_0000, &[Operand::Rs1, Operand::Rs2, Operand::Cond, Operand::Rel13]),
     op("FBRI", 0x7420_0000, &[Operand::Rs1, Operand::Simm4, Operand::Cond, Operand::Rel13]),
+    op("FBRV", 0xB420_0000, &[Operand::Rs1, Operand::Imm, Operand::Cond, Operand::Rel13]),
     op("JMP", 0xA000_0000, &[Operand::Imm]),
     op("JMPZ", 0xA008_0000, &[Operand::Imm]),
     op("JMPNZ", 0xA00C_0000, &[Operand::Imm]),
@@ -360,6 +401,9 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("MULR", 0x6880_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("MULHR", 0x68C0_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("MULV", 0xA880_0000, &[Operand::RdRs1, Operand::Imm]),
+    // The unsigned multiply by a zero-extended imm32 (SGN = 0), as LLVM
+    // names it: the twin of MULUV.S.
+    op("MULUV", 0xA800_0000, &[Operand::RdRs1, Operand::Imm]),
     op("DIVUR", 0x6900_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("DIVR", 0x6980_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("DIVV", 0xA980_0000, &[Operand::RdRs1, Operand::Imm]),
@@ -371,6 +415,10 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("WAIT", 0x6C02_0000, &[]),
     op("RESET", 0x6C03_0000, &[]),
     op("TRAP", 0x6C04_0000, &[]),
+    // hw-proposals 7a: DI rd = old enable bit (0/1), then disable; EI rs1:
+    // enable = rs1[0] (ISA_ENCODING_V2_MAP §8.2).
+    op("DI", 0x6C06_0000, &[Operand::Rd]),
+    op("EI", 0x6C07_0000, &[Operand::Rs1]),
     op("DELAYR", 0x6C05_0000, &[Operand::Rs1]),
     op("DELAYV", 0xAC05_0000, &[Operand::Imm]),
     op("LCDCMDR", 0x7000_0000, &[Operand::Rs1]),

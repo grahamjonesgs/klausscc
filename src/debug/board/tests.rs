@@ -527,9 +527,22 @@ fn traps_are_breakpoints_only_where_the_debugger_set_them() {
     state.borrow_mut().halt(Cause::Trap);
     assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::SwBreak(()))));
     assert!(target.resume(None).is_ok(), "resuming over the patched breakpoint");
+    state.borrow_mut().set_word(0x200, TRAP_WORD);
     state.borrow_mut().regs[17] = 0x200;
     state.borrow_mut().halt(Cause::Trap);
     assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::Signal(Signal::SIGTRAP))));
+}
+
+#[test]
+fn a_misaligned_access_is_a_bus_error() {
+    // The core reports a misaligned 16/32-bit access (park kind 5) with the
+    // trap cause, the PC on the access: LDIDX32 D, [B + 2].
+    let (mut target, state) = halted_target(0x100);
+    state.borrow_mut().set_word(0x300, 0x9A20_0310);
+    assert!(target.resume(None).is_ok());
+    state.borrow_mut().regs[17] = 0x300;
+    state.borrow_mut().halt(Cause::Trap);
+    assert_eq!(target.poll().ok(), Some(Some(SingleThreadStopReason::Signal(Signal::SIGBUS))));
 }
 
 #[test]

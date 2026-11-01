@@ -519,6 +519,7 @@ MINUR A A B       // A = unsigned min(A, B)
 | `SETRU rd imm32` | 2 | rd = zext(imm32) | — |
 | `SETR64 rd imm64` | 3 | rd = imm64 (one 64-bit literal, or two words: low then high) | — |
 | `LEAPC rd offset` | 2 | rd = address of this instruction + offset (a 32-bit result, zero-extended) | — |
+| `LEAPC.S rd target` | 1 | rd = target, a label or address within −32768..32767 bytes of this instruction (a 32-bit result, zero-extended; hw-proposals 9) | — |
 | `SETR.S rd imm8` | 1 | rd = sext(imm8); imm8 −128..127 (v3) | — |
 | `ADDI.S rd rs1 imm8` | 1 | rd = rs1 + sext(imm8); imm8 −128..127 (v3) | Z S C V |
 | `ADDV.S rd [rs1] imm8` | 1 | rd = rs1 + zext(imm8); imm8 0..255 (v3) | Z S C V |
@@ -556,6 +557,7 @@ SETR.S C -5       // one word: C = -5
 | `CMPRVU rs1 imm32` | 2 | flags from rs1 − zext(imm32) | Z S C V |
 | `CMPRRW rs1 rs2` | 1 | flags from the 32-bit compare of the low halves of rs1 and rs2 (v3) | Z S C V |
 | `CMPRVW rs1 imm32` | 2 | flags from the 32-bit compare of the low halves of rs1 and sext(imm32) (v3) | Z S C V |
+| `CMPRVW.S rs1 imm8` | 1 | as `CMPRVW`, imm8 −128..127 (hw-proposals 9) | Z S C V |
 | `CMPEQR rd rs1 rs2` | 1 | rd = 1 if rs1 = rs2, else 0 | — |
 | `CMPNER rd rs1 rs2` | 1 | rd = 1 if rs1 ≠ rs2, else 0 | — |
 | `CMPLTR rd rs1 rs2` | 1 | rd = 1 if rs1 < rs2 (signed), else 0 | — |
@@ -606,10 +608,20 @@ These v3 instructions compare two registers, or a register and a small literal, 
 | `BULEI rs1 simm4 target` | 1 | branch if rs1 ≤ simm4 (unsigned); simm4 −8..7, sign-extended | — |
 | `BUGT rs1 rs2 target` | 1 | branch if rs1 > rs2 (unsigned) | — |
 | `BUGTI rs1 simm4 target` | 1 | branch if rs1 > simm4 (unsigned); simm4 −8..7, sign-extended | — |
-| `FBR rs1 rs2 cc target` | 1 | LLVM's spelling of `BEQ` … `BUGT`: cc 0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE; plus 8 for the inverse (NE, GE, GT, UGE, UGT) | — |
-| `FBRI rs1 simm4 cc target` | 1 | LLVM's spelling of `BEQI` … `BUGTI`, cc as for `FBR` | — |
+| `BEQW rs1 rs2 target`, `BEQWI rs1 simm4 target` | 1 | branch if the low 32 bits are equal | — |
+| `BNEW rs1 rs2 target`, `BNEWI rs1 simm4 target` | 1 | branch if the low 32 bits differ | — |
+| `BLTW rs1 rs2 target`, `BLTWI rs1 simm4 target` | 1 | branch if rs1[31:0] < rhs[31:0] (signed) | — |
+| `BGEW rs1 rs2 target`, `BGEWI rs1 simm4 target` | 1 | branch if rs1[31:0] ≥ rhs[31:0] (signed) | — |
+| `BULTW rs1 rs2 target`, `BULTWI rs1 simm4 target` | 1 | branch if rs1[31:0] < rhs[31:0] (unsigned) | — |
+| `BUGEW rs1 rs2 target`, `BUGEWI rs1 simm4 target` | 1 | branch if rs1[31:0] ≥ rhs[31:0] (unsigned) | — |
+| `BEQV rs1 imm32 target` … `BUGTV`, `BEQWV` … `BUGEWV` | 2 | as `BEQ` … `BUGT` and `BEQW` … `BUGEW`, comparing rs1 with sext(imm32) | — |
+| `FBR rs1 rs2 cc target` | 1 | LLVM's spelling of `BEQ` … `BUGEW`: cc 0 EQ, 1 LT, 2 LE, 3 ULT, 4 ULE, 5 EQW, 6 LTW, 7 ULTW; plus 8 for the inverse (NE, GE, GT, UGE, UGT, NEW, GEW, UGEW) | — |
+| `FBRI rs1 simm4 cc target` | 1 | LLVM's spelling of `BEQI` … `BUGEWI`, cc as for `FBR` | — |
+| `FBRV rs1 imm32 cc target` | 2 | LLVM's spelling of `BEQV` … `BUGEWV`, cc as for `FBR` | — |
 
-`FBR` and `FBRI` are the names the LLVM compiler prints (`fbr r14, r12, 8, …` is `BNE O M …`). They assemble to the same words as the named branches, a cc of 5 to 7 or 13 to 15 is an error (the CPU traps on it), and a disassembly listing shows the named branch.
+The `W` forms compare the low 32 bits only, as `CMPRRW` does (the simm4 and imm32 are compared as 32-bit values); there are no `W` forms of LE and GT, which are LT and GE with the operands swapped. The `V` forms are 2 words, the imm32 in word 1, the target still within ±16 KB of the branch; not taken, they go on at PC + 8. These need klaussCPU 3508f87 or later (hw-proposals 6).
+
+`FBR`, `FBRI` and `FBRV` are the names the LLVM compiler prints (`fbr r14, r12, 8, …` is `BNE O M …`). They assemble to the same words as the named branches, a cc above 15 is an error, and a disassembly listing shows the named branch.
 
 ```
 SETR B 10
@@ -712,32 +724,32 @@ All of these except `COPY` and `SETFR` work in place when given one register (`N
 | Instruction | Words | Operation | Flags |
 |---|---|---|---|
 | `MEMGET8 rd rs1` | 1 | rd = zext(mem8[rs1]) | — |
-| `MEMGET16 rd rs1` | 1 | rd = zext(mem16[rs1 & ~1]) | — |
+| `MEMGET16 rd rs1` | 1 | rd = zext(mem16[rs1]) | — |
 | `MEMGET32 rd rs1` | 1 | rd = zext(mem32[rs1]); any alignment, may cross a doubleword | — |
 | `MEMREADRR rd rs1` | 1 | rd = mem64[rs1] | — |
 | `MEMGET64 rd rs1` | 1 | rd = mem64[rs1 & ~7] | — |
 | `LDIDX8 rd rs1 off32` | 2 | rd = zext(mem8[rs1 + off32]) | — |
 | `LDIDX8_S rd rs1 off32` | 2 | rd = sext(mem8[rs1 + off32]) | — |
-| `LDIDX16 rd rs1 off32` | 2 | rd = zext(mem16[(rs1 + off32) & ~1]) | — |
-| `LDIDX16_S rd rs1 off32` | 2 | rd = sext(mem16[(rs1 + off32) & ~1]) | — |
-| `LDIDX32 rd rs1 off32` | 2 | rd = zext(mem32[(rs1 + off32) & ~3]) | — |
-| `LDIDX32_S rd rs1 off32` | 2 | rd = sext(mem32[(rs1 + off32) & ~3]) (v3) | — |
+| `LDIDX16 rd rs1 off32` | 2 | rd = zext(mem16[rs1 + off32]) | — |
+| `LDIDX16_S rd rs1 off32` | 2 | rd = sext(mem16[rs1 + off32]) | — |
+| `LDIDX32 rd rs1 off32` | 2 | rd = zext(mem32[rs1 + off32]) | — |
+| `LDIDX32_S rd rs1 off32` | 2 | rd = sext(mem32[rs1 + off32]) (v3) | — |
 | `LDIDX64 rd rs1 off32` | 2 | rd = mem64[rs1 + off32]; also spelt `LDIDX64U` ⚠ | — |
 | `LDIDX64A rd rs1 off32` | 2 | rd = mem64[(rs1 + off32) & ~7] | — |
 | `LDIDX64R rd rs1 rs2` | 1 | rd = mem64[rs1 + rs2] | — |
 | `LDIDX8R rd rs1 rs2` | 1 | rd = zext(mem8[rs1 + rs2]) | — |
 | `LDIDX8SR rd rs1 rs2` | 1 | rd = sext(mem8[rs1 + rs2]) | — |
-| `LDIDX16R rd rs1 rs2` | 1 | rd = zext(mem16[(rs1 + rs2) & ~1]) | — |
-| `LDIDX16SR rd rs1 rs2` | 1 | rd = sext(mem16[(rs1 + rs2) & ~1]) | — |
-| `LDIDX32R rd rs1 rs2` | 1 | rd = zext(mem32[(rs1 + rs2) & ~3]) | — |
-| `LDIDX32SR rd rs1 rs2` | 1 | rd = sext(mem32[(rs1 + rs2) & ~3]) | — |
+| `LDIDX16R rd rs1 rs2` | 1 | rd = zext(mem16[rs1 + rs2]) | — |
+| `LDIDX16SR rd rs1 rs2` | 1 | rd = sext(mem16[rs1 + rs2]) | — |
+| `LDIDX32R rd rs1 rs2` | 1 | rd = zext(mem32[rs1 + rs2]) | — |
+| `LDIDX32SR rd rs1 rs2` | 1 | rd = sext(mem32[rs1 + rs2]) | — |
 | `MEMREADR rd addr32` | 2 | rd = mem64[addr32]; addr32 is an address or label | — |
 | `LDABS8 rd addr32` | 2 | rd = zext(mem8[addr32]) | — |
 | `LDABS8S rd addr32` | 2 | rd = sext(mem8[addr32]) | — |
-| `LDABS16 rd addr32` | 2 | rd = zext(mem16[addr32 & ~1]) | — |
-| `LDABS16S rd addr32` | 2 | rd = sext(mem16[addr32 & ~1]) | — |
-| `LDABS32 rd addr32` | 2 | rd = zext(mem32[addr32 & ~3]) | — |
-| `LDABS32S rd addr32` | 2 | rd = sext(mem32[addr32 & ~3]) | — |
+| `LDABS16 rd addr32` | 2 | rd = zext(mem16[addr32]) | — |
+| `LDABS16S rd addr32` | 2 | rd = sext(mem16[addr32]) | — |
+| `LDABS32 rd addr32` | 2 | rd = zext(mem32[addr32]) | — |
+| `LDABS32S rd addr32` | 2 | rd = sext(mem32[addr32]) | — |
 | `LDIDX8.S rd rs1 off` | 1 | as `LDIDX8`, off −128..127 (v3) | — |
 | `LDIDX8_S.S rd rs1 off` | 1 | as `LDIDX8_S`, off −128..127 (v3) | — |
 | `LDIDX16.S rd rs1 off` | 1 | as `LDIDX16`, off even, −256..254 (v3) | — |
@@ -752,23 +764,23 @@ All of these except `COPY` and `SETFR` work in place when given one register (`N
 | Instruction | Words | Operation | Flags |
 |---|---|---|---|
 | `MEMSET8 rd rs1` | 1 | mem8[rs1] = rd[7:0] | — |
-| `MEMSET16 rd rs1` | 1 | mem16[rs1 & ~1] = rd[15:0] | — |
-| `MEMSET32 rd rs1` | 1 | mem32[rs1 & ~3] = rd[31:0] | — |
+| `MEMSET16 rd rs1` | 1 | mem16[rs1] = rd[15:0] | — |
+| `MEMSET32 rd rs1` | 1 | mem32[rs1] = rd[31:0] | — |
 | `MEMSET64RR rd rs1` | 1 | mem64[rs1] = rd | — |
 | `MEMSET64 rd rs1` | 1 | mem64[rs1 & ~7] = rd | — |
 | `STIDX8 rd rs1 off32` | 2 | mem8[rs1 + off32] = rd[7:0] | — |
-| `STIDX16 rd rs1 off32` | 2 | mem16[(rs1 + off32) & ~1] = rd[15:0] | — |
-| `STIDX32 rd rs1 off32` | 2 | mem32[(rs1 + off32) & ~3] = rd[31:0] | — |
+| `STIDX16 rd rs1 off32` | 2 | mem16[rs1 + off32] = rd[15:0] | — |
+| `STIDX32 rd rs1 off32` | 2 | mem32[rs1 + off32] = rd[31:0] | — |
 | `STIDX64 rd rs1 off32` | 2 | mem64[rs1 + off32] = rd; also spelt `STIDX64U` ⚠ | — |
 | `STIDX64A rd rs1 off32` | 2 | mem64[(rs1 + off32) & ~7] = rd | — |
 | `STIDX64R rd rs1 rs2` | 1 | mem64[rs1 + rs2] = rd | — |
 | `STIDX8R rd rs1 rs2` | 1 | mem8[rs1 + rs2] = rd[7:0] | — |
-| `STIDX16R rd rs1 rs2` | 1 | mem16[(rs1 + rs2) & ~1] = rd[15:0] | — |
-| `STIDX32R rd rs1 rs2` | 1 | mem32[(rs1 + rs2) & ~3] = rd[31:0] | — |
+| `STIDX16R rd rs1 rs2` | 1 | mem16[rs1 + rs2] = rd[15:0] | — |
+| `STIDX32R rd rs1 rs2` | 1 | mem32[rs1 + rs2] = rd[31:0] | — |
 | `MEMSETR rd addr32` | 2 | mem64[addr32] = rd; addr32 is an address or label | — |
 | `STABS8 rd addr32` | 2 | mem8[addr32] = rd[7:0] | — |
-| `STABS16 rd addr32` | 2 | mem16[addr32 & ~1] = rd[15:0] | — |
-| `STABS32 rd addr32` | 2 | mem32[addr32 & ~3] = rd[31:0] | — |
+| `STABS16 rd addr32` | 2 | mem16[addr32] = rd[15:0] | — |
+| `STABS32 rd addr32` | 2 | mem32[addr32] = rd[31:0] | — |
 | `STIDX8.S rd rs1 off` | 1 | as `STIDX8`, off −128..127 (v3) | — |
 | `STIDX16.S rd rs1 off` | 1 | as `STIDX16`, off even, −256..254 (v3) | — |
 | `STIDX32.S rd rs1 off` | 1 | as `STIDX32`, off a multiple of 4, −512..508 (v3) | — |
@@ -777,7 +789,7 @@ All of these except `COPY` and `SETFR` work in place when given one register (`N
 
 Stores take the value from `rd` and the address from `rs1`: `MEMSET8 D B` stores the low byte of D at the address in B.
 
-Byte accesses use the address as it is. 16- and 32-bit accesses clear the address bits below their size, except `MEMGET32`, which reads four bytes at any address. The `A` forms (`MEMGET64`, `MEMSET64`, `LDIDX64A`, `STIDX64A` and their `.S` forms) clear the low three address bits. The other 64-bit forms pass the address on unchanged, but the data cache ignores address bits 2:0, so every 64-bit memory access reaches the aligned doubleword that holds the address. The same goes for `PUSH`, `POP`, calls and returns when SP is not a multiple of 8. A device (MMIO) access without `A` keeps the address as it is. Keep the address of every 64-bit access 8-byte aligned, or use an `A` form.
+Byte accesses use the address as it is. A 16-bit access must be at an even address and a 32-bit one at a multiple of 4, except `MEMGET32`, which reads four bytes at any address: a misaligned one stops the CPU before it happens (a crash dump with `ERR=0A`; the emulator stops with `Misaligned`, the PC on the access). Cores before klaussCPU's hw-proposals merge (3508f87) cleared the low address bits instead. The `A` forms (`MEMGET64`, `MEMSET64`, `LDIDX64A`, `STIDX64A` and their `.S` forms) clear the low three address bits. The other 64-bit forms pass the address on unchanged, but the data cache ignores address bits 2:0, so every 64-bit memory access reaches the aligned doubleword that holds the address. The same goes for `PUSH`, `POP`, calls and returns when SP is not a multiple of 8. A device (MMIO) access without `A` keeps the address as it is. Keep the address of every 64-bit access 8-byte aligned, or use an `A` form.
 
 The `.S` forms are one word long and take a literal byte offset, which must be a multiple of the access size. Offsets in `off32` may be negative (`STIDX64 A P -8`). The `R` forms add two registers; the sign-extending ones are spelt `LDIDX8SR`, `LDIDX16SR` and `LDIDX32SR`, as the LLVM compiler names them, without the underscore of `LDIDX8_S`. The 2-word and `.S` sign-extending loads also take LLVM's spelling without the underscore (`LDIDX8S`, `LDIDX16S.S`, …). The `LDABS`/`STABS` forms take an absolute address at every width, as `MEMREADR`/`MEMSETR` do for 64 bits; the compiler uses them for device registers (`LDABS32S` is the sign-extending 32-bit one).
 
@@ -942,6 +954,9 @@ LEAVERET                 // SP = P; pop P; return
 | `MULHUR rd rs1 rs2` | 1 | rd = high 64 bits of rs1 × rs2 (unsigned) | Z S V ⁵ |
 | `MULW rd rs1 rs2` | 1 | rd = sext32(low 32 bits of rs1 × rs2) (v3) | Z S V ⁵ |
 | `MULV rd [rs1] imm32` | 2 | rd = rs1 × sext(imm32) (signed) | Z S V ⁵ |
+| `MULUV rd [rs1] imm32` | 2 | rd = rs1 × zext(imm32) (unsigned) | Z S V ⁵ |
+| `MULV.S rd [rs1] imm8` | 1 | rd = rs1 × sext(imm8) (signed); imm8 −128..127 (hw-proposals 9) | Z S V ⁵ |
+| `MULUV.S rd [rs1] imm8` | 1 | rd = rs1 × zext(imm8) (unsigned); imm8 0..255 (hw-proposals 9) | Z S V ⁵ |
 | `DIVR rd rs1 rs2` | 1 | rd = rs1 ÷ rs2 (signed) | Z V ⁵ |
 | `DIVUR rd rs1 rs2` | 1 | rd = rs1 ÷ rs2 (unsigned) | Z V ⁵ |
 | `DIVV rd [rs1] imm32` | 2 | rd = rs1 ÷ sext(imm32) (signed) | Z V ⁵ |
@@ -951,7 +966,7 @@ LEAVERET                 // SP = P; pop P; return
 
 ⁵ The multiplies set Z from the value written, S from bit 63 of the 64-bit half they produce (for `MULW`, of the full low half before sign-extension) and V = 1 when the low-half product does not fit in 64 bits (always 0 for `MULHR`/`MULHUR`). Divide and modulo set Z and clear V. Divide by zero does not trap: `DIV..` gives `0xFFFF_FFFF_FFFF_FFFF`, `MOD..` gives the dividend, V = 1 and Z is unchanged.
 
-`MULV`, `DIVV` and `MODV` sign-extend their immediate.
+`MULV`, `DIVV` and `MODV` sign-extend their immediate; `MULUV` zero-extends it.
 
 ### System and LCD
 
@@ -961,6 +976,8 @@ LEAVERET                 // SP = P; pop P; return
 | `HALT` | 1 | stop the CPU | — |
 | `WAIT` | 1 | sleep until an enabled interrupt is pending (see [Interrupts](#interrupts)) | — |
 | `TRAP` | 1 | stop the CPU with a trap (software abort) | — |
+| `DI rd` | 1 | rd = 1 if interrupts were enabled, else 0; then disable them (hw-proposals 7a) | — |
+| `EI rs1` | 1 | enable interrupts if rs1 bit 0 is 1, disable them if it is 0 (hw-proposals 7a) | — |
 | `RESET` | 1 | jump to address 0x4 | — |
 | `DELAYR rs1` | 1 | busy-wait for rs1[31:0] × 8192 clock cycles | — |
 | `DELAYV imm32` | 2 | busy-wait for imm32 × 8192 clock cycles | — |
@@ -995,7 +1012,8 @@ The LLVM compiler's assembler writes registers as `r0`–`r15` (`A`–`P` here) 
 | **`ldidx64`, `stidx64`** | **`LDIDX64A`, `STIDX64A`** | **⚠ Same name, different instruction.** klausscc's `LDIDX64`/`STIDX64` are LLVM's `ldidx64u`/`stidx64u`; see [Loads](#loads) |
 | `ldidx64u`, `stidx64u` | `LDIDX64U`, `STIDX64U` (= `LDIDX64`, `STIDX64`) | Accepted, with their `.S` forms; the listing uses these names |
 | `ldidx8s`, `ldidx16s`, `ldidx32s` | `LDIDX8_S`, … (or `LDIDX8S`, …) | Both spellings are accepted, and by LLVM too |
-| `fbr rs1, rs2, cc, target`, `fbri rs1, simm4, cc, target` | `BEQ` … `BUGTI`, or `FBR`/`FBRI` | See [Fused Compare-and-Branch](#fused-compare-and-branch) |
+| `fbr rs1, rs2, cc, target`, `fbri rs1, simm4, cc, target`, `fbrv rs1, imm32, cc, target` | `BEQ` … `BUGEWV`, or `FBR`/`FBRI`/`FBRV` | See [Fused Compare-and-Branch](#fused-compare-and-branch) |
+| `cmprvw`, `mulv`, `muluv`, `leapc` with a value that fits the 1-word form | `CMPRVW.S`, `MULV.S`, `MULUV.S`, `LEAPC.S` | LLVM picks the 1-word form by value and prints the same name; a `.S` form here takes a literal (`LEAPC.S` a label or address) |
 | `lcd` | `LCDRST` (or `LCD`) | |
 | `rolr1`, `rorr1` | `ROLR1`, `RORR1` (= `ROLV r 1`, `RORV r 1`) | One encoding; the listing shows `ROLR1`/`RORR1`, as LLVM does |
 | `shlar` | `SHLAR` (= `SHLR1`) | One encoding; the listing shows `SHLR1`, as LLVM does |
@@ -1170,7 +1188,7 @@ The board has more counters at higher offsets (see `MMIO_MAP.md`). The emulator 
 
 ## Interrupts
 
-There are four interrupt sources. Source 0 is a periodic timer. On the board, source 1 is the blitter and source 2 is Ethernet; source 3 is reserved. Everything is set up through the interrupt controller at `0xF00F_0000`. The only interrupt instruction is `IRET`.
+There are four interrupt sources. Source 0 is a periodic timer. On the board, source 1 is the blitter and source 2 is Ethernet; source 3 is reserved. Everything is set up through the interrupt controller at `0xF00F_0000`. The interrupt instructions are `IRET`, and `DI`/`EI` (below).
 
 | Offset | Register | Access | Description |
 |--------|----------|--------|-------------|
@@ -1183,13 +1201,15 @@ There are four interrupt sources. Source 0 is a periodic timer. On the board, so
 
 An interrupt is taken between instructions when its mask bit is set, it is pending and its vector is not 0. The timer has priority over the blitter, which has priority over Ethernet. The CPU then:
 
-1. pushes one 64-bit context word: PC in bits 31:0, the flags in bits 38:32, and `INT_MASK` in bits 42:39;
+1. pushes one 64-bit context word: PC in bits 31:0, the flags in bits 38:32, `INT_MASK` in bits 42:39, and in bit 43 a 1 if `DI` had disabled interrupts (always 0 for a taken interrupt; a frame built by software with bit 43 clear resumes enabled);
 2. clears the source's `INT_MASK` bit, so the handler is not re-entered for the same source;
 3. clears the timer's pending bit (source 0 only), and jumps to the source's vector.
 
-`IRET` pops the context word and restores PC, flags and `INT_MASK`. The hardware saves no registers, so a handler must save and restore any register it changes. The blitter's pending bit stays set until its handler acknowledges the blitter, so that handler must do so before `IRET`.
+`IRET` pops the context word and restores PC, flags, `INT_MASK` and the `DI` bit. The hardware saves no registers, so a handler must save and restore any register it changes. The blitter's pending bit stays set until its handler acknowledges the blitter, so that handler must do so before `IRET`.
 
 `WAIT` sleeps until an enabled interrupt is pending. The handler runs, and its `IRET` returns to the instruction after the `WAIT`.
+
+`DI rd` and `EI rs1` (klaussCPU 3508f87 and later) switch all interrupt taking off and on without touching `INT_MASK`, in one instruction each: `DI D` … `EI D` keeps every interrupt out of the code between them and then restores the state before the `DI`. While interrupts are disabled a pending interrupt still wakes a `WAIT`, but its handler runs only after an `EI` enables them. The bit is not shared with the second core.
 
 The emulator models the timer (source 0), `WAIT` and `IRET`. It counts time as 2 clock cycles per instruction, so interrupts arrive at different points than on the board. A `WAIT` that nothing can wake stops the emulator.
 
@@ -1405,6 +1425,8 @@ The `tests/fixtures/` directory holds the test corpus; `cargo test` runs every f
 | `test_directives.kla` | `.data`, `.text`, `.word`, `.comm`, `.global` |
 | `test_io.kla` | A numbered step sequence, checked by eye (no expected values) |
 | `hw_alignment.kla` | The emulator-vs-hardware check: flags, divide by zero, unaligned 64-bit access, `BEXTR`/`BDEP`, `.S` immediates, strings and inline data, each derived from the RTL |
+| `hw_div_fbr.kla`, `hw_div_smc.kla` | The klaussCPU 9ad6614 squash fixes |
+| `hw_proposals.kla` | The klaussCPU 3508f87 instructions: `W` and imm32 fused branches, `CMPRVW.S`, `MULV.S`/`MULUV.S`/`MULUV`, `LEAPC.S`, `DI`/`EI` |
 | `test2.kla`, `test_64bit.kla` | Compiled C linked with the runtime (see [C Programs and the Runtime](#c-programs-and-the-runtime)); `test_64bit` runs 33 64-bit integer checks and expects `00000000`, the failure count |
 | `uart_stubs.kla` | The UART print routines the tests include |
 

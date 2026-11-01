@@ -12,7 +12,7 @@
 //! that file.
 
 use super::flags::Flags;
-use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, Cpu, StopReason};
+use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, Cpu, StopReason};
 
 /// The decoded instruction: word 0 plus the fields every class shares
 /// (`doc/ISA_ENCODING_V2.md` §1).  Each handler pulls its own attribute bits
@@ -92,7 +92,7 @@ enum Pred {
 }
 
 impl Pred {
-    /// Decode PRED; 5..=7 are reserved.
+    /// Decode a class-3 PRED; 5..=7 are reserved there.
     const fn decode(bits: u32) -> Result<Self, Illegal> {
         Ok(match bits {
             0 => Self::Eq,
@@ -102,6 +102,22 @@ impl Pred {
             4 => Self::Ule,
             _ => return Err(Illegal),
         })
+    }
+
+    /// Decode a fused-branch PRED (class D): 0..=4 as class 3, and 5..=7 the
+    /// 32-bit EQW, LTW, ULTW (hw-proposals 6, `pipeline_core.sv`
+    /// `f_fbr_pred`), returned with `true` for a compare of the low halves.
+    const fn decode_fused(bits: u32) -> (Self, bool) {
+        match bits {
+            0 => (Self::Eq, false),
+            1 => (Self::Lt, false),
+            2 => (Self::Le, false),
+            3 => (Self::Ult, false),
+            4 => (Self::Ule, false),
+            5 => (Self::Eq, true),
+            6 => (Self::Lt, true),
+            _ => (Self::Ult, true),
+        }
     }
 
     /// Whether `lhs PRED rhs` holds.
@@ -220,7 +236,7 @@ impl Cpu {
             0xA => self.exec_muldiv(f),
             0xB => self.exec_system(f),
             0xC => exec_lcd(f),
-            0xD if len == 1 => self.exec_fused_branch(f),
+            0xD if len <= 2 => self.exec_fused_branch(f),
             _ => Err(Illegal),
         };
         match flow {
@@ -286,6 +302,15 @@ impl Cpu {
             self.regs[f.rd] = self.imm64();
             return Ok(Flow::Next);
         }
+        if f.len == 1 && op == 14 && f.bit(21) {
+            // hw-proposals 9 LEAPC.S: rd = PC + sext(simm16), the offset in
+            // {[19:12], [7:0]} (`short_imm`).  The RTL decodes it with SGN
+            // [20] clear, and also with SGN set when rs2 [3:0] is zero (its
+            // generic short ALU path), the same offset either way.
+            legal(!f.bit(20) || f.rs2 == 0)?;
+            self.regs[f.rd] = u64::from(self.pc.wrapping_add(f.imm32));
+            return Ok(Flow::Next);
+        }
         // v3 D3 ADDIW = the 2-word ADD with W [19] (the short form's [19:12]
         // is its immediate).
         let w = f.len == 2 && f.bit(19);
@@ -335,30 +360,43 @@ impl Cpu {
         // form, whose [19:12] is its immediate). Comparing {x[31:0], 0}
         // gives exactly the 32-bit Z/S/C/V and 32-bit signed/unsigned order —
         // the same trick the RTL uses at its dispatch mux.
-        let (lhs, rhs) = if !short && f.bit(19) { (lhs << 32, rhs << 32) } else { (lhs, rhs) };
+        // hw-proposals 9: the short form with INV [22] set is CMPRVW.S, the
+        // 32-bit compare against simm8.
+        let w = if short { inv } else { f.bit(19) };
+        let (lhs, rhs) = if w { (lhs << 32, rhs << 32) } else { (lhs, rhs) };
         if boolean {
             let pred = Pred::decode(f.field(23, 3))?;
             self.regs[f.rd] = u64::from(pred.holds(lhs, rhs) ^ inv);
         } else {
-            // The flag-setting CMP has PRED = 0, INV = 0 and rd = 0 (:450).
-            legal(f.field(23, 3) == 0 && !inv && f.rd == 0)?;
+            // The flag-setting CMP has PRED = 0 and rd = 0, and INV only in
+            // the short form (CMPRVW.S).
+            legal(f.field(23, 3) == 0 && (!inv || short) && f.rd == 0)?;
             self.cmp(lhs, rhs);
         }
         Ok(Flow::Next)
     }
 
-    /// Class D (ISA v3 B) — fused compare-and-branch, 1 word, flags untouched:
-    /// `if (rs1 PRED rhs) ^ INV { PC += 4*simm13 }`.  PRED `[25:23]` as class 3
-    /// (EQ, LT, LE, ULT, ULE), INV `[22]`, IMM `[21]` (rhs = simm4 `[3:0]`
-    /// instead of rs2), simm13 word displacement `[20:8]`.
+    /// Class D (ISA v3 B) — fused compare-and-branch, flags untouched:
+    /// `if (rs1 PRED rhs) ^ INV { PC += 4*simm13 }`.  PRED `[25:23]` (EQ, LT,
+    /// LE, ULT, ULE, and the 32-bit EQW, LTW, ULTW), INV `[22]`, IMM `[21]`
+    /// (rhs = simm4 `[3:0]` instead of rs2), simm13 word displacement
+    /// `[20:8]` from the branch.  The 2-word form (hw-proposals 6) has IMM
+    /// set, `[3:0]` = 0 and rhs = sext(imm32) from word 1; not taken, it
+    /// falls through to PC + 8.
     fn exec_fused_branch(&mut self, f: Fields) -> Exec {
-        let pred = Pred::decode(f.field(23, 3))?;
+        let (pred, w) = Pred::decode_fused(f.field(23, 3));
         let lhs = self.regs[f.rs1];
-        let rhs = if f.bit(21) {
+        let rhs = if f.len == 2 {
+            legal(f.bit(21) && f.rs2 == 0)?;
+            ext(f.imm32, true)
+        } else if f.bit(21) {
             i64::from(((f.word << 28) as i32) >> 28) as u64 // sign-extend [3:0]
         } else {
             self.regs[f.rs2]
         };
+        // The W predicates compare {x[31:0], 0}: the low halves, signed or
+        // unsigned, as CMPRRW (the RTL's dispatch shift).
+        let (lhs, rhs) = if w { (lhs << 32, rhs << 32) } else { (lhs, rhs) };
         Ok(if pred.holds(lhs, rhs) ^ f.bit(22) {
             let disp = ((f.word << 11) as i32) >> 19; // sign-extend [20:8]
             Flow::Jump(self.pc.wrapping_add((disp << 2) as u32))
@@ -533,7 +571,13 @@ impl Cpu {
         // MEMGET32 ([rs1], 32-bit) has no sign-extending form (:559-560).
         legal(!(f.field(24, 2) == 2 && f.field(21, 2) == 0 && f.bit(23)))?;
         let size_bytes = 1_usize << f.field(24, 2); // 00=8 01=16 10=32 11=64
-        let ea = self.ea(f) & load_align_mask(size_bytes, f.field(21, 2), f.bit(20));
+        let ea = self.ea(f);
+        // MEMGET32 ([rs1], 32-bit) is unaligned-tolerant; every other 16/32-bit
+        // load traps on a misaligned address.
+        if !(size_bytes == 4 && f.field(21, 2) == 0) && misaligned(ea, size_bytes) {
+            return Ok(Flow::Stop(StopReason::Misaligned(ea)));
+        }
+        let ea = ea & load_align_mask(size_bytes, f.field(21, 2), f.bit(20));
         let val = if size_bytes == 8 {
             self.read64(ea)
         } else {
@@ -547,7 +591,11 @@ impl Cpu {
     fn exec_store(&mut self, f: Fields) -> Exec {
         mem_legal(f, true)?;
         let size_bytes = 1_usize << f.field(24, 2);
-        let ea = self.ea(f) & store_align_mask(size_bytes, f.bit(20));
+        let ea = self.ea(f);
+        if misaligned(ea, size_bytes) {
+            return Ok(Flow::Stop(StopReason::Misaligned(ea)));
+        }
+        let ea = ea & store_align_mask(size_bytes, f.bit(20));
         let data = self.regs[f.rd];
         if size_bytes == 8 {
             self.write64(ea, data);
@@ -686,8 +734,8 @@ impl Cpu {
         Ok(Flow::Next)
     }
 
-    /// IRET — pop the saved interrupt context and restore PC`[31:0]`, flags`[38:32]`
-    /// and `INT_MASK` `[42:39]`.
+    /// IRET — pop the saved interrupt context and restore PC`[31:0]`, flags`[38:32]`,
+    /// `INT_MASK` `[42:39]` and the `DI` bit `[43]` (1 = disabled).
     ///
     /// The 7-bit saved word is `{Z,E,C,V,S,L,U}` (bit38→Z … bit32→U), but only the
     /// unified `Z/S/C/V` are consumed (`doc/ISA_ENCODING_V2.md` §7.4); the derived `E`(bit37)/`L`(bit33)/
@@ -696,6 +744,7 @@ impl Cpu {
         let ctx = self.pop();
         self.flags = Flags::from_ctx((ctx >> CTX_FLAGS_SHIFT) as u8 & 0x7F);
         self.int_mask = ((ctx >> CTX_INT_MASK_SHIFT) & 0xF) as u8;
+        self.irq_disabled = (ctx >> CTX_IRQ_DISABLED_SHIFT) & 1 != 0;
         Flow::Jump(ctx as u32)
     }
 
@@ -708,6 +757,15 @@ impl Cpu {
         let sgn = f.bit(23);
         let high = f.bit(22); // high half (MUL only)
         let kind = f.field(24, 2);
+        if f.len == 1 && kind == 3 {
+            // hw-proposals 9 MULV.S / MULUV.S: rd = rs1 * ext(imm8 [19:12]),
+            // extended and multiplied signed or unsigned by SGN [23] as the
+            // 2-word MULV / MULUV; the low half, Z/S/V as MUL.  [22:20] and
+            // rs2 are zero.
+            legal(f.field(20, 3) == 0 && f.rs2 == 0)?;
+            self.mul_low(f.rd, self.regs[f.rs1], ext(f.imm32, sgn), sgn, false);
+            return Ok(Flow::Next);
+        }
         // [21:20] and [18:12] zero, W only on the low-half MUL, and rs2 = 0
         // in the 2-word form (:650-652); HIGH only on MUL (:659, :663).
         legal(
@@ -722,28 +780,20 @@ impl Cpu {
         let a = self.regs[f.rs1];
         let b = if is_imm { ext(f.imm32, sgn) } else { self.regs[f.rs2] };
         match kind {
-            0 => {
-                // MUL: the full 128-bit product, signed or unsigned per SGN
-                // (:892-899); rd takes its high or low half.  S is bit 63 of
-                // that half, before any W sign-extension; V is set when the
-                // low half does not hold the whole product, and cleared by the
-                // high-half forms (:1159-1162).
-                let (r, overflow) = match (high, sgn) {
-                    (false, false) => a.overflowing_mul(b),
-                    (false, true) => {
-                        let (lo, v) = (a as i64).overflowing_mul(b as i64);
-                        (lo as u64, v)
-                    }
-                    (true, false) => (((u128::from(a) * u128::from(b)) >> 64) as u64, false),
-                    (true, true) => (((i128::from(a as i64) * i128::from(b as i64)) >> 64) as u64, false),
+            0 if high => {
+                // MULH: the high half of the 128-bit product, signed or
+                // unsigned per SGN; S is its bit 63, V cleared (:1159-1162).
+                let r = if sgn {
+                    ((i128::from(a as i64) * i128::from(b as i64)) >> 64) as u64
+                } else {
+                    ((u128::from(a) * u128::from(b)) >> 64) as u64
                 };
                 self.flags.set_sign(r >> 63 == 1);
-                self.flags.set_overflow(overflow);
-                // v3 D3 MULW: W [19] on the low-half MUL; Z follows the W
-                // result (:649, :1333-1334).
-                let r = if !high && f.bit(19) { sign_extend(r, 4) } else { r };
+                self.flags.set_overflow(false);
                 self.regs[rd] = self.with_z(r);
             }
+            // v3 D3 MULW: W [19] on the low-half MUL (:649, :1333-1334).
+            0 => self.mul_low(rd, a, b, sgn, f.bit(19)),
             kind @ (1 | 2) => {
                 let is_mod = kind == 2;
                 if b == 0 {
@@ -771,8 +821,41 @@ impl Cpu {
         Ok(Flow::Next)
     }
 
-    /// Class B — system: NOP / HALT / WAIT / RESET / TRAP / DELAY.
+    /// MUL's low half: the 128-bit product, signed or unsigned per `sgn`
+    /// (:892-899).  S is bit 63 of the low half, before any W
+    /// sign-extension; V is set when the low half does not hold the whole
+    /// product.  With `w` (MULW) the result is the low 32 bits sign-extended,
+    /// and Z follows it.
+    fn mul_low(&mut self, rd: usize, a: u64, b: u64, sgn: bool, w: bool) {
+        let (r, overflow) = if sgn {
+            let (lo, v) = (a as i64).overflowing_mul(b as i64);
+            (lo as u64, v)
+        } else {
+            a.overflowing_mul(b)
+        };
+        self.flags.set_sign(r >> 63 == 1);
+        self.flags.set_overflow(overflow);
+        let r = if w { sign_extend(r, 4) } else { r };
+        self.regs[rd] = self.with_z(r);
+    }
+
+    /// Class B — system: NOP / HALT / WAIT / RESET / TRAP / DELAY, and DI / EI.
     fn exec_system(&mut self, f: Fields) -> Exec {
+        if f.len == 1 && f.field(17, 9) == 3 {
+            // hw-proposals 7a, OP [21:16] 6 / 7 with [25:22], [15:12] and rs2
+            // zero: DI rd (rs1 = 0) sets rd = the old enable bit and
+            // disables; EI rs1 (rd = 0) sets enable = rs1[0].
+            legal(f.field(12, 4) == 0 && f.rs2 == 0)?;
+            if f.bit(16) {
+                legal(f.rd == 0)?;
+                self.irq_disabled = self.regs[f.rs1] & 1 == 0;
+            } else {
+                legal(f.rs1 == 0)?;
+                self.regs[f.rd] = u64::from(!self.irq_disabled);
+                self.irq_disabled = true;
+            }
+            return Ok(Flow::Next);
+        }
         // [25:22], [15:8] and rs2 zero (:672).
         legal(f.field(22, 4) == 0 && f.field(8, 8) == 0 && f.rs2 == 0)?;
         let op = f.field(16, 6);
@@ -854,6 +937,9 @@ fn mem_legal(f: Fields, store: bool) -> Result<(), Illegal> {
 /// - A3 class 3, `LEN=01`, `SGN=1`, `B=0`: simm8 `[19:12]`.
 /// - A4 class 6/7, `LEN=01`, `MODE=01`: simm8 `[19:12]` << `SIZE` `[25:24]`.
 /// - A1 class 8, `LEN=01`, `RIND=0`: simm18 `[17:0]` << 2 (PC-relative).
+/// - hw-proposals 9 `LEAPC.S`, class 2 `OP=14` `[21]=1`: simm16
+///   `{[19:12], [7:0]}`; `MULV.S`/`MULUV.S`, class A `OP=3`: imm8 `[19:12]`,
+///   `SGN` `[23]` picks sign/zero extension.  (`CMPRVW.S` is A3's.)
 const fn short_imm(word: u32) -> Option<u32> {
     if word >> 30 != 1 {
         return None;
@@ -861,7 +947,9 @@ const fn short_imm(word: u32) -> Option<u32> {
     let i8v = (word >> 12) & 0xFF;
     let s8 = ((i8v as u8) as i8) as i32 as u32;
     match (word >> 26) & 0xF {
+        0x2 if (word >> 21) & 0x1F == 0b11101 => Some(((((word >> 4) & 0xFF00) | (word & 0xFF)) as u16 as i16) as i32 as u32),
         0x2 => Some(if (word >> 20) & 1 == 1 { s8 } else { i8v }),
+        0xA if (word >> 24) & 3 == 3 => Some(if (word >> 23) & 1 == 1 { s8 } else { i8v }),
         0x3 if (word >> 20) & 1 == 1 && (word >> 21) & 1 == 0 => Some(s8),
         0x6 | 0x7 if (word >> 21) & 0x3 == 1 => Some(s8 << ((word >> 24) & 0x3)),
         0x8 if (word >> 23) & 1 == 0 => {
@@ -869,6 +957,18 @@ const fn short_imm(word: u32) -> Option<u32> {
             Some((d << 2) as u32)
         }
         _ => None,
+    }
+}
+
+/// Whether a `size_bytes` access at `ea` traps as misaligned: 16-bit at an
+/// odd address, 32-bit not 4-byte aligned (hw-proposals 8, `pipeline_core.sv`
+/// `ex_misal`).  Byte and 64-bit accesses never do; the caller exempts
+/// `MEMGET32`.
+const fn misaligned(ea: u32, size_bytes: usize) -> bool {
+    match size_bytes {
+        2 => ea & 1 != 0,
+        4 => ea & 3 != 0,
+        _ => false,
     }
 }
 
