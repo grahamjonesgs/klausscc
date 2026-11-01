@@ -374,8 +374,10 @@ practice every 64-bit RAM access reads or writes the aligned doubleword
 | STABS32    | `0x9E40_0000` | 2 | rd imm32 | imm32 absolute | — |
 
 The first operand is the **value**, the second the **address**:
-`MEMSET8 C B` stores the low byte of C at `[B]`. Sub-word stores align
-down to their size. Stores write no flags.
+`MEMSET8 C B` stores the low byte of C at `[B]`. A 16-bit store at an
+odd address or a 32-bit store whose address is not a multiple of 4 traps
+(klaussCPU 3508f87; earlier cores aligned it down); byte and 64-bit
+stores take any address. Stores write no flags.
 
 ### 3.8 Branch / call (class 8)
 

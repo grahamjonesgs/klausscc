@@ -204,6 +204,11 @@ access reads 0 or is ignored.
   or memory latency. Time advances by `CYCLES_PER_INSTRUCTION` (2) cycles
   per instruction for the timer, millisecond clock and cycle counter, so
   interrupt timing differs from the board. Architectural effects match.
+  One consequence: a pending interrupt is taken on the first step after
+  `EI` retires. The core reads the committed enable bit (`irq_take`) and
+  abandons an interrupt boundary when a younger `DI` is in flight, so on
+  the board `EI` immediately followed by `DI` may let no interrupt in.
+  Software must not depend on either behaviour.
 - `DELAYR`/`DELAYV` do not wait, but advance modelled time by the
   RTL's spin, value × 8192 cycles (value = rs1[31:0] or imm32). LCD
   instructions do nothing once their encoding has been checked.

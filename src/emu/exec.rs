@@ -577,7 +577,7 @@ impl Cpu {
         if !(size_bytes == 4 && f.field(21, 2) == 0) && misaligned(ea, size_bytes) {
             return Ok(Flow::Stop(StopReason::Misaligned(ea)));
         }
-        let ea = ea & load_align_mask(size_bytes, f.field(21, 2), f.bit(20));
+        let ea = ea & align_mask(size_bytes, f.bit(20));
         let val = if size_bytes == 8 {
             self.read64(ea)
         } else {
@@ -595,7 +595,7 @@ impl Cpu {
         if misaligned(ea, size_bytes) {
             return Ok(Flow::Stop(StopReason::Misaligned(ea)));
         }
-        let ea = ea & store_align_mask(size_bytes, f.bit(20));
+        let ea = ea & align_mask(size_bytes, f.bit(20));
         let data = self.regs[f.rd];
         if size_bytes == 8 {
             self.write64(ea, data);
@@ -990,33 +990,16 @@ const fn bit_field(desc: u32) -> (u64, u64) {
     (start, (1 << len) - 1)
 }
 
-/// Address-alignment mask for a class-6 **load** of `size_bytes` in addressing
-/// `mode` with the `A` (force-align) bit, as the RTL forms the issue address
-/// (`pipeline_core.sv` :1180-1187): `MEMGET32` (`[rs1]`) is unaligned-tolerant
-/// while the other 32-bit loads align to 4; a 64-bit load aligns only with
-/// `A=1`, and otherwise RAM itself serves the aligned doubleword (see
-/// [`Cpu::read64`]).
-const fn load_align_mask(size_bytes: usize, mode: u32, force_align: bool) -> u32 {
-    match size_bytes {
-        2 => !1,
-        4 if mode == 0 => !0, // MEMGET32 — unaligned-tolerant
-        4 => !3,              // LDIDX32
-        8 if force_align => !7,
-        _ => !0, // byte access, and 64-bit with A=0
-    }
-}
-
-/// Address-alignment mask for a class-7 **store** (`pipeline_core.sv`
-/// :1097-1116): sub-word stores align to their width; a 64-bit store aligns
-/// only with `A=1`, and otherwise RAM itself writes the aligned doubleword
-/// (see [`Cpu::write64`]).
-const fn store_align_mask(size_bytes: usize, force_align: bool) -> u32 {
-    match size_bytes {
-        2 => !1,
-        4 => !3, // MEMSET32 / STIDX32
-        8 if force_align => !7,
-        _ => !0,
-    }
+/// Address-alignment mask for a class-6 load or class-7 store of
+/// `size_bytes` with the `A` (force-align) bit, as the RTL forms the issue
+/// address (`pipeline_core.sv` :1097-1116, :1180-1187): a 64-bit access
+/// aligns to 8 only with `A=1`, and with `A=0` RAM itself serves the aligned
+/// doubleword (see [`Cpu::read64`]).  Every other access is used as
+/// computed: a byte or `MEMGET32` access takes any address, and a 16/32-bit
+/// one reaches here only when aligned (a misaligned one has already stopped
+/// with [`StopReason::Misaligned`]).
+const fn align_mask(size_bytes: usize, force_align: bool) -> u32 {
+    if size_bytes == 8 && force_align { !7 } else { !0 }
 }
 
 /// Sign-extend the low `size_bytes` (1/2/4) of `val` to 64 bits; 8 keeps `val`.
