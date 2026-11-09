@@ -2029,3 +2029,699 @@ fn memget32_byte_64bit_and_stack_accesses_never_stop_misaligned() {
     assert_eq!(cpu.regs[4], 0x22, "MEMGET8 at 0x1001");
     assert_eq!(cpu.regs[7], 0x8877_6655_4433_2211, "POP at an unaligned SP");
 }
+
+// ---- MMU stage 1 (klaussCPU MMU_PLAN.md §3-§6) ----------------------------
+
+/// `EVEC` for the stage 1 tests: the handler's address.
+const HANDLER: u32 = 0x400;
+/// The user stack top in the stage 1 tests.
+const USER_SP: u32 = 0x8000;
+/// The kernel stack top in the stage 1 tests.
+const KERNEL_SP: u32 = 0xF000;
+/// `SYSCALL`.
+const SYSCALL: u32 = 0x6C08_0000;
+/// `TRAP`.
+const TRAP: u32 = 0x6C04_0000;
+/// `NOP`.
+const NOP: u32 = 0x6C00_0000;
+/// An illegal word (class F).
+const ILLEGAL_WORD: u32 = 0x7C00_0000;
+/// The SR numbers.
+const SR_STATUS: u32 = 0;
+const SR_EVEC: u32 = 1;
+const SR_ECAUSE: u32 = 2;
+const SR_EADDR: u32 = 3;
+const SR_USP: u32 = 4;
+const SR_SCRATCH0: u32 = 5;
+const SR_TP: u32 = 7;
+const SR_CYCLE: u32 = 8;
+
+/// `MFSR rd, sr`.
+const fn mfsr(rd: u32, sr: u32) -> u32 {
+    0x6C40_0000 | (sr << 12) | (rd << 8)
+}
+
+/// `MTSR sr, rs1`.
+const fn mtsr(sr: u32, rs1: u32) -> u32 {
+    0x6C60_0000 | (sr << 12) | (rs1 << 4)
+}
+
+/// LR.D / LR.W / LR.W.S `rd, [rs1]` from its template.
+const fn lr(template: u32, rd: u32, rs1: u32) -> u32 {
+    template | (rd << 8) | (rs1 << 4)
+}
+
+/// SC.D / SC.W `rd, rs2, [rs1]` from its template.
+const fn sc(template: u32, rd: u32, rs2: u32, rs1: u32) -> u32 {
+    template | (rd << 8) | (rs1 << 4) | rs2
+}
+const LR_D: u32 = 0x5B00_1000;
+const LR_W: u32 = 0x5A00_1000;
+const LR_W_S: u32 = 0x5A80_1000;
+const SC_D: u32 = 0x5F00_1000;
+const SC_W: u32 = 0x5E00_1000;
+
+/// A CPU with `code` at the code base and `handler` at [`HANDLER`], `EVEC`
+/// set to it, in user mode (`user`) on [`USER_SP`] with the kernel SP in
+/// `SP_ALT`, or in supervisor mode on [`KERNEL_SP`].
+fn stage1_cpu(code: &[u32], handler: &[u32], user: bool) -> Cpu {
+    let mut cpu = cpu_with(&image_from_words(code));
+    let bytes: Vec<u8> = handler.iter().flat_map(|w| w.to_le_bytes()).collect();
+    assert!(cpu.debug_write(HANDLER, &bytes));
+    cpu.evec = HANDLER;
+    if user {
+        cpu.um = true;
+        cpu.sp = USER_SP;
+        cpu.sp_alt = KERNEL_SP;
+    } else {
+        cpu.sp = KERNEL_SP;
+        cpu.sp_alt = USER_SP;
+    }
+    cpu
+}
+
+/// Assert `cpu` has just entered the handler for `cause` with `eaddr`, the
+/// frame PC `frame_pc`, from user mode if `from_user`: the frame is on the
+/// kernel stack, the user SP in `SP_ALT`, supervisor mode, DI set.
+fn assert_entered(cpu: &Cpu, cause: Cause, eaddr: u32, frame_pc: u32, from_user: bool) {
+    let what = format!("{cause:?} from {}", if from_user { "user" } else { "supervisor" });
+    assert_eq!(cpu.stop, None, "{what}");
+    assert_eq!(cpu.pc, HANDLER, "{what}: at EVEC");
+    assert_eq!((cpu.ecause, cpu.eaddr), (cause as u8, eaddr), "{what}: ECAUSE/EADDR");
+    assert!(!cpu.um, "{what}: supervisor mode");
+    assert!(cpu.irq_disabled, "{what}: DI set");
+    assert_eq!(cpu.sp, KERNEL_SP - 8, "{what}: the frame is on the kernel stack");
+    assert_eq!(cpu.sp_alt, USER_SP, "{what}: SP_ALT keeps the user SP");
+    let frame = cpu.peek64(KERNEL_SP - 8);
+    assert_eq!(frame as u32, frame_pc, "{what}: frame PC");
+    assert_eq!((frame >> 44) & 1, u64::from(from_user), "{what}: frame PM");
+    assert_eq!((frame >> 43) & 1, 0, "{what}: frame DI (enabled before)");
+    assert_eq!(frame >> 45, 0, "{what}: frame [63:45]");
+}
+
+#[test]
+fn stage1_reset_state_and_cpu_features() {
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    let s = cpu.system_regs();
+    assert_eq!(s, SystemRegs::default(), "supervisor, EVEC 0, no reservation at reset");
+    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x9, "CPU_FEATURES: stage 1 and LR/SC");
+    assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
+}
+
+#[test]
+fn stage1_each_cause_from_supervisor_and_user_mode() {
+    // (code, cause, EADDR, frame PC; None = the cause does not happen in
+    // that mode).  Registers: B = 0x1001 (odd), C = 0xF001_0000 (UART).
+    let setup = [setr(1, 0x1001), setr(2, 0xF001_0000)].concat();
+    let at = CODE_BASE + 16; // the instruction after the setup
+    let cases: [(u32, Cause, u32, u32, bool); 9] = [
+        (ILLEGAL_WORD, Cause::Illegal, ILLEGAL_WORD, at, true),
+        (TRAP, Cause::Trap, TRAP, at, true),
+        (SYSCALL, Cause::Syscall, 0, at + 4, true),
+        (0x5900_0310, Cause::MisalignedLoad, 0x1001, at, true),  // MEMGET16 D [B]
+        (0x5E00_0310, Cause::MisalignedStore, 0x1001, at, true), // MEMSET32 D [B]
+        (lr(LR_W, 3, 1), Cause::MisalignedLoad, 0x1001, at, true),
+        (sc(SC_W, 3, 4, 1), Cause::MisalignedStore, 0x1001, at, true),
+        (lr(LR_D, 3, 2), Cause::AccessLoad, 0xF001_0000, at, true), // LR to MMIO: both modes
+        (sc(SC_D, 3, 4, 2), Cause::AccessStore, 0xF001_0000, at, true),
+    ];
+    for (word, cause, eaddr, frame_pc, _) in cases {
+        for user in [false, true] {
+            let mut code = setup.clone();
+            code.extend([word, HALT]);
+            let mut cpu = stage1_cpu(&code, &[HALT], false);
+            for _ in 0..2 {
+                assert_eq!(cpu.step_one(true), None);
+            }
+            if user {
+                // Into user mode with the setup's registers.
+                cpu.um = true;
+                cpu.sp = USER_SP;
+                cpu.sp_alt = KERNEL_SP;
+            }
+            let regs = cpu.regs;
+            assert_eq!(cpu.step_one(true), None, "{word:08x}");
+            assert_entered(&cpu, cause, eaddr, frame_pc, user);
+            assert_eq!(cpu.regs, regs, "{word:08x}: no register written");
+            assert_eq!(cpu.instret, 2, "{word:08x}: the faulting instruction did not retire");
+        }
+    }
+    // The user-mode-only causes: an MMIO load and store, a privileged
+    // instruction, and the two fetch faults.
+    for (word, cause, eaddr) in [
+        (0x5B10_0320, Cause::AccessLoad, 0xF001_0000),  // MEMGET64 D [C]
+        (0x5F10_0320, Cause::AccessStore, 0xF001_0000), // MEMSET64 D [C]
+        (0x5800_0320, Cause::AccessLoad, 0xF001_0000),  // MEMGET8 D [C]
+        (0x6C06_0300, Cause::Privileged, 0x6C06_0300),  // DI D
+    ] {
+        let mut code = setup.clone();
+        code.extend([word, HALT]);
+        let mut cpu = stage1_cpu(&code, &[HALT], true);
+        for _ in 0..3 {
+            assert_eq!(cpu.step_one(true), None);
+        }
+        assert_entered(&cpu, cause, eaddr, at, true);
+        // The same word in supervisor mode just runs.
+        let mut cpu = stage1_cpu(&code, &[HALT], false);
+        for _ in 0..3 {
+            assert_eq!(cpu.step_one(true), None, "{word:08x}");
+        }
+        assert_eq!(cpu.pc, at + 4, "{word:08x} runs in supervisor mode");
+    }
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], true);
+    cpu.pc = CODE_BASE + 2;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered(&cpu, Cause::MisalignedFetch, CODE_BASE + 2, CODE_BASE + 2, true);
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], true);
+    cpu.pc = 0xF000_0000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered(&cpu, Cause::AccessFetch, 0xF000_0000, 0xF000_0000, true);
+    // In supervisor mode an MMIO PC is outside RAM, as before stage 1.
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], false);
+    cpu.pc = 0xF000_0000;
+    assert_eq!(cpu.step_one(true), Some(StopReason::PcOutOfRange(0xF000_0000)));
+}
+
+#[test]
+fn stage1_every_privileged_instruction_traps_in_user_mode() {
+    let words: [&[u32]; 13] = [
+        &[0x6C06_0300],        // DI D
+        &[0x6C07_0030],        // EI D
+        &[IRET],               // IRET
+        &[HALT],               // HALT
+        &[WAIT],               // WAIT
+        &[0x6C03_0000],        // RESET
+        &[0x6C05_0010],        // DELAYR B
+        &[0xAC05_0000, 1],     // DELAYV 1
+        &[0x7000_0010],        // LCDCMDR B
+        &[0xB100_0000, 0x41],  // LCDDATAV 'A'
+        &[0xB200_0000, 1],     // LCDRST 1
+        &[mfsr(3, SR_EVEC)],   // MFSR D EVEC
+        &[mtsr(SR_STATUS, 3)], // MTSR STATUS D
+    ];
+    for code in words {
+        let mut cpu = stage1_cpu(code, &[HALT], true);
+        let before = cpu.cycles;
+        assert_eq!(cpu.step_one(true), None, "{:08x}", code[0]);
+        assert_entered(&cpu, Cause::Privileged, code[0], CODE_BASE, true);
+        assert!(!cpu.waiting, "{:08x}", code[0]);
+        assert_eq!(cpu.cycles, before + CYCLES_PER_INSTRUCTION, "{:08x}: no DELAY", code[0]);
+    }
+    // ILLEGAL wins over PRIVILEGED: a DI with rs1 set is illegal in either mode.
+    let mut cpu = stage1_cpu(&[0x6C06_0310], &[HALT], true);
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered(&cpu, Cause::Illegal, 0x6C06_0310, CODE_BASE, true);
+}
+
+#[test]
+fn stage1_user_mode_sr_allow_list() {
+    // MFSR STATUS / TP / CYCLE and MTSR TP run in user mode.
+    let code = [
+        setr(1, 0x1234).as_slice(),
+        &[mtsr(SR_TP, 1), mfsr(2, SR_TP), mfsr(3, SR_STATUS), mfsr(4, SR_CYCLE), mfsr(5, SR_CYCLE)],
+    ]
+    .concat();
+    let mut cpu = stage1_cpu(&code, &[HALT], true);
+    for _ in 0..6 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert!(cpu.um);
+    assert_eq!((cpu.tp, cpu.regs[2]), (0x1234, 0x1234), "TP written and read back");
+    assert_eq!(cpu.regs[3], 0b01, "STATUS: UM set, DI clear");
+    assert_eq!(cpu.regs[5] - cpu.regs[4], CYCLES_PER_INSTRUCTION, "CYCLE counts");
+    // The others are PRIVILEGED in user mode and run in supervisor mode.
+    for sr in [SR_EVEC, SR_ECAUSE, SR_EADDR, SR_USP, SR_SCRATCH0, 6] {
+        for word in [mfsr(3, sr), mtsr(sr, 1)] {
+            let mut cpu = stage1_cpu(&[word], &[HALT], true);
+            assert_eq!(cpu.step_one(true), None);
+            assert_entered(&cpu, Cause::Privileged, word, CODE_BASE, true);
+            let mut cpu = stage1_cpu(&[word], &[HALT], false);
+            assert_eq!(cpu.step_one(true), None);
+            assert_eq!(cpu.pc, CODE_BASE + 4, "{word:08x} in supervisor mode");
+        }
+    }
+    // An SR that does not exist, and MTSR to CYCLE, are ILLEGAL in both
+    // modes; so are the reserved fields.
+    for word in [
+        mfsr(3, 9),
+        mtsr(9, 1),
+        mfsr(3, 0x10),
+        mtsr(SR_CYCLE, 1),
+        mfsr(3, SR_TP) | 1,
+        mtsr(SR_TP, 1) | 0x100,
+        mfsr(3, 0) | 1 << 20,
+    ] {
+        for user in [false, true] {
+            let mut cpu = stage1_cpu(&[word], &[HALT], user);
+            assert_eq!(cpu.step_one(true), None, "{word:08x}");
+            assert_eq!((cpu.ecause, cpu.eaddr), (Cause::Illegal as u8, word), "{word:08x}");
+        }
+    }
+}
+
+#[test]
+fn stage1_supervisor_sr_reads_and_writes() {
+    let mut cpu = stage1_cpu(&[HALT], &[HALT], false);
+    for (sr, value, back) in [
+        (SR_EVEC, 0x1237, 0x1234),
+        (SR_ECAUSE, 0x1FF, 0xFF),
+        (SR_EADDR, 0x1_2345_6789, 0x2345_6789),
+        (SR_USP, 0x1_0000_7000, 0x7000),
+        (SR_SCRATCH0, u64::MAX, u64::MAX),
+        (6, 0x55, 0x55),
+        (SR_TP, 1 << 63, 1 << 63),
+        (SR_STATUS, 3, 0),
+    ] {
+        assert!(cpu.sr_write(sr, value), "SR {sr}");
+        assert_eq!(cpu.sr_read(sr), Some(back), "SR {sr}");
+    }
+    assert!(!cpu.sr_write(SR_CYCLE, 0));
+    assert_eq!(cpu.sr_read(9), None);
+    cpu.irq_disabled = true;
+    assert_eq!(cpu.sr_read(SR_STATUS), Some(0b10), "STATUS DI");
+}
+
+#[test]
+fn stage1_faults_on_multi_side_effect_instructions_change_nothing_and_retry() {
+    // Each instruction faults in user mode on the UART (0xF001_0000:
+    // TX_DATA, +8 RX_DATA); the handler fixes up the user state and IRETs,
+    // and the retry runs.  (code, set up the fault, EADDR, cause, fix up)
+    type Fix = fn(&mut Cpu);
+    type Case = (&'static str, Vec<u32>, Fix, u32, Cause, Fix);
+    let cases: [Case; 9] = [
+        (
+            "PUSH",
+            vec![0x6400_0010],
+            |c| c.sp = 0xF001_0008,
+            0xF001_0000,
+            Cause::AccessStore,
+            |c| c.sp_alt = USER_SP,
+        ),
+        (
+            "PUSHV",
+            vec![0xA440_0000, 0x55],
+            |c| c.sp = 0xF001_0008,
+            0xF001_0000,
+            Cause::AccessStore,
+            |c| c.sp_alt = USER_SP,
+        ),
+        (
+            "POP",
+            vec![0x6480_0300],
+            |c| c.sp = 0xF001_0008,
+            0xF001_0008,
+            Cause::AccessLoad,
+            |c| c.sp_alt = USER_SP - 8,
+        ),
+        (
+            "CALL",
+            vec![0xA200_0000, 0x200],
+            |c| c.sp = 0xF001_0008,
+            0xF001_0000,
+            Cause::AccessStore,
+            |c| c.sp_alt = USER_SP,
+        ),
+        (
+            "RET",
+            vec![0x6580_0000],
+            |c| c.sp = 0xF001_0008,
+            0xF001_0008,
+            Cause::AccessLoad,
+            |c| c.sp_alt = USER_SP - 8,
+        ),
+        (
+            "ENTER",
+            vec![0x6600_0002],
+            |c| c.sp = 0xF001_0008,
+            0xF001_0000,
+            Cause::AccessStore,
+            |c| c.sp_alt = USER_SP,
+        ),
+        (
+            "LEAVE",
+            vec![0x6640_0000],
+            |c| c.regs[15] = 0xF001_0008,
+            0xF001_0008,
+            Cause::AccessLoad,
+            |c| c.regs[15] = 0x3000,
+        ),
+        // Both loads are checked first: the frame pointer is RAM-side and
+        // the return address in MMIO.
+        (
+            "LEAVERET",
+            vec![0x6680_0000],
+            |c| c.regs[15] = 0xEFFF_FFF8,
+            0xF000_0000,
+            Cause::AccessLoad,
+            |c| c.regs[15] = 0x3000,
+        ),
+        // MEMGET32 spanning RAM-side and MMIO doublewords: the lowest MMIO byte.
+        (
+            "MEMGET32",
+            vec![0x5A00_0310],
+            |c| c.regs[1] = 0xEFFF_FFFE,
+            0xF000_0000,
+            Cause::AccessLoad,
+            |c| c.regs[1] = 0x3000,
+        ),
+    ];
+    for (name, code, set_up, eaddr, cause, fix) in cases {
+        let mut code = code;
+        code.push(HALT);
+        let mut cpu = stage1_cpu(&code, &[IRET], true);
+        cpu.regs[1] = 0x1111;
+        cpu.regs[3] = 0x3333;
+        cpu.feed_uart_rx(b"x");
+        // A return address and saved R15 for RET / LEAVE / LEAVERET's retry.
+        assert!(cpu.debug_write(0x3000, &0x3100_u64.to_le_bytes()));
+        assert!(cpu.debug_write(0x3008, &u64::from(CODE_BASE + 0x40).to_le_bytes()));
+        assert!(cpu.debug_write(USER_SP - 8, &u64::from(CODE_BASE + 0x40).to_le_bytes()));
+        set_up(&mut cpu);
+        let (regs, user_sp, flags) = (cpu.regs, cpu.sp, cpu.flags);
+        assert_eq!(cpu.step_one(true), None, "{name}");
+        assert_eq!((cpu.ecause, cpu.eaddr, cpu.pc), (cause as u8, eaddr, HANDLER), "{name}");
+        assert_eq!((cpu.regs, cpu.sp_alt, cpu.flags), (regs, user_sp, flags), "{name}: nothing changed");
+        assert_eq!(cpu.sp, KERNEL_SP - 8, "{name}");
+        assert!(cpu.take_uart().is_empty(), "{name}: no UART store");
+        assert_eq!(cpu.uart_rx.len(), 1, "{name}: no UART load");
+        // The handler fixes the user state up and returns to the instruction.
+        fix(&mut cpu);
+        assert_eq!(cpu.step_one(true), None, "{name}: IRET");
+        assert!(cpu.um, "{name}: back in user mode");
+        assert_eq!(
+            (cpu.pc, cpu.sp_alt),
+            (CODE_BASE, KERNEL_SP),
+            "{name}: at the instruction, kernel SP restored"
+        );
+        assert_eq!(cpu.step_one(true), None, "{name}: retry");
+        assert_ne!(cpu.pc, HANDLER, "{name}: the retry ran");
+        assert_eq!(cpu.ecause, cause as u8, "{name}: no second fault");
+    }
+}
+
+#[test]
+fn stage1_syscall_round_trip_to_user_mode() {
+    // The kernel enters user mode with a frame of PM = 1, the user SP in
+    // USP, and IRET; the user SYSCALLs; the handler reads ECAUSE, adds 1 to
+    // A and IRETs back to the instruction after the SYSCALL.
+    let user = CODE_BASE + 0x100;
+    let frame = (1_u64 << 44) | u64::from(user);
+    let mut kernel = Vec::new();
+    kernel.extend(setr(1, HANDLER)); // B = handler
+    kernel.push(mtsr(SR_EVEC, 1));
+    kernel.extend(setr(1, USER_SP));
+    kernel.push(mtsr(SR_USP, 1));
+    kernel.extend([0xE440_0000, frame as u32, (frame >> 32) as u32]); // PUSHV64 frame
+    kernel.push(IRET);
+    let mut code = kernel.clone();
+    code.resize(0x40, NOP);
+    code.extend(setr(0, 41)); // user: A = 41
+    code.push(SYSCALL);
+    code.extend(setr(2, 0x77)); // C = 0x77
+    code.push(0x6100_0000); // JMP.S . (spin)
+    let handler = [mfsr(3, SR_ECAUSE), 0x8820_0000, 1, IRET]; // D = ECAUSE; ADDV A 1
+    let mut cpu = stage1_cpu(&code, &handler, false);
+    cpu.evec = 0;
+    for _ in 0..6 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert!(cpu.um, "IRET with PM = 1 entered user mode");
+    assert_eq!((cpu.pc, cpu.sp, cpu.sp_alt), (user, USER_SP, KERNEL_SP), "on the user stack");
+    assert_eq!(cpu.step_one(true), None); // SETR A
+    assert_eq!(cpu.step_one(true), None); // SYSCALL
+    assert_entered(&cpu, Cause::Syscall, 0, user + 12, true);
+    for _ in 0..3 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert!(cpu.um);
+    assert!(!cpu.irq_disabled, "IRET restored DI");
+    assert_eq!((cpu.pc, cpu.sp, cpu.sp_alt), (user + 12, USER_SP, KERNEL_SP));
+    assert_eq!((cpu.regs[0], cpu.regs[3]), (42, u64::from(Cause::Syscall as u8)));
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.regs[2], 0x77, "the instruction after the SYSCALL ran");
+}
+
+#[test]
+fn stage1_interrupt_in_user_mode_switches_stacks() {
+    // The timer fires while user code spins; the entry pushes the frame on
+    // the kernel stack with PM = 1 and leaves DI and ECAUSE alone; IRET
+    // returns to user mode on the user stack.
+    let mut cpu = stage1_cpu(&[0x6100_0000], &[IRET], true); // JMP.S .
+    cpu.int_vec[0] = HANDLER;
+    cpu.int_mask = 1;
+    cpu.timer_period = 10;
+    cpu.ecause = 0x42;
+    cpu.reservation = Some(0x100);
+    while cpu.pc != HANDLER {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert!(!cpu.um);
+    assert!(!cpu.irq_disabled, "an interrupt leaves DI alone");
+    assert_eq!(cpu.ecause, 0x42, "and ECAUSE");
+    assert_eq!(cpu.reservation, None, "entry clears the reservation");
+    assert_eq!((cpu.sp, cpu.sp_alt), (KERNEL_SP - 8, USER_SP));
+    let frame = cpu.peek64(KERNEL_SP - 8);
+    assert_eq!((frame as u32, (frame >> 44) & 1, (frame >> 39) & 0xF), (CODE_BASE, 1, 1));
+    assert_eq!(cpu.step_one(true), None); // IRET
+    assert!(cpu.um);
+    assert_eq!((cpu.pc, cpu.sp, cpu.sp_alt), (CODE_BASE, USER_SP, KERNEL_SP));
+    // From supervisor mode nothing changes: same stack, PM = 0.
+    let mut cpu = stage1_cpu(&[0x6100_0000], &[IRET], false);
+    cpu.int_vec[0] = HANDLER;
+    cpu.int_mask = 1;
+    cpu.timer_period = 10;
+    while cpu.pc != HANDLER {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert_eq!((cpu.sp, cpu.sp_alt), (KERNEL_SP - 8, USER_SP));
+    assert_eq!((cpu.peek64(KERNEL_SP - 8) >> 44) & 1, 0);
+    assert_eq!(cpu.step_one(true), None);
+    assert!(!cpu.um);
+    assert_eq!(cpu.sp, KERNEL_SP);
+}
+
+#[test]
+fn stage1_evec_zero_parks_as_before() {
+    // With EVEC = 0 every cause stops the CPU as before stage 1, with the
+    // PC on the instruction and nothing entered: ILLEGAL and the new
+    // causes as an illegal instruction, TRAP as a TRAP, a misaligned load
+    // or store as misaligned.
+    let setup = [setr(1, 0x1001), setr(2, 0xF001_0000)].concat();
+    for (word, user, stop) in [
+        (ILLEGAL_WORD, true, StopReason::InvalidOpcode(ILLEGAL_WORD)),
+        (TRAP, true, StopReason::Trap),
+        (SYSCALL, false, StopReason::InvalidOpcode(SYSCALL)),
+        (SYSCALL, true, StopReason::InvalidOpcode(SYSCALL)),
+        (0x5900_0310, true, StopReason::Misaligned(0x1001)),
+        (0x6C06_0300, true, StopReason::InvalidOpcode(0x6C06_0300)), // DI: PRIVILEGED
+        (0x5B10_0320, true, StopReason::InvalidOpcode(0x5B10_0320)), // MMIO load
+        (lr(LR_D, 3, 2), false, StopReason::InvalidOpcode(lr(LR_D, 3, 2))),
+    ] {
+        let mut code = setup.clone();
+        code.extend([word, HALT]);
+        let mut cpu = stage1_cpu(&code, &[HALT], false);
+        cpu.evec = 0;
+        for _ in 0..2 {
+            assert_eq!(cpu.step_one(true), None);
+        }
+        cpu.um = user;
+        let sp = cpu.sp;
+        assert_eq!(cpu.step_one(true), Some(stop), "{word:08x}");
+        assert_eq!(
+            (cpu.pc, cpu.sp, cpu.um, cpu.ecause),
+            (CODE_BASE + 16, sp, user, 0),
+            "{word:08x}: nothing entered"
+        );
+        assert!(cpu.parked_exception().is_some());
+    }
+    // A user-mode fetch fault too.
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], true);
+    cpu.evec = 0;
+    cpu.pc = CODE_BASE + 2;
+    assert!(matches!(cpu.step_one(true), Some(StopReason::InvalidOpcode(_))));
+    assert_eq!(cpu.parked_exception(), Some((Cause::MisalignedFetch, CODE_BASE + 2)));
+}
+
+#[test]
+fn stage1_debugger_halts_on_illegal_trap_misaligned_unless_exc_pass() {
+    let setup = [setr(1, 0x1001)].concat();
+    for (word, stop, cause) in [
+        (ILLEGAL_WORD, StopReason::InvalidOpcode(ILLEGAL_WORD), Cause::Illegal),
+        (TRAP, StopReason::Trap, Cause::Trap),
+        (0x5900_0310, StopReason::Misaligned(0x1001), Cause::MisalignedLoad),
+    ] {
+        let mut code = setup.clone();
+        code.extend([word, HALT]);
+        let mut cpu = stage1_cpu(&code, &[HALT], false);
+        cpu.set_debugger_attached(true);
+        assert_eq!(cpu.step_one(false), None);
+        assert_eq!(cpu.step_one(false), Some(stop), "{word:08x}: debug halt with EVEC set");
+        assert_eq!(cpu.pc, CODE_BASE + 8);
+        // EXC_PASS: the program's handler takes it.
+        cpu.clear_stop();
+        cpu.set_exc_pass(true);
+        assert!(cpu.exc_pass());
+        assert_eq!(cpu.step_one(false), None);
+        assert_eq!((cpu.pc, cpu.ecause), (HANDLER, cause as u8), "{word:08x}");
+    }
+    // SYSCALL and the other new causes are never debug halts.
+    let mut cpu = stage1_cpu(&[SYSCALL], &[HALT], false);
+    cpu.set_debugger_attached(true);
+    assert_eq!(cpu.step_one(false), None);
+    assert_eq!(cpu.pc, HANDLER);
+}
+
+#[test]
+fn stage1_faulting_instruction_retires_no_trace_line() {
+    // SETR B handler ; MTSR EVEC B ; SYSCALL -> handler: HALT.
+    let mut code = setr(1, HANDLER).to_vec();
+    code.extend([mtsr(SR_EVEC, 1), SYSCALL]);
+    let mut img = image_from_words(&code);
+    img.resize(HANDLER as usize + 4, 0);
+    img[HANDLER as usize..].copy_from_slice(&HALT.to_le_bytes());
+    let trace = trace_of(&img);
+    let ops: Vec<&str> = trace.lines().map(|l| l.split(' ').nth(2).unwrap()).collect();
+    assert_eq!(ops, ["op=8bd00100", "op=6c601010", "op=6c010000"], "no line for the SYSCALL");
+    let r = emulate_image(&img, CODE_BASE, 100, None);
+    assert_eq!((r.stop, r.instructions), (StopReason::Halt, 3));
+}
+
+#[test]
+fn stage1_a_handler_that_faults_forever_hits_the_cap() {
+    // EVEC points at an illegal word: each entry faults again.
+    let mut cpu = stage1_cpu(&[ILLEGAL_WORD], &[ILLEGAL_WORD], false);
+    let r = cpu.run(50, None);
+    assert_eq!((r.stop, r.instructions), (StopReason::InstructionCap, 0));
+    assert_eq!(cpu.exc_entries, 50);
+}
+
+/// Run the one instruction `word` in supervisor mode with `regs` and the
+/// reservation `res`, returning the CPU after it.
+fn lr_sc_one(word: u32, regs: &[(usize, u64)], reserved: Option<u32>) -> Cpu {
+    let mut cpu = stage1_cpu(&[word, HALT], &[HALT], false);
+    for &(r, v) in regs {
+        cpu.regs[r] = v;
+    }
+    cpu.reservation = reserved;
+    assert_eq!(cpu.step_one(true), None, "{word:08x}");
+    cpu
+}
+
+#[test]
+fn stage1_lr_sc() {
+    // LR.D reserves; SC.D to the same doubleword stores rs2, rd = 0, and
+    // clears the reservation; ordinary stores leave it.
+    let code = [
+        lr(LR_D, 3, 1),    // D = [B]
+        0x5F10_0420,       // MEMSET64 E [C]: an ordinary store elsewhere
+        sc(SC_D, 6, 5, 1), // G = SC.D F [B]
+        sc(SC_D, 7, 5, 1), // H = SC.D F [B] again: fails
+        HALT,
+    ];
+    let mut cpu = stage1_cpu(&code, &[HALT], true);
+    cpu.regs[1] = 0x2000;
+    cpu.regs[2] = 0x2100;
+    cpu.regs[5] = 0xAAAA_BBBB_CCCC_DDDD;
+    assert!(cpu.debug_write(0x2000, &0x1234_u64.to_le_bytes()));
+    for _ in 0..4 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert_eq!(cpu.regs[3], 0x1234, "LR.D loaded");
+    assert_eq!(cpu.regs[6], 0, "SC.D succeeded after an ordinary store");
+    assert_eq!(cpu.peek64(0x2000), 0xAAAA_BBBB_CCCC_DDDD);
+    assert_eq!(cpu.regs[7], 1, "a second SC fails: the first cleared the reservation");
+    assert_eq!(cpu.reservation, None);
+
+    // LR.W zero-extends, LR.W.S sign-extends; both reserve the doubleword.
+    let mut cpu = stage1_cpu(&[lr(LR_W, 3, 1), lr(LR_W_S, 4, 1)], &[HALT], false);
+    cpu.regs[1] = 0x2004;
+    assert!(cpu.debug_write(0x2004, &0x8000_0001_u32.to_le_bytes()));
+    for _ in 0..2 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert_eq!((cpu.regs[3], cpu.regs[4]), (0x8000_0001, 0xFFFF_FFFF_8000_0001));
+    assert_eq!(cpu.reservation, Some(0x2000 >> 3));
+
+    // SC.W stores the low word; to the other half of the reserved
+    // doubleword it succeeds too.
+    let cpu = lr_sc_one(sc(SC_W, 6, 5, 1), &[(1, 0x2004), (5, 0x1_2345_6789)], Some(0x2000 >> 3));
+    assert_eq!((cpu.regs[6], cpu.peek64(0x2000)), (0, 0x2345_6789_0000_0000));
+    // A different doubleword fails, stores nothing, and clears the reservation.
+    let cpu = lr_sc_one(sc(SC_D, 6, 5, 1), &[(1, 0x2008), (5, 7)], Some(0x2000 >> 3));
+    assert_eq!((cpu.regs[6], cpu.peek64(0x2008), cpu.reservation), (1, 0, None));
+    // No reservation: fails.
+    let cpu = lr_sc_one(sc(SC_D, 6, 5, 1), &[(1, 0x2000), (5, 7), (6, 9)], None);
+    assert_eq!((cpu.regs[6], cpu.peek64(0x2000)), (1, 0));
+    // rd may be rs2: the data is read first.
+    let cpu = lr_sc_one(sc(SC_D, 5, 5, 1), &[(1, 0x2000), (5, 7)], Some(0x2000 >> 3));
+    assert_eq!((cpu.regs[5], cpu.peek64(0x2000)), (0, 7));
+}
+
+#[test]
+fn stage1_lr_sc_faults_keep_the_reservation() {
+    // Misaligned (64-bit too, unlike ordinary 64-bit accesses) and MMIO, in
+    // supervisor mode: nothing stored, rd and the reservation kept.
+    for (word, addr, cause) in [
+        (lr(LR_D, 6, 1), 0x2004, Cause::MisalignedLoad),
+        (lr(LR_W, 6, 1), 0x2002, Cause::MisalignedLoad),
+        (sc(SC_D, 6, 5, 1), 0x2004, Cause::MisalignedStore),
+        (sc(SC_W, 6, 5, 1), 0x2001, Cause::MisalignedStore),
+        (lr(LR_W, 6, 1), 0xF001_0008, Cause::AccessLoad),
+        (sc(SC_W, 6, 5, 1), 0xF001_0000, Cause::AccessStore),
+    ] {
+        let mut cpu = lr_sc_one(word, &[(1, u64::from(addr)), (5, 0x55), (6, 0x66)], Some(addr >> 3));
+        assert_entered(&cpu, cause, addr, CODE_BASE, false);
+        assert_eq!(cpu.reservation, None, "{word:08x}: the entry clears it");
+        assert_eq!(cpu.regs[6], 0x66, "{word:08x}: rd kept");
+        assert_eq!(cpu.take_uart(), [] as [u8; 0]);
+    }
+    // The fault itself leaves the reservation: with EVEC = 0 (no entry to
+    // clear it) a faulting SC parks with it intact.
+    let mut cpu = stage1_cpu(&[sc(SC_D, 6, 5, 1)], &[HALT], false);
+    cpu.evec = 0;
+    cpu.regs[1] = 0x2004;
+    cpu.reservation = Some(0x2000 >> 3);
+    assert_eq!(cpu.step_one(true), Some(StopReason::Misaligned(0x2004)));
+    assert_eq!(cpu.reservation, Some(0x2000 >> 3));
+    // Reserved encodings: SGN on LR.D / SC, A, [19:13], an 8/16-bit size,
+    // rs2 on LR.
+    for word in [
+        LR_D | 1 << 23,
+        SC_D | 1 << 23,
+        LR_W | 1 << 20,
+        LR_W | 1 << 13,
+        0x5800_1000,
+        0x5D00_1000,
+        LR_D | 1,
+    ] {
+        let mut cpu = stage1_cpu(&[word], &[HALT], false);
+        cpu.evec = 0;
+        assert_eq!(cpu.step_one(true), Some(StopReason::InvalidOpcode(word)), "{word:08x}");
+    }
+}
+
+#[test]
+fn stage1_sc_fails_after_an_interrupt_or_iret() {
+    // An interrupt between LR and SC clears the reservation.
+    let mut cpu = stage1_cpu(&[lr(LR_D, 3, 1), sc(SC_D, 6, 5, 1), HALT], &[IRET], true);
+    cpu.regs[1] = 0x2000;
+    assert_eq!(cpu.step_one(true), None);
+    assert!(cpu.reservation.is_some());
+    cpu.int_vec[0] = HANDLER;
+    cpu.int_mask = 1;
+    cpu.timer_pending = true;
+    assert_eq!(cpu.step_one(true), None); // entry
+    assert_eq!(cpu.step_one(true), None); // IRET
+    assert_eq!(cpu.step_one(true), None); // SC.D
+    assert_eq!((cpu.regs[6], cpu.peek64(0x2000)), (1, 0), "SC failed");
+    // IRET alone clears it too.
+    let frame = u64::from(CODE_BASE + 8);
+    let mut cpu = stage1_cpu(&[lr(LR_D, 3, 1), IRET, sc(SC_D, 6, 5, 1)], &[HALT], false);
+    cpu.regs[1] = 0x2000;
+    cpu.sp = KERNEL_SP - 8;
+    assert!(cpu.debug_write(KERNEL_SP - 8, &frame.to_le_bytes()));
+    for _ in 0..3 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert_eq!(cpu.regs[6], 1, "SC after IRET failed");
+}

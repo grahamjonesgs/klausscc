@@ -61,18 +61,21 @@
 //! and its saved layouts, `mmio` models the UART, interrupt controller /
 //! timer and performance counters, `debug` is the debugger's view (registers,
 //! memory, watchpoints, stop reasons) and `trace` writes the per-instruction
-//! trace.
+//! trace, and `system` is MMU stage 1: user mode, exceptions, the system
+//! registers and the LR/SC reservation.
 
 mod debug;
 mod exec;
 mod flags;
 mod mmio;
+mod system;
 #[cfg(test)]
 mod tests;
 mod trace;
 
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
 pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE};
+pub use system::{Cause, SystemRegs};
 
 use crate::layout::is_mmio;
 use flags::Flags;
@@ -100,6 +103,9 @@ const CTX_INT_MASK_SHIFT: u32 = 39;
 /// disabled), so a software-built frame with it clear resumes enabled
 /// (`pipeline_core.sv` IRQ frame push, `IRET` restore).
 const CTX_IRQ_DISABLED_SHIFT: u32 = 43;
+/// Interrupt / exception frame: PM, the mode the entry came from (1 = user;
+/// `MMU_PLAN.md` §3.2), which `IRET` restores.
+const CTX_PREV_MODE_SHIFT: u32 = 44;
 /// Initial stack pointer — top of DDR2, grows down. The loader sets SP near the
 /// top of memory; we use a generous value below the 128 MiB ceiling so PUSH
 /// never wraps. Matches the board's full-descending stack convention.
@@ -141,6 +147,10 @@ struct PerfBase {
 }
 
 /// The architectural machine state.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "independent architectural bits (WAIT, DI, UM, the timer's pending bit) and debugger switches"
+)]
 pub struct Cpu {
     /// General-purpose registers R0..R15 (64-bit).
     regs: [u64; 16],
@@ -193,6 +203,34 @@ pub struct Cpu {
     perf_base: PerfBase,
     /// Parked in `WAIT` until an interrupt source is ready.
     waiting: bool,
+    // ---- MMU stage 1 (`system`) ----
+    /// User mode (`UM`).
+    um: bool,
+    /// The inactive stack pointer: the user SP in supervisor mode, the
+    /// kernel SP in user mode (SR `USP` from supervisor mode).
+    sp_alt: u32,
+    /// `EVEC`: the exception vector; 0 parks on every exception.
+    evec: u32,
+    /// `ECAUSE`.
+    ecause: u8,
+    /// `EADDR`.
+    eaddr: u32,
+    /// `SCRATCH0`, `SCRATCH1`.
+    scratch: [u64; 2],
+    /// `TP`, the thread pointer.
+    tp: u64,
+    /// The LR/SC reservation: `EA[31:3]` of the reserved doubleword.
+    reservation: Option<u32>,
+    /// A debugger is attached (ILLEGAL, TRAP and MISALIGNED_* stop the CPU
+    /// unless `exc_pass`).
+    debugger_attached: bool,
+    /// `EXC_PASS`: with a debugger attached, those causes go to `EVEC`.
+    exc_pass: bool,
+    /// Exceptions entered since reset (they retire no instruction, but
+    /// count against a run's instruction cap).
+    exc_entries: u64,
+    /// The exception the CPU last stopped on instead of entering a handler.
+    parked: Option<(Cause, u32)>,
 }
 
 impl Cpu {
@@ -243,6 +281,18 @@ impl Cpu {
             instret: 0,
             perf_base: PerfBase::default(),
             waiting: false,
+            um: false,
+            sp_alt: 0,
+            evec: 0,
+            ecause: 0,
+            eaddr: 0,
+            scratch: [0; 2],
+            tp: 0,
+            reservation: None,
+            debugger_attached: false,
+            exc_pass: false,
+            exc_entries: 0,
+            parked: None,
         }
     }
 
@@ -272,6 +322,7 @@ impl Cpu {
     /// mutates the UART FIFO.  Instruction/immediate fetch uses `read32` instead,
     /// so this never fires on a code fetch.
     fn read64(&mut self, addr: u32) -> u64 {
+        debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO load at 0x{addr:08X}");
         if is_mmio(addr) {
             self.note_access(addr, 8, Access::Load);
             return self.mmio_read(addr);
@@ -283,6 +334,7 @@ impl Cpu {
 
     /// Read `n` bytes (1/2/4) zero-extended into a u64, little-endian.
     fn read_sub(&mut self, addr: u32, n: usize) -> u64 {
+        debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO load at 0x{addr:08X}");
         self.note_access(addr, n as u32, Access::Load);
         if is_mmio(addr) {
             // MMIO presents its value in the low bits; a sub-word load takes the
@@ -307,6 +359,7 @@ impl Cpu {
     /// `mem_read_write.sv` :610-632, :725-745).  The trace records the address
     /// as issued, as the RTL's `ret_wr_addr` does (`pipeline_core.sv` :1895).
     fn write64(&mut self, addr: u32, val: u64) {
+        debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO store at 0x{addr:08X}");
         if is_mmio(addr) {
             self.note_access(addr, 8, Access::Store);
             self.mmio_write(addr, val);
@@ -326,6 +379,7 @@ impl Cpu {
 
     /// Write the low `n` bytes (1/2/4) at `addr`, little-endian; record write.
     fn write_sub(&mut self, addr: u32, val: u64, n: usize) {
+        debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO store at 0x{addr:08X}");
         // Byte-enable mask placed at the byte-lane within the doubleword, matching
         // the RTL's byte-enable semantics for the trace `be` field.
         self.note_access(addr, n as u32, Access::Store);
@@ -364,7 +418,9 @@ impl Cpu {
     /// One step of the machine: take a ready interrupt (entry is a step of
     /// its own), or wake from / finish a `WAIT`, or retire one instruction,
     /// returning its `(pc, word)` for the trace.  An illegal word stops the
-    /// machine without retiring.  With `allow_irq` false (a
+    /// machine without retiring, and an instruction that raises an
+    /// exception retires nothing either (`MMU_PLAN.md` §7.2).  With
+    /// `allow_irq` false (a
     /// debugger single-step) no interrupt is taken, and a `WAIT` completes as
     /// if woken, leaving the interrupt pending for the next continue.
     fn step_inner(&mut self, allow_irq: bool) -> Option<(u32, u32)> {
@@ -395,18 +451,25 @@ impl Cpu {
             self.waiting = false;
         }
         let pc = self.pc;
+        self.last_write = None;
+        if self.um
+            && let Some((cause, eaddr)) = self.user_fetch_fault(pc)
+        {
+            // MMU stage 1 §3.6: nothing of the instruction is fetched.
+            self.raise(cause, eaddr, self.read32(pc), pc);
+            return None;
+        }
         if (pc as usize) + 4 > self.mem.len() {
             self.stop = Some(StopReason::PcOutOfRange(pc));
             return None;
         }
         let word = self.read32(pc);
-        self.last_write = None;
-        self.execute(word);
-        if matches!(self.stop, Some(StopReason::InvalidOpcode(_) | StopReason::Misaligned(_))) {
+        if !self.execute(word) {
             // An illegal word or a misaligned access parks without retiring:
             // the RTL gives it no trace line (`pipeline_core.sv` WB park,
             // kinds 2 and 5) and `PERF_INSTR` counts only retirements
-            // (`KlaussCPU.sv` :2342-2343).
+            // (`KlaussCPU.sv` :2342-2343).  An exception taken to `EVEC`
+            // retires nothing either (`MMU_PLAN.md` §7.2).
             return None;
         }
         self.instret += 1;
@@ -417,6 +480,8 @@ impl Cpu {
     // ---- main execute loop ---------------------------------------------------
 
     /// Run until HALT / TRAP / cap / fault. Returns the result + trace (if any).
+    /// The cap counts retired instructions and exceptions entered, so a
+    /// handler that faults on its own first instruction still ends.
     ///
     /// When `trace` is `Some`, one line per retired instruction is written to the
     /// sink in the `doc/EMULATOR_ISA_SEMANTICS.md` "Trace format" layout.  The trace is
@@ -425,7 +490,8 @@ impl Cpu {
     /// broken pipe on stdout) stops the trace; the run carries on without it.
     pub fn run(&mut self, max_instructions: u64, mut trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
         let mut count: u64 = 0;
-        while self.stop.is_none() && count < max_instructions {
+        let entries_before = self.exc_entries;
+        while self.stop.is_none() && count + (self.exc_entries - entries_before) < max_instructions {
             if let Some((pc, word)) = self.step_inner(true) {
                 count += 1;
                 if let Some(t) = trace.as_deref_mut()

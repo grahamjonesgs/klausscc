@@ -2,8 +2,12 @@
 //!
 //! [`Cpu::execute`] decodes the fields every class shares into [`Fields`],
 //! dispatches on CLASS, and applies the handler's [`Flow`]: the handlers never
-//! touch the PC themselves, and a reserved encoding is an [`Illegal`] error
-//! that becomes [`StopReason::InvalidOpcode`] in one place.
+//! touch the PC themselves.  A reserved encoding is an [`Illegal`] error and
+//! an MMU stage 1 exception (a privileged instruction in user mode, a
+//! user-mode MMIO access, a misaligned access, TRAP, SYSCALL, ...) a
+//! [`Fault::Exception`]; both reach [`Cpu::raise`] in one place.  A handler
+//! makes every check that can fault before its first side effect, so a
+//! faulting instruction changes nothing (`MMU_PLAN.md` §4.1-§4.2).
 //!
 //! Which encodings are reserved follows the board core's decoder,
 //! `f_decode_raw` in `pipeline_core.sv` (`KlaussCPU` master, lines 388-715):
@@ -12,7 +16,9 @@
 //! that file.
 
 use super::flags::Flags;
-use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, Cpu, StopReason};
+use super::system::{Cause, sr_user_readable, sr_user_writable};
+use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, CTX_PREV_MODE_SHIFT, Cpu, StopReason};
+use crate::layout::is_mmio;
 
 /// The decoded instruction: word 0 plus the fields every class shares
 /// (`doc/ISA_ENCODING_V2.md` §1).  Each handler pulls its own attribute bits
@@ -63,8 +69,28 @@ enum Flow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Illegal;
 
+/// Why an instruction did not execute.  Nothing of it has happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fault {
+    /// A reserved encoding (ECAUSE ILLEGAL).
+    Illegal,
+    /// Any other exception, with its `EADDR`.
+    Exception(Cause, u32),
+}
+
+impl From<Illegal> for Fault {
+    fn from(_: Illegal) -> Self {
+        Self::Illegal
+    }
+}
+
 /// What a class handler returns.
-type Exec = Result<Flow, Illegal>;
+type Exec = Result<Flow, Fault>;
+
+/// The PRIVILEGED exception for the instruction `f` (`EADDR` = its word 0).
+const fn privileged(f: Fields) -> Fault {
+    Fault::Exception(Cause::Privileged, f.word)
+}
 
 /// `DELAYR` / `DELAYV` wait `value << DELAY_SHIFT` cycles (`pipeline_core.sv`
 /// :1622: `dly_max = {value, 13'b0}`).
@@ -185,6 +211,30 @@ impl Cpu {
         (u64::from(hi) << 32) | u64::from(lo)
     }
 
+    /// MMU stage 1 §3.6: in user mode, an access to the bytes `[addr,
+    /// addr + len)` that touches MMIO (`0xF000_0000` up) raises `ACCESS_LOAD`
+    /// or `ACCESS_STORE` with the lowest such byte as `EADDR`.  A 64-bit RAM
+    /// access reaches only the aligned doubleword (see [`Cpu::read64`]), so
+    /// its callers pass `len` 1; only `MEMGET32` can span a doubleword.
+    fn check_user(&self, addr: u32, len: u32, store: bool) -> Result<(), Fault> {
+        if !self.um {
+            return Ok(());
+        }
+        let last = addr.wrapping_add(len - 1);
+        let first_mmio = if is_mmio(addr) {
+            Some(addr)
+        } else if last < addr || is_mmio(last) {
+            // Crosses into MMIO (0xF000_0000 is doubleword aligned).
+            Some(0xF000_0000)
+        } else {
+            None
+        };
+        match first_mmio {
+            Some(at) => Err(Fault::Exception(if store { Cause::AccessStore } else { Cause::AccessLoad }, at)),
+            None => Ok(()),
+        }
+    }
+
     /// Push a doubleword (SP grows down).
     pub(super) fn push(&mut self, value: u64) {
         self.sp = self.sp.wrapping_sub(8);
@@ -203,12 +253,14 @@ impl Cpu {
     /// The word is decoded straight from its bit fields (`doc/ISA_ENCODING_V2.md` §1):
     /// LEN gives the instruction length, CLASS selects the handler, and each
     /// handler pulls its own attribute bits from `[25:16]`.
-    pub(super) fn execute(&mut self, word: u32) {
+    ///
+    /// Returns whether the instruction retired; one that raised an
+    /// exception did not ([`Cpu::raise`]).
+    pub(super) fn execute(&mut self, word: u32) -> bool {
         let len = word >> 30;
         if len == 0 {
             // LEN=00 is illegal — this is how a stale v1 binary fails fast.
-            self.stop = Some(StopReason::InvalidOpcode(word));
-            return;
+            return self.raise(Cause::Illegal, word, word, self.pc.wrapping_add(4));
         }
         // ISA v3 short 1-word forms carry their immediate in word 0 instead;
         // `short_imm` returns it already extended/scaled to the 32-bit value
@@ -235,16 +287,19 @@ impl Cpu {
             0x9 => self.exec_stack(f),
             0xA => self.exec_muldiv(f),
             0xB => self.exec_system(f),
-            0xC => exec_lcd(f),
+            0xC => self.exec_lcd(f),
             0xD if len <= 2 => self.exec_fused_branch(f),
-            _ => Err(Illegal),
+            _ => Err(Fault::Illegal),
         };
         match flow {
             Ok(Flow::Next) => self.pc = f.next,
             Ok(Flow::Jump(target)) => self.pc = target,
             Ok(Flow::Stop(reason)) => self.stop = Some(reason),
-            Err(Illegal) => self.stop = Some(StopReason::InvalidOpcode(word)),
+            // ECAUSE ILLEGAL: EADDR is the instruction word.
+            Err(Fault::Illegal) => return self.raise(Cause::Illegal, word, word, f.next),
+            Err(Fault::Exception(cause, eaddr)) => return self.raise(cause, eaddr, word, f.next),
         }
+        true
     }
 
     /// CMPRR / CMPRV flag computation.
@@ -280,7 +335,7 @@ impl Cpu {
             8 => (a as i64).max(b as i64) as u64, // MAXR
             9 => a.min(b),                        // MINUR (unsigned)
             10 => a.max(b),                       // MAXUR
-            _ => return Err(Illegal),
+            _ => return Err(Fault::Illegal),
         };
         // v3 D3: W [19] on ADD/SUB — result = sext of the low 32 bits; Z
         // follows the W result (S/C/V are the 64-bit operation's).
@@ -334,7 +389,7 @@ impl Cpu {
             6 => a ^ imm,                                   // XORV
             14 => u64::from(self.pc.wrapping_add(f.imm32)), // LEAPC: rd = PC + imm32
             15 => imm,                                      // MOV: SETR (sign- or zero-extended per SGN)
-            _ => return Err(Illegal),
+            _ => return Err(Fault::Illegal),
         };
         Ok(Flow::Next)
     }
@@ -472,7 +527,7 @@ impl Cpu {
                     self.write_z(rd, bit, set_z);
                 }
             }
-            _ => return Err(Illegal),
+            _ => return Err(Fault::Illegal),
         }
         Ok(Flow::Next)
     }
@@ -501,7 +556,7 @@ impl Cpu {
                 let clear = !(mask << start) & 0xFFFF_FFFF;
                 self.regs[rd] = (a & clear) | (field & 0xFFFF_FFFF);
             }
-            _ => return Err(Illegal),
+            _ => return Err(Fault::Illegal),
         }
         Ok(Flow::Next)
     }
@@ -560,13 +615,16 @@ impl Cpu {
                 legal(set_z)?;
                 self.regs[rd] = self.sub_flags(a, 1, 0);
             }
-            _ => return Err(Illegal),
+            _ => return Err(Fault::Illegal),
         }
         Ok(Flow::Next)
     }
 
     /// Class 6 — loads: `rd = ext(mem[EA])`.
     fn exec_load(&mut self, f: Fields) -> Exec {
+        if is_lr_sc(f) {
+            return self.exec_lr(f);
+        }
         mem_legal(f, false)?;
         // MEMGET32 ([rs1], 32-bit) has no sign-extending form (:559-560).
         legal(!(f.field(24, 2) == 2 && f.field(21, 2) == 0 && f.bit(23)))?;
@@ -574,10 +632,13 @@ impl Cpu {
         let ea = self.ea(f);
         // MEMGET32 ([rs1], 32-bit) is unaligned-tolerant; every other 16/32-bit
         // load traps on a misaligned address.
+        // The misaligned check comes first, as in the RTL (EX->MEM, before
+        // the MEM-stage access check, MMU_PLAN §7.1).
         if !(size_bytes == 4 && f.field(21, 2) == 0) && misaligned(ea, size_bytes) {
-            return Ok(Flow::Stop(StopReason::Misaligned(ea)));
+            return Err(Fault::Exception(Cause::MisalignedLoad, ea));
         }
         let ea = ea & align_mask(size_bytes, f.bit(20));
+        self.check_user(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, false)?;
         let val = if size_bytes == 8 {
             self.read64(ea)
         } else {
@@ -589,19 +650,65 @@ impl Cpu {
 
     /// Class 7 — stores: `mem[EA] = reg[rd]` (rd field is the data source).
     fn exec_store(&mut self, f: Fields) -> Exec {
+        if is_lr_sc(f) {
+            return self.exec_sc(f);
+        }
         mem_legal(f, true)?;
         let size_bytes = 1_usize << f.field(24, 2);
         let ea = self.ea(f);
         if misaligned(ea, size_bytes) {
-            return Ok(Flow::Stop(StopReason::Misaligned(ea)));
+            return Err(Fault::Exception(Cause::MisalignedStore, ea));
         }
         let ea = ea & align_mask(size_bytes, f.bit(20));
+        self.check_user(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, true)?;
         let data = self.regs[f.rd];
         if size_bytes == 8 {
             self.write64(ea, data);
         } else {
             self.write_sub(ea, data, size_bytes);
         }
+        Ok(Flow::Next)
+    }
+
+    /// MMU stage 1 LR.D / LR.W / LR.W.S (`MMU_PLAN.md` §5.1): `rd =
+    /// mem[rs1]` (LR.W zero-extended, LR.W.S sign-extended), and reserve its
+    /// doubleword.  `[19:13]`, A `[20]` and rs2 are zero; SIZE 64 with SGN
+    /// clear, or SIZE 32.
+    fn exec_lr(&mut self, f: Fields) -> Exec {
+        let size = f.field(24, 2);
+        legal(f.field(13, 7) == 0 && !f.bit(20) && f.rs2 == 0 && (size == 2 || (size == 3 && !f.bit(23))))?;
+        let bytes = if size == 3 { 8 } else { 4 };
+        let ea = self.regs[f.rs1] as u32;
+        atomic_check(ea, bytes, false)?;
+        let val = if bytes == 8 { self.read64(ea) } else { self.read_sub(ea, 4) };
+        self.regs[f.rd] = if f.bit(23) { sign_extend(val, 4) } else { val };
+        self.reservation = Some(ea >> 3);
+        Ok(Flow::Next)
+    }
+
+    /// MMU stage 1 SC.D / SC.W (`MMU_PLAN.md` §5.1): if the reservation is
+    /// valid and on this doubleword, store rs2 (SC.W its low 32 bits) at
+    /// rs1 and set rd = 0; otherwise store nothing and set rd = 1.  Either
+    /// way the reservation is cleared; a faulting SC leaves it, and rd, as
+    /// they were.  `[19:13]`, A `[20]` and SGN `[23]` are zero; SIZE 64 or
+    /// 32.
+    fn exec_sc(&mut self, f: Fields) -> Exec {
+        let size = f.field(24, 2);
+        legal(f.field(13, 7) == 0 && !f.bit(20) && !f.bit(23) && size >= 2)?;
+        let bytes = if size == 3 { 8 } else { 4 };
+        let ea = self.regs[f.rs1] as u32;
+        atomic_check(ea, bytes, true)?;
+        let data = self.regs[f.rs2];
+        let reserved = self.reservation == Some(ea >> 3);
+        if reserved {
+            if bytes == 8 {
+                self.write64(ea, data);
+            } else {
+                self.write_sub(ea, data, 4);
+            }
+        }
+        self.regs[f.rd] = u64::from(!reserved);
+        self.reservation = None;
         Ok(Flow::Next)
     }
 
@@ -646,6 +753,7 @@ impl Cpu {
         };
         if link {
             // Push the (zero-extended) return address = the fall-through PC.
+            self.check_user(self.sp.wrapping_sub(8), 1, true)?;
             self.push(u64::from(f.next));
         }
         Ok(Flow::Jump(target))
@@ -680,6 +788,7 @@ impl Cpu {
             (1, 8) => {
                 // v3 C: ENTER N — push R15; R15 = SP; SP -= 8*N  (N = [21:0],
                 // any value, :587).
+                self.check_user(self.sp.wrapping_sub(8), 1, true)?;
                 self.push(self.regs[15]);
                 self.regs[15] = u64::from(self.sp);
                 self.sp = self.sp.wrapping_sub(f.field(0, 22) << 3);
@@ -688,6 +797,7 @@ impl Cpu {
                 // v3 C: LEAVE — SP = R15; pop R15 ([21:0] = 0, :591).
                 legal(f.field(0, 22) == 0)?;
                 let fp = self.regs[15] as u32;
+                self.check_user(fp, 1, false)?;
                 self.regs[15] = self.read64(fp);
                 self.sp = fp.wrapping_add(8);
             }
@@ -696,6 +806,10 @@ impl Cpu {
                 // ([21:0] = 0, :595).
                 legal(f.field(0, 22) == 0)?;
                 let fp = self.regs[15] as u32;
+                // Both loads are checked before either happens; EADDR is
+                // the lower faulting one (MMU_PLAN §4.1).
+                self.check_user(fp, 1, false)?;
+                self.check_user(fp.wrapping_add(8), 1, false)?;
                 self.regs[15] = self.read64(fp);
                 let ra = self.read64(fp.wrapping_add(8));
                 self.sp = fp.wrapping_add(16);
@@ -715,9 +829,17 @@ impl Cpu {
             (1, 0 | 4) => (false, true),                        // PUSH, SETSP
             (1, 2 | 3) => (true, false),                        // POP, GETSP
             (1, 6 | 7) | (2, 1 | 5) | (3, 1) => (false, false), // RET, IRET, PUSHV, ADDSP, PUSHV64
-            _ => return Err(Illegal),
+            _ => return Err(Fault::Illegal),
         };
         legal(f.rs2 == 0 && (rd || f.rd == 0) && (rs1 || f.rs1 == 0))?;
+        // MMU stage 1: the stack accesses are checked in user mode (pushes
+        // are stores, pops loads), and IRET is privileged.
+        match op {
+            0 | 1 => self.check_user(self.sp.wrapping_sub(8), 1, true)?,
+            2 | 6 => self.check_user(self.sp, 1, false)?,
+            7 if self.um => return Err(privileged(f)),
+            _ => {}
+        }
         match op {
             0 => self.push(self.regs[f.rs1]), // PUSH rs1
             // PUSHI: PUSHV (2-word, zero-ext imm32) or PUSHV64 (3-word, imm64).
@@ -740,11 +862,21 @@ impl Cpu {
     /// The 7-bit saved word is `{Z,E,C,V,S,L,U}` (bit38→Z … bit32→U), but only the
     /// unified `Z/S/C/V` are consumed (`doc/ISA_ENCODING_V2.md` §7.4); the derived `E`(bit37)/`L`(bit33)/
     /// `U`(bit32) bits are ignored and regenerate from `Z/S/C/V` on read.
+    ///
+    /// MMU stage 1 (`MMU_PLAN.md` §3.4): `UM` = PM `[44]`, and with PM set
+    /// the stacks swap after the pop, so the SP is the user SP and `SP_ALT`
+    /// the kernel SP just above the popped frame.  The LR/SC reservation is
+    /// cleared.
     fn iret(&mut self) -> Flow {
         let ctx = self.pop();
         self.flags = Flags::from_ctx((ctx >> CTX_FLAGS_SHIFT) as u8 & 0x7F);
         self.int_mask = ((ctx >> CTX_INT_MASK_SHIFT) & 0xF) as u8;
         self.irq_disabled = (ctx >> CTX_IRQ_DISABLED_SHIFT) & 1 != 0;
+        self.reservation = None;
+        if (ctx >> CTX_PREV_MODE_SHIFT) & 1 != 0 {
+            std::mem::swap(&mut self.sp, &mut self.sp_alt);
+            self.um = true;
+        }
         Flow::Jump(ctx as u32)
     }
 
@@ -816,7 +948,7 @@ impl Cpu {
                     self.regs[rd] = self.with_z(r);
                 }
             }
-            _ => return Err(Illegal),
+            _ => return Err(Fault::Illegal),
         }
         Ok(Flow::Next)
     }
@@ -839,18 +971,27 @@ impl Cpu {
         self.regs[rd] = self.with_z(r);
     }
 
-    /// Class B — system: NOP / HALT / WAIT / RESET / TRAP / DELAY, and DI / EI.
+    /// Class B — system: NOP / HALT / WAIT / RESET / TRAP / DELAY, DI / EI,
+    /// and MMU stage 1's SYSCALL and MFSR / MTSR.  In user mode everything
+    /// but NOP, TRAP and SYSCALL (and the user's SRs) is PRIVILEGED.
     fn exec_system(&mut self, f: Fields) -> Exec {
+        if f.field(22, 4) == 1 {
+            return self.exec_sr(f);
+        }
         if f.len == 1 && f.field(17, 9) == 3 {
             // hw-proposals 7a, OP [21:16] 6 / 7 with [25:22], [15:12] and rs2
             // zero: DI rd (rs1 = 0) sets rd = the old enable bit and
             // disables; EI rs1 (rd = 0) sets enable = rs1[0].
-            legal(f.field(12, 4) == 0 && f.rs2 == 0)?;
-            if f.bit(16) {
-                legal(f.rd == 0)?;
+            // The decode checks come first: an illegal word is ILLEGAL in
+            // either mode, a legal one PRIVILEGED in user mode.
+            let ei = f.bit(16);
+            legal(f.field(12, 4) == 0 && f.rs2 == 0 && if ei { f.rd == 0 } else { f.rs1 == 0 })?;
+            if self.um {
+                return Err(privileged(f));
+            }
+            if ei {
                 self.irq_disabled = self.regs[f.rs1] & 1 == 0;
             } else {
-                legal(f.rs1 == 0)?;
                 self.regs[f.rd] = u64::from(!self.irq_disabled);
                 self.irq_disabled = true;
             }
@@ -861,6 +1002,10 @@ impl Cpu {
         let op = f.field(16, 6);
         // rs1 is used only by DELAYR (:675-684).
         legal(f.rs1 == 0 || (f.len == 1 && op == 5))?;
+        // MMU stage 1 §3.5: HALT, WAIT, RESET and DELAY are privileged.
+        if self.um && matches!((f.len, op), (1, 1..=3) | (1 | 2, 5)) {
+            return Err(privileged(f));
+        }
         Ok(match (f.len, op) {
             (1, 0) => Flow::Next, // NOP
             (1 | 2, 5) => {
@@ -880,28 +1025,87 @@ impl Cpu {
                 Flow::Next
             }
             (1, 3) => Flow::Jump(0x4), // RESET → PC = 0x4
-            (1, 4) => Flow::Stop(StopReason::Trap),
-            _ => return Err(Illegal),
+            // TRAP and SYSCALL raise their exception in either mode; with
+            // EVEC = 0 a TRAP stops the CPU as before stage 1.
+            (1, 4) => return Err(Fault::Exception(Cause::Trap, f.word)),
+            (1, 8) => return Err(Fault::Exception(Cause::Syscall, 0)),
+            _ => return Err(Fault::Illegal),
         })
+    }
+
+    /// MMU stage 1 `MFSR rd, sr` (`[21]` = 0) and `MTSR sr, rs1` (`[21]` =
+    /// 1), `[25:22]` = 1, sr in `[19:12]` (`MMU_PLAN.md` §5, §6.1).  One
+    /// word with `[20]` zero; MFSR has `[7:0]` zero, MTSR rd and rs2.  An
+    /// SR that does not exist, and MTSR to `CYCLE`, are ILLEGAL; in user
+    /// mode only `STATUS`, `TP` and `CYCLE` may be read and `TP` written,
+    /// and the rest are PRIVILEGED.  MTSR serializes on the board, which
+    /// the emulator, one instruction at a time, needs nothing for.
+    fn exec_sr(&mut self, f: Fields) -> Exec {
+        let n = f.field(12, 8);
+        if f.bit(21) {
+            legal(f.len == 1 && !f.bit(20) && f.rd == 0 && f.rs2 == 0)?;
+            // MMU-SPEC-Q: §3.5 makes MTSR of any SR but TP PRIVILEGED in
+            // user mode, and §6.1 makes MTSR to CYCLE (and to an SR that does
+            // not exist) ILLEGAL.  Here ILLEGAL wins in both modes: it is a
+            // property of the encoding, decided before the mode is looked at.
+            legal(self.sr_read(n).is_some() && n != super::system::sr::CYCLE)?;
+            if self.um && !sr_user_writable(n) {
+                return Err(privileged(f));
+            }
+            let value = self.regs[f.rs1];
+            let written = self.sr_write(n, value);
+            debug_assert!(written, "SR {n} exists and is writable");
+        } else {
+            legal(f.len == 1 && !f.bit(20) && f.field(0, 8) == 0)?;
+            let value = self.sr_read(n).ok_or(Illegal)?;
+            if self.um && !sr_user_readable(n) {
+                return Err(privileged(f));
+            }
+            self.regs[f.rd] = value;
+        }
+        Ok(Flow::Next)
+    }
+
+    /// Class C — the SPI LCD port: `LCDCMDR`/`LCDDATAR` (1 word, rs1),
+    /// `LCDCMDV`/`LCDDATAV`/`LCDRST` (2 words, imm32).  There is no LCD model, so
+    /// a legal word does nothing; the decode checks are the RTL's (:698-711).
+    /// All are privileged in user mode (MMU stage 1 §3.5).
+    fn exec_lcd(&self, f: Fields) -> Exec {
+        let op = f.field(24, 2);
+        legal(
+            f.field(12, 12) == 0
+                && f.rd == 0
+                && f.rs2 == 0
+                && match f.len {
+                    1 => op <= 1,
+                    2 => f.rs1 == 0 && op <= 2,
+                    _ => false,
+                },
+        )?;
+        if self.um {
+            return Err(privileged(f));
+        }
+        Ok(Flow::Next)
     }
 }
 
-/// Class C — the SPI LCD port: `LCDCMDR`/`LCDDATAR` (1 word, rs1),
-/// `LCDCMDV`/`LCDDATAV`/`LCDRST` (2 words, imm32).  There is no LCD model, so
-/// a legal word does nothing; the decode checks are the RTL's (:698-711).
-fn exec_lcd(f: Fields) -> Exec {
-    let op = f.field(24, 2);
-    legal(
-        f.field(12, 12) == 0
-            && f.rd == 0
-            && f.rs2 == 0
-            && match f.len {
-                1 => op <= 1,
-                2 => f.rs1 == 0 && op <= 2,
-                _ => false,
-            },
-    )?;
-    Ok(Flow::Next)
+/// Whether `f` is an MMU stage 1 LR or SC: class 6 / 7, one word, MODE 00
+/// and `[12]` set, which no other load or store has (`MMU_PLAN.md` §5.1).
+const fn is_lr_sc(f: Fields) -> bool {
+    f.len == 1 && f.field(21, 2) == 0 && f.bit(12)
+}
+
+/// The LR/SC address checks (`MMU_PLAN.md` §5.1), in either mode: an
+/// address not naturally aligned (4 or 8, 64-bit too) is
+/// `MISALIGNED_LOAD/STORE`, and then one in MMIO is `ACCESS_LOAD/STORE`.
+const fn atomic_check(ea: u32, bytes: u32, store: bool) -> Result<(), Fault> {
+    if ea & (bytes - 1) != 0 {
+        return Err(Fault::Exception(if store { Cause::MisalignedStore } else { Cause::MisalignedLoad }, ea));
+    }
+    if is_mmio(ea) {
+        return Err(Fault::Exception(if store { Cause::AccessStore } else { Cause::AccessLoad }, ea));
+    }
+    Ok(())
 }
 
 /// The load / store decode checks shared by classes 6 and 7 (:547-554): the

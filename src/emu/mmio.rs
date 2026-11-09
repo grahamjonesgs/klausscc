@@ -1,7 +1,8 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
 //! the performance counters.
 
-use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, CYCLES_PER_MS, Cpu, PerfBase};
+use super::system::CPU_FEATURES_VALUE;
+use super::{CYCLES_PER_MS, Cpu, PerfBase};
 
 /// Interrupt controller / timer device select (`addr[27:16]`).
 const IRQ_DEV_SELECT: u32 = 0x00F;
@@ -23,6 +24,9 @@ const TIMER_PERIOD: u32 = 0x0030;
 const TIMER_COUNT: u32 = 0x0038;
 /// The free-running millisecond clock (read-only).
 const MS_CLOCK: u32 = 0x0040;
+/// `CPU_FEATURES` (read-only, `MMU_PLAN.md` §6.3): which of the MMU stages
+/// and LR/SC the core has.  Older bitstreams read 0 here.
+const CPU_FEATURES: u32 = 0x0048;
 
 // Performance-counter register offsets (`addr[15:0]`).
 /// `PERF_CTRL`: writing bit 0 clears the counters.
@@ -243,6 +247,7 @@ impl Cpu {
             TIMER_PERIOD => u64::from(self.timer_period),
             TIMER_COUNT => u64::from(self.timer_count),
             MS_CLOCK => self.cycles / CYCLES_PER_MS,
+            CPU_FEATURES => CPU_FEATURES_VALUE,
             _ => 0,
         }
     }
@@ -292,18 +297,15 @@ impl Cpu {
 
     /// Interrupt entry (`pipeline_core.sv` IRQ sequencer): push the context
     /// word at SP-8, mask the source, acknowledge it, jump to its vector.
+    /// From user mode the frame goes on the kernel stack, with PM set
+    /// (`MMU_PLAN.md` §3.3, §4.5); DI and `ECAUSE` are left alone.
     pub(super) fn take_irq(&mut self, src: usize) {
-        let ctx = (u64::from(self.irq_disabled) << CTX_IRQ_DISABLED_SHIFT)
-            | (u64::from(self.int_mask) << CTX_INT_MASK_SHIFT)
-            | (u64::from(self.flags.to_ctx()) << CTX_FLAGS_SHIFT)
-            | u64::from(self.pc);
-        self.push(ctx);
+        self.enter(self.pc);
         self.int_mask &= !(1 << src);
         if src == 0 {
             self.timer_pending = false;
         }
         self.pc = self.int_vec[src];
-        self.waiting = false;
     }
 
     /// Interrupt controller and timer state.
