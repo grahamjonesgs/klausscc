@@ -57,6 +57,15 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
     }
 }
 
+/// Scripted UART input for `--emulate` (`--uart-in`, `--uart-prompt`).
+#[derive(Debug, Default)]
+pub(crate) struct UartInput {
+    /// The bytes to type (empty: no input).
+    pub(crate) bytes: Vec<u8>,
+    /// Type each line only after the program prints this (empty: don't wait).
+    pub(crate) prompt: Vec<u8>,
+}
+
 /// Run `image` on the emulator and report the run (`--emulate`).
 ///
 /// The program starts with the UART transmitter idle, as one loaded onto the
@@ -71,7 +80,7 @@ fn emulate_and_report(
     trace_file: Option<&str>,
     max_instructions: u64,
     mpu: bool,
-    uart_in: &[u8],
+    uart_in: &UartInput,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     let mut trace_writer = open_trace_writer(trace_file, msg_list)?;
@@ -80,7 +89,8 @@ fn emulate_and_report(
         image.entry,
         max_instructions,
         mpu,
-        uart_in,
+        &uart_in.bytes,
+        &uart_in.prompt,
         trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
     );
     finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
@@ -119,7 +129,7 @@ pub(crate) fn run_emulate(
     trace_file: Option<&str>,
     max_instructions: u64,
     mpu: bool,
-    uart_in: &[u8],
+    uart_in: &UartInput,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     if msg_list.has_errors() {
@@ -149,7 +159,7 @@ pub(crate) fn run_emulate_elf(
     trace_file: Option<&str>,
     max_instructions: u64,
     mpu: bool,
-    uart_in: &[u8],
+    uart_in: &UartInput,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     let binary_path = input.path;

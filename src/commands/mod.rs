@@ -16,7 +16,7 @@ mod gdb;
 mod load;
 mod test_runner;
 
-pub(crate) use emulate::{run_emulate, run_emulate_elf, run_emulate_test};
+pub(crate) use emulate::{UartInput, run_emulate, run_emulate_elf, run_emulate_test};
 #[cfg(not(feature = "board"))]
 pub(crate) use gdb::board_unsupported;
 pub(crate) use gdb::run_gdbserver;

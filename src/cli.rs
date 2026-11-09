@@ -183,9 +183,13 @@ pub(crate) struct Cli {
     #[arg(long, conflicts_with = "board")]
     pub(crate) mpu: bool,
 
-    /// Type the bytes of this file into the emulated UART receiver, one at a time whenever the receive FIFO is empty (with a short gap between bytes), like keyboard input; for scripted sessions with programs that read the console. For --emulate
+    /// Type the bytes of this file into the emulated UART receiver, one at a time whenever the receive FIFO has room (with a short gap between bytes), like keyboard input; for scripted sessions with programs that read the console. For --emulate
     #[arg(long, value_name = "FILE", requires = "emulate")]
     pub(crate) uart_in: Option<PathBuf>,
+
+    /// With --uart-in: type each line (the first one too) only once the program has printed this text since the previous line, e.g. a shell prompt, so the session reads as if typed at the prompt
+    #[arg(long, value_name = "TEXT", requires = "uart_in")]
+    pub(crate) uart_prompt: Option<String>,
 }
 
 /// What an `-i` input file holds, judged by its extension (case-insensitive).
@@ -709,6 +713,12 @@ mod tests {
         let cli = parse(&["-i", "prog.elf", "--emulate", "--uart-in", "keys.txt"]).unwrap();
         assert_eq!(cli.uart_in, Some(PathBuf::from("keys.txt")));
         assert!(parse(&["-i", "prog.elf", "--uart-in", "keys.txt"]).is_err(), "--uart-in needs --emulate");
+        let cli = parse(&["-i", "prog.elf", "--emulate", "--uart-in", "k", "--uart-prompt", "$ "]).unwrap();
+        assert_eq!(cli.uart_prompt.as_deref(), Some("$ "));
+        assert!(
+            parse(&["-i", "prog.elf", "--emulate", "--uart-prompt", "$ "]).is_err(),
+            "--uart-prompt needs --uart-in"
+        );
     }
 
     #[test]

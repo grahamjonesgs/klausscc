@@ -178,11 +178,16 @@ pub struct Cpu {
     /// Empty unless a caller feeds it via [`Cpu::feed_uart_rx`].
     uart_rx: VecDeque<u8>,
     /// Scripted UART input (`--uart-in`): bytes not yet in `uart_rx`.  One
-    /// moves into the empty FIFO every [`UART_SCRIPT_GAP`] instructions, so
-    /// a polled reader sees them arrive like typed input.
+    /// moves into the FIFO, when it has room, every [`UART_SCRIPT_GAP`]
+    /// instructions, so a polled reader sees them arrive like typed input.
     uart_script: VecDeque<u8>,
     /// Instructions left before the next scripted byte may move.
     uart_script_wait: u64,
+    /// `--uart-prompt`: the next scripted line waits until the program
+    /// prints this (after the previous line's newline, or from the start).
+    uart_script_prompt: Vec<u8>,
+    /// Where in `uart` to look for the prompt, while a line is waiting.
+    uart_script_waiting_from: Option<usize>,
     /// Why execution stopped, once it has.  A HALT is final; the other
     /// reasons can be cleared by a debugger ([`Cpu::clear_stop`]).
     stop: Option<StopReason>,
@@ -305,6 +310,8 @@ impl Cpu {
             uart_rx: VecDeque::new(),
             uart_script: VecDeque::new(),
             uart_script_wait: 0,
+            uart_script_prompt: Vec::new(),
+            uart_script_waiting_from: None,
             stop: None,
             last_write: None,
             watches: Vec::new(),
@@ -585,11 +592,12 @@ impl Cpu {
 /// `mpu` gives the CPU the stage 2 MPU ([`Cpu::set_has_mpu`], `--mpu`).
 #[must_use]
 pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, mpu: bool, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
-    emulate_image_input(image, entry, max_instructions, mpu, &[], trace)
+    emulate_image_input(image, entry, max_instructions, mpu, &[], &[], trace)
 }
 
 /// [`emulate_image`] with scripted UART input (`--uart-in`): `uart_in` is
-/// typed into the UART receiver a byte at a time ([`Cpu::set_uart_script`]).
+/// typed into the UART receiver a byte at a time, each line after the
+/// program prints `uart_prompt` if that isn't empty ([`Cpu::set_uart_script`]).
 #[must_use]
 pub fn emulate_image_input(
     image: &[u8],
@@ -597,10 +605,11 @@ pub fn emulate_image_input(
     max_instructions: u64,
     mpu: bool,
     uart_in: &[u8],
+    uart_prompt: &[u8],
     trace: Option<&mut dyn std::io::Write>,
 ) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
     cpu.set_has_mpu(mpu);
-    cpu.set_uart_script(uart_in);
+    cpu.set_uart_script(uart_in, uart_prompt);
     cpu.run(max_instructions, trace)
 }

@@ -4132,20 +4132,46 @@ fn tlb_len00_word_at_a_page_end_is_illegal_not_a_next_page_fault() {
 }
 
 #[test]
-fn uart_script_types_one_byte_at_a_time_into_an_empty_fifo() {
-    // JMP.S . forever; the script moves a byte into the RX FIFO only when it
-    // is empty and UART_SCRIPT_GAP instructions have passed (--uart-in).
+fn uart_script_types_one_byte_at_a_time_while_the_fifo_has_room() {
+    // JMP.S . forever; the script moves a byte into the RX FIFO when it has
+    // room and UART_SCRIPT_GAP instructions have passed (--uart-in).
     let mut cpu = cpu_with(&image_from_words(&[0x6100_0000]));
-    cpu.set_uart_script(b"ab");
+    let script: Vec<u8> = (0..20).collect();
+    cpu.set_uart_script(&script, b"");
     let gap = crate::emu::UART_SCRIPT_GAP;
     let _ = cpu.run(gap, None);
     assert!(cpu.uart_rx.is_empty(), "nothing before the first gap has passed");
     let _ = cpu.run(1, None);
-    assert_eq!(cpu.uart_rx, [b'a'], "the first byte after the gap");
+    assert_eq!(cpu.uart_rx, [0], "the first byte after the gap");
+    let _ = cpu.run(2 * (gap + 1), None);
+    assert_eq!(cpu.uart_rx, [0, 1, 2], "one byte per gap + 1 instructions");
+    let _ = cpu.run(30 * gap, None);
+    assert_eq!(cpu.uart_rx.len(), 16, "never more than the FIFO holds");
+    cpu.uart_rx.clear();
+    let _ = cpu.run(10 * gap, None);
+    assert_eq!(cpu.uart_rx, [16, 17, 18, 19]);
+    assert!(cpu.uart_script.is_empty());
+}
+
+#[test]
+fn uart_script_waits_for_the_prompt_before_each_line() {
+    // --uart-prompt: a line is typed only once the program has printed the
+    // prompt since the previous line's newline.
+    let mut cpu = cpu_with(&image_from_words(&[0x6100_0000]));
+    cpu.set_uart_script(b"a\nb", b"$ ");
+    let gap = crate::emu::UART_SCRIPT_GAP;
     let _ = cpu.run(3 * gap, None);
-    assert_eq!(cpu.uart_rx, [b'a'], "the next waits until the FIFO is read");
+    assert!(cpu.uart_rx.is_empty(), "no prompt yet");
+    cpu.uart.extend_from_slice(b"$ ");
+    let _ = cpu.run(gap + 1, None);
+    assert_eq!(cpu.uart_rx, [b'a']);
     cpu.uart_rx.clear();
     let _ = cpu.run(gap + 1, None);
+    assert_eq!(cpu.uart_rx, [b'\n']);
+    cpu.uart_rx.clear();
+    let _ = cpu.run(3 * gap, None);
+    assert!(cpu.uart_rx.is_empty(), "the next line waits for a new prompt");
+    cpu.uart.extend_from_slice(b"out\n$ ");
+    let _ = cpu.run(gap + 1, None);
     assert_eq!(cpu.uart_rx, [b'b']);
-    assert!(cpu.uart_script.is_empty());
 }

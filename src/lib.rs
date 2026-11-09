@@ -295,16 +295,19 @@ fn run_assemble(
     Ok(())
 }
 
-/// The `--uart-in` file's bytes (empty without the option).
-fn read_uart_in(cli: &Cli, msg_list: &mut Diagnostics) -> Result<Vec<u8>, Error> {
+/// The `--uart-in` file's bytes and the `--uart-prompt` text (both empty
+/// without the options).
+fn read_uart_in(cli: &Cli, msg_list: &mut Diagnostics) -> Result<commands::UartInput, Error> {
+    let prompt = cli.uart_prompt.as_deref().unwrap_or_default().as_bytes().to_vec();
     let Some(path) = cli.uart_in.as_deref() else {
-        return Ok(Vec::new());
+        return Ok(commands::UartInput::default());
     };
-    std::fs::read(path).map_err(|source| {
+    let bytes = std::fs::read(path).map_err(|source| {
         msg_list.error(format!("Unable to read --uart-in file {}, error {source}", path.display()));
         Error::Read {
             path: path.to_path_buf(),
             source,
         }
-    })
+    })?;
+    Ok(commands::UartInput { bytes, prompt })
 }

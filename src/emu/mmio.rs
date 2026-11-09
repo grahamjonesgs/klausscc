@@ -334,13 +334,19 @@ impl Cpu {
     }
 
     /// Type `bytes` into the UART receiver as [`Cpu::run`] goes (`--uart-in`):
-    /// a byte moves into the RX FIFO when the FIFO is empty and at least
+    /// a byte moves into the RX FIFO when the FIFO isn't full and at least
     /// [`UART_SCRIPT_GAP`] instructions have retired since the last one, so
     /// a program that polls (or reads on a timer tick) sees typed input, and
     /// nothing is lost to a full FIFO.
-    pub fn set_uart_script(&mut self, bytes: &[u8]) {
+    ///
+    /// With a non-empty `prompt` (`--uart-prompt`), each line (the first one
+    /// too) waits until the program has printed `prompt` since the previous
+    /// line's newline, so the transcript reads as if typed at the prompt.
+    pub fn set_uart_script(&mut self, bytes: &[u8], prompt: &[u8]) {
         self.uart_script = bytes.iter().copied().collect();
         self.uart_script_wait = UART_SCRIPT_GAP;
+        self.uart_script_prompt = prompt.to_vec();
+        self.uart_script_waiting_from = (!prompt.is_empty()).then_some(self.uart.len());
     }
 
     /// Move the next scripted byte into the RX FIFO if it is due.
@@ -348,13 +354,23 @@ impl Cpu {
         if self.uart_script.is_empty() {
             return;
         }
+        if let Some(from) = self.uart_script_waiting_from {
+            let prompt = &self.uart_script_prompt;
+            if self.uart.len() < from + prompt.len() || !self.uart[from..].windows(prompt.len()).any(|w| w == prompt) {
+                return;
+            }
+            self.uart_script_waiting_from = None;
+        }
         if self.uart_script_wait > 0 {
             self.uart_script_wait -= 1;
-        } else if self.uart_rx.is_empty()
+        } else if self.uart_rx.len() < UART_RX_FIFO_DEPTH
             && let Some(b) = self.uart_script.pop_front()
         {
             self.uart_rx.push_back(b);
             self.uart_script_wait = UART_SCRIPT_GAP;
+            if b == b'\n' && !self.uart_script_prompt.is_empty() {
+                self.uart_script_waiting_from = Some(self.uart.len());
+            }
         }
     }
 
