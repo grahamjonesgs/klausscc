@@ -18,6 +18,11 @@
 //! * Single steps run with interrupts masked; the timer, millisecond clock
 //!   and cycle counter are frozen while the core is halted.
 //! * MMIO (`0xF000_0000+`) is off limits unless `monitor mmio on`.
+//! * Memory addresses are physical, whatever `STATUS.TE` says: the debug
+//!   module reads and writes physical memory (`MMU_PLAN.md` §11.3).  With
+//!   translation on, a kseg address is the physical one plus `0x8000_0000`,
+//!   and a useg or kmap address has to be looked up in the program's page
+//!   tables.  (The emulator's server translates instead.)
 //! * MMU stage 1 (`MMU_PLAN.md` §4.4, §6.2), only when DMSTATUS reports
 //!   debug module version 2 or later: registers 20 (`sp_alt`) and 21
 //!   (`mode`) are in the target description and the register file, and
@@ -153,6 +158,7 @@ impl fmt::Display for BoardError {
                     0 => "HALT",
                     1 => "TRAP",
                     5 => "misaligned access",
+                    6 => "double fault",
                     _ => "illegal instruction",
                 }
             ),

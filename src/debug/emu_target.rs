@@ -33,6 +33,17 @@
 //! in the debugger even when the program has an exception vector, unless
 //! `monitor exc_pass on` lets them through to it (a misaligned fetch never
 //! stops there).  `monitor sr` shows the system registers.
+//!
+//! MMU stages 2 and 3 (`MMU_PLAN.md` §10-§11): `monitor mpu` shows the MPU
+//! regions and `monitor tlb` the TLB.  While translation is on
+//! (`STATUS.TE` = 1) the debugger's memory addresses are virtual, as the
+//! program's are: each is translated as a supervisor data access would be
+//! (kseg direct, MMIO identity, useg and kmap through the TLB in the
+//! current ASID, without the entry's R/W/X check), and an address that
+//! does not translate is an error, not a physical access.  `monitor phys
+//! on` makes them physical again.  The board's server is always physical,
+//! because its debug module reads physical memory.  A double fault (an
+//! entry whose frame push has no kseg address) reports SIGSEGV.
 
 use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, MODE_DI, MODE_UM, TRAP_WORD};
 use super::{GdbError, RunEvent, Session, accept, mmio_monitor_cmd, run_session, session_summary};
@@ -80,6 +91,8 @@ pub(crate) struct EmuTarget {
     resuming: bool,
     /// `monitor mmio on`: let the debugger access device registers.
     allow_mmio: bool,
+    /// `monitor phys on`: memory addresses are physical even with `TE` = 1.
+    physical: bool,
     uart_rx: mpsc::Receiver<u8>,
 }
 
@@ -93,6 +106,7 @@ impl EmuTarget {
             hw_breakpoints: Vec::new(),
             resuming: false,
             allow_mmio: false,
+            physical: false,
             uart_rx,
         }
     }
@@ -261,12 +275,21 @@ impl EmuTarget {
                 let s = self.cpu.system_regs();
                 outputln!(
                     out,
-                    "mode {}   DI {}   SP_ALT 0x{:08X}",
+                    "mode {}   DI {}   MPU_EN {}   TE {}   SP_ALT 0x{:08X}",
                     if s.um { "user" } else { "supervisor" },
                     u8::from(s.irq_disabled),
+                    u8::from(s.mpu_en),
+                    u8::from(s.te),
                     s.sp_alt
                 );
-                outputln!(out, "EVEC 0x{:08X}   ECAUSE {}   EADDR 0x{:08X}", s.evec, s.ecause, s.eaddr);
+                outputln!(
+                    out,
+                    "EVEC 0x{:08X}   ECAUSE {}{}   EADDR 0x{:08X}",
+                    s.evec,
+                    s.ecause & 0xFF,
+                    if s.ecause & 0x100 != 0 { " GUARD" } else { "" },
+                    s.eaddr
+                );
                 outputln!(out, "SCRATCH0 0x{:016X}   SCRATCH1 0x{:016X}", s.scratch[0], s.scratch[1]);
                 outputln!(out, "TP 0x{:016X}   CYCLE {}", s.tp, s.cycle);
                 if let Some(addr) = s.reservation {
@@ -274,9 +297,89 @@ impl EmuTarget {
                 } else {
                     outputln!(out, "LR/SC reservation none");
                 }
+                outputln!(
+                    out,
+                    "TLB_HI 0x{:08X}   TLB_LO 0x{:08X}   TLB_INDEX 0x{:08X}   ASID {}   TLBVEC 0x{:08X}",
+                    s.tlb_hi,
+                    s.tlb_lo,
+                    s.tlb_index,
+                    s.asid,
+                    s.tlbvec
+                );
                 if let Some((cause, addr)) = self.cpu.parked_exception() {
                     outputln!(out, "last stop on an exception: {cause:?} (ECAUSE {}) at 0x{addr:08X}", cause as u8);
                 }
+            }
+            "mpu" => {
+                let s = self.cpu.system_regs();
+                outputln!(
+                    out,
+                    "MPU {} (STATUS.MPU_EN){}",
+                    if s.mpu_en { "on" } else { "off" },
+                    if s.te { "; ignored while TE = 1" } else { "" }
+                );
+                let mut any = false;
+                for (n, r) in self.cpu.mpu_regions().iter().enumerate() {
+                    if r.enabled() {
+                        any = true;
+                        outputln!(
+                            out,
+                            "  {n:2}  0x{:08X}-0x{:08X}  {}",
+                            r.first(),
+                            r.last(),
+                            if r.guard() { "GUARD".to_owned() } else { r.permissions() }
+                        );
+                    } else if r.base != 0 || r.limit != 0 {
+                        outputln!(out, "  {n:2}  (disabled: MPU_BASE 0x{:08X} MPU_LIMIT 0x{:08X})", r.base, r.limit);
+                    }
+                }
+                if !any {
+                    outputln!(out, "  no region enabled");
+                }
+            }
+            "tlb" => {
+                let s = self.cpu.system_regs();
+                outputln!(
+                    out,
+                    "translation {} (STATUS.TE)   ASID {}   TLB_INDEX 0x{:08X}",
+                    if s.te { "on" } else { "off" },
+                    s.asid,
+                    s.tlb_index
+                );
+                let mut any = false;
+                for (n, e) in self.cpu.tlb_entries().iter().enumerate() {
+                    if e.valid() {
+                        any = true;
+                        outputln!(
+                            out,
+                            "  {n:2}  VA 0x{:04X}xxxx -> PA 0x{:04X}xxxx  {}  {}",
+                            e.vpn(),
+                            e.pfn(),
+                            e.permissions(),
+                            if e.global() { "global".to_owned() } else { format!("ASID {}", e.asid()) }
+                        );
+                    }
+                }
+                if !any {
+                    outputln!(out, "  no valid entry");
+                }
+            }
+            "phys" => outputln!(
+                out,
+                "memory addresses are {}",
+                if self.physical || !self.cpu.translation_on() {
+                    "physical"
+                } else {
+                    "virtual (TE = 1)"
+                }
+            ),
+            "phys on" => {
+                self.physical = true;
+                outputln!(out, "memory addresses are physical");
+            }
+            "phys off" => {
+                self.physical = false;
+                outputln!(out, "memory addresses are virtual while TE = 1");
             }
             "exc_pass" => outputln!(out, "EXC_PASS is {}", if self.cpu.exc_pass() { "on" } else { "off" }),
             "exc_pass on" | "exc_pass off" => {
@@ -299,7 +402,13 @@ impl EmuTarget {
                 outputln!(out, "klausscc gdbserver monitor commands:");
                 outputln!(out, "  mmio on|off       allow debugger reads/writes of 0xF000_0000+ (default off)");
                 outputln!(out, "  irq               interrupt controller and timer state");
-                outputln!(out, "  sr                MMU stage 1 system registers and mode");
+                outputln!(out, "  sr                MMU system registers and mode");
+                outputln!(out, "  mpu               MPU regions (stage 2)");
+                outputln!(out, "  tlb               TLB entries (stage 3)");
+                outputln!(
+                    out,
+                    "  phys on|off       physical memory addresses even while TE = 1 (default off: virtual)"
+                );
                 outputln!(
                     out,
                     "  exc_pass on|off   let illegal/TRAP/misaligned go to EVEC instead of the debugger (default off)"
@@ -325,13 +434,16 @@ impl SingleThreadBase for EmuTarget {
     }
 
     fn read_addrs(&mut self, start_addr: u32, data: &mut [u8]) -> TargetResult<usize, Self> {
+        // MMIO is identity whether or not translation is on.
         let n = if self.allow_mmio && is_mmio(start_addr) {
             self.cpu.debug_read_mmio(start_addr, data)
+        } else if self.virtual_addresses() {
+            self.cpu.debug_read_virtual(start_addr, data)
         } else {
             self.cpu.debug_read(start_addr, data)
         };
         if n == 0 && !data.is_empty() {
-            return Err(TargetError::NonFatal); // MMIO or outside RAM
+            return Err(TargetError::NonFatal); // MMIO, outside RAM or not mapped
         }
         Ok(n)
     }
@@ -339,6 +451,8 @@ impl SingleThreadBase for EmuTarget {
     fn write_addrs(&mut self, start_addr: u32, data: &[u8]) -> TargetResult<(), Self> {
         let ok = if self.allow_mmio && is_mmio(start_addr) {
             self.cpu.debug_write_mmio(start_addr, data)
+        } else if self.virtual_addresses() {
+            self.cpu.debug_write_virtual(start_addr, data)
         } else {
             self.cpu.debug_write(start_addr, data)
         };
@@ -365,6 +479,12 @@ impl SingleRegisterAccess<()> for EmuTarget {
 }
 
 impl EmuTarget {
+    /// Whether the debugger's memory addresses are virtual: translation is
+    /// on and `monitor phys on` was not given.
+    const fn virtual_addresses(&self) -> bool {
+        self.cpu.translation_on() && !self.physical
+    }
+
     /// Every register, the MMU stage 1 ones included.
     fn regs(&self) -> KlaussRegs {
         let d = self.cpu.debug_regs();
@@ -604,6 +724,68 @@ mod tests {
         regs.stage1 = false;
         assert!(target.write_registers(&regs).is_ok());
         assert_eq!(target.cpu.system_regs().sp_alt, 0x7000);
+    }
+
+    #[test]
+    fn mpu_tlb_monitors_and_virtual_memory_while_translation_is_on() {
+        // MTSR MPU_BASE0 D; MTSR MPU_LIMIT0 E; MTSR ECAUSE F; MTSR TLB_HI A;
+        // MTSR TLB_LO B; TLBWI; MTSR STATUS C (MPU_EN and TE).
+        let code: [u32; 7] = [0x6C61_0030, 0x6C61_1040, 0x6C60_2050, 0x6C63_0000, 0x6C63_1010, 0x6C09_0000, 0x6C60_0020];
+        let mut target = target_with(code[0]);
+        let bytes: Vec<u8> = code.iter().flat_map(|w| w.to_le_bytes()).collect();
+        assert!(target.cpu.debug_write(0x20, &bytes));
+        assert!(target.cpu.debug_write(0x3_0010, &0x1122_3344_u32.to_le_bytes()));
+        let mut regs = target.regs();
+        regs.r[0] = 0x0005_0100; // TLB_HI: VPN 5, global
+        regs.r[1] = 0x0003_0003; // TLB_LO: PFN 3, R, V
+        regs.r[2] = 0x300; // STATUS: MPU_EN, TE
+        regs.r[3] = 0x2011; // MPU_BASE0: 0x2000, GUARD, EN
+        regs.r[4] = 0x203F; // MPU_LIMIT0
+        regs.r[5] = 0x107; // ECAUSE: ACCESS_LOAD, GUARD
+        target.set_regs(&regs);
+        for _ in 0..code.len() {
+            assert_eq!(target.step_instruction(false), None);
+        }
+        let mut out = String::new();
+        target.monitor("sr", &mut out);
+        target.monitor("mpu", &mut out);
+        target.monitor("tlb", &mut out);
+        target.monitor("phys", &mut out);
+        for want in [
+            "MPU_EN 1   TE 1",
+            "ECAUSE 7 GUARD",
+            "TLB_HI 0x00050100   TLB_LO 0x00030003   TLB_INDEX 0x00000000   ASID 0   TLBVEC 0x00000000",
+            "MPU on (STATUS.MPU_EN); ignored while TE = 1",
+            "   0  0x00002000-0x0000203F  GUARD",
+            "translation on (STATUS.TE)   ASID 0",
+            "   0  VA 0x0005xxxx -> PA 0x0003xxxx  r--  global",
+            "memory addresses are virtual (TE = 1)",
+        ] {
+            assert!(out.contains(want), "{want:?} not in:\n{out}");
+        }
+        // Virtual: useg through the TLB, kseg direct; an unmapped page and
+        // the hole are errors, not physical reads.
+        let mut buf = [0_u8; 4];
+        assert_eq!(target.read_addrs(0x0005_0010, &mut buf).ok(), Some(4));
+        assert_eq!(u32::from_le_bytes(buf), 0x1122_3344);
+        assert_eq!(target.read_addrs(0x8000_0020, &mut buf).ok(), Some(4));
+        assert_eq!(u32::from_le_bytes(buf), code[0]);
+        assert!(target.read_addrs(0x0009_0000, &mut buf).is_err());
+        assert!(target.read_addrs(0x9000_0000, &mut buf).is_err());
+        assert!(target.write_addrs(0x0005_0014, &[0xAB]).is_ok());
+        assert!(target.write_addrs(0x0009_0000, &[0xAB]).is_err());
+        // Physical on request.
+        let mut out = String::new();
+        target.monitor("phys on", &mut out);
+        assert_eq!(target.read_addrs(0x3_0010, &mut buf).ok(), Some(4));
+        assert_eq!(u32::from_le_bytes(buf), 0x1122_3344);
+        let mut eight = [0_u8; 8];
+        assert_eq!(target.read_addrs(0x3_0010, &mut eight).ok(), Some(8));
+        assert_eq!(eight[4], 0xAB, "the virtual write landed in frame 3");
+        target.monitor("phys", &mut out);
+        target.monitor("phys off", &mut out);
+        assert!(out.contains("memory addresses are physical\n"), "{out}");
+        assert!(target.read_addrs(0x0009_0000, &mut buf).is_err());
     }
 
     #[test]
