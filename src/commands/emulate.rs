@@ -66,13 +66,21 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
 /// made while the transmitter was busy, and the captured UART output on stdout.
 /// `mpu` gives the emulated CPU the stage 2 MPU (`--mpu`).
 #[cfg(not(tarpaulin_include))]
-fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions: u64, mpu: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
+fn emulate_and_report(
+    image: &Image,
+    trace_file: Option<&str>,
+    max_instructions: u64,
+    mpu: bool,
+    uart_in: &[u8],
+    msg_list: &mut Diagnostics,
+) -> Result<(), Error> {
     let mut trace_writer = open_trace_writer(trace_file, msg_list)?;
-    let result = emu::emulate_image(
+    let result = emu::emulate_image_input(
         &image.to_ddr(),
         image.entry,
         max_instructions,
         mpu,
+        uart_in,
         trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
     );
     finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
@@ -111,6 +119,7 @@ pub(crate) fn run_emulate(
     trace_file: Option<&str>,
     max_instructions: u64,
     mpu: bool,
+    uart_in: &[u8],
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     if msg_list.has_errors() {
@@ -126,7 +135,7 @@ pub(crate) fn run_emulate(
         image.bytes.len(),
         image.entry
     ));
-    emulate_and_report(&image, trace_file, max_instructions, mpu, msg_list)
+    emulate_and_report(&image, trace_file, max_instructions, mpu, uart_in, msg_list)
 }
 
 /// Run the emulator on an ELF or flat binary input (`--emulate` with binary input).
@@ -140,6 +149,7 @@ pub(crate) fn run_emulate_elf(
     trace_file: Option<&str>,
     max_instructions: u64,
     mpu: bool,
+    uart_in: &[u8],
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     let binary_path = input.path;
@@ -155,7 +165,7 @@ pub(crate) fn run_emulate_elf(
         msg_list.info(format!("Emulating flat binary {binary_path}"));
     }
 
-    emulate_and_report(&image, trace_file, max_instructions, mpu, msg_list)
+    emulate_and_report(&image, trace_file, max_instructions, mpu, uart_in, msg_list)
 }
 
 /// Batch-verify the emulator against `.kla` files with expected `// ` UART values.

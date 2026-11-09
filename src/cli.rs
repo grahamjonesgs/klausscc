@@ -182,6 +182,10 @@ pub(crate) struct Cli {
     /// Give the emulator the MMU stage 2 MPU (16 regions; CPU_FEATURES reads 0x10FF). Without it the emulator matches the Nexys A7 bitstream, which has no MPU: CPU_FEATURES reads 0x100D, the MPU_BASEn/MPU_LIMITn system registers are illegal and STATUS bit 8 (MPU_EN) stays 0. For --emulate, --emulate-test and --gdbserver on the emulator
     #[arg(long, conflicts_with = "board")]
     pub(crate) mpu: bool,
+
+    /// Type the bytes of this file into the emulated UART receiver, one at a time whenever the receive FIFO is empty (with a short gap between bytes), like keyboard input; for scripted sessions with programs that read the console. For --emulate
+    #[arg(long, value_name = "FILE", requires = "emulate")]
+    pub(crate) uart_in: Option<PathBuf>,
 }
 
 /// What an `-i` input file holds, judged by its extension (case-insensitive).
@@ -701,6 +705,10 @@ mod tests {
         assert!(!cli.mpu, "no MPU by default, as on the Nexys A7");
 
         assert!(parse(&["-i", "prog.elf", "--emulate", "--mpu"]).unwrap().mpu);
+
+        let cli = parse(&["-i", "prog.elf", "--emulate", "--uart-in", "keys.txt"]).unwrap();
+        assert_eq!(cli.uart_in, Some(PathBuf::from("keys.txt")));
+        assert!(parse(&["-i", "prog.elf", "--uart-in", "keys.txt"]).is_err(), "--uart-in needs --emulate");
     }
 
     #[test]

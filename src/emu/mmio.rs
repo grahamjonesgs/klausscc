@@ -58,6 +58,9 @@ const UART_STATUS: u32 = 0x0010;
 /// the program.  A byte that arrives during `START_WAIT` (about 6000 cycles,
 /// before the first instruction) is kept; the emulator has no such source.
 const UART_RX_FIFO_DEPTH: usize = 16;
+/// Instructions between two scripted input bytes (`--uart-in`): about 20 µs
+/// at 100 MHz, a fast typist.
+pub const UART_SCRIPT_GAP: u64 = 2_000;
 
 // ---- UART transmit timing ----------------------------------------------------
 // There is no TX FIFO.  A `TX_DATA` store hands one byte to `uart_send_msg`
@@ -328,6 +331,31 @@ impl Cpu {
     /// Feed bytes into the UART RX FIFO (for tests / an external input source).
     pub fn feed_uart_rx(&mut self, bytes: &[u8]) {
         self.uart_rx.extend(bytes.iter().copied());
+    }
+
+    /// Type `bytes` into the UART receiver as [`Cpu::run`] goes (`--uart-in`):
+    /// a byte moves into the RX FIFO when the FIFO is empty and at least
+    /// [`UART_SCRIPT_GAP`] instructions have retired since the last one, so
+    /// a program that polls (or reads on a timer tick) sees typed input, and
+    /// nothing is lost to a full FIFO.
+    pub fn set_uart_script(&mut self, bytes: &[u8]) {
+        self.uart_script = bytes.iter().copied().collect();
+        self.uart_script_wait = UART_SCRIPT_GAP;
+    }
+
+    /// Move the next scripted byte into the RX FIFO if it is due.
+    pub(super) fn pump_uart_script(&mut self) {
+        if self.uart_script.is_empty() {
+            return;
+        }
+        if self.uart_script_wait > 0 {
+            self.uart_script_wait -= 1;
+        } else if self.uart_rx.is_empty()
+            && let Some(b) = self.uart_script.pop_front()
+        {
+            self.uart_rx.push_back(b);
+            self.uart_script_wait = UART_SCRIPT_GAP;
+        }
     }
 
     // ---- UART output ---------------------------------------------------------

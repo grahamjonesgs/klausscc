@@ -4130,3 +4130,22 @@ fn tlb_len00_word_at_a_page_end_is_illegal_not_a_next_page_fault() {
     assert_eq!(cpu.step_one(true), None);
     assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissFetch, U_CODE + 0x1_0000, at, true);
 }
+
+#[test]
+fn uart_script_types_one_byte_at_a_time_into_an_empty_fifo() {
+    // JMP.S . forever; the script moves a byte into the RX FIFO only when it
+    // is empty and UART_SCRIPT_GAP instructions have passed (--uart-in).
+    let mut cpu = cpu_with(&image_from_words(&[0x6100_0000]));
+    cpu.set_uart_script(b"ab");
+    let gap = crate::emu::UART_SCRIPT_GAP;
+    let _ = cpu.run(gap, None);
+    assert!(cpu.uart_rx.is_empty(), "nothing before the first gap has passed");
+    let _ = cpu.run(1, None);
+    assert_eq!(cpu.uart_rx, [b'a'], "the first byte after the gap");
+    let _ = cpu.run(3 * gap, None);
+    assert_eq!(cpu.uart_rx, [b'a'], "the next waits until the FIFO is read");
+    cpu.uart_rx.clear();
+    let _ = cpu.run(gap + 1, None);
+    assert_eq!(cpu.uart_rx, [b'b']);
+    assert!(cpu.uart_script.is_empty());
+}

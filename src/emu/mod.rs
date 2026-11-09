@@ -77,7 +77,7 @@ mod tests;
 mod trace;
 
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
-pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE};
+pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE, UART_SCRIPT_GAP};
 pub use mmu::{MpuRegion, TlbEntry};
 pub use system::{Cause, SystemRegs};
 
@@ -177,6 +177,12 @@ pub struct Cpu {
     /// UART receive FIFO — head byte returned (and popped) by an `RX_DATA` read.
     /// Empty unless a caller feeds it via [`Cpu::feed_uart_rx`].
     uart_rx: VecDeque<u8>,
+    /// Scripted UART input (`--uart-in`): bytes not yet in `uart_rx`.  One
+    /// moves into the empty FIFO every [`UART_SCRIPT_GAP`] instructions, so
+    /// a polled reader sees them arrive like typed input.
+    uart_script: VecDeque<u8>,
+    /// Instructions left before the next scripted byte may move.
+    uart_script_wait: u64,
     /// Why execution stopped, once it has.  A HALT is final; the other
     /// reasons can be cleared by a debugger ([`Cpu::clear_stop`]).
     stop: Option<StopReason>,
@@ -297,6 +303,8 @@ impl Cpu {
             tx_busy_until: 0,
             tx_busy_writes: TxBusyWrites::default(),
             uart_rx: VecDeque::new(),
+            uart_script: VecDeque::new(),
+            uart_script_wait: 0,
             stop: None,
             last_write: None,
             watches: Vec::new(),
@@ -545,6 +553,7 @@ impl Cpu {
         while self.stop.is_none() && count + (self.exc_entries - entries_before) < max_instructions {
             if let Some((pc, word)) = self.step_inner(true) {
                 count += 1;
+                self.pump_uart_script();
                 if let Some(t) = trace.as_deref_mut()
                     && self.trace_line(t, count, pc, word).is_err()
                 {
@@ -576,7 +585,22 @@ impl Cpu {
 /// `mpu` gives the CPU the stage 2 MPU ([`Cpu::set_has_mpu`], `--mpu`).
 #[must_use]
 pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, mpu: bool, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
+    emulate_image_input(image, entry, max_instructions, mpu, &[], trace)
+}
+
+/// [`emulate_image`] with scripted UART input (`--uart-in`): `uart_in` is
+/// typed into the UART receiver a byte at a time ([`Cpu::set_uart_script`]).
+#[must_use]
+pub fn emulate_image_input(
+    image: &[u8],
+    entry: u32,
+    max_instructions: u64,
+    mpu: bool,
+    uart_in: &[u8],
+    trace: Option<&mut dyn std::io::Write>,
+) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
     cpu.set_has_mpu(mpu);
+    cpu.set_uart_script(uart_in);
     cpu.run(max_instructions, trace)
 }

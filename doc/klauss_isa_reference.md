@@ -125,6 +125,7 @@ The input's extension picks what `-i` does: a `.kla` file is assembled, a `.kbt`
 | `--trace [FILE]` | With `--emulate`, write the per-instruction trace to `FILE`, or to stdout with no value (or `-`) |
 | `--max-instructions <COUNT>` | Instruction-count cap for the emulator (default: 50000000) |
 | `--mpu` | Give the emulator the MMU stage 2 MPU (see [MPU and TLB](#mpu-and-tlb)), for `--emulate`, `--emulate-test` and `--gdbserver` without `--board`. Without it the emulator has no MPU, as the Nexys A7 bitstream has none |
+| `--uart-in FILE` | With `--emulate`: type FILE's bytes into the emulated UART receiver, one byte whenever the receive FIFO is empty and 2,000 instructions have passed since the last, like keyboard input. For scripted sessions with programs that read the console (the UART output is printed when the run ends) |
 | `--gdbserver <PORT>` | Debug an ELF on the emulator over the GDB remote protocol on `127.0.0.1:PORT` (for lldb) |
 | `--board` | With `--gdbserver`, debug the real board over its USB-JTAG instead (needs a `DEBUG_EN=1` bitstream and a klausscc built with `--features board`). With `-s`, the ELF is first loaded over the UART. |
 | `--jtag-khz <KHZ>` | JTAG clock for `--board` (default: 10000) |
