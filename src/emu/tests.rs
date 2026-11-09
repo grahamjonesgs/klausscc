@@ -2381,7 +2381,7 @@ fn stage1_faults_on_multi_side_effect_instructions_change_nothing_and_retry() {
             Cause::AccessLoad,
             |c| c.regs[15] = 0x3000,
         ),
-        // MEMGET32 spanning RAM-side and MMIO doublewords: the lowest MMIO byte.
+        // MEMGET32 spanning RAM-side and MMIO doublewords: the second doubleword.
         (
             "MEMGET32",
             vec![0x5A00_0310],
@@ -2730,4 +2730,90 @@ fn stage1_sc_fails_after_an_interrupt_or_iret() {
         assert_eq!(cpu.step_one(true), None);
     }
     assert_eq!(cpu.regs[6], 1, "SC after IRET failed");
+}
+
+#[test]
+fn stage1_cause_priority() {
+    // MMU_PLAN §4.1: MISALIGNED_FETCH > ACCESS_FETCH > ILLEGAL > PRIVILEGED >
+    // TRAP/SYSCALL > MISALIGNED_LOAD/STORE > ACCESS_LOAD/STORE.
+    // A misaligned PC in MMIO is MISALIGNED_FETCH.
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], true);
+    cpu.pc = 0xF000_0002;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered(&cpu, Cause::MisalignedFetch, 0xF000_0002, 0xF000_0002, true);
+    // Whatever word sits in MMIO (illegal, privileged, a TRAP), fetching it
+    // in user mode is ACCESS_FETCH: the word is never decoded.
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], true);
+    cpu.pc = 0xF001_0000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered(&cpu, Cause::AccessFetch, 0xF001_0000, 0xF001_0000, true);
+    // (word, cause, EADDR) in user mode with B = 0xF001_0001 (MMIO, odd)
+    // and C = 0xF001_0000.
+    for (word, cause, eaddr) in [
+        // ILLEGAL > PRIVILEGED: an illegal DI / MTSR form.
+        (0x6C06_0310, Cause::Illegal, 0x6C06_0310),
+        (mtsr(SR_CYCLE, 1), Cause::Illegal, mtsr(SR_CYCLE, 1)),
+        (mfsr(3, 9), Cause::Illegal, mfsr(3, 9)),
+        // ILLEGAL > ACCESS: an illegal load (MEMGET32 with SGN) from MMIO.
+        (0x5A80_0320, Cause::Illegal, 0x5A80_0320),
+        // MISALIGNED > ACCESS: a misaligned user load / store to MMIO, and
+        // LR/SC (alignment before MMIO).
+        (0x5900_0310, Cause::MisalignedLoad, 0xF001_0001),
+        (0x5D00_0310, Cause::MisalignedStore, 0xF001_0001),
+        (lr(LR_W, 3, 1), Cause::MisalignedLoad, 0xF001_0001),
+        (sc(SC_D, 3, 4, 1), Cause::MisalignedStore, 0xF001_0001),
+    ] {
+        let mut cpu = stage1_cpu(&[word], &[HALT], true);
+        cpu.regs[1] = 0xF001_0001;
+        cpu.regs[2] = 0xF001_0000;
+        assert_eq!(cpu.step_one(true), None, "{word:08x}");
+        assert_entered(&cpu, cause, eaddr, CODE_BASE, true);
+    }
+}
+
+#[test]
+fn stage1_eaddr_is_the_raw_effective_address() {
+    // MMU_PLAN §4.1: before any alignment, for A=1 64-bit accesses and
+    // sub-word stores too; a two-access instruction whose second doubleword
+    // alone faults reports that doubleword's start.
+    for (code, b, eaddr, cause) in [
+        (vec![0x5B10_0310], 0xF001_0003, 0xF001_0003, Cause::AccessLoad), // MEMGET64 D [B] (A=1)
+        (vec![0x5F10_0310], 0xF001_0005, 0xF001_0005, Cause::AccessStore), // MEMSET64 D [B] (A=1)
+        (vec![0x5B00_0310], 0xF001_0006, 0xF001_0006, Cause::AccessLoad), // MEMREADRR (A=0)
+        (vec![0x5C00_0310], 0xF001_0005, 0xF001_0005, Cause::AccessStore), // MEMSET8 D [B]
+        (vec![0x9B30_0310, 3], 0xF001_0000, 0xF001_0003, Cause::AccessLoad), // LDIDX64A D B 3
+        (vec![0x5A00_0310], 0xEFFF_FFFD, 0xF000_0000, Cause::AccessLoad), // MEMGET32 spanning
+        (vec![0x5A00_0310], 0xF000_0001, 0xF000_0001, Cause::AccessLoad), // MEMGET32 in MMIO
+    ] {
+        let mut cpu = stage1_cpu(&code, &[HALT], true);
+        cpu.regs[1] = b;
+        assert_eq!(cpu.step_one(true), None, "{:08x}", code[0]);
+        assert_entered(&cpu, cause, eaddr, CODE_BASE, true);
+    }
+    // LEAVERET: R15 when the first load faults (as computed), the second
+    // doubleword's start when only it does.
+    for (fp, eaddr) in [(0xF001_0003_u32, 0xF001_0003), (0xEFFF_FFFC, 0xF000_0000), (0xEFFF_FFF8, 0xF000_0000)] {
+        let mut cpu = stage1_cpu(&[0x6680_0000], &[HALT], true);
+        cpu.regs[15] = u64::from(fp);
+        assert_eq!(cpu.step_one(true), None);
+        assert_entered(&cpu, Cause::AccessLoad, eaddr, CODE_BASE, true);
+    }
+}
+
+#[test]
+fn stage1_misaligned_fetch_never_debug_halts() {
+    // With a debugger attached and EXC_PASS off, MISALIGNED_FETCH still goes
+    // to EVEC like ACCESS_*; with EVEC = 0 it parks as an illegal
+    // instruction (which the debugger sees).
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], true);
+    cpu.set_debugger_attached(true);
+    cpu.pc = CODE_BASE + 2;
+    assert_eq!(cpu.step_one(false), None);
+    assert_entered(&cpu, Cause::MisalignedFetch, CODE_BASE + 2, CODE_BASE + 2, true);
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], true);
+    cpu.set_debugger_attached(true);
+    cpu.evec = 0;
+    cpu.pc = CODE_BASE + 2;
+    assert!(matches!(cpu.step_one(false), Some(StopReason::InvalidOpcode(_))));
+    assert_eq!(cpu.ecause, 0, "a park writes no ECAUSE");
 }

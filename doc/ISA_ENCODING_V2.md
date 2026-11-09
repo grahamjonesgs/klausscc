@@ -736,7 +736,7 @@ a trap halt with the PC on the access). It does not execute or retire.
 doubleword) and the stack ops are exempt. The emulator stops with
 `Misaligned(EA)`.
 
-### 3.16 MMU stage 1 additions (klaussCPU `mmu`, b6fa71c)
+### 3.16 MMU stage 1 additions (klaussCPU `mmu`, 507990d)
 
 From klaussCPU's `MMU_PLAN.md` §5 and its `ISA_ENCODING_V2_MAP.md` §9
 (frozen interface; the semantics, privilege rules and exceptions are in

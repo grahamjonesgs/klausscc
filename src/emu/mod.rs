@@ -221,7 +221,7 @@ pub struct Cpu {
     tp: u64,
     /// The LR/SC reservation: `EA[31:3]` of the reserved doubleword.
     reservation: Option<u32>,
-    /// A debugger is attached (ILLEGAL, TRAP and MISALIGNED_* stop the CPU
+    /// A debugger is attached (ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE` stop the CPU
     /// unless `exc_pass`).
     debugger_attached: bool,
     /// `EXC_PASS`: with a debugger attached, those causes go to `EVEC`.

@@ -38,7 +38,9 @@ pub enum Cause {
     /// The same for stores and SC.
     MisalignedStore = 6,
     /// A user-mode load (stack pops included) from MMIO, or an LR to MMIO
-    /// in either mode.  `EADDR` = the lowest MMIO byte the access touches.
+    /// in either mode.  `EADDR` = the effective address as computed (base +
+    /// offset, before any alignment), or, when only the second doubleword of
+    /// a two-access instruction faults, that doubleword's start.
     AccessLoad = 7,
     /// The same for stores (stack pushes included) and SC.
     AccessStore = 8,
@@ -51,15 +53,10 @@ pub enum Cause {
 
 impl Cause {
     /// Whether an attached debugger halts on this cause unless `EXC_PASS`
-    /// is set (§4.4 step 1: ILLEGAL, TRAP and MISALIGNED_*).
-    // MMU-SPEC-Q: §4.4 step 1 says "MISALIGNED_*" and step 2 lists
-    // MISALIGNED_FETCH apart from "MISALIGNED_* → 5".  Read literally, step
-    // 1 includes MISALIGNED_FETCH, so an attached debugger halts on it.
+    /// is set (§4.4 step 1: ILLEGAL, TRAP, `MISALIGNED_LOAD` and
+    /// `MISALIGNED_STORE`; not the new, user-mode-only `MISALIGNED_FETCH`).
     const fn debug_halts(self) -> bool {
-        matches!(
-            self,
-            Self::Illegal | Self::Trap | Self::MisalignedLoad | Self::MisalignedStore | Self::MisalignedFetch
-        )
+        matches!(self, Self::Illegal | Self::Trap | Self::MisalignedLoad | Self::MisalignedStore)
     }
 }
 
@@ -151,7 +148,7 @@ impl Cpu {
     /// and which would fall through to `next`, in the order of §4.4:
     ///
     /// 1. an attached debugger with `EXC_PASS` clear halts on ILLEGAL, TRAP
-    ///    and MISALIGNED_* as before stage 1;
+    ///    and `MISALIGNED_LOAD/STORE` as before stage 1;
     /// 2. with `EVEC` = 0 the core parks as before stage 1: ILLEGAL and
     ///    every new cause as an illegal instruction, TRAP as a TRAP, a
     ///    misaligned load or store as a misaligned access;
@@ -168,9 +165,8 @@ impl Cpu {
             self.stop = Some(match cause {
                 Cause::Trap => StopReason::Trap,
                 Cause::MisalignedLoad | Cause::MisalignedStore => StopReason::Misaligned(eaddr),
-                // Only an attached debugger stops on this one as misaligned
-                // (step 1); parked, it is a new cause (step 2).
-                Cause::MisalignedFetch if debug_halt => StopReason::Misaligned(eaddr),
+                // Every new cause parks as an illegal instruction (step 2;
+                // with a debugger attached that park is a debug halt).
                 _ => StopReason::InvalidOpcode(word),
             });
             self.parked = Some((cause, eaddr));
@@ -193,9 +189,8 @@ impl Cpu {
     /// with `[1:0]` != 0 is `MISALIGNED_FETCH`, and an instruction with any
     /// word in MMIO is `ACCESS_FETCH` at that word.  `None` when it may run.
     pub(super) fn user_fetch_fault(&self, pc: u32) -> Option<(Cause, u32)> {
-        // MMU-SPEC-Q: §3.6 / §4.1 do not order MISALIGNED_FETCH against
-        // ACCESS_FETCH for a misaligned PC in MMIO; here the misaligned PC
-        // wins (it is known before any word is fetched).
+        // §4.1 priority: MISALIGNED_FETCH > ACCESS_FETCH > everything the
+        // instruction itself could raise (it is never decoded).
         if pc & 3 != 0 {
             return Some((Cause::MisalignedFetch, pc));
         }
@@ -276,7 +271,7 @@ impl Cpu {
         self.irq_disabled = irq_disabled;
     }
 
-    /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and MISALIGNED_*
+    /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`
     /// then stop it (a debug halt) instead of entering `EVEC`, unless
     /// `EXC_PASS` is set ([`Cpu::set_exc_pass`]).
     pub fn set_debugger_attached(&mut self, attached: bool) {
@@ -284,7 +279,7 @@ impl Cpu {
     }
 
     /// `EXC_PASS` (the board's `DMCONTROL[5]`): with a debugger attached,
-    /// let ILLEGAL, TRAP and MISALIGNED_* go to the program's `EVEC`.
+    /// let ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE` go to the program's `EVEC`.
     pub fn set_exc_pass(&mut self, on: bool) {
         self.exc_pass = on;
     }

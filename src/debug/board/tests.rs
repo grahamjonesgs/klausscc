@@ -2,6 +2,7 @@
 //! module behind the [`Dmi`] seam: no JTAG cable or libftdi needed.
 
 use super::*;
+use crate::debug::arch::{MODE_DI, MODE_UM};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -414,15 +415,15 @@ fn a_version_2_module_has_registers_20_21_and_exc_pass() {
     // DMCONTROL writes.
     let (mut target, state) = halted_target_version(0x100, 2);
     state.borrow_mut().regs[20] = 0x0700_0000;
-    state.borrow_mut().regs[21] = 0b10;
+    state.borrow_mut().regs[21] = 0b01; // UM
     let mut regs = KlaussRegs::default();
     ok(target.read_registers(&mut regs));
     assert!(regs.stage1);
-    assert_eq!((regs.sp_alt, regs.mode), (0x0700_0000, 0b10));
+    assert_eq!((regs.sp_alt, regs.mode), (0x0700_0000, MODE_UM));
     regs.sp_alt = 0x0600_0000;
-    regs.mode = 0b01;
+    regs.mode = MODE_DI;
     ok(target.write_registers(&regs));
-    assert_eq!((state.borrow().regs[20], state.borrow().regs[21]), (0x0600_0000, 0b01));
+    assert_eq!((state.borrow().regs[20], state.borrow().regs[21]), (0x0600_0000, 0b10));
     let mut buf = [0_u8; 4];
     assert_eq!(ok(target.read_register((), KlaussRegId::SpAlt, &mut buf)), 4);
     assert_eq!(u32::from_le_bytes(buf), 0x0600_0000);

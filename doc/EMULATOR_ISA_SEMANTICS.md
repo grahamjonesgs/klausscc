@@ -185,10 +185,13 @@ unless the program sets it; see [MMU stage 1](#mmu-stage-1)).
 ## MMU stage 1
 
 The emulator implements stage 1 of the klaussCPU MMU plan
-(`MMU_PLAN.md` §3-§6 at klaussCPU b6fa71c, branch `mmu`; encodings in
-[ISA_ENCODING_V2.md](ISA_ENCODING_V2.md) §3.16). There is no RTL for it
-yet, so these follow the spec, not `pipeline_core.sv`. The points where
-the spec is ambiguous are marked `MMU-SPEC-Q` in the code.
+(`MMU_PLAN.md` §3-§6 at klaussCPU 507990d, branch `mmu`; encodings in
+[ISA_ENCODING_V2.md](ISA_ENCODING_V2.md) §3.16). It follows the spec,
+including its clarifications of 507990d (§10 item 10: the register 21
+bit order, MISALIGNED_FETCH and the debugger, legality before privilege,
+cause priority and `EADDR`, and parking), which the hardware designer
+checked against the stage 1 RTL. The emulator itself has not yet been
+compared with that RTL.
 
 **Compatibility.** At reset (every run and every `--gdbserver` session
 starts from reset, which is also the program load) the CPU is in
@@ -224,24 +227,38 @@ line, not in `PERF_INSTR`). The causes and their `EADDR`:
 | 3 | TRAP | `TRAP` | the instruction | its word 0 |
 | 4 | SYSCALL | `SYSCALL` | **the next instruction** | 0 |
 | 5 / 6 | MISALIGNED_LOAD / _STORE | a misaligned 16/32-bit access (as before); an LR/SC not naturally aligned (64-bit too) | the instruction | the effective address |
-| 7 / 8 | ACCESS_LOAD / _STORE | in user mode, any data or stack access touching `0xF000_0000`+; LR/SC to MMIO in either mode | the instruction | the lowest MMIO byte it touches |
+| 7 / 8 | ACCESS_LOAD / _STORE | in user mode, any data or stack access touching `0xF000_0000`+; LR/SC to MMIO in either mode | the instruction | the effective address ¹ |
 | 9 | ACCESS_FETCH | in user mode, an instruction with a word in MMIO | the instruction | that word's address |
 | 10 | MISALIGNED_FETCH | in user mode, a PC with `[1:0]` ≠ 0 | the PC | the PC |
 
+¹ The effective address as computed (base + offset), before any
+alignment: an A=1 64-bit access and a sub-word store report the raw
+address. A two-access instruction (LEAVERET's `[R15]` and `[R15+8]`, a
+`MEMGET32` that spans two doublewords) whose first doubleword is RAM and
+second MMIO reports the second doubleword's start, `0xF000_0000`.
+
 PUSH, PUSHV, PUSHV64, CALL (taken) and ENTER are stores; POP, RET,
-LEAVE and LEAVERET loads. LEAVERET's two loads and a `MEMGET32` that
-spans two doublewords are both checked before either happens. An ILLEGAL
-encoding is ILLEGAL in either mode (the decode is checked before the
-mode). In supervisor mode a PC in MMIO is still `PcOutOfRange`.
+LEAVE and LEAVERET loads. LEAVERET's two loads and a spanning `MEMGET32`
+are both checked before either happens. When several causes apply, the
+first of MISALIGNED_FETCH, ACCESS_FETCH, ILLEGAL, PRIVILEGED,
+TRAP/SYSCALL, MISALIGNED_LOAD/STORE, ACCESS_LOAD/STORE is raised (§4.1):
+a word fetched from MMIO in user mode is ACCESS_FETCH whatever it holds,
+an illegal encoding is ILLEGAL in either mode (legality is checked before
+privilege, so `MTSR CYCLE` and SR numbers above 8 are ILLEGAL in user
+mode too), and a misaligned user access to MMIO, or LR/SC, is
+MISALIGNED. In supervisor mode a PC in MMIO is still `PcOutOfRange`.
 
 **What happens to an exception** (`MMU_PLAN.md` §4.4), in order:
 
 1. With a debugger attached (`--gdbserver`) and `EXC_PASS` off (the
-   default; `monitor exc_pass on`), ILLEGAL, TRAP and MISALIGNED_* stop
-   in the debugger as before, whatever `EVEC` holds.
+   default; `monitor exc_pass on`), ILLEGAL, TRAP and MISALIGNED_LOAD/
+   STORE stop in the debugger as before, whatever `EVEC` holds.
+   MISALIGNED_FETCH does not: it goes on to step 2 or 3 like ACCESS_*.
 2. With `EVEC` = 0 the machine stops as before stage 1: `Trap`,
    `Misaligned(EADDR)`, or `InvalidOpcode(word)` for ILLEGAL and every new
-   cause. The PC stays on the instruction.
+   cause (MISALIGNED_FETCH included). The PC stays on the instruction,
+   and `ECAUSE`/`EADDR` are not written. Under `--gdbserver` the stop is
+   reported to the debugger, as any park is.
 3. Otherwise the exception is entered: from user mode the stacks swap
    (the SP becomes the kernel SP) and `UM` clears; the frame
    `{PM, DI, INT_MASK, flags, frame PC}` is pushed; `ECAUSE`/`EADDR` are

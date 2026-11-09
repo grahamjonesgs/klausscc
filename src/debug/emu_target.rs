@@ -28,10 +28,11 @@
 //! e.g. popping the UART RX FIFO, and debuggers read memory freely.
 //!
 //! MMU stage 1 (`MMU_PLAN.md` §4.4, §6.2): registers 20 (`sp_alt`) and 21
-//! (`mode`: UM, DI) are served, and as on the board an illegal instruction,
-//! TRAP or misaligned access stops in the debugger even when the program
-//! has an exception vector, unless `monitor exc_pass on` lets them through
-//! to it.  `monitor sr` shows the system registers.
+//! (`mode`: UM in bit 0, DI in bit 1, as SR `STATUS`) are served, and as on
+//! the board an illegal instruction, TRAP or misaligned load or store stops
+//! in the debugger even when the program has an exception vector, unless
+//! `monitor exc_pass on` lets them through to it (a misaligned fetch never
+//! stops there).  `monitor sr` shows the system registers.
 
 use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, MODE_DI, MODE_UM, TRAP_WORD};
 use super::{GdbError, RunEvent, Session, accept, mmio_monitor_cmd, run_session, session_summary};
@@ -588,7 +589,7 @@ mod tests {
         assert!(target.write_register((), KlaussRegId::Pc, &0x40_u32.to_le_bytes()).is_ok());
         assert_eq!(target.cpu.debug_regs().pc, 0x40);
         assert!(target.write_register((), KlaussRegId::Pc, &[1, 2]).is_err(), "wrong size");
-        // MMU stage 1: SP_ALT and {UM, DI}.
+        // MMU stage 1: SP_ALT and the mode bits (UM bit 0, DI bit 1).
         assert!(target.write_register((), KlaussRegId::SpAlt, &0x7000_u32.to_le_bytes()).is_ok());
         assert!(target.write_register((), KlaussRegId::Mode, &MODE_UM.to_le_bytes()).is_ok());
         let s = target.cpu.system_regs();

@@ -213,7 +213,10 @@ impl Cpu {
 
     /// MMU stage 1 §3.6: in user mode, an access to the bytes `[addr,
     /// addr + len)` that touches MMIO (`0xF000_0000` up) raises `ACCESS_LOAD`
-    /// or `ACCESS_STORE` with the lowest such byte as `EADDR`.  A 64-bit RAM
+    /// or `ACCESS_STORE`.  `addr` is the effective address as computed,
+    /// before any alignment, and is the `EADDR` (§4.1); an access whose
+    /// first doubleword is RAM and second MMIO (a spanning `MEMGET32`)
+    /// reports the second doubleword's start, `0xF000_0000`.  A 64-bit RAM
     /// access reaches only the aligned doubleword (see [`Cpu::read64`]), so
     /// its callers pass `len` 1; only `MEMGET32` can span a doubleword.
     fn check_user(&self, addr: u32, len: u32, store: bool) -> Result<(), Fault> {
@@ -224,7 +227,7 @@ impl Cpu {
         let first_mmio = if is_mmio(addr) {
             Some(addr)
         } else if last < addr || is_mmio(last) {
-            // Crosses into MMIO (0xF000_0000 is doubleword aligned).
+            // Crosses into MMIO: the second doubleword's start.
             Some(0xF000_0000)
         } else {
             None
@@ -637,8 +640,9 @@ impl Cpu {
         if !(size_bytes == 4 && f.field(21, 2) == 0) && misaligned(ea, size_bytes) {
             return Err(Fault::Exception(Cause::MisalignedLoad, ea));
         }
-        let ea = ea & align_mask(size_bytes, f.bit(20));
+        // EADDR is the raw EA, before the A=1 alignment (MMU_PLAN §4.1).
         self.check_user(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, false)?;
+        let ea = ea & align_mask(size_bytes, f.bit(20));
         let val = if size_bytes == 8 {
             self.read64(ea)
         } else {
@@ -659,8 +663,8 @@ impl Cpu {
         if misaligned(ea, size_bytes) {
             return Err(Fault::Exception(Cause::MisalignedStore, ea));
         }
-        let ea = ea & align_mask(size_bytes, f.bit(20));
         self.check_user(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, true)?;
+        let ea = ea & align_mask(size_bytes, f.bit(20));
         let data = self.regs[f.rd];
         if size_bytes == 8 {
             self.write64(ea, data);
@@ -806,10 +810,11 @@ impl Cpu {
                 // ([21:0] = 0, :595).
                 legal(f.field(0, 22) == 0)?;
                 let fp = self.regs[15] as u32;
-                // Both loads are checked before either happens; EADDR is
-                // the lower faulting one (MMU_PLAN §4.1).
+                // Both loads are checked before either happens (MMU_PLAN
+                // §4.1).  EADDR is R15 when the first faults; when only the
+                // second does, the start of its doubleword.
                 self.check_user(fp, 1, false)?;
-                self.check_user(fp.wrapping_add(8), 1, false)?;
+                self.check_user(fp.wrapping_add(8) & !7, 1, false)?;
                 self.regs[15] = self.read64(fp);
                 let ra = self.read64(fp.wrapping_add(8));
                 self.sp = fp.wrapping_add(16);
@@ -1044,10 +1049,8 @@ impl Cpu {
         let n = f.field(12, 8);
         if f.bit(21) {
             legal(f.len == 1 && !f.bit(20) && f.rd == 0 && f.rs2 == 0)?;
-            // MMU-SPEC-Q: §3.5 makes MTSR of any SR but TP PRIVILEGED in
-            // user mode, and §6.1 makes MTSR to CYCLE (and to an SR that does
-            // not exist) ILLEGAL.  Here ILLEGAL wins in both modes: it is a
-            // property of the encoding, decided before the mode is looked at.
+            // Legality before privilege (MMU_PLAN §3.5): MTSR to CYCLE, or to
+            // an SR that does not exist, is ILLEGAL in user mode too.
             legal(self.sr_read(n).is_some() && n != super::system::sr::CYCLE)?;
             if self.um && !sr_user_writable(n) {
                 return Err(privileged(f));
