@@ -59,3 +59,8 @@ hw_proposals.kla
 // SYSCALL, MFSR/MTSR, LR/SC.  Needs a bitstream whose CPU_FEATURES
 // (0xF00F_0048) reads 0x9; on an older one it parks at its first MTSR.
 hw_mmu.kla
+
+// MMU stage 2 (klaussCPU branch mmu, da8c085 on): the 16-region MPU.
+// Needs CPU_FEATURES[1]; on an older bitstream it mismatches at its first
+// check (CPU_FEATURES).
+hw_mpu.kla

@@ -384,12 +384,13 @@ mod tests {
     /// fixture the emulator corpus checks, and nothing that is not there.
     #[test]
     fn all_tests_lists_every_file_with_expected_values() {
-        // The MMU stage 2 and 3 tests need a bitstream with the MPU / TLB.
-        // On an older one they print 00000000 for CPU_FEATURES and halt (a
-        // clean mismatch), but a test list cannot say "skip when absent",
-        // so they stay out of all_tests.txt until the bitstream has them.
-        // They are in the emulator corpus all the same.
-        const NEEDS_NEWER_BITSTREAM: [&str; 2] = ["hw_mpu.kla", "hw_tlb.kla"];
+        // The MMU stage 3 test needs a bitstream with the TLB.  On an older
+        // one it prints 00000000 for CPU_FEATURES and halts (a clean
+        // mismatch), but a test list cannot say "skip when absent", so it
+        // stays out of all_tests.txt until the bitstream has it.  It is in
+        // the emulator corpus all the same.  (hw_mpu.kla joined the list
+        // when the stage 2 bitstream, klaussCPU mmu da8c085, passed it.)
+        const NEEDS_NEWER_BITSTREAM: [&str; 1] = ["hw_tlb.kla"];
         let mut with_values: Vec<String> = fs::read_dir(fixture_dir())
             .expect("read fixture dir")
             .flatten()
