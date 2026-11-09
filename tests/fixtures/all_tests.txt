@@ -62,3 +62,7 @@ hw_mmu.kla
 
 // hw_mpu.kla (the MPU) is not listed: the MPU is off in the Nexys A7
 // bitstream (klaussCPU MMU_PLAN §10).  Run it by hand on an MPU build.
+
+// MMU stage 3 (klaussCPU branch mmu, release 98fe470): the TLB.  Needs
+// CPU_FEATURES bit 2; on an older bitstream it mismatches at a1.
+hw_tlb.kla

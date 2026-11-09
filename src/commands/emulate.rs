@@ -443,8 +443,9 @@ mod tests {
         //   feature, off in the Nexys A7 bitstream for timing margin
         //   (klaussCPU MMU_PLAN §10; Graham, 2026-11-09).  It passed 17/17
         //   on the MPU bitstream mmu_da8c085.
-        // - hw_tlb.kla: joins the list once a TLB bitstream passes it.
-        const NEEDS_NEWER_BITSTREAM: [&str; 2] = ["hw_mpu.kla", "hw_tlb.kla"];
+        // (hw_tlb.kla joined the list when the stage 3 release bitstream,
+        // klaussCPU mmu 98fe470, passed it 19/19.)
+        const NEEDS_NEWER_BITSTREAM: [&str; 1] = ["hw_mpu.kla"];
         let mut with_values: Vec<String> = fs::read_dir(fixture_dir())
             .expect("read fixture dir")
             .flatten()
