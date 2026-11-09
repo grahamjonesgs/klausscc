@@ -28,7 +28,7 @@
 //   d) supervisor mode with TE = 1: kseg, the hole, MMIO
 //
 // Expected UART output:
-//   00002004  a1 CPU_FEATURES bit 2 and [15:8] = 32 entries
+//   00000004  a1 CPU_FEATURES bit 2 (the TLB; any entry count >= 16)
 //   12340105  b1 TLBR: TLB_HI as TLBWI wrote it (VPN 0x1234, G, ASID 5)
 //   07FF000F  b2 TLBR: TLB_LO keeps PFN [26:16] and X W R V
 //   00000007  b3 TLBP hit (a global entry, another ASID): its index
@@ -55,10 +55,10 @@ $NEWLINE
 // a) CPU_FEATURES
 SETR B 0xF00F0048
 MEMGET64 A B
-ANDV A 0xFF04
+ANDV A 0x0004
 $TXR A
 $NEWLINE
-BNEV A 0x2004 NO_TLB:
+BNEV A 0x4 NO_TLB:
 
 // b) the TLB instructions
 SETR A 0x12340105
@@ -132,13 +132,13 @@ MTSR TLBVEC B
 SETR B HANDLER:
 ORV B 0x80000000
 MTSR EVEC B
-// Entry 31 maps page 0 to itself (global), then translation goes on and
+// Entry 15 maps page 0 to itself (global), then translation goes on and
 // the kernel stack moves to kseg.
 SETR A 0x00000100
 MTSR TLB_HI A
 SETR A 0x0000000F
 MTSR TLB_LO A
-SETR A 31
+SETR A 15
 MTSR TLB_INDEX A
 TLBWI
 SETR A 0

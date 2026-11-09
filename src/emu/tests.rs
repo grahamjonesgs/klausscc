@@ -2136,8 +2136,8 @@ fn stage1_reset_state_and_cpu_features() {
     assert_eq!(s, SystemRegs::default(), "supervisor, EVEC 0, no reservation at reset");
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x20FF,
-        "CPU_FEATURES: stages 1-3 and LR/SC, 16 regions, 32 entries"
+        0x10FF,
+        "CPU_FEATURES: stages 1-3 and LR/SC, 16 regions, 16 entries"
     );
     assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
 }
@@ -3277,7 +3277,7 @@ fn tlb_reset_state_and_srs() {
     for (sr, value, back) in [
         (SR_TLB_HI, 0xFFFF_FFFF_u64, 0xFFFF_01FF_u64),
         (SR_TLB_LO, 0xFFFF_FFFF, 0x07FF_000F),
-        (SR_TLB_INDEX, 0xFFFF_FFFF, 0x8000_001F),
+        (SR_TLB_INDEX, 0xFFFF_FFFF, u64::from(super::mmu::TLB_INDEX_BITS)),
         (SR_ASID, 0x1FF, 0xFF),
         (SR_TLBVEC, 0x8000_0503, 0x8000_0500), // [1:0] read 0 (424e236)
     ] {
@@ -3318,7 +3318,7 @@ fn tlb_kseg_is_direct_and_the_hole_faults() {
     // MMIO is identity in supervisor mode.
     let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
     step_with_b(&mut cpu, 0xF00F_0048);
-    assert_eq!(cpu.regs[3], 0x20FF, "CPU_FEATURES");
+    assert_eq!(cpu.regs[3], 0x10FF, "CPU_FEATURES");
 }
 
 #[test]
@@ -3737,7 +3737,7 @@ fn tlb_double_fault_on_an_entry_outside_kseg() {
 #[test]
 fn tlb_turning_translation_on_and_off() {
     // MTSR STATUS with TE: the next fetch is translated.  Boot code at its
-    // physical address needs an entry for its own page first (entry 31,
+    // physical address needs an entry for its own page first (entry 15,
     // global, identity), then jumps to its kseg alias.
     let code = [
         mtsr(SR_STATUS, 0), // A = 0x200: TE on
@@ -3745,7 +3745,7 @@ fn tlb_turning_translation_on_and_off() {
         HALT,
     ];
     let mut cpu = stage1_cpu(&code, &[HALT], false);
-    tlb_map(&mut cpu, 31, 0, 0, TLB_V | TLB_X, None);
+    tlb_map(&mut cpu, 15, 0, 0, TLB_V | TLB_X, None);
     cpu.regs[0] = STATUS_TE;
     step_with_b(&mut cpu, KSEG + CODE_BASE + 8);
     assert!(cpu.te);

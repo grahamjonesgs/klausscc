@@ -29,8 +29,10 @@ use crate::layout::is_mmio;
 
 /// The number of MPU regions (`CPU_FEATURES[7:4]` + 1, §10.1).
 pub(super) const MPU_REGIONS: usize = 16;
-/// The number of TLB entries (`CPU_FEATURES[15:8]`, §11.3).
-pub(super) const TLB_ENTRIES: usize = 32;
+/// The number of TLB entries (`CPU_FEATURES[15:8]`, §11.3): 16 on the
+/// Nexys A7 build (klaussCPU mmu daee899, parameter `TLB_N`).  A power of
+/// two; `TLB_INDEX` keeps only the bits that address an entry.
+pub(super) const TLB_ENTRIES: usize = 16;
 
 /// `MPU_BASEn[0]`: the region is enabled.
 const MPU_ENABLE: u32 = 1 << 0;
@@ -49,8 +51,11 @@ const TLB_INDEX_P: u32 = 1 << 31;
 pub(super) const TLB_HI_BITS: u32 = 0xFFFF_01FF;
 /// The bits `TLB_LO` has: PFN `[26:16]`, X `[3]`, W `[2]`, R `[1]`, V `[0]`.
 pub(super) const TLB_LO_BITS: u32 = 0x07FF_000F;
-/// The bits `TLB_INDEX` has: P `[31]` and the entry index `[4:0]`.
-pub(super) const TLB_INDEX_BITS: u32 = 0x8000_001F;
+/// The entry-index bits of `TLB_INDEX` (`[3:0]` with 16 entries; the
+/// higher index bits read 0 and are ignored on write).
+const TLB_INDEX_MASK: u32 = TLB_ENTRIES as u32 - 1;
+/// The bits `TLB_INDEX` has: P `[31]` and the entry index.
+pub(super) const TLB_INDEX_BITS: u32 = TLB_INDEX_P | TLB_INDEX_MASK;
 /// The page size is 64 KiB (§11.1): VPN = VA`[31:16]`.
 const PAGE_SHIFT: u32 = 16;
 /// The offset within a page.
@@ -492,19 +497,19 @@ impl Cpu {
         self.stop = Some(StopReason::DoubleFault(kernel_sp));
     }
 
-    /// `TLBWI`: entry[`TLB_INDEX[4:0]`] = {`TLB_HI`, `TLB_LO`}.  Clears the
+    /// `TLBWI`: entry[`TLB_INDEX` index] = {`TLB_HI`, `TLB_LO`}.  Clears the
     /// reservation (§11.3 side effects).
     pub(super) fn tlbwi(&mut self) {
-        self.tlb[(self.tlb_index & 0x1F) as usize] = TlbEntry {
+        self.tlb[(self.tlb_index & TLB_INDEX_MASK) as usize] = TlbEntry {
             hi: self.tlb_hi,
             lo: self.tlb_lo,
         };
         self.reservation = None;
     }
 
-    /// `TLBR`: {`TLB_HI`, `TLB_LO`} = entry[`TLB_INDEX[4:0]`].
+    /// `TLBR`: {`TLB_HI`, `TLB_LO`} = entry[`TLB_INDEX` index].
     pub(super) fn tlbr(&mut self) {
-        let entry = self.tlb[(self.tlb_index & 0x1F) as usize];
+        let entry = self.tlb[(self.tlb_index & TLB_INDEX_MASK) as usize];
         self.tlb_hi = entry.hi;
         self.tlb_lo = entry.lo;
     }
