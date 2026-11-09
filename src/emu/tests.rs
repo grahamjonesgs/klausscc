@@ -4174,4 +4174,14 @@ fn uart_script_waits_for_the_prompt_before_each_line() {
     cpu.uart.extend_from_slice(b"out\n$ ");
     let _ = cpu.run(gap + 1, None);
     assert_eq!(cpu.uart_rx, [b'b']);
+    // After the last line (ending in a newline), the next prompt ends the run.
+    let mut cpu = cpu_with(&image_from_words(&[0x6100_0000]));
+    cpu.set_uart_script(b"x\n", b"$ ");
+    cpu.uart.extend_from_slice(b"$ ");
+    let r = cpu.run(10 * gap, None);
+    assert_eq!(r.stop, StopReason::InstructionCap, "waits for the prompt after the last line");
+    assert_eq!(cpu.uart_script.len(), 0);
+    cpu.uart.extend_from_slice(b"x\n$ ");
+    let r = cpu.run(10 * gap, None);
+    assert_eq!(r.stop, StopReason::InputDone);
 }

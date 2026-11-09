@@ -187,7 +187,7 @@ pub(crate) struct Cli {
     #[arg(long, value_name = "FILE", requires = "emulate")]
     pub(crate) uart_in: Option<PathBuf>,
 
-    /// With --uart-in: type each line (the first one too) only once the program has printed this text since the previous line, e.g. a shell prompt, so the session reads as if typed at the prompt
+    /// With --uart-in: type each line (the first one too) only once the program has printed this text since the previous line, e.g. a shell prompt, so the session reads as if typed at the prompt; the run stops (stop = InputDone) when the prompt is back after the last line (end it with a newline)
     #[arg(long, value_name = "TEXT", requires = "uart_in")]
     pub(crate) uart_prompt: Option<String>,
 }

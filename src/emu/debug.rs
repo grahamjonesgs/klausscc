@@ -32,6 +32,9 @@ pub enum StopReason {
     /// on the instruction that faulted or was interrupted.  The board parks
     /// with `park_kind` 6, or debug-halts with a debugger attached.
     DoubleFault(u32),
+    /// `--uart-in` with `--uart-prompt`: every scripted line has been typed
+    /// and the program has printed the prompt again, so the session is over.
+    InputDone,
 }
 
 /// Data access a debugger watchpoint triggers on.

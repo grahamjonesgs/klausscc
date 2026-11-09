@@ -182,6 +182,8 @@ impl EmuTarget {
                 SingleThreadStopReason::Signal(Signal::SIGSEGV)
             }
             StopReason::InstructionCap => SingleThreadStopReason::Signal(Signal::SIGXCPU),
+            // Scripted input is an --emulate feature; never set under the debugger.
+            StopReason::InputDone => SingleThreadStopReason::Signal(Signal::SIGSTOP),
             StopReason::WaitForever(pc) => {
                 eprintln!("klausscc gdbserver: WAIT at 0x{pc:08X} can never be woken (no unmasked, vectored interrupt)");
                 SingleThreadStopReason::Signal(Signal::SIGSTOP)

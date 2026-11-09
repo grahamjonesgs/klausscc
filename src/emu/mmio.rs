@@ -1,7 +1,7 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
 //! the performance counters.
 
-use super::{CYCLES_PER_MS, Cpu, PerfBase};
+use super::{CYCLES_PER_MS, Cpu, PerfBase, StopReason};
 
 /// Interrupt controller / timer device select (`addr[27:16]`).
 const IRQ_DEV_SELECT: u32 = 0x00F;
@@ -349,17 +349,23 @@ impl Cpu {
         self.uart_script_waiting_from = (!prompt.is_empty()).then_some(self.uart.len());
     }
 
-    /// Move the next scripted byte into the RX FIFO if it is due.
+    /// Move the next scripted byte into the RX FIFO if it is due.  With a
+    /// prompt, the run stops ([`StopReason::InputDone`]) once the last line
+    /// has been typed and the prompt is back.
     pub(super) fn pump_uart_script(&mut self) {
-        if self.uart_script.is_empty() {
-            return;
-        }
         if let Some(from) = self.uart_script_waiting_from {
             let prompt = &self.uart_script_prompt;
             if self.uart.len() < from + prompt.len() || !self.uart[from..].windows(prompt.len()).any(|w| w == prompt) {
                 return;
             }
             self.uart_script_waiting_from = None;
+            if self.uart_script.is_empty() {
+                self.stop = Some(StopReason::InputDone);
+                return;
+            }
+        }
+        if self.uart_script.is_empty() {
+            return;
         }
         if self.uart_script_wait > 0 {
             self.uart_script_wait -= 1;
