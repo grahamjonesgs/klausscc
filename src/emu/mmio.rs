@@ -354,8 +354,16 @@ impl Cpu {
     /// has been typed and the prompt is back.
     pub(super) fn pump_uart_script(&mut self) {
         if let Some(from) = self.uart_script_waiting_from {
+            // Only output that arrived since the last look can complete the
+            // prompt (keep the last prompt.len() - 1 bytes for an overlap).
             let prompt = &self.uart_script_prompt;
-            if self.uart.len() < from + prompt.len() || !self.uart[from..].windows(prompt.len()).any(|w| w == prompt) {
+            let end = self.uart.len();
+            if end == from {
+                return;
+            }
+            let start = from.max(self.uart_script_checked.saturating_sub(prompt.len() - 1));
+            self.uart_script_checked = end;
+            if end < start + prompt.len() || !self.uart[start..].windows(prompt.len()).any(|w| w == prompt) {
                 return;
             }
             self.uart_script_waiting_from = None;

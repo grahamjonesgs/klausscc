@@ -188,6 +188,8 @@ pub struct Cpu {
     uart_script_prompt: Vec<u8>,
     /// Where in `uart` to look for the prompt, while a line is waiting.
     uart_script_waiting_from: Option<usize>,
+    /// How much of `uart` has been searched for the prompt already.
+    uart_script_checked: usize,
     /// Why execution stopped, once it has.  A HALT is final; the other
     /// reasons can be cleared by a debugger ([`Cpu::clear_stop`]).
     stop: Option<StopReason>,
@@ -312,6 +314,7 @@ impl Cpu {
             uart_script_wait: 0,
             uart_script_prompt: Vec::new(),
             uart_script_waiting_from: None,
+            uart_script_checked: 0,
             stop: None,
             last_write: None,
             watches: Vec::new(),
