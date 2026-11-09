@@ -38,7 +38,9 @@ pub(crate) const DEFAULT_JTAG_KHZ: u32 = 10_000;
     author,
     about = "Assembler for FPGA_CPU",
     long_about = None,
-    arg_required_else_help = true
+    arg_required_else_help = true,
+    // --uart-in / --uart-prompt types at the emulated UART or the board monitor.
+    group(clap::ArgGroup::new("uart_host").multiple(true).args(["emulate", "monitor"]))
 )]
 // At most one mode: an input file, a net-load, a boot-ROM image, a board or
 // emulator test run, or the opcode lists (--opcodes and -t may go together).
@@ -183,11 +185,11 @@ pub(crate) struct Cli {
     #[arg(long, conflicts_with = "board")]
     pub(crate) mpu: bool,
 
-    /// Type the bytes of this file into the emulated UART receiver, one at a time whenever the receive FIFO has room (with a short gap between bytes), like keyboard input; for scripted sessions with programs that read the console. For --emulate
-    #[arg(long, value_name = "FILE", requires = "emulate")]
+    /// Type the bytes of this file into the UART receiver like keyboard input, for scripted sessions with programs that read the console. With --emulate: one byte at a time whenever the receive FIFO has room (with a short gap between bytes). With -m (serial monitor): sent to the board line by line, one byte every 3 ms, instead of forwarding the keyboard (no raw mode; Ctrl+C still ends the run). Needs --emulate or -m
+    #[arg(long, value_name = "FILE", requires = "uart_host", conflicts_with = "gdbserver")]
     pub(crate) uart_in: Option<PathBuf>,
 
-    /// With --uart-in: type each line (the first one too) only once the program has printed this text since the previous line, e.g. a shell prompt, so the session reads as if typed at the prompt; the run stops (stop = InputDone) when the prompt is back after the last line (end it with a newline)
+    /// With --uart-in: type each line (the first one too) only once the program has printed this text since the previous line, e.g. a shell prompt, so the session reads as if typed at the prompt; the run stops when the prompt is back after the last line (--emulate: stop = InputDone; -m: prints "Script done." and exits; end the file with a newline). Without it, -m sends a line every 200 ms and keeps monitoring
     #[arg(long, value_name = "TEXT", requires = "uart_in")]
     pub(crate) uart_prompt: Option<String>,
 }
@@ -712,7 +714,34 @@ mod tests {
 
         let cli = parse(&["-i", "prog.elf", "--emulate", "--uart-in", "keys.txt"]).unwrap();
         assert_eq!(cli.uart_in, Some(PathBuf::from("keys.txt")));
-        assert!(parse(&["-i", "prog.elf", "--uart-in", "keys.txt"]).is_err(), "--uart-in needs --emulate");
+        assert!(
+            parse(&["-i", "prog.elf", "--uart-in", "keys.txt"]).is_err(),
+            "--uart-in needs --emulate or -m"
+        );
+        let cli = parse(&[
+            "-i",
+            "prog.elf",
+            "-s",
+            "/dev/ttyUSB1",
+            "-m",
+            "--uart-in",
+            "keys.txt",
+            "--uart-prompt",
+            "$ ",
+        ])
+        .unwrap();
+        assert_eq!(cli.uart_in, Some(PathBuf::from("keys.txt")));
+        assert_eq!(cli.uart_prompt.as_deref(), Some("$ "));
+        assert!(parse(&["-m", "--uart-in", "keys.txt"]).is_ok(), "monitor-only");
+        assert!(
+            parse(&["-i", "prog.elf", "-s", "-m", "--uart-prompt", "$ "]).is_err(),
+            "--uart-prompt needs --uart-in"
+        );
+        assert!(
+            parse(&["-i", "prog.elf", "--gdbserver", "1234", "-m", "--uart-in", "k"]).is_err(),
+            "--uart-in is not for --gdbserver"
+        );
+        assert!(parse(&["-i", "prog.elf", "--gdbserver", "1234", "--uart-in", "k"]).is_err());
         let cli = parse(&["-i", "prog.elf", "--emulate", "--uart-in", "k", "--uart-prompt", "$ "]).unwrap();
         assert_eq!(cli.uart_prompt.as_deref(), Some("$ "));
         assert!(

@@ -3,11 +3,13 @@
 
 mod monitor;
 mod port;
+mod script;
 mod uart_test;
 mod upload;
 
 pub(crate) use monitor::{monitor_serial, monitor_serial_port};
 pub(crate) use port::SerialError;
+pub(crate) use script::Script;
 pub(crate) use uart_test::{TestResult, hex_token, parse_expected_uart_values, run_test_monitor};
 pub(crate) use upload::{AwaitAck, ResetMethod, write_to_board};
 

@@ -84,7 +84,7 @@ pub(crate) fn run_elf2serial(
     input: BinaryInput<'_>,
     kbt_file_name: &str,
     port: Option<SerialTarget<'_>>,
-    send: SendOpts,
+    send: SendOpts<'_>,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     let binary_path = input.path;
@@ -152,7 +152,7 @@ pub(crate) fn run_elf2serial(
 /// file and no re-encoding.  With `-m` and no `-s`, the serial port is
 /// auto-detected so a bare `-m` can both send and monitor.
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_kbt_send(kbt_path: &Path, port: Option<SerialTarget<'_>>, send: SendOpts, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn run_kbt_send(kbt_path: &Path, port: Option<SerialTarget<'_>>, send: SendOpts<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let wire = match fs::read_to_string(kbt_path) {
         Ok(contents) => contents,
         Err(e) => {

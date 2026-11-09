@@ -107,16 +107,23 @@ pub fn run() -> ExitCode {
 #[cfg(not(tarpaulin_include))] // Cannot test main in tarpaulin
 fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let serial = cli.serial();
+    // `--uart-in` types at the board's monitor (`-m`); --emulate reads it itself.
+    let script = if cli.monitor && !cli.emulate && cli.uart_in.is_some() {
+        Some(read_uart_in(cli, msg_list)?)
+    } else {
+        None
+    };
     let send = SendOpts {
         reset: cli.reset_method(),
         monitor: cli.monitor,
         debug: cli.debug,
+        script: script.as_ref(),
     };
     match *mode {
         // Monitor-only mode: `-m` on its own (optionally with `-s`) just opens
         // the serial monitor.  With no `-s` the board's FTDI USB-UART is
         // auto-detected.
-        Mode::Monitor(port) => monitor(port, cli.debug, msg_list),
+        Mode::Monitor(port) => monitor(port, cli.debug, script.as_ref(), msg_list),
         // net-load mode: flatten an ELF (or take a flat binary) and stream it
         // to the board over TCP — no kbt, no UART. See NETBOOT_PLAN.md / netboot.c.
         Mode::NetLoad {
@@ -134,7 +141,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
              * monitor runs until the user quits. */
             if let Some(port) = monitor_port {
                 msg_list.print_summary();
-                monitor(port, cli.debug, msg_list)?;
+                monitor(port, cli.debug, script.as_ref(), msg_list)?;
             }
             Ok(())
         }
@@ -237,7 +244,7 @@ fn run_assemble(
     code_file_name: &str,
     binary_file_name: &str,
     serial: Option<SerialTarget<'_>>,
-    send: SendOpts,
+    send: SendOpts<'_>,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     use std::fs::remove_file;

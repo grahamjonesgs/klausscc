@@ -61,7 +61,7 @@ pub(crate) fn run_gdbserver_board(
     jtag_khz: u32,
     kbt_file_name: &str,
     serial: Option<SerialTarget<'_>>,
-    send: SendOpts,
+    send: SendOpts<'_>,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     use crate::debug::board::{self, BoardError};
@@ -78,6 +78,7 @@ pub(crate) fn run_gdbserver_board(
         let send = SendOpts {
             monitor: false,
             debug: false,
+            script: None,
             ..send
         };
         let mut load = || {

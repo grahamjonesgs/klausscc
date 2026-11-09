@@ -2,6 +2,7 @@
 
 use super::SerialTarget;
 use super::port::{SerialError, open_port};
+use super::script::{Pacing, Received, Script, ScriptEnd, run_script};
 use crate::diag::Diagnostics;
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use serialport::SerialPort;
@@ -49,9 +50,14 @@ fn print_bytes(data: &[u8], debug: bool) {
 /// Continuously reads from the serial port and prints received data to stdout.
 /// Runs until the user presses Ctrl+C, then closes the port cleanly.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub(crate) fn monitor_serial(target: SerialTarget<'_>, debug: bool, msg_list: &mut Diagnostics) -> Result<(), SerialError> {
+pub(crate) fn monitor_serial(
+    target: SerialTarget<'_>,
+    debug: bool,
+    script: Option<Script<'_>>,
+    msg_list: &mut Diagnostics,
+) -> Result<(), SerialError> {
     let port = open_port(target, msg_list)?;
-    monitor_serial_port(port, debug, msg_list)
+    monitor_serial_port(port, debug, script, msg_list)
 }
 
 /// What the serial monitor does with one terminal key event.
@@ -163,6 +169,53 @@ impl Drop for StdinForwarder {
     }
 }
 
+/// A thread typing a script at the board, stopped and joined on drop.
+struct ScriptTyper {
+    /// Shared with the monitor loop.
+    running: Arc<AtomicBool>,
+    /// Set when the script has run to the end and the monitor should stop.
+    finished: Arc<AtomicBool>,
+    /// The script thread, until it is joined.
+    handle: Option<thread::JoinHandle<()>>,
+}
+
+impl ScriptTyper {
+    /// Start typing `script` into `write_port`, reading prompts from `received`.
+    #[cfg(not(tarpaulin_include))] // Needs a serial port
+    fn spawn(mut write_port: Box<dyn SerialPort>, script: Script<'_>, received: Arc<Received>, running: Arc<AtomicBool>) -> Self {
+        let bytes = script.bytes.to_vec();
+        let prompt = script.prompt.to_vec();
+        let finished = Arc::new(AtomicBool::new(false));
+        let (thread_running, thread_finished) = (Arc::clone(&running), Arc::clone(&finished));
+        let handle = thread::spawn(move || {
+            let script = Script {
+                bytes: &bytes,
+                prompt: &prompt,
+            };
+            let end = run_script(script, &received, &mut write_port, &thread_running, Pacing::BOARD);
+            // With a prompt the script is the whole session: stop once it is done.
+            if end == ScriptEnd::Finished && !prompt.is_empty() {
+                thread_finished.store(true, Ordering::Relaxed);
+                thread_running.store(false, Ordering::Relaxed);
+            }
+        });
+        Self {
+            running,
+            finished,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for ScriptTyper {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            drop(handle.join());
+        }
+    }
+}
+
 /// Discard keyboard input typed before the monitor started.
 ///
 /// Both steps are needed: tcflush clears bytes already in the kernel buffer
@@ -186,8 +239,17 @@ fn flush_stdin() {
 ///
 /// Used after `write_to_board` to continue reading from the same port
 /// that was used to upload the program, ensuring no UART output is missed.
+///
+/// With a `script`, that is typed at the board instead of forwarding the
+/// keyboard: no raw mode, and Ctrl+C is the terminal's SIGINT.  With a prompt,
+/// the monitor stops once the script is done.
 #[cfg(not(tarpaulin_include))] // Cannot test serial monitoring in tarpaulin
-pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, msg_list: &mut Diagnostics) -> Result<(), SerialError> {
+pub(crate) fn monitor_serial_port(
+    mut port: Box<dyn SerialPort>,
+    debug: bool,
+    script: Option<Script<'_>>,
+    msg_list: &mut Diagnostics,
+) -> Result<(), SerialError> {
     port.set_timeout(MONITOR_READ_TIMEOUT)?;
 
     let running = Arc::new(AtomicBool::new(true));
@@ -205,9 +267,24 @@ pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, ms
     // nothing would see Ctrl+C, so the terminal keeps its normal mode and
     // Ctrl+C (SIGINT) still stops the monitor.  Declared before the forwarder
     // so the forwarder is dropped (stopped) first.
-    let raw_mode = if write_port.is_some() { RawMode::enable(msg_list) } else { None };
-    flush_stdin();
-    let forwarder = write_port.map(|write_port| StdinForwarder::spawn(write_port, Arc::clone(&running)));
+    let received = Arc::new(Received::default());
+    let (raw_mode, forwarder, typer) = match (script, write_port) {
+        // A script replaces the keyboard: stdin may be a pipe.
+        (Some(script), Some(write_port)) => (
+            None,
+            None,
+            Some(ScriptTyper::spawn(write_port, script, Arc::clone(&received), Arc::clone(&running))),
+        ),
+        (script, write_port) => {
+            if script.is_some() {
+                msg_list.warning("Cannot type the --uart-in script without a second handle on the serial port");
+            }
+            let raw_mode = if write_port.is_some() { RawMode::enable(msg_list) } else { None };
+            flush_stdin();
+            let forwarder = write_port.map(|write_port| StdinForwarder::spawn(write_port, Arc::clone(&running)));
+            (raw_mode, forwarder, None)
+        }
+    };
 
     eprintln!("Monitoring serial port (Ctrl+C to stop)...\r");
 
@@ -226,6 +303,7 @@ pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, ms
                     break 'monitor;
                 }
                 print_bytes(data, debug);
+                received.push(data);
             }
             Err(err) if err.kind() == io::ErrorKind::TimedOut => {}
             Err(err) => {
@@ -236,10 +314,14 @@ pub(crate) fn monitor_serial_port(mut port: Box<dyn SerialPort>, debug: bool, ms
     }
 
     // Stop the forwarder, then leave raw mode, before the closing message.
+    let script_done = typer.as_ref().is_some_and(|typer| typer.finished.load(Ordering::Relaxed));
+    drop(typer);
     drop(forwarder);
     drop(raw_mode);
     if halt_received {
         eprintln!("\r\nCPU halted.");
+    } else if script_done {
+        eprintln!("\r\nScript done.");
     } else {
         eprintln!("\r\nSerial monitor stopped.");
     }
