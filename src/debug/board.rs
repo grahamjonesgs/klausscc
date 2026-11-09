@@ -18,6 +18,12 @@
 //! * Single steps run with interrupts masked; the timer, millisecond clock
 //!   and cycle counter are frozen while the core is halted.
 //! * MMIO (`0xF000_0000+`) is off limits unless `monitor mmio on`.
+//! * MMU stage 1 (`MMU_PLAN.md` §4.4, §6.2), only when DMSTATUS reports
+//!   debug module version 2 or later: registers 20 (`sp_alt`) and 21
+//!   (`mode`) are in the target description and the register file, and
+//!   `monitor exc_pass on` sets `DMCONTROL[5]` `EXC_PASS` on every DMCONTROL
+//!   write while attached.  A version 1 module gets neither.  (Not yet
+//!   tried on hardware: no bitstream has them.)
 //!
 //! On detach the server removes its breakpoints, clears "attached" and lets
 //! the program run on.
@@ -29,7 +35,7 @@
 
 mod dm;
 
-use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD};
+use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD, target_xml_range};
 #[cfg(feature = "board")]
 use super::{GdbError, accept, run_session, session_summary};
 use super::{RunEvent, Session, access_last_addr, mmio_monitor_cmd};
@@ -38,9 +44,9 @@ use crate::jtag::Jtag;
 use crate::jtag::{Dmi, DmiReq, JtagError};
 use crate::layout::is_mmio;
 use dm::{
-    BP0, CTL_ATTACHED, CTL_HALT_ON_LOAD, CTL_HALTREQ, CTL_RESUMEREQ, CTL_STEP, Cause, DATA0, DMCONTROL, DMSTATUS, DmInfo, DmStatus, MAX_BREAKPOINTS,
-    MAX_WATCHPOINTS, MEM_ADDR, MEM_BE_ALL, MEM_CMD, MEM_INC, MEM_WRITE, REG_CMD, REG_CMD_WRITE, SLOT_ENABLE, WATCH_ADDR, WP_LANES_SHIFT, WP_READ,
-    WP_WRITE, WP0,
+    BP0, CTL_ATTACHED, CTL_EXC_PASS, CTL_HALT_ON_LOAD, CTL_HALTREQ, CTL_RESUMEREQ, CTL_STEP, Cause, DATA0, DM_VERSION_STAGE1, DMCONTROL, DMSTATUS,
+    DmInfo, DmStatus, MAX_BREAKPOINTS, MAX_WATCHPOINTS, MEM_ADDR, MEM_BE_ALL, MEM_CMD, MEM_INC, MEM_WRITE, REG_CMD, REG_CMD_WRITE, SLOT_ENABLE,
+    WATCH_ADDR, WP_LANES_SHIFT, WP_READ, WP_WRITE, WP0,
 };
 use gdbstub::common::Signal;
 use gdbstub::stub::SingleThreadStopReason;
@@ -55,6 +61,7 @@ use gdbstub::target::ext::breakpoints::{
 use gdbstub::target::ext::host_info::HostInfoOps;
 use gdbstub::target::ext::monitor_cmd::{ConsoleOutput, MonitorCmd, MonitorCmdOps, outputln};
 use gdbstub::target::ext::process_info::ProcessInfoOps;
+use gdbstub::target::ext::target_description_xml_override::{TargetDescriptionXmlOverride, TargetDescriptionXmlOverrideOps};
 use gdbstub::target::{Target, TargetError, TargetResult};
 use std::collections::BTreeMap;
 use std::fmt;
@@ -207,6 +214,8 @@ pub(crate) struct Board<D> {
     dmi: D,
     /// What the debug module reported about itself when it was opened.
     info: Option<DmInfo>,
+    /// `monitor exc_pass on`: set `EXC_PASS` on every attached DMCONTROL write.
+    exc_pass: bool,
 }
 
 #[cfg(feature = "board")]
@@ -240,7 +249,23 @@ impl Board<Jtag> {
 impl<D: Dmi> Board<D> {
     /// The debug module behind `dmi`, before it has reported its comparators.
     const fn new(dmi: D) -> Self {
-        Self { dmi, info: None }
+        Self {
+            dmi,
+            info: None,
+            exc_pass: false,
+        }
+    }
+
+    /// Whether the debug module has the MMU stage 1 features (version 2
+    /// on): `EXC_PASS` and registers 20 and 21.  Unknown counts as no.
+    fn has_stage1(&self) -> bool {
+        self.info.is_some_and(|info| info.version >= DM_VERSION_STAGE1)
+    }
+
+    /// The registers this debug module has, in `regnum` order.
+    fn registers(&self) -> impl Iterator<Item = KlaussRegId> + use<D> {
+        let stage1 = self.has_stage1();
+        KlaussRegId::all().filter(move |reg| stage1 || !reg.is_stage1())
     }
 
     /// The hardware breakpoint comparators: as many as the debug module
@@ -266,8 +291,9 @@ impl<D: Dmi> Board<D> {
         self.dmi.dmi_read(DMSTATUS).map(DmStatus::from_raw).map_err(BoardError::Jtag)
     }
 
-    /// Write DMCONTROL.
+    /// Write DMCONTROL, with `EXC_PASS` added while attached if it is on.
     pub(crate) fn control(&mut self, v: u64) -> BoardResult<()> {
+        let v = if self.exc_pass && v & CTL_ATTACHED != 0 { v | CTL_EXC_PASS } else { v };
         self.dmi.dmi_write(DMCONTROL, v).map_err(BoardError::Jtag)
     }
 
@@ -288,20 +314,27 @@ impl<D: Dmi> Board<D> {
 
     /// Read every register in one batch.
     fn read_regs(&mut self) -> BoardResult<KlaussRegs> {
-        let requests: Vec<DmiReq> = KlaussRegId::all()
+        let requests: Vec<DmiReq> = self
+            .registers()
             .flat_map(|reg| [DmiReq::Write(REG_CMD, reg.regnum() as u64), DmiReq::Read(DATA0)])
             .collect();
         let v = self.batch(&requests)?;
-        let mut regs = KlaussRegs::default();
-        for (reg, value) in KlaussRegId::all().zip(v.into_iter().skip(1).step_by(2)) {
+        let mut regs = KlaussRegs {
+            stage1: self.has_stage1(),
+            ..KlaussRegs::default()
+        };
+        for (reg, value) in self.registers().zip(v.into_iter().skip(1).step_by(2)) {
             regs.set(reg, value);
         }
         Ok(regs)
     }
 
-    /// Write every register in one batch.
+    /// Write every register in one batch (20 and 21 only when both the
+    /// module and the packet have them).
     fn write_regs(&mut self, regs: &KlaussRegs) -> BoardResult<()> {
-        let requests: Vec<DmiReq> = KlaussRegId::all()
+        let requests: Vec<DmiReq> = self
+            .registers()
+            .filter(|reg| regs.stage1 || !reg.is_stage1())
             .flat_map(|reg| {
                 [
                     DmiReq::Write(DATA0, regs.get(reg)),
@@ -313,12 +346,23 @@ impl<D: Dmi> Board<D> {
     }
 
     fn read_reg(&mut self, reg: KlaussRegId) -> BoardResult<u64> {
+        self.check_reg(reg)?;
         Ok(self.batch(&[DmiReq::Write(REG_CMD, reg.regnum() as u64), DmiReq::Read(DATA0)])?[1])
     }
 
     fn write_reg(&mut self, reg: KlaussRegId, v: u64) -> BoardResult<()> {
+        self.check_reg(reg)?;
         self.batch(&[DmiReq::Write(DATA0, v), DmiReq::Write(REG_CMD, reg.regnum() as u64 | REG_CMD_WRITE)])
             .map(drop)
+    }
+
+    /// Refuse a register this debug module does not have (20 and 21 before
+    /// version 2).
+    fn check_reg(&self, reg: KlaussRegId) -> BoardResult<()> {
+        if reg.is_stage1() && !self.has_stage1() {
+            return Err(BoardError::Unsupported("this debug module (version 1) has no registers 20 and 21"));
+        }
+        Ok(())
     }
 
     /// Check (and clear) the DM's sticky error after a memory batch.
@@ -671,12 +715,33 @@ impl<D: Dmi> Target for BoardTarget<D> {
     fn support_monitor_cmd(&mut self) -> Option<MonitorCmdOps<'_, Self>> {
         Some(self)
     }
+
+    fn support_target_description_xml_override(&mut self) -> Option<TargetDescriptionXmlOverrideOps<'_, Self>> {
+        Some(self)
+    }
+}
+
+/// Registers 20 and 21 are described only to a debug module that has them.
+impl<D: Dmi> TargetDescriptionXmlOverride for BoardTarget<D> {
+    fn target_description_xml(&self, annex: &[u8], offset: u64, length: usize, buf: &mut [u8]) -> TargetResult<usize, Self> {
+        if annex != b"target.xml" {
+            return Err(TargetError::NonFatal);
+        }
+        Ok(target_xml_range(self.board.has_stage1(), offset, length, buf))
+    }
 }
 
 impl<D: Dmi> MonitorCmd for BoardTarget<D> {
     fn handle_monitor_cmd(&mut self, cmd: &[u8], mut out: ConsoleOutput<'_>) -> Result<(), Self::Error> {
         // Not UTF-8: no command, so the help.
-        let cmd = std::str::from_utf8(cmd).map_or("", str::trim);
+        self.monitor(std::str::from_utf8(cmd).map_or("", str::trim), &mut out);
+        Ok(())
+    }
+}
+
+impl<D: Dmi> BoardTarget<D> {
+    /// Run the monitor command `cmd`, writing its reply to `out`.
+    fn monitor(&mut self, cmd: &str, out: &mut impl fmt::Write) {
         match cmd {
             "status" => match self.board.status() {
                 Ok(st) => outputln!(
@@ -688,14 +753,32 @@ impl<D: Dmi> MonitorCmd for BoardTarget<D> {
                 ),
                 Err(e) => outputln!(out, "DMSTATUS read failed: {e}"),
             },
-            _ if mmio_monitor_cmd(cmd, &mut self.allow_mmio, &mut out) => {}
+            "exc_pass" | "exc_pass on" | "exc_pass off" if !self.board.has_stage1() => {
+                outputln!(out, "EXC_PASS needs debug module version 2 (MMU stage 1); this one is older");
+            }
+            "exc_pass" => outputln!(out, "EXC_PASS is {}", if self.board.exc_pass { "on" } else { "off" }),
+            "exc_pass on" | "exc_pass off" => {
+                self.board.exc_pass = cmd.ends_with("on");
+                // Takes effect now (the core is halted); every later
+                // DMCONTROL write while attached carries it.
+                match self.board.control(CTL_ATTACHED) {
+                    Ok(()) => outputln!(out, "EXC_PASS {}", if self.board.exc_pass { "on" } else { "off" }),
+                    Err(e) => outputln!(out, "DMCONTROL write failed: {e}"),
+                }
+            }
+            _ if mmio_monitor_cmd(cmd, &mut self.allow_mmio, out) => {}
             _ => {
                 outputln!(out, "klausscc gdbserver (board) monitor commands:");
-                outputln!(out, "  mmio on|off   allow debugger reads/writes of 0xF000_0000+ (default off)");
-                outputln!(out, "  status        debug module status");
+                outputln!(out, "  mmio on|off       allow debugger reads/writes of 0xF000_0000+ (default off)");
+                outputln!(out, "  status            debug module status");
+                if self.board.has_stage1() {
+                    outputln!(
+                        out,
+                        "  exc_pass on|off   let illegal/TRAP/misaligned go to EVEC instead of the debugger (default off)"
+                    );
+                }
             }
         }
-        Ok(())
     }
 }
 

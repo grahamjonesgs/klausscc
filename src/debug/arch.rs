@@ -12,6 +12,12 @@
 //! | 17     | pc       | 32   | 17    | pc (= the CFI return-address column) |
 //! | 18     | flags    | 32   | -     | flags: bit3 Z, bit2 S, bit1 C, bit0 V |
 //! | 19     | `int_mask` | 32 | -     | per-source interrupt enables (`INT_MASK`) |
+//! | 20     | `sp_alt` | 32   | -     | MMU stage 1: the inactive stack pointer (`SP_ALT`) |
+//! | 21     | `mode`   | 32   | -     | MMU stage 1: bit 1 UM (user mode), bit 0 DI |
+//!
+//! Registers 20 and 21 (`MMU_PLAN.md` §6.2) exist on the emulator and on a
+//! board whose debug module reports version 2 or later.  Without them the
+//! target description stops at 19 and the `g` packet has 20 registers.
 
 use gdbstub::arch::{Arch, RegId, Registers};
 use std::num::NonZeroUsize;
@@ -25,8 +31,19 @@ pub(crate) const HW_WATCHPOINTS: usize = 2;
 /// The target triple reported to the debugger.
 pub(crate) const TRIPLE: &str = "klausscpu-unknown-elf";
 
-/// The target description: the register layout of the module docs.
-const TARGET_XML: &str = r#"<?xml version="1.0"?>
+/// The `mode` register (21): user mode.
+// MMU-SPEC-Q: MMU_PLAN §6.2 gives register 21 as "{UM, DI} in [1:0]".  Read
+// as a Verilog concatenation that is UM in bit 1 and DI in bit 0, the
+// opposite of SR STATUS ([0] UM, [1] DI).
+pub(crate) const MODE_UM: u32 = 1 << 1;
+/// The `mode` register (21): interrupts disabled (`DI`).
+pub(crate) const MODE_DI: u32 = 1;
+
+/// The target description up to register 19, without its closing tags
+/// (a macro, so `concat!` can build both descriptions from it).
+macro_rules! target_xml_base {
+    () => {
+        r#"<?xml version="1.0"?>
 <!DOCTYPE target SYSTEM "gdb-target.dtd">
 <target version="1.0">
   <architecture>klausscpu</architecture>
@@ -57,8 +74,53 @@ const TARGET_XML: &str = r#"<?xml version="1.0"?>
     <reg name="pc" bitsize="32" regnum="17" type="uint32" group="general" dwarf_regnum="17" generic="pc"/>
     <reg name="flags" bitsize="32" regnum="18" type="klausscpu_flags" group="general" generic="flags"/>
     <reg name="int_mask" bitsize="32" regnum="19" type="uint32" group="general"/>
-  </feature>
-</target>"#;
+"#
+    };
+}
+
+/// The closing tags of the target description.
+macro_rules! target_xml_end {
+    () => {
+        "  </feature>\n</target>"
+    };
+}
+
+/// The target description: the register layout of the module docs, with
+/// the MMU stage 1 registers 20 and 21.
+const TARGET_XML: &str = concat!(
+    target_xml_base!(),
+    r#"    <flags id="klausscpu_mode" size="4">
+      <field name="DI" start="0" end="0"/>
+      <field name="UM" start="1" end="1"/>
+    </flags>
+    <reg name="sp_alt" bitsize="32" regnum="20" type="data_ptr" group="system"/>
+    <reg name="mode" bitsize="32" regnum="21" type="klausscpu_mode" group="system"/>
+"#,
+    target_xml_end!()
+);
+
+/// The target description of a core without MMU stage 1 (registers 0-19),
+/// for a board whose debug module is version 1.
+#[cfg_attr(
+    not(any(test, feature = "board")),
+    expect(dead_code, reason = "only the board target has cores without stage 1")
+)]
+pub(crate) const TARGET_XML_V1: &str = concat!(target_xml_base!(), target_xml_end!());
+
+/// The bytes of the target description for a `qXfer:features:read` of
+/// `offset`/`length`, copied into `buf`: the full one when `stage1`, else
+/// [`TARGET_XML_V1`].  Returns the number of bytes copied.
+#[cfg_attr(
+    not(any(test, feature = "board")),
+    expect(dead_code, reason = "only the board target has cores without stage 1")
+)]
+pub(crate) fn target_xml_range(stage1: bool, offset: u64, length: usize, buf: &mut [u8]) -> usize {
+    let xml = if stage1 { TARGET_XML } else { TARGET_XML_V1 }.as_bytes();
+    let start = usize::try_from(offset).unwrap_or(usize::MAX).min(xml.len());
+    let n = length.min(buf.len()).min(xml.len() - start);
+    buf[..n].copy_from_slice(&xml[start..start + n]);
+    n
+}
 
 /// The `KlaussCPU` register file in `g`-packet layout.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -68,10 +130,18 @@ pub(crate) struct KlaussRegs {
     pub(crate) pc: u32,
     pub(crate) flags: u32,
     pub(crate) int_mask: u32,
+    /// MMU stage 1 register 20, `SP_ALT`.
+    pub(crate) sp_alt: u32,
+    /// MMU stage 1 register 21, [`MODE_UM`] | [`MODE_DI`].
+    pub(crate) mode: u32,
+    /// Registers 20 and 21 exist (and are in the `g` packet).
+    pub(crate) stage1: bool,
 }
 
 /// Bytes in a `g` packet: 16 64-bit GPRs, then sp, pc, flags and `int_mask`.
 const REG_BYTES: usize = 16 * 8 + 4 * 4;
+/// Bytes in a `g` packet with the MMU stage 1 registers `sp_alt` and `mode`.
+const REG_BYTES_STAGE1: usize = REG_BYTES + 2 * 4;
 
 impl Registers for KlaussRegs {
     type ProgramCounter = u32;
@@ -84,26 +154,33 @@ impl Registers for KlaussRegs {
         for r in &self.r {
             r.to_le_bytes().iter().for_each(|b| write_byte(Some(*b)));
         }
-        for v in [self.sp, self.pc, self.flags, self.int_mask] {
+        let stage1 = [self.sp_alt, self.mode];
+        let extra: &[u32] = if self.stage1 { &stage1 } else { &[] };
+        for v in [self.sp, self.pc, self.flags, self.int_mask].iter().chain(extra) {
             v.to_le_bytes().iter().for_each(|b| write_byte(Some(*b)));
         }
     }
 
     fn gdb_deserialize(&mut self, bytes: &[u8]) -> Result<(), ()> {
-        if bytes.len() != REG_BYTES {
+        if bytes.len() != REG_BYTES && bytes.len() != REG_BYTES_STAGE1 {
             return Err(());
         }
         let (gprs, rest) = bytes.split_at(16 * 8);
         for (r, chunk) in self.r.iter_mut().zip(gprs.as_chunks::<8>().0) {
             *r = u64::from_le_bytes(*chunk);
         }
-        let (&[sp, pc, flags, int_mask], []) = rest.as_chunks::<4>() else {
+        let (words, []) = rest.as_chunks::<4>() else {
             return Err(());
         };
-        self.sp = u32::from_le_bytes(sp);
-        self.pc = u32::from_le_bytes(pc);
-        self.flags = u32::from_le_bytes(flags);
-        self.int_mask = u32::from_le_bytes(int_mask);
+        let words: Vec<u32> = words.iter().map(|w| u32::from_le_bytes(*w)).collect();
+        let (&[sp, pc, flags, int_mask], stage1) = words.split_at(4) else {
+            return Err(());
+        };
+        (self.sp, self.pc, self.flags, self.int_mask) = (sp, pc, flags, int_mask);
+        self.stage1 = !stage1.is_empty();
+        if let &[sp_alt, mode] = stage1 {
+            (self.sp_alt, self.mode) = (sp_alt, mode);
+        }
         Ok(())
     }
 }
@@ -117,6 +194,8 @@ impl KlaussRegs {
             KlaussRegId::Pc => self.pc as u64,
             KlaussRegId::Flags => self.flags as u64,
             KlaussRegId::IntMask => self.int_mask as u64,
+            KlaussRegId::SpAlt => self.sp_alt as u64,
+            KlaussRegId::Mode => self.mode as u64,
         }
     }
 
@@ -128,6 +207,8 @@ impl KlaussRegs {
             KlaussRegId::Pc => self.pc = value as u32,
             KlaussRegId::Flags => self.flags = value as u32,
             KlaussRegId::IntMask => self.int_mask = value as u32,
+            KlaussRegId::SpAlt => self.sp_alt = value as u32,
+            KlaussRegId::Mode => self.mode = value as u32,
         }
     }
 }
@@ -145,15 +226,19 @@ pub(crate) enum KlaussRegId {
     Flags,
     /// Interrupt mask.
     IntMask,
+    /// MMU stage 1: the inactive stack pointer (`SP_ALT`).
+    SpAlt,
+    /// MMU stage 1: [`MODE_UM`] | [`MODE_DI`].
+    Mode,
 }
 
 impl KlaussRegId {
-    /// The number of registers (`regnum` 0 to 19).
+    /// The number of registers (`regnum` 0 to 21).
     #[cfg_attr(
         not(any(test, feature = "board")),
         expect(dead_code, reason = "only the board target lists every register")
     )]
-    pub(crate) const COUNT: usize = 20;
+    pub(crate) const COUNT: usize = 22;
 
     /// The register with GDB `regnum` `n`, which is also its index in the
     /// board debug module's `REG_CMD`.
@@ -164,6 +249,8 @@ impl KlaussRegId {
             17 => Self::Pc,
             18 => Self::Flags,
             19 => Self::IntMask,
+            20 => Self::SpAlt,
+            21 => Self::Mode,
             _ => return None,
         })
     }
@@ -189,14 +276,26 @@ impl KlaussRegId {
             Self::Pc => 17,
             Self::Flags => 18,
             Self::IntMask => 19,
+            Self::SpAlt => 20,
+            Self::Mode => 21,
         }
+    }
+
+    /// Whether this is an MMU stage 1 register (20 or 21), which a version 1
+    /// debug module does not have.
+    #[cfg_attr(
+        not(any(test, feature = "board")),
+        expect(dead_code, reason = "only the board target has cores without them")
+    )]
+    pub(crate) const fn is_stage1(self) -> bool {
+        matches!(self, Self::SpAlt | Self::Mode)
     }
 
     /// The register's size in bytes.
     pub(crate) const fn size(self) -> usize {
         match self {
             Self::Gpr(_) => 8,
-            Self::Sp | Self::Pc | Self::Flags | Self::IntMask => 4,
+            Self::Sp | Self::Pc | Self::Flags | Self::IntMask | Self::SpAlt | Self::Mode => 4,
         }
     }
 
@@ -262,6 +361,28 @@ mod tests {
         back.gdb_deserialize(&bytes).unwrap();
         assert_eq!(back, regs);
         assert!(back.gdb_deserialize(&bytes[1..]).is_err());
+        // With the MMU stage 1 registers: two more words, after int_mask.
+        regs.stage1 = true;
+        regs.sp_alt = 0x0700_0000;
+        regs.mode = MODE_UM | MODE_DI;
+        let mut bytes = Vec::new();
+        regs.gdb_serialize(|b| bytes.push(b.unwrap()));
+        assert_eq!(bytes.len(), REG_BYTES_STAGE1);
+        assert_eq!(&bytes[REG_BYTES..], &[0, 0, 0, 7, 3, 0, 0, 0]);
+        let mut back = KlaussRegs::default();
+        back.gdb_deserialize(&bytes).unwrap();
+        assert_eq!(back, regs);
+    }
+
+    #[test]
+    fn target_xml_reads_in_pieces() {
+        let mut buf = [0_u8; 4096];
+        let n = target_xml_range(true, 0, 4096, &mut buf);
+        assert_eq!(&buf[..n], TARGET_XML.as_bytes());
+        let n = target_xml_range(false, 10, 4096, &mut buf);
+        assert_eq!(&buf[..n], &TARGET_XML_V1.as_bytes()[10..]);
+        assert_eq!(target_xml_range(true, 0, 5, &mut buf), 5);
+        assert_eq!(target_xml_range(true, 1 << 40, 5, &mut buf), 0, "past the end");
     }
 
     #[test]
@@ -312,10 +433,14 @@ mod tests {
     fn register_ids_match_target_xml() {
         assert_eq!(KlaussRegId::from_raw_id(15).map(|r| r.0), Some(KlaussRegId::Gpr(15)));
         assert_eq!(KlaussRegId::from_raw_id(17).map(|r| r.0), Some(KlaussRegId::Pc));
-        assert_eq!(KlaussRegId::from_raw_id(20), None);
-        for n in 0..20 {
+        assert_eq!(KlaussRegId::from_raw_id(21).map(|r| r.0), Some(KlaussRegId::Mode));
+        assert_eq!(KlaussRegId::from_raw_id(22), None);
+        for n in 0..22 {
             assert!(TARGET_XML.contains(&format!("regnum=\"{n}\"")), "regnum {n} described");
+            assert_eq!(TARGET_XML_V1.contains(&format!("regnum=\"{n}\"")), n < 20, "regnum {n} in v1");
         }
+        assert!(TARGET_XML.ends_with("</feature>\n</target>") && TARGET_XML_V1.ends_with("</feature>\n</target>"));
+        assert!(TARGET_XML.contains(r#"<field name="UM" start="1" end="1"/>"#));
         assert!(TARGET_XML.contains(r#"name="pc" bitsize="32" regnum="17""#));
         assert!(TARGET_XML.contains(r#"dwarf_regnum="17" generic="pc""#));
     }

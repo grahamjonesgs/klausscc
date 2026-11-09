@@ -367,6 +367,85 @@ fn registers_read_and_write_through_reg_cmd() {
     assert_eq!(state.borrow().regs[19], 0x14443);
 }
 
+/// [`halted_target`] with a debug module of version `version`.
+fn halted_target_version(pc: u32, version: u8) -> (BoardTarget<FakeDm>, Rc<RefCell<DmState>>) {
+    let (mut target, state) = halted_target(pc);
+    target.board.info = Some(DmInfo {
+        version,
+        breakpoints: HW_BREAKPOINTS as u8,
+        watchpoints: HW_WATCHPOINTS as u8,
+    });
+    (target, state)
+}
+
+/// The target description `target` serves.
+fn served_xml(target: &mut BoardTarget<FakeDm>) -> String {
+    let mut buf = vec![0_u8; 8192];
+    let n = ok(target.target_description_xml(b"target.xml", 0, buf.len(), &mut buf));
+    String::from_utf8(buf[..n].to_vec()).unwrap()
+}
+
+#[test]
+fn a_version_1_module_has_no_stage1_registers_or_exc_pass() {
+    let (mut target, state) = halted_target_version(0x100, 1);
+    let mut regs = KlaussRegs::default();
+    ok(target.read_registers(&mut regs));
+    assert!(!regs.stage1);
+    let mut bytes = Vec::new();
+    gdbstub::arch::Registers::gdb_serialize(&regs, |b| bytes.push(b));
+    assert_eq!(bytes.len(), 16 * 8 + 4 * 4, "a 20-register g packet");
+    let asked = |state: &Rc<RefCell<DmState>>| state.borrow().regs[20];
+    let mut buf = [0_u8; 4];
+    assert_eq!(err_kind(&target.read_register((), KlaussRegId::SpAlt, &mut buf)), "nonfatal");
+    assert_eq!(err_kind(&target.write_register((), KlaussRegId::Mode, &[1, 0, 0, 0])), "nonfatal");
+    assert_eq!(asked(&state), 0);
+    let xml = served_xml(&mut target);
+    assert!(xml.contains(r#"regnum="19""#) && !xml.contains(r#"regnum="20""#), "{xml}");
+    let mut out = String::new();
+    target.monitor("exc_pass on", &mut out);
+    assert!(out.contains("needs debug module version 2"), "{out}");
+    assert!(!target.board.exc_pass);
+    assert!(state.borrow().controls.is_empty(), "no DMCONTROL write");
+}
+
+#[test]
+fn a_version_2_module_has_registers_20_21_and_exc_pass() {
+    // Untested on hardware: the model only answers REG_CMD 20/21 and keeps
+    // DMCONTROL writes.
+    let (mut target, state) = halted_target_version(0x100, 2);
+    state.borrow_mut().regs[20] = 0x0700_0000;
+    state.borrow_mut().regs[21] = 0b10;
+    let mut regs = KlaussRegs::default();
+    ok(target.read_registers(&mut regs));
+    assert!(regs.stage1);
+    assert_eq!((regs.sp_alt, regs.mode), (0x0700_0000, 0b10));
+    regs.sp_alt = 0x0600_0000;
+    regs.mode = 0b01;
+    ok(target.write_registers(&regs));
+    assert_eq!((state.borrow().regs[20], state.borrow().regs[21]), (0x0600_0000, 0b01));
+    let mut buf = [0_u8; 4];
+    assert_eq!(ok(target.read_register((), KlaussRegId::SpAlt, &mut buf)), 4);
+    assert_eq!(u32::from_le_bytes(buf), 0x0600_0000);
+    assert!(served_xml(&mut target).contains(r#"name="mode" bitsize="32" regnum="21""#));
+    assert_eq!(err_kind(&target.target_description_xml(b"other.xml", 0, 10, &mut [0; 10])), "nonfatal");
+
+    // EXC_PASS goes out at once and with every later attached write.
+    let mut out = String::new();
+    target.monitor("exc_pass on", &mut out);
+    target.monitor("exc_pass", &mut out);
+    assert_eq!(out, "EXC_PASS on\nEXC_PASS is on\n");
+    assert_eq!(state.borrow().controls.last(), Some(&(CTL_ATTACHED | CTL_EXC_PASS)));
+    ok(target.resume(None).map_err(TargetError::Fatal));
+    assert_eq!(state.borrow().controls.last(), Some(&(CTL_ATTACHED | CTL_RESUMEREQ | CTL_EXC_PASS)));
+    target.monitor("exc_pass off", &mut out);
+    assert_eq!(state.borrow().controls.last(), Some(&CTL_ATTACHED));
+    // Detaching (attached clear) never carries it.
+    target.monitor("exc_pass on", &mut out);
+    target.state = RunState::Halted;
+    assert!(target.detach().is_ok());
+    assert_eq!(state.borrow().controls.last(), Some(&CTL_RESUMEREQ));
+}
+
 #[test]
 fn single_registers_read_and_write_by_size() {
     let (mut target, state) = halted_target(0x0102_0304);

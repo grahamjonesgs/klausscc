@@ -26,8 +26,14 @@
 //! The debugger cannot read or write MMIO (`0xF000_0000+`)
 //! unless `monitor mmio on` is given: some device reads have side effects,
 //! e.g. popping the UART RX FIFO, and debuggers read memory freely.
+//!
+//! MMU stage 1 (`MMU_PLAN.md` §4.4, §6.2): registers 20 (`sp_alt`) and 21
+//! (`mode`: UM, DI) are served, and as on the board an illegal instruction,
+//! TRAP or misaligned access stops in the debugger even when the program
+//! has an exception vector, unless `monitor exc_pass on` lets them through
+//! to it.  `monitor sr` shows the system registers.
 
-use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, TRAP_WORD};
+use super::arch::{HW_BREAKPOINTS, HW_WATCHPOINTS, KlaussCpuArch, KlaussRegId, KlaussRegs, MODE_DI, MODE_UM, TRAP_WORD};
 use super::{GdbError, RunEvent, Session, accept, mmio_monitor_cmd, run_session, session_summary};
 use crate::emu::{Access, CYCLES_PER_MS, Cpu, DebugRegs, StopReason, Watch, WatchKind as EmuWatchKind};
 use crate::layout::is_mmio;
@@ -77,7 +83,8 @@ pub(crate) struct EmuTarget {
 }
 
 impl EmuTarget {
-    fn new(cpu: Cpu, uart_rx: mpsc::Receiver<u8>) -> Self {
+    fn new(mut cpu: Cpu, uart_rx: mpsc::Receiver<u8>) -> Self {
+        cpu.set_debugger_attached(true);
         Self {
             cpu,
             exec: ExecMode::Continue,
@@ -215,7 +222,14 @@ impl Target for EmuTarget {
 impl MonitorCmd for EmuTarget {
     fn handle_monitor_cmd(&mut self, cmd: &[u8], mut out: ConsoleOutput<'_>) -> Result<(), Self::Error> {
         // Not UTF-8: no command, so the help.
-        let cmd = std::str::from_utf8(cmd).map_or("", str::trim);
+        self.monitor(std::str::from_utf8(cmd).map_or("", str::trim), &mut out);
+        Ok(())
+    }
+}
+
+impl EmuTarget {
+    /// Run the monitor command `cmd`, writing its reply to `out`.
+    fn monitor(&mut self, cmd: &str, out: &mut impl std::fmt::Write) {
         match cmd {
             "irq" => {
                 let st = self.cpu.irq_state();
@@ -238,25 +252,66 @@ impl MonitorCmd for EmuTarget {
                     st.cycles / CYCLES_PER_MS
                 );
             }
-            _ if mmio_monitor_cmd(cmd, &mut self.allow_mmio, &mut out) => {}
+            "sr" => {
+                let s = self.cpu.system_regs();
+                outputln!(
+                    out,
+                    "mode {}   DI {}   SP_ALT 0x{:08X}",
+                    if s.um { "user" } else { "supervisor" },
+                    u8::from(s.irq_disabled),
+                    s.sp_alt
+                );
+                outputln!(out, "EVEC 0x{:08X}   ECAUSE {}   EADDR 0x{:08X}", s.evec, s.ecause, s.eaddr);
+                outputln!(out, "SCRATCH0 0x{:016X}   SCRATCH1 0x{:016X}", s.scratch[0], s.scratch[1]);
+                outputln!(out, "TP 0x{:016X}   CYCLE {}", s.tp, s.cycle);
+                if let Some(addr) = s.reservation {
+                    outputln!(out, "LR/SC reservation 0x{addr:08X}");
+                } else {
+                    outputln!(out, "LR/SC reservation none");
+                }
+                if let Some((cause, addr)) = self.cpu.parked_exception() {
+                    outputln!(out, "last stop on an exception: {cause:?} (ECAUSE {}) at 0x{addr:08X}", cause as u8);
+                }
+            }
+            "exc_pass" => outputln!(out, "EXC_PASS is {}", if self.cpu.exc_pass() { "on" } else { "off" }),
+            "exc_pass on" | "exc_pass off" => {
+                let on = cmd.ends_with("on");
+                self.cpu.set_exc_pass(on);
+                if on {
+                    outputln!(
+                        out,
+                        "EXC_PASS on: illegal instructions, TRAP and misaligned accesses go to the program's EVEC"
+                    );
+                } else {
+                    outputln!(
+                        out,
+                        "EXC_PASS off: illegal instructions, TRAP and misaligned accesses stop in the debugger"
+                    );
+                }
+            }
+            _ if mmio_monitor_cmd(cmd, &mut self.allow_mmio, out) => {}
             _ => {
                 outputln!(out, "klausscc gdbserver monitor commands:");
-                outputln!(out, "  mmio on|off   allow debugger reads/writes of 0xF000_0000+ (default off)");
-                outputln!(out, "  irq           interrupt controller and timer state");
+                outputln!(out, "  mmio on|off       allow debugger reads/writes of 0xF000_0000+ (default off)");
+                outputln!(out, "  irq               interrupt controller and timer state");
+                outputln!(out, "  sr                MMU stage 1 system registers and mode");
+                outputln!(
+                    out,
+                    "  exc_pass on|off   let illegal/TRAP/misaligned go to EVEC instead of the debugger (default off)"
+                );
             }
         }
-        Ok(())
     }
 }
 
 impl SingleThreadBase for EmuTarget {
     fn read_registers(&mut self, regs: &mut KlaussRegs) -> TargetResult<(), Self> {
-        *regs = KlaussRegs::from(&self.cpu.debug_regs());
+        *regs = self.regs();
         Ok(())
     }
 
     fn write_registers(&mut self, regs: &KlaussRegs) -> TargetResult<(), Self> {
-        self.cpu.set_debug_regs(&DebugRegs::from(regs));
+        self.set_regs(regs);
         Ok(())
     }
 
@@ -292,27 +347,40 @@ impl SingleThreadBase for EmuTarget {
 
 impl SingleRegisterAccess<()> for EmuTarget {
     fn read_register(&mut self, _tid: (), reg_id: KlaussRegId, buf: &mut [u8]) -> TargetResult<usize, Self> {
-        let regs = KlaussRegs::from(&self.cpu.debug_regs());
-        Ok(reg_id.encode(regs.get(reg_id), buf))
+        Ok(reg_id.encode(self.regs().get(reg_id), buf))
     }
 
     fn write_register(&mut self, _tid: (), reg_id: KlaussRegId, val: &[u8]) -> TargetResult<(), Self> {
         let value = reg_id.decode(val).ok_or(TargetError::NonFatal)?;
-        let mut regs = KlaussRegs::from(&self.cpu.debug_regs());
+        let mut regs = self.regs();
         regs.set(reg_id, value);
-        self.cpu.set_debug_regs(&DebugRegs::from(&regs));
+        self.set_regs(&regs);
         Ok(())
     }
 }
 
-impl From<&DebugRegs> for KlaussRegs {
-    fn from(d: &DebugRegs) -> Self {
-        Self {
+impl EmuTarget {
+    /// Every register, the MMU stage 1 ones included.
+    fn regs(&self) -> KlaussRegs {
+        let d = self.cpu.debug_regs();
+        let s = self.cpu.system_regs();
+        KlaussRegs {
             r: d.r,
             sp: d.sp,
             pc: d.pc,
             flags: u32::from(d.flags),
             int_mask: u32::from(d.int_mask),
+            sp_alt: s.sp_alt,
+            mode: if s.um { MODE_UM } else { 0 } | if s.irq_disabled { MODE_DI } else { 0 },
+            stage1: true,
+        }
+    }
+
+    /// Set the registers; registers 20 and 21 only when `regs` has them.
+    fn set_regs(&mut self, regs: &KlaussRegs) {
+        self.cpu.set_debug_regs(&DebugRegs::from(regs));
+        if regs.stage1 {
+            self.cpu.set_mode_regs(regs.sp_alt, regs.mode & MODE_UM != 0, regs.mode & MODE_DI != 0);
         }
     }
 }
@@ -508,6 +576,7 @@ mod tests {
         let mut regs = KlaussRegs::default();
         assert!(target.read_registers(&mut regs).is_ok());
         assert_eq!(regs.pc, 0x20);
+        assert!(regs.stage1, "the emulator has registers 20 and 21");
         regs.r[7] = 0x1234_5678_9ABC_DEF0;
         regs.flags = 0x1F;
         assert!(target.write_registers(&regs).is_ok());
@@ -519,5 +588,48 @@ mod tests {
         assert!(target.write_register((), KlaussRegId::Pc, &0x40_u32.to_le_bytes()).is_ok());
         assert_eq!(target.cpu.debug_regs().pc, 0x40);
         assert!(target.write_register((), KlaussRegId::Pc, &[1, 2]).is_err(), "wrong size");
+        // MMU stage 1: SP_ALT and {UM, DI}.
+        assert!(target.write_register((), KlaussRegId::SpAlt, &0x7000_u32.to_le_bytes()).is_ok());
+        assert!(target.write_register((), KlaussRegId::Mode, &MODE_UM.to_le_bytes()).is_ok());
+        let s = target.cpu.system_regs();
+        assert_eq!((s.sp_alt, s.um, s.irq_disabled), (0x7000, true, false));
+        assert_eq!(target.read_register((), KlaussRegId::Mode, &mut buf).ok(), Some(4));
+        assert_eq!(u32::from_le_bytes(buf[..4].try_into().unwrap()), MODE_UM);
+        // A 20-register G packet leaves them alone.
+        regs.stage1 = false;
+        assert!(target.write_registers(&regs).is_ok());
+        assert_eq!(target.cpu.system_regs().sp_alt, 0x7000);
+    }
+
+    #[test]
+    fn exc_pass_lets_a_trap_reach_the_program_handler() {
+        // MTSR EVEC A with A = 0x40 (set by the debugger), then TRAP at 0x24;
+        // the handler at 0x40 is a NOP.
+        let mut target = target_with(0x6C60_1000);
+        assert!(target.cpu.debug_write(0x24, &TRAP_WORD.to_le_bytes()));
+        assert!(target.cpu.debug_write(0x40, &0x6C00_0000_u32.to_le_bytes()));
+        let mut regs = target.regs();
+        regs.r[0] = 0x40;
+        target.set_regs(&regs);
+        assert!(target.step(None).is_ok());
+        assert!(matches!(target.run(|| false), RunEvent::Stop(SingleThreadStopReason::DoneStep)));
+        assert_eq!(target.cpu.system_regs().evec, 0x40);
+        // Attached, EXC_PASS off: the TRAP stops in the debugger.
+        assert!(matches!(
+            target.step_instruction(false),
+            Some(SingleThreadStopReason::Signal(Signal::SIGTRAP))
+        ));
+        assert_eq!(target.cpu.debug_regs().pc, 0x24);
+        let mut out = String::new();
+        target.monitor("exc_pass on", &mut out);
+        assert!(target.cpu.exc_pass());
+        target.monitor("exc_pass", &mut out);
+        target.monitor("sr", &mut out);
+        assert!(out.contains("EXC_PASS is on"), "{out}");
+        assert!(out.contains("EVEC 0x00000040"), "{out}");
+        target.cpu.clear_stop();
+        assert_eq!(target.step_instruction(false), None);
+        assert_eq!(target.cpu.debug_regs().pc, 0x40, "entered EVEC");
+        assert_eq!(target.cpu.system_regs().ecause, 3, "TRAP");
     }
 }

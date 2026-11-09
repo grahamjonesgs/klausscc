@@ -34,6 +34,12 @@ pub(super) const CTL_RESUMEREQ: u64 = 1 << 1;
 pub(super) const CTL_STEP: u64 = 1 << 2;
 pub(super) const CTL_ATTACHED: u64 = 1 << 3;
 pub(super) const CTL_HALT_ON_LOAD: u64 = 1 << 4;
+/// `EXC_PASS` (debug module version 2, MMU stage 1 §4.4): with the
+/// debugger attached, illegal instructions, TRAP and misaligned accesses go
+/// to the program's `EVEC` instead of halting.
+pub(super) const CTL_EXC_PASS: u64 = 1 << 5;
+/// The first debug module version with `EXC_PASS` and registers 20/21.
+pub(super) const DM_VERSION_STAGE1: u8 = 2;
 
 // ---- REG_CMD and MEM_CMD bits -----------------------------------------------
 /// `REG_CMD`: write the register from DATA0.
