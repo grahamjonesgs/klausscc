@@ -54,3 +54,8 @@ hw_div_smc.kla
 // The hw-proposals instructions (klaussCPU master 3508f87): W and imm32
 // fused branches, CMPRVW.S, MULV.S/MULUV.S/MULUV, LEAPC.S, DI/EI
 hw_proposals.kla
+
+// MMU stage 1 (klaussCPU branch mmu): exceptions to EVEC, user mode,
+// SYSCALL, MFSR/MTSR, LR/SC.  Needs a bitstream whose CPU_FEATURES
+// (0xF00F_0048) reads 0x9; on an older one it parks at its first MTSR.
+hw_mmu.kla

@@ -1,6 +1,6 @@
 //! Disassembling instruction words back into assembler text.
 
-use super::{Opcode, Operand, REG_NAMES};
+use super::{Opcode, Operand, REG_NAMES, SR_NAMES};
 use crate::asm::line::{Emitted, LineType, Pass2};
 use std::fmt::Write as _;
 
@@ -68,6 +68,11 @@ impl Disassembler {
                 Operand::Imm8 => write!(text, " {}", (word >> 12) & 0xFF),
                 Operand::Off8(shift) => write!(text, " {}", i64::from((((word >> 12) & 0xFF) as u8) as i8) << shift),
                 Operand::Frame22 => write!(text, " {}", word & 0x3F_FFFF),
+                // By name where there is one, else the number.
+                Operand::Sr => match SR_NAMES.get(((word >> 12) & 0xFF) as usize) {
+                    Some(name) => write!(text, " {name}"),
+                    None => write!(text, " {}", (word >> 12) & 0xFF),
+                },
                 Operand::Simm4 => write!(text, " {}", (((word & 0xF) << 28) as i32) >> 28),
                 Operand::Cond => write!(text, " {}", Operand::cond_value(word)),
                 Operand::Rel18 => write!(text, " PC{:+}", (((word << 14) as i32) >> 14) * 4),
@@ -170,7 +175,16 @@ mod tests {
         ("LDIDX64U.S", "LDIDX64.S"),
         ("STIDX64U.S", "STIDX64.S"),
         ("LCDRST", "LCD"),
+        ("LR64", "LR_D"),
+        ("LR32", "LR_W"),
+        ("LR32S", "LR32_S"),
+        ("LR32S", "LR_W_S"),
+        ("SC64", "SC_D"),
+        ("SC32", "SC_W"),
     ];
+
+    /// Two hidden aliases of one opcode, which overlap each other too.
+    const HIDDEN_PAIRS: &[(&str, &str)] = &[("LR32_S", "LR_W_S")];
 
     /// Opcodes that are one case of a later opcode, as `(shown, general)`:
     /// a rotate by 1 shows as LLVM shows it, any other count as ROLV/RORV.
@@ -226,6 +240,8 @@ mod tests {
                     (offset.clone(), offset)
                 }
                 Operand::Frame22 => ("12345".to_owned(), "12345".to_owned()),
+                // Lower case in, the listing's upper case out.
+                Operand::Sr => ("scratch1".to_owned(), "SCRATCH1".to_owned()),
                 Operand::Simm4 => ("-3".to_owned(), "-3".to_owned()),
                 Operand::Cond => ("9".to_owned(), "9".to_owned()),
                 Operand::Rel18 | Operand::Rel13 | Operand::Rel16 | Operand::Rel32 => ("0x10".to_owned(), "PC-16".to_owned()),
@@ -257,7 +273,7 @@ mod tests {
                 }
             }
         }
-        let mut want: Vec<(&str, &str)> = ALIASES.iter().chain(SPECIAL_CASES).copied().collect();
+        let mut want: Vec<(&str, &str)> = ALIASES.iter().chain(SPECIAL_CASES).chain(HIDDEN_PAIRS).copied().collect();
         for (reg, imm, imm32) in FUSED {
             want.extend([(reg, "FBR"), (imm, "FBRI"), (imm32, "FBRV")]);
         }

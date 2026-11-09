@@ -1476,6 +1476,8 @@ fn every_assembler_form_executes() {
             Operand::Rel18 => &[1, 0, 0x3_FFFF],
             Operand::Rel13 => &[1, 0, 0x1FFF],
             Operand::Rel16 => &[0x0_1004, 0, 0xF_F0FF],
+            // SRs that exist and MTSR may write (not CYCLE).
+            Operand::Sr => &[7, 0, 5],
             Operand::Imm | Operand::Imm64 | Operand::Rel32 => &[0],
         }
     }
@@ -1500,8 +1502,12 @@ fn every_assembler_form_executes() {
             let mut regs = cpu.debug_regs();
             regs.r = [0x100; 16];
             cpu.set_debug_regs(&regs);
+            // With EVEC set, SYSCALL (and TRAP) enter the handler instead
+            // of parking as illegal: only ECAUSE tells them apart.
+            cpu.evec = 0x800;
             let stop = cpu.step_one(false);
             assert_ne!(stop, Some(StopReason::InvalidOpcode(word)), "{} as {word:08x}", opcode.name);
+            assert_ne!(cpu.ecause, Cause::Illegal as u8, "{} as {word:08x}", opcode.name);
         }
     }
 }

@@ -1,0 +1,183 @@
+// Test 28: MMU stage 1 (klaussCPU MMU_PLAN.md, branch mmu)
+// Exceptions taken to EVEC, user mode, SYSCALL, the system registers and
+// LR/SC.  Needs a bitstream with CPU_FEATURES (0xF00F_0048) bits 0 and 3:
+// on an older one the first MTSR is an illegal instruction and the core
+// parks after printing 00000000 for a1.
+//
+// The kernel's exception handler (HANDLER) keeps ECAUSE in N and EADDR in
+// O and skips the faulting instruction (every one here is one word).  A
+// SYSCALL with A = 0 leaves user mode for the kernel continuation in
+// SCRATCH0; any other SYSCALL adds 100 to A and returns.  The handler uses
+// M.  Only the kernel prints: the UART is MMIO, out of user mode's reach.
+//
+//   a) CPU_FEATURES
+//   b) supervisor mode: EVEC, STATUS and CYCLE read back
+//   c) user mode, entered by IRET with PM = 1: STATUS, TP, a faulting MMIO
+//      load and a privileged DI change nothing, a SYSCALL, the user stack
+//   d) LR/SC: success, failure after an SC, a misaligned LR, an SC to MMIO
+//   e) TRAP and SYSCALL from supervisor mode
+//
+// Expected UART output:
+//   00000009  a1 CPU_FEATURES: stage 1 and LR/SC
+//   00000000  b1 EVEC reads back what MTSR wrote
+//   00000000  b2 STATUS in supervisor mode (UM 0, DI 0)
+//   00000001  b3 CYCLE counts up
+//   00000001  c1 STATUS in user mode (UM 1)
+//   00001234  c2 TP written and read back in user mode
+//   00000055  c3 the faulting MMIO load left its rd alone
+//   00000007  c4 ECAUSE ACCESS_LOAD
+//   F0010000  c5 EADDR: the MMIO address
+//   00000077  c6 the privileged DI left its rd alone
+//   00000002  c7 ECAUSE PRIVILEGED
+//   6C060800  c8 EADDR: the DI's instruction word
+//   00000069  c9 SYSCALL returned A + 100
+//   07000000  c10 the user SP
+//   0000002A  d1 LR64 then add 1
+//   00000000  d2 SC64 succeeded
+//   00000001  d3 a second SC64 failed
+//   0000002A  d4 the stored value
+//   00000005  d5 ECAUSE MISALIGNED_LOAD (LR64 at 4 mod 8)
+//   06F00004  d6 EADDR
+//   00000008  d7 ECAUSE ACCESS_STORE (SC32 to MMIO, supervisor mode)
+//   00000003  e1 ECAUSE TRAP
+//   00000065  e2 SYSCALL from supervisor mode returned A + 100
+
+_start
+DELAYV 0x0500
+$NEWLINE
+
+// a) CPU_FEATURES
+SETR B 0xF00F0048
+MEMGET64 A B
+$TXR A
+$NEWLINE
+
+// b) supervisor mode
+SETR B HANDLER:
+MTSR EVEC B
+MFSR C evec
+SUBR C C B
+$TXR C
+$NEWLINE
+MFSR C STATUS
+$TXR C
+$NEWLINE
+MFSR B CYCLE
+MFSR C CYCLE
+CMPULTR D B C
+$TXR D
+$NEWLINE
+
+// c) user mode
+SETR B CONT1:
+MTSR SCRATCH0 B
+SETR B 0x07000000
+MTSR USP B
+SETR B USER1:
+SETR64 C 0x100000000000      // frame bit 44: PM = user
+ORR B B C
+PUSH B
+IRET
+
+USER1:
+MFSR D STATUS
+SETR E 0x1234
+MTSR TP E
+MFSR F tp
+SETR H 0x55
+SETR G 0xF0010000
+MEMGET64 H G                 // ACCESS_LOAD: skipped
+COPY J N
+COPY K O
+SETR I 0x77
+DI I                         // PRIVILEGED: skipped
+COPY C N
+COPY B O
+SETR A 5
+SYSCALL
+COPY E A
+GETSP L
+SETR A 0
+SYSCALL                      // to CONT1
+
+CONT1:
+$TXR D
+$NEWLINE
+$TXR F
+$NEWLINE
+$TXR H
+$NEWLINE
+$TXR J
+$NEWLINE
+$TXR K
+$NEWLINE
+$TXR I
+$NEWLINE
+$TXR C
+$NEWLINE
+$TXR B
+$NEWLINE
+$TXR E
+$NEWLINE
+$TXR L
+$NEWLINE
+
+// d) LR/SC
+SETR B 0x06F00000
+SETR C 41
+MEMSET64 C B
+LR64 D B
+ADDV D 1
+SC64 E D B
+SC64 F D B
+MEMGET64 G B
+$TXR D
+$NEWLINE
+$TXR E
+$NEWLINE
+$TXR F
+$NEWLINE
+$TXR G
+$NEWLINE
+SETR B 0x06F00004
+LR64 H B                     // MISALIGNED_LOAD: skipped
+$TXR N
+$NEWLINE
+$TXR O
+$NEWLINE
+SETR B 0xF0010000
+SC32 H C B                   // ACCESS_STORE: skipped
+$TXR N
+$NEWLINE
+
+// e) TRAP and SYSCALL in supervisor mode
+TRAP
+$TXR N
+$NEWLINE
+SETR A 1
+SYSCALL
+$TXR A
+$NEWLINE
+HALT
+
+// The exception handler: interrupts are disabled (DI) on entry and the
+// frame is on the kernel stack.
+HANDLER:
+MFSR N ECAUSE
+MFSR O EADDR
+BEQI N 4 HANDLER_SYSCALL:
+POP M                        // a fault: skip the instruction
+ADDV M 4
+PUSH M
+IRET
+HANDLER_SYSCALL:
+BEQI A 0 HANDLER_EXIT:
+ADDV A 100
+IRET
+HANDLER_EXIT:
+ADDSP 8                      // drop the user frame
+MFSR M SCRATCH0              // and return to the kernel continuation
+PUSH M
+IRET
+
+!include uart_stubs.kla

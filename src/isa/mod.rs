@@ -28,6 +28,21 @@ pub(crate) fn reg_index(name: &str) -> Option<u32> {
     REG_NAMES.iter().zip(0..).find_map(|(&reg, index)| (reg == name).then_some(index))
 }
 
+/// The MMU stage 1 system-register names, by SR number (`MFSR`/`MTSR`,
+/// `MMU_PLAN.md` §6.1).  Numbers 9 and up are reserved (illegal in stage 1).
+pub(crate) const SR_NAMES: [&str; 9] = ["STATUS", "EVEC", "ECAUSE", "EADDR", "USP", "SCRATCH0", "SCRATCH1", "TP", "CYCLE"];
+
+/// The SR number a `MFSR`/`MTSR` operand names: one of [`SR_NAMES`] in any
+/// case, or a literal 0..=255 (the 8-bit field; a number with no SR behind
+/// it assembles, and is an illegal instruction when it runs).
+pub(crate) fn sr_index(token: &str) -> Option<u32> {
+    let name = token.to_uppercase();
+    if let Some(index) = SR_NAMES.iter().zip(0..).find_map(|(&sr, index)| (sr == name).then_some(index)) {
+        return Some(index);
+    }
+    crate::num::parse_int(token).ok().and_then(|v| u8::try_from(v).ok()).map(u32::from)
+}
+
 /// One source-operand slot of a v2 instruction, describing how the operand
 /// token maps onto the instruction word (`doc/ISA_ENCODING_V2.md` §1). The uniform
 /// v2 layout is `word0 = template | rd<<8 | rs1<<4 | rs2` plus `N<<15` for the
@@ -83,6 +98,9 @@ pub(crate) enum Operand {
     /// this instruction, high byte in `word0[19:12]` and low byte in
     /// `word0[7:0]`. Filled in pass 2.
     Rel16,
+    /// MMU stage 1 `MFSR`/`MTSR` system register, by name ([`SR_NAMES`]) or
+    /// number → `word0[19:12]`.
+    Sr,
 }
 
 impl Operand {
@@ -96,7 +114,7 @@ impl Operand {
             Self::RdRs1 => 0xFF << 4,
             Self::Cond => 0xF << 22,
             Self::Count => 0x3F << 15,
-            Self::Imm8 | Self::Off8(_) => 0xFF << 12,
+            Self::Imm8 | Self::Off8(_) | Self::Sr => 0xFF << 12,
             Self::Frame22 => 0x3F_FFFF,
             Self::Rel18 => 0x3_FFFF,
             Self::Rel13 => 0x1FFF << 8,

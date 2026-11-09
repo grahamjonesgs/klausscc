@@ -205,6 +205,24 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("STIDX8R", 0x5C60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("STIDX16R", 0x5D60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
     op("STIDX32R", 0x5E60_0000, &[Operand::Rd, Operand::Rs1, Operand::Rs2]),
+    // MMU stage 1 LR/SC (ISA_ENCODING_V2_MAP §9.2): class 6/7, LEN=01,
+    // MODE=00 with [12] set, which other loads and stores keep clear.
+    // Spelled as LLVM spells them (klausscpu-llvm mmu 7b4eb67f3ba0); the
+    // address is a plain register, as for MEMGET64/MEMSET64, and SC's
+    // operands are the 0/1 result (rd), the data (rs2) and the address
+    // (rs1).  The ISA map's symbols follow as aliases; the dotted spec
+    // names (LR.D, ...) are not taken, since `.S` means a short form here.
+    op("LR64", 0x5B00_1000, &[Operand::Rd, Operand::Rs1]),
+    op("LR32", 0x5A00_1000, &[Operand::Rd, Operand::Rs1]),
+    op("LR32S", 0x5A80_1000, &[Operand::Rd, Operand::Rs1]),
+    op("LR32_S", 0x5A80_1000, &[Operand::Rd, Operand::Rs1]),
+    op("SC64", 0x5F00_1000, &[Operand::Rd, Operand::Rs2, Operand::Rs1]),
+    op("SC32", 0x5E00_1000, &[Operand::Rd, Operand::Rs2, Operand::Rs1]),
+    op("LR_D", 0x5B00_1000, &[Operand::Rd, Operand::Rs1]),
+    op("LR_W", 0x5A00_1000, &[Operand::Rd, Operand::Rs1]),
+    op("LR_W_S", 0x5A80_1000, &[Operand::Rd, Operand::Rs1]),
+    op("SC_D", 0x5F00_1000, &[Operand::Rd, Operand::Rs2, Operand::Rs1]),
+    op("SC_W", 0x5E00_1000, &[Operand::Rd, Operand::Rs2, Operand::Rs1]),
     // ---- ISA v3 (ISA_V3_PROPOSAL.md): D1/D2 long forms, short 1-word
     //      immediates (".S", literal immediates only), ENTER/LEAVE ----
     op("LDIDX32_S", 0x9AA0_0000, &[Operand::Rd, Operand::Rs1, Operand::Imm]),
@@ -419,6 +437,11 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     // enable = rs1[0] (ISA_ENCODING_V2_MAP §8.2).
     op("DI", 0x6C06_0000, &[Operand::Rd]),
     op("EI", 0x6C07_0000, &[Operand::Rs1]),
+    // MMU stage 1 (ISA_ENCODING_V2_MAP §9.1, MMU_PLAN §5): SYSCALL and
+    // the system-register moves, the SR by name (any case) or number 0-255.
+    op("SYSCALL", 0x6C08_0000, &[]),
+    op("MFSR", 0x6C40_0000, &[Operand::Rd, Operand::Sr]),
+    op("MTSR", 0x6C60_0000, &[Operand::Sr, Operand::Rs1]),
     op("DELAYR", 0x6C05_0000, &[Operand::Rs1]),
     op("DELAYV", 0xAC05_0000, &[Operand::Imm]),
     op("LCDCMDR", 0x7000_0000, &[Operand::Rs1]),

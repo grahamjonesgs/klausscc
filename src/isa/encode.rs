@@ -2,7 +2,7 @@
 //! and literal fields of word 0, the PC-relative branch fields that need the
 //! instruction's address, and the appended immediate words.
 
-use super::{Opcode, Operand, reg_index};
+use super::{Opcode, Operand, reg_index, sr_index};
 use crate::asm::symbols::{OperandError, SymbolTable, resolve_operand};
 use crate::num::{parse_bits64, parse_int};
 use std::ops::RangeInclusive;
@@ -51,6 +51,9 @@ pub(crate) enum EncodeFault {
     Imm8Range(String, RangeInclusive<i128>),
     /// A register, count or short literal that is missing or malformed.
     Registers,
+    /// A system-register operand (the token as written) that is neither an
+    /// SR name nor a number 0..=255.
+    SystemRegister(String),
     /// An immediate or branch target with no value.
     Operand(OperandError),
     /// A branch target out of the field's reach, or not word aligned.
@@ -73,6 +76,7 @@ impl EncodeFault {
                 format!("Immediate {token} out of range {}..={} - \"{line}\"", range.start(), range.end())
             }
             Self::Registers => format!("Incorrect register definition - \"{line}\""),
+            Self::SystemRegister(token) => format!("Unknown system register {token} - \"{line}\""),
             Self::Operand(error) => error.to_string(),
             Self::BranchRange { what, delta } => format!("{what} target out of range ({delta:+} bytes) - \"{line}\""),
             Self::Arguments => format!("Incorrect argument definition - \"{line}\""),
@@ -176,6 +180,11 @@ fn word0_fields(opcode: &Opcode, ops: &[Operand], tokens: &[&str]) -> Result<u32
                 (_, Some(count @ 0..=63)) => word0 |= (count as u32) << 15,
                 (Some(token), Some(_)) => return Err(EncodeFault::CountRange(token.to_owned())),
                 _ => ok = false,
+            },
+            Operand::Sr => match (token, token.and_then(sr_index)) {
+                (_, Some(n)) => word0 |= n << 12,
+                (Some(token), None) => return Err(EncodeFault::SystemRegister(token.to_owned())),
+                (None, None) => ok = false,
             },
             Operand::Rd | Operand::Rs1 | Operand::Rs2 | Operand::RdRs1 => match token.and_then(reg_index) {
                 // Each register field is a nibble; RdRs1 is two of them.
@@ -413,7 +422,10 @@ mod tests {
     fn test_zero_operand_opcodes_encode_to_their_template() {
         let zero_operand: Vec<&Opcode> = V2_OPCODES.iter().filter(|o| o.ops.is_empty()).collect();
         let names: Vec<&str> = zero_operand.iter().map(|o| o.name).collect();
-        assert_eq!(names, ["LEAVE", "LEAVERET", "RET", "IRET", "NOP", "HALT", "WAIT", "RESET", "TRAP"]);
+        assert_eq!(
+            names,
+            ["LEAVE", "LEAVERET", "RET", "IRET", "NOP", "HALT", "WAIT", "RESET", "TRAP", "SYSCALL"]
+        );
         for opcode in zero_operand {
             let line = opcode.name;
             let encoded = enc(line).unwrap();
@@ -734,6 +746,51 @@ mod tests {
         for (src, want) in cases {
             assert_eq!(hex(src), want, "{src}");
         }
+        // MMU stage 1 (ISA_ENCODING_V2_MAP §9), against the spec's examples
+        // and LLVM's spelling (klausscpu-llvm mmu 7b4eb67f3ba0).
+        let cases = [
+            ("SYSCALL", "6C080000"),         // syscall
+            ("MFSR D ECAUSE", "6C402300"),   // mfsr r3, ecause
+            ("MTSR EVEC B", "6C601010"),     // mtsr evec, r1
+            ("MFSR C TP", "6C407200"),       // mfsr r2, tp
+            ("mfsr c tp", "6C407200"),       // any case
+            ("MFSR C 7", "6C407200"),        // the SR by number
+            ("MTSR 255 B", "6C6FF010"),      // any 8-bit number assembles
+            ("MFSR A status", "6C400000"),   //
+            ("MFSR A Cycle", "6C408000"),    //
+            ("MTSR usp B", "6C604010"),      //
+            ("MTSR SCRATCH0 B", "6C605010"), //
+            ("MTSR scratch1 B", "6C606010"), //
+            ("MFSR A eaddr", "6C403000"),    //
+            ("LR64 D B", "5B001310"),        // lr64 r3, r1
+            ("LR32 D B", "5A001310"),        // lr32 r3, r1
+            ("LR32S D B", "5A801310"),       // lr32s r3, r1
+            ("lr32_s D B", "5A801310"),      // lr32_s r3, r1
+            ("SC64 G F B", "5F001615"),      // sc64 r6, r5, r1 (= SC.D r6, r5, [r1])
+            ("SC32 G F B", "5E001615"),      // sc32 r6, r5, r1
+            ("LR_D D B", "5B001310"),        // the ISA map's symbols
+            ("LR_W D B", "5A001310"),
+            ("LR_W_S D B", "5A801310"),
+            ("SC_D G F B", "5F001615"),
+            ("SC_W G F B", "5E001615"),
+        ];
+        for (src, want) in cases {
+            assert_eq!(hex(src), want, "{src}");
+        }
+        assert_eq!(faults("MFSR D 256").1, ["Unknown system register 256 - \"MFSR D 256\""]);
+        assert_eq!(faults("MTSR EPC A").1, ["Unknown system register EPC - \"MTSR EPC A\""]);
+        assert_eq!(faults("MFSR D").1, ["Incorrect register definition - \"MFSR D\""]);
+        // The dotted spec names are not opcodes (`.S` is a short form here).
+        for dotted in ["LR.D", "LR.W", "LR.W.S", "SC.D", "SC.W"] {
+            assert!(Isa::v2().get(dotted).is_none(), "{dotted}");
+        }
+        // The listing names an SR 0-8 and numbers the rest.
+        let disassembler = Disassembler::new(V2_OPCODES);
+        assert_eq!(disassembler.word(0x6C40_2300).unwrap().0, "MFSR D ECAUSE");
+        assert_eq!(disassembler.word(0x6C60_8010).unwrap().0, "MTSR CYCLE B");
+        assert_eq!(disassembler.word(0x6C40_9300).unwrap().0, "MFSR D 9");
+        assert_eq!(disassembler.word(0x5F00_1615).unwrap().0, "SC64 G F B");
+        assert_eq!(disassembler.word(0x5A80_1310).unwrap().0, "LR32S D B");
         assert_eq!(hex("FBRV B -100000 13 0x28"), hex("BNEWV B -100000 0x28"));
     }
 
