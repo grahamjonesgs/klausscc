@@ -830,7 +830,7 @@ any other field set is illegal):
 |---|---|---|
 | TLBWI  | `0x6C09_0000` | entry[`TLB_INDEX[3:0]`] ← {`TLB_HI`, `TLB_LO`} |
 | TLBR   | `0x6C0A_0000` | {`TLB_HI`, `TLB_LO`} ← entry[`TLB_INDEX[3:0]`] |
-| TLBP   | `0x6C0B_0000` | look `TLB_HI` up (VPN, and ASID unless the entry is global): hit, `TLB_INDEX` = index; miss, `TLB_INDEX[31]` set, `[4:0]` unchanged |
+| TLBP   | `0x6C0B_0000` | look `TLB_HI` up (VPN, and ASID unless the entry is global): hit, `TLB_INDEX` = index; miss, `TLB_INDEX[31]` set, the index unchanged |
 | TLBINV | `0x6C0C_0000` | V ← 0 in every entry |
 
 ## 4. History: v1 → v2 migration notes
