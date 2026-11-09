@@ -4010,6 +4010,22 @@ fn mmio_fetch_with_mpu_or_te_is_a_fake_fill() {
     cpu.pc = 0xF00F_0048;
     assert_eq!(cpu.step_one(true), None);
     assert_entered_te(&cpu, K_HANDLER, Cause::Illegal, 0, 0xF00F_0048, false);
+    // The fetch faults outrank ILLEGAL (§4.1): a GUARD region over MMIO,
+    let mut cpu = mpu_cpu(&[NOP], &[HALT], false);
+    mpu_region(&mut cpu, 0, 0xF000_0000, 0xF000_00FF, MPU_GUARD);
+    cpu.pc = 0xF000_0000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_mpu_fault(&cpu, Cause::AccessFetch, 0xF000_0000, 0xF000_0000, false, true);
+    // a user PC there with the MPU on (the stage 1 MMIO rule),
+    let mut cpu = mpu_cpu(&[NOP], &[HALT], true);
+    cpu.pc = 0xF000_0000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_mpu_fault(&cpu, Cause::AccessFetch, 0xF000_0000, 0xF000_0000, true, false);
+    // and with TE = 1 (the segment rule).
+    let mut cpu = te_cpu(&[NOP], &[HALT], true);
+    cpu.pc = 0xF000_0000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::AccessFetch, 0xF000_0000, 0xF000_0000, true);
 }
 
 #[test]
