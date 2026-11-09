@@ -95,7 +95,7 @@ That is the rate the bitstream fixes for the board UART.
 - `emulator_corpus_passes` (in `src/commands/emulate.rs`) assembles every
   `.kla` here that lists expected values and checks them on the emulator. It
   is the same check as `klausscc --emulate-test tests/fixtures`. It also fails
-  if fewer than 28 files pass, so a test that stops declaring its values is
+  if fewer than 31 files pass, so a test that stops declaring its values is
   noticed.
 - `rtl_squash_fixtures_keep_their_shape` (in `src/asm/corpus_tests.rs`)
   checks the code layout the two RTL squash tests depend on; see
@@ -148,13 +148,22 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 26 | `hw_div_smc.kla` | RTL regression | A DIVR busy in EX must survive a self-modifying-code squash of ID; see [The RTL squash tests](#the-rtl-squash-tests) |
 | 27 | `hw_proposals.kla` | New instructions | The klaussCPU 3508f87 (hw-proposals) forms: BEQW/BLTWI/BUGEW, BNEV/BGTV/BULTWV/BLEV, FBR and FBRV with a W condition, CMPRVW.S, MULV.S, MULUV.S, MULUV, LEAPC.S, DI, EI; every one is an illegal instruction on an older core |
 | 28 | `hw_mmu.kla` | New instructions | MMU stage 1 (klaussCPU branch `mmu`): CPU_FEATURES, MTSR/MFSR (EVEC, STATUS, CYCLE, TP, USP, SCRATCH0, ECAUSE, EADDR), IRET into user mode, a user MMIO load and a user DI faulting and skipped by the handler, SYSCALL from user and supervisor mode, LR64/SC64, a misaligned LR64, SC32 to MMIO, TRAP to EVEC. Needs a bitstream whose CPU_FEATURES reads 0x9; on an older one it parks at its first MTSR |
+| 29 | `hw_mpu.kla` | New instructions | MMU stage 2, the MPU (klaussCPU branch `mmu`): CPU_FEATURES bit 1 and the region count; MPU_BASEn/MPU_LIMITn by name; user-mode R/W per region, default deny, a GUARD region (ECAUSE 0x107), MEMGET32 across two regions and into a guard, a fetch from a region without X; supervisor default allow and the guard; MPU_EN off. **Not in `all_tests.txt`** (see below) |
+| 30 | `hw_tlb.kla` | New instructions | MMU stage 3, the TLB (klaussCPU branch `mmu`): CPU_FEATURES bit 2 and the entry count; TLBWI/TLBR/TLBP/TLBINV; TE = 1 with a software refill handler at TLBVEC running a user program across five pages (a MEMGET32 across pages, the user stack, CALLREL/RET), the dirty-bit flow on a read-only page, kseg and the kseg hole. **Not in `all_tests.txt`** (see below) |
 | — | `test_directives.kla` | Directives | `.global`, `.extern`, `.text`, `.word`, `.comm` |
 | — | `hello_world.kla` | Compiled C | Arithmetic, factorial, GCD, Fibonacci, primes |
 | — | `test_64bit.kla` | Compiled C | 33 64-bit checks; expects main's return value (the failure count) `00000000` |
 
 The list holds every file here with expected values (plus `test_io`), so a
 board run covers the whole emulator corpus; `all_tests_lists_every_file_with_expected_values`
-(in `src/commands/emulate.rs`) checks this.
+(in `src/commands/emulate.rs`) checks this.  The exceptions are `hw_mpu.kla`
+and `hw_tlb.kla`, which need a bitstream with the MPU / TLB
+(`CPU_FEATURES` bits 1 / 2).  On an older one they print `00000000` for
+CPU_FEATURES and halt before touching an MPU or TLB register, which a run
+reports as a failure: an expected-value list has no way to say "skip when
+the feature is absent".  So they stay out of the list until the board has
+them (add them then), and run on the emulator in the meantime: they are in
+the `emulator_corpus_passes` corpus and `--emulate-test .`.
 
 ### Other fixtures
 

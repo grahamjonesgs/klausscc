@@ -1,0 +1,311 @@
+// Test 30: MMU stage 3, the TLB (klaussCPU MMU_PLAN.md §11, branch mmu)
+// TLBWI/TLBR/TLBP/TLBINV, translation (STATUS.TE), kseg, a software
+// refill handler at TLBVEC running a user program across pages, the
+// dirty-bit flow, and the kseg hole.  Needs a bitstream with CPU_FEATURES
+// (0xF00F_0048) bit 2: on an older one a1 prints 00000000 and the test
+// halts there (a mismatch, not a park), before any TLB register is
+// touched.
+//
+// Memory (physical; the program is in the first 64 KiB page):
+//   0x0002_0000  the page table: TLB_LO values indexed by VPN, 0 = unmapped
+//   0x0002_0800  refill count, 0x0002_0808 dirty-bit fault count
+//   0x0003_0000- user data pages 0x41-0x43 (frames 3-5), the user stack
+//   0x0006_0000  page 0x50 (frame 6)
+// User code runs at VA 0x0040_0000 + its offset here (page 0x40 -> frame
+// 0).  TLB entry 31 maps page 0 to itself (global), so the kernel and the
+// UART routines keep running at their physical addresses with TE = 1; the
+// vectors, the refill handler, the page table and the kernel stack are
+// reached through kseg (VA = PA + 0x8000_0000), as §11.2 requires.  The
+// refill handler fills entries 0-15 round robin (the counter in SCRATCH1).
+// The EVEC handler: SYSCALL returns to the kernel continuation in
+// SCRATCH0; an ACCESS_STORE to a user page sets W in its PTE and TLB
+// entry; anything else keeps ECAUSE in N and EADDR in O and skips the
+// instruction.
+//
+//   a) CPU_FEATURES
+//   b) the TLB instructions (TE = 0)
+//   c) translation on: a user program across five pages
+//   d) supervisor mode with TE = 1: kseg, the hole, MMIO
+//
+// Expected UART output:
+//   00002004  a1 CPU_FEATURES bit 2 and [15:8] = 32 entries
+//   12340105  b1 TLBR: TLB_HI as TLBWI wrote it (VPN 0x1234, G, ASID 5)
+//   07FF000F  b2 TLBR: TLB_LO keeps PFN [26:16] and X W R V
+//   00000007  b3 TLBP hit (a global entry, another ASID): its index
+//   80000007  b4 TLBP miss: P set, the index bits unchanged
+//   80000007  b5 TLBP after TLBINV: a miss
+//   00000011  c1 user store and load on page 0x41
+//   DDCCBBAA  c2 MEMGET32 across pages 0x42 and 0x43
+//   00000034  c3 the user stack and CALLREL/RET (page 0x50)
+//   00000005  c4 refills: pages 0x40, 0x41, 0x42, 0x43, 0x50
+//   00000001  c5 dirty-bit faults: the store to read-only page 0x43
+//   00050007  c6 page 0x43's PTE is now writable
+//   00000033  c7 the store landed in frame 5
+//   0000000D  c8 ECAUSE the refill handler saw first: TLB_MISS_FETCH
+//   00400000  c9 TLB_HI it saw: VPN 0x40, ASID 0
+//   00001234  d1 a load through kseg (the physical word, +0x8000_0000)
+//   00000007  d2 ECAUSE ACCESS_LOAD: 0x8800_0000 is the hole
+//   88000000  d3 EADDR
+//   00000200  d4 STATUS: TE
+
+_start
+DELAYV 0x0500
+$NEWLINE
+
+// a) CPU_FEATURES
+SETR B 0xF00F0048
+MEMGET64 A B
+ANDV A 0xFF04
+$TXR A
+$NEWLINE
+BNEV A 0x2004 NO_TLB:
+
+// b) the TLB instructions
+SETR A 0x12340105
+MTSR TLB_HI A
+SETR A 0xFFFFFFFF
+MTSR TLB_LO A
+SETR A 7
+MTSR TLB_INDEX A
+TLBWI
+SETR A 0
+MTSR TLB_HI A
+MTSR TLB_LO A
+TLBR
+MFSR A TLB_HI
+$TXR A
+$NEWLINE
+MFSR A tlb_lo
+$TXR A
+$NEWLINE
+SETR A 0x12340009
+MTSR TLB_HI A
+SETR A 3
+MTSR TLB_INDEX A
+TLBP
+MFSR A TLB_INDEX
+$TXR A
+$NEWLINE
+SETR A 0x99990005
+MTSR TLB_HI A
+TLBP
+MFSR A TLB_INDEX
+$TXR A
+$NEWLINE
+TLBINV
+SETR A 0x12340105
+MTSR TLB_HI A
+SETR A 7
+MTSR TLB_INDEX A
+TLBP
+MFSR A TLB_INDEX
+$TXR A
+$NEWLINE
+
+// c) The page table (TE is still off: physical addresses).
+SETR B 0x20000
+SETR C 0x0000000B          // VPN 0x40, user code: frame 0, X R V
+STIDX64 C B 0x200
+SETR C 0x00030007          // VPN 0x41: frame 3, W R V
+STIDX64 C B 0x208
+SETR C 0x00040007          // VPN 0x42: frame 4
+STIDX64 C B 0x210
+SETR C 0x00050003          // VPN 0x43: frame 5, read-only for now
+STIDX64 C B 0x218
+SETR C 0x00060007          // VPN 0x50: the user stack, frame 6
+STIDX64 C B 0x280
+SETR C 0
+STIDX64 C B 0x800          // the counters
+STIDX64 C B 0x808
+STIDX64 C B 0x810          // the first refill's ECAUSE and TLB_HI
+STIDX64 C B 0x818
+SETR B 0x4FFF8             // the bytes MEMGET32 reads across pages
+SETR64 C 0xBBAA000000000000
+MEMSET64 C B
+SETR B 0x50000
+SETR C 0xDDCC
+MEMSET64 C B
+// The vectors, at their kseg aliases.
+SETR B REFILL:
+ORV B 0x80000000
+MTSR TLBVEC B
+SETR B HANDLER:
+ORV B 0x80000000
+MTSR EVEC B
+// Entry 31 maps page 0 to itself (global), then translation goes on and
+// the kernel stack moves to kseg.
+SETR A 0x00000100
+MTSR TLB_HI A
+SETR A 0x0000000F
+MTSR TLB_LO A
+SETR A 31
+MTSR TLB_INDEX A
+TLBWI
+SETR A 0
+MTSR SCRATCH1 A            // the refill counter
+MTSR ASID A
+SETR A 0x200
+MTSR STATUS A
+GETSP A
+ORV A 0x80000000
+SETSP A
+// Into user mode at USER's VA, on the user stack at the top of page 0x50.
+SETR A CONT1:
+MTSR SCRATCH0 A
+SETR A 0x00510000
+MTSR USP A
+SETR A USER:
+ORV A 0x00400000
+SETR64 C 0x100000000000    // frame PM = user
+ORR A A C
+PUSH A
+IRET
+
+CONT1:
+$TXR E                     // c1
+$NEWLINE
+$TXR C                     // c2
+$NEWLINE
+$TXR D                     // c3
+$NEWLINE
+SETR B 0x80020000
+LDIDX64 A B 0x800
+$TXR A                     // c4
+$NEWLINE
+LDIDX64 A B 0x808
+$TXR A                     // c5
+$NEWLINE
+LDIDX64 A B 0x218
+$TXR A                     // c6
+$NEWLINE
+SETR B 0x80050000
+MEMGET64 A B
+ANDV A 0xFF
+$TXR A                     // c7
+$NEWLINE
+SETR B 0x80020000
+LDIDX64 A B 0x810
+$TXR A                     // c8
+$NEWLINE
+LDIDX64 A B 0x818
+$TXR A                     // c9
+$NEWLINE
+
+// d) supervisor mode with TE = 1
+SETR B 0x80030000          // frame 3 through kseg
+SETR C 0x1234
+MEMSET64 C B
+MEMGET64 A B
+$TXR A
+$NEWLINE
+SETR B 0x88000000
+MEMGET64 A B               // the hole: ACCESS_LOAD, skipped
+$TXR N
+$NEWLINE
+$TXR O
+$NEWLINE
+MFSR A STATUS
+$TXR A
+$NEWLINE
+SETR A 0                   // translation off again
+MTSR STATUS A
+NO_TLB:
+HALT
+
+// TLB refill (TLBVEC).  TLB_HI already holds {VPN, ASID}.
+REFILL:
+PUSH A
+PUSH B
+SETR B 0x80020000
+LDIDX64 A B 0x810          // keep the first refill's ECAUSE and TLB_HI
+BNEV A 0 REFILL_LOOKUP:
+MFSR A ECAUSE
+STIDX64 A B 0x810
+MFSR A TLB_HI
+STIDX64 A B 0x818
+REFILL_LOOKUP:
+MFSR A TLB_HI
+SHRV A 16
+SHLV A 3
+ADDR A A B
+MEMGET64 B A               // the PTE
+BEQI B 0 FATAL:
+MTSR TLB_LO B
+MFSR B SCRATCH1
+MTSR TLB_INDEX B
+TLBWI
+ADDV B 1
+ANDV B 15
+MTSR SCRATCH1 B
+SETR A 0x80020800
+MEMGET64 B A
+ADDV B 1
+MEMSET64 B A
+POP B
+POP A
+IRET
+
+// Other exceptions (EVEC).
+HANDLER:
+MFSR N ECAUSE
+MFSR O EADDR
+BEQI N 4 HANDLER_SYSCALL:
+BNEV N 8 HANDLER_SKIP:     // ACCESS_STORE: the dirty bit
+PUSH A
+PUSH B
+MFSR A TLB_HI              // set W in the PTE and the entry
+SHRV A 16
+SHLV A 3
+SETR B 0x80020000
+ADDR A A B
+MEMGET64 B A
+ORV B 4
+MEMSET64 B A
+MTSR TLB_LO B
+TLBP
+TLBWI
+SETR A 0x80020808
+MEMGET64 B A
+ADDV B 1
+MEMSET64 B A
+POP B
+POP A
+IRET
+HANDLER_SKIP:
+POP M                      // skip the faulting instruction
+ADDV M 4
+PUSH M
+IRET
+HANDLER_SYSCALL:
+ADDSP 8                    // drop the user frame
+MFSR M SCRATCH0            // and return to the kernel continuation
+PUSH M
+IRET
+FATAL:
+TRAP
+
+// The user program (runs at VA 0x0040_0000 + its offset).
+USER:
+SETR A 0x00410000
+SETR B 0x11
+MEMSET64 B A               // page 0x41: miss, refill, store
+SETR A 0x00420008
+SETR B 0x22
+MEMSET64 B A               // page 0x42
+SETR A 0x0042FFFE
+MEMGET32 C A               // pages 0x42 and 0x43: the second misses
+SETR A 0x00430000
+SETR B 0x33
+MEMSET64 B A               // page 0x43 is read-only: ACCESS_STORE, then W
+PUSH B                     // page 0x50: the stack
+POP D
+CALLREL USUB:
+SETR A 0x00410000
+MEMGET64 E A               // a TLB hit now
+SETR A 0
+SYSCALL                    // to CONT1
+USUB:
+ADDV D 1
+RET
+
+!include uart_stubs.kla

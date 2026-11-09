@@ -1,0 +1,215 @@
+// Test 29: MMU stage 2, the MPU (klaussCPU MMU_PLAN.md §10, branch mmu)
+// 16 base/limit regions with R/W/X and GUARD, STATUS.MPU_EN, ECAUSE[8]
+// GUARD.  Needs a bitstream with CPU_FEATURES (0xF00F_0048) bit 1: on an
+// older one a1 prints 00000000 and the test halts there (a mismatch, not a
+// park), before any MPU register is touched.
+//
+// The exception handler (HANDLER) keeps ECAUSE in N and EADDR in O and
+// skips the faulting instruction (every one here is one word).  A fetch
+// fault (ECAUSE 9) resumes at the user address in SCRATCH1 instead.  A
+// SYSCALL with A = 0 leaves user mode for the kernel continuation in
+// SCRATCH0.  The handler uses L and M.  Only the kernel prints.
+//
+// Regions (the program and the kernel stack need none: supervisor mode is
+// default-allow):
+//   0  0x0000_0000-0x0000_FFFF  X    the program, for user mode
+//   1  0x0600_0000-0x0600_00FF  RW
+//   2  0x0600_0100-0x0600_01FF  R
+//   3  0x0600_0200-0x0600_021F  GUARD
+//   4  0x0700_0000-0x0700_FFFF  RW   the user stack
+//
+//   a) CPU_FEATURES
+//   b) user mode: R/W per region, default deny, the guard, a MEMGET32 that
+//      spans two regions (allowed: the union) and one whose second
+//      doubleword is in the guard, a fetch from a region without X
+//   c) supervisor mode: the guard denies, everything else is allowed
+//   d) MPU_EN off
+//
+// Expected UART output:
+//   000000F2  a1 CPU_FEATURES bit 1 and [7:4] = 15 (16 regions)
+//   00000055  b1 a user store and load in an RW region
+//   00000008  b2 ECAUSE ACCESS_STORE: a store to the R-only region
+//   06000100  b3 EADDR
+//   00000066  b4 a load from the R-only region
+//   00000007  b5 ECAUSE ACCESS_LOAD: no region covers it (default deny)
+//   00000107  b6 ECAUSE ACCESS_LOAD with GUARD: the guard region
+//   0066BBAA  b7 MEMGET32 across regions 1 and 2
+//   00000107  b8 ECAUSE: MEMGET32 whose second doubleword is in the guard
+//   06000200  b9 EADDR: the second doubleword's start
+//   00000009  b10 ECAUSE ACCESS_FETCH: a jump to a region without X
+//   06000000  b11 EADDR
+//   00000107  c1 ECAUSE: a supervisor load in the guard
+//   06000208  c2 EADDR
+//   00000077  c3 supervisor store and load where no region is
+//   00000100  c4 STATUS: MPU_EN
+//   00000088  d1 MPU_EN off: the guard no longer denies
+
+_start
+DELAYV 0x0500
+$NEWLINE
+
+// a) CPU_FEATURES
+SETR B 0xF00F0048
+MEMGET64 A B
+ANDV A 0xF2
+$TXR A
+$NEWLINE
+BNEV A 0xF2 NO_MPU:
+
+// Data the user loads: 0x66 at 0x06000100 (region 2) and 0xAA 0xBB in the
+// last two bytes of region 1, for the spanning MEMGET32.
+SETR B 0x06000100
+SETR C 0x66
+MEMSET64 C B
+SETR B 0x060000F8
+SETR64 C 0xBBAA000000000000
+MEMSET64 C B
+
+SETR B HANDLER:
+MTSR EVEC B
+SETR B 0x00000009            // region 0: X
+MTSR MPU_BASE0 B
+SETR B 0x0000FFE0
+MTSR MPU_LIMIT0 B
+SETR B 0x06000007            // region 1: R W
+MTSR mpu_base1 B
+SETR B 0x060000E0
+MTSR mpu_limit1 B
+SETR B 0x06000103            // region 2: R
+MTSR MPU_BASE2 B
+SETR B 0x060001E0
+MTSR MPU_LIMIT2 B
+SETR B 0x06000211            // region 3: GUARD
+MTSR MPU_BASE3 B
+SETR B 0x06000200
+MTSR MPU_LIMIT3 B
+SETR B 0x07000007            // region 4: R W
+MTSR MPU_BASE4 B
+SETR B 0x0700FFE0
+MTSR MPU_LIMIT4 B
+SETR B 0x100                 // MPU_EN
+MTSR STATUS B
+
+// b) user mode
+SETR B CONT1:
+MTSR SCRATCH0 B
+SETR B USER2:
+MTSR SCRATCH1 B
+SETR B 0x07010000
+MTSR USP B
+SETR B USER1:
+SETR64 C 0x100000000000      // frame bit 44: PM = user
+ORR B B C
+PUSH B
+IRET
+
+USER1:
+SETR B 0x06000000
+SETR C 0x55
+MEMSET64 C B                 // region 1: allowed
+MEMGET64 D B
+SETR B 0x06000100
+MEMSET64 C B                 // region 2 is R only: ACCESS_STORE, skipped
+COPY E N
+COPY F O
+MEMGET64 G B                 // allowed
+SETR B 0x06000400
+MEMGET64 H B                 // no region: ACCESS_LOAD, skipped
+COPY H N
+SETR B 0x06000208
+MEMGET64 I B                 // the guard: skipped
+COPY I N
+SETR B 0x060000FE
+MEMGET32 J B                 // regions 1 and 2: allowed
+SETR B 0x060001FE
+MEMGET32 K B                 // the second doubleword is in the guard
+COPY K N
+COPY C O
+SETR B 0x06000000
+JMPR B                       // region 1 has no X: resume at USER2
+USER2:
+COPY P N
+COPY B O
+SETR A 0
+SYSCALL                      // to CONT1
+
+CONT1:
+$TXR D
+$NEWLINE
+$TXR E
+$NEWLINE
+$TXR F
+$NEWLINE
+$TXR G
+$NEWLINE
+$TXR H
+$NEWLINE
+$TXR I
+$NEWLINE
+$TXR J
+$NEWLINE
+$TXR K
+$NEWLINE
+$TXR C
+$NEWLINE
+$TXR P
+$NEWLINE
+$TXR B
+$NEWLINE
+
+// c) supervisor mode
+SETR B 0x06000208
+MEMGET64 C B                 // the guard: skipped
+$TXR N
+$NEWLINE
+$TXR O
+$NEWLINE
+SETR B 0x06000400
+SETR C 0x77
+MEMSET64 C B                 // no region: allowed in supervisor mode
+MEMGET64 D B
+$TXR D
+$NEWLINE
+MFSR D STATUS
+$TXR D
+$NEWLINE
+
+// d) MPU_EN off
+SETR C 0
+MTSR STATUS C
+SETR B 0x06000208
+SETR C 0x88
+MEMSET64 C B
+MEMGET64 D B
+$TXR D
+$NEWLINE
+NO_MPU:
+HALT
+
+// The exception handler.  It touches no memory before it knows the fault
+// is not a guard denial of the kernel stack (MMU_PLAN §10.2): here no guard
+// is near the kernel stack, so it can pop the frame straight away.
+HANDLER:
+MFSR N ECAUSE
+MFSR O EADDR
+BEQI N 4 HANDLER_SYSCALL:
+BEQV N 9 HANDLER_FETCH:
+POP M                        // a data fault: skip the instruction
+ADDV M 4
+PUSH M
+IRET
+HANDLER_FETCH:
+POP M                        // a fetch fault: resume at SCRATCH1
+SHRV M 32
+SHLV M 32
+MFSR L SCRATCH1
+ORR M M L
+PUSH M
+IRET
+HANDLER_SYSCALL:
+ADDSP 8                      // drop the user frame
+MFSR M SCRATCH0              // and return to the kernel continuation
+PUSH M
+IRET
+
+!include uart_stubs.kla

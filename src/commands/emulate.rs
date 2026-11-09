@@ -377,13 +377,19 @@ mod tests {
         assert!(failures.is_empty(), "emulator corpus failures: {failures:#?}");
         // Guards against the corpus silently shrinking (e.g. a file that stops
         // declaring its expected values).
-        assert!(passed.len() >= 29, "only {} validated files passed: {passed:#?}", passed.len());
+        assert!(passed.len() >= 31, "only {} validated files passed: {passed:#?}", passed.len());
     }
 
     /// `all_tests.txt` is what a board run (`-L`) checks, so it must list every
     /// fixture the emulator corpus checks, and nothing that is not there.
     #[test]
     fn all_tests_lists_every_file_with_expected_values() {
+        // The MMU stage 2 and 3 tests need a bitstream with the MPU / TLB.
+        // On an older one they print 00000000 for CPU_FEATURES and halt (a
+        // clean mismatch), but a test list cannot say "skip when absent",
+        // so they stay out of all_tests.txt until the bitstream has them.
+        // They are in the emulator corpus all the same.
+        const NEEDS_NEWER_BITSTREAM: [&str; 2] = ["hw_mpu.kla", "hw_tlb.kla"];
         let mut with_values: Vec<String> = fs::read_dir(fixture_dir())
             .expect("read fixture dir")
             .flatten()
@@ -404,7 +410,11 @@ mod tests {
         for file in &listed {
             assert!(Path::new(file).is_file(), "{file} is listed but missing");
         }
-        let missing: Vec<&String> = with_values.iter().filter(|f| !listed.contains(f)).collect();
+        let missing: Vec<&String> = with_values
+            .iter()
+            .filter(|f| !listed.contains(f))
+            .filter(|f| !NEEDS_NEWER_BITSTREAM.iter().any(|name| f.ends_with(name)))
+            .collect();
         assert!(missing.is_empty(), "files with expected values missing from all_tests.txt: {missing:#?}");
     }
 
