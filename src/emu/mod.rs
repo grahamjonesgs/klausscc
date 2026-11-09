@@ -355,7 +355,8 @@ impl Cpu {
     /// `addr[2:0]` (`mem_read_write.sv` :274-277, :569, :672-676, :818-822),
     /// which is what a 64-bit load, POP, RET or IRET with an unaligned address
     /// gets.  An MMIO read keeps the address as issued.  Watchpoints see the
-    /// virtual address.
+    /// physical address, as the RTL's do (klaussCPU mmu 5e9338d); with
+    /// `TE` = 0 that is the address as issued.
     ///
     /// Takes `&mut self` because an MMIO read (`RX_DATA`) is read-to-consume and
     /// mutates the UART FIFO.  Instruction fetch uses `read32` instead, so
@@ -364,10 +365,10 @@ impl Cpu {
         let addr = at.pa();
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO load at 0x{addr:08X}");
         if is_mmio(addr) {
-            self.note_access(at.va(), 8, Access::Load);
+            self.note_access(at.pa(), 8, Access::Load);
             return self.mmio_read(addr);
         }
-        self.note_access(at.va() & !7, 8, Access::Load);
+        self.note_access(at.pa() & !7, 8, Access::Load);
         self.bytes(addr & !7).map_or(0, u64::from_le_bytes)
     }
 
@@ -377,7 +378,7 @@ impl Cpu {
     fn read_sub(&mut self, at: Mapped, n: usize) -> u64 {
         let addr = at.pa();
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO load at 0x{addr:08X}");
-        self.note_access(at.va(), n as u32, Access::Load);
+        self.note_access(at.pa(), n as u32, Access::Load);
         if is_mmio(addr) {
             // MMIO presents its value in the low bits; a sub-word load takes the
             // low `n` bytes (addr[2]==0 lands the value in [31:0]).
@@ -404,10 +405,10 @@ impl Cpu {
         let addr = at.pa();
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO store at 0x{addr:08X}");
         if is_mmio(addr) {
-            self.note_access(at.va(), 8, Access::Store);
+            self.note_access(at.pa(), 8, Access::Store);
             self.mmio_write(addr, val);
         } else {
-            self.note_access(at.va() & !7, 8, Access::Store);
+            self.note_access(at.pa() & !7, 8, Access::Store);
             let pa = (addr & !7) as usize;
             if let Some(dst) = self.mem.get_mut(pa..pa + 8) {
                 dst.copy_from_slice(&val.to_le_bytes());
@@ -426,7 +427,7 @@ impl Cpu {
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO store at 0x{addr:08X}");
         // Byte-enable mask placed at the byte-lane within the doubleword, matching
         // the RTL's byte-enable semantics for the trace `be` field.
-        self.note_access(at.va(), n as u32, Access::Store);
+        self.note_access(at.pa(), n as u32, Access::Store);
         let lane = (addr & 7) as usize;
         let be_bits: u8 = ((1_u16 << n) - 1).rotate_left(lane as u32) as u8;
         if is_mmio(addr) {

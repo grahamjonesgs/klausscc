@@ -138,7 +138,7 @@ impl XlateFault {
 /// doubleword's physical start.  Only this module builds one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Mapped {
-    /// The virtual address (what watchpoints and the trace see).
+    /// The virtual address (what the trace sees; watchpoints see `pa`).
     va: u32,
     /// The physical address of the byte at `va`.
     pa: u32,
@@ -424,7 +424,8 @@ impl Cpu {
     /// address (§4.1).  In user mode a PC with `[1:0]` != 0 is
     /// `MISALIGNED_FETCH` first; supervisor mode ignores those bits, as
     /// before stage 1.  Words past the end of RAM read 0, and word 0 there
-    /// is [`Fetch::OutOfRange`].
+    /// is [`Fetch::OutOfRange`], except that with `MPU_EN` or `TE` an MMIO
+    /// word 0 fetches as 0 (ILLEGAL).
     pub(super) fn fetch(&self, pc: u32) -> Fetch {
         if self.um && pc & 3 != 0 {
             let word = self.translate(pc, Kind::Fetch).map_or(0, |pa| self.read32(pa));
@@ -442,6 +443,13 @@ impl Cpu {
             Ok(pa) => pa,
             Err(fault) => return Fetch::Fault(fault, 0),
         };
+        // With MPU_EN or TE set, a fetch fill from MMIO is a fake fill of
+        // zeros (§10.2, klaussCPU mmu 64bacdf), so no stray fetch reads a
+        // device: the zero word is LEN 00, ILLEGAL.  With both off it is
+        // outside RAM, as before stage 1.
+        if (self.mpu_en || self.te) && is_mmio(pa) {
+            return Fetch::Words([0; 3]);
+        }
         if (pa as usize) + 4 > self.mem.len() {
             return Fetch::OutOfRange;
         }

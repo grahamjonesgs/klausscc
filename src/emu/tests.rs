@@ -3995,3 +3995,35 @@ fn tlb_software_refill_runs_a_user_program_across_pages() {
     assert_eq!(vpns, [0x40, 0x41, 0x42, 0x43, 0x50]);
     assert!(cpu.tlb_entries()[..5].iter().all(|e| e.valid() && !e.global() && e.asid() == 1));
 }
+
+#[test]
+fn mmio_fetch_with_mpu_or_te_is_a_fake_fill() {
+    // klaussCPU mmu 64bacdf (§10.2): with MPU_EN or TE set, a fetch fill
+    // from MMIO is zeros, so a supervisor PC there takes ILLEGAL (EADDR = the
+    // word, 0) instead of reading a device.  With both off it stays outside
+    // RAM (stage1_each_cause_from_supervisor_and_user_mode).
+    let mut cpu = mpu_cpu(&[NOP], &[HALT], false);
+    cpu.pc = 0xF000_0000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered(&cpu, Cause::Illegal, 0, 0xF000_0000, false);
+    let mut cpu = te_cpu(&[NOP], &[HALT], false);
+    cpu.pc = 0xF00F_0048;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::Illegal, 0, 0xF00F_0048, false);
+}
+
+#[test]
+fn watchpoints_compare_the_physical_address() {
+    // klaussCPU mmu 5e9338d: with TE = 1 a watchpoint matches the PA, like
+    // the debugger's own accesses.  kseg 0x8000_2000 is PA 0x2000.
+    for (watch, hit) in [(0x2000, true), (0x8000_2000, false)] {
+        let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
+        cpu.add_watch(Watch {
+            addr: watch,
+            len: 8,
+            kind: WatchKind::Read,
+        });
+        step_with_b(&mut cpu, 0x8000_2000);
+        assert_eq!(cpu.take_watch_hit().is_some(), hit, "watch 0x{watch:08X}");
+    }
+}
