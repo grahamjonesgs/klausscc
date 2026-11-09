@@ -33,6 +33,7 @@ Where the built-in emulator and the hardware disagree, this document describes t
   - [Stack](#stack)
   - [Multiply and Divide](#multiply-and-divide)
   - [System and LCD](#system-and-lcd)
+  - [Exceptions, User Mode and LR/SC](#exceptions-user-mode-and-lrsc)
   - [Separate Source Registers](#separate-source-registers)
   - [LLVM Names](#llvm-names)
 - [CPU Flags](#cpu-flags)
@@ -758,6 +759,9 @@ All of these except `COPY` and `SETFR` work in place when given one register (`N
 | `LDIDX32_S.S rd rs1 off` | 1 | as `LDIDX32_S`, off a multiple of 4, −512..508 (v3) | — |
 | `LDIDX64.S rd rs1 off` | 1 | as `LDIDX64`, off a multiple of 8, −1024..1016 (v3); also spelt `LDIDX64U.S` ⚠ | — |
 | `LDIDX64A.S rd rs1 off` | 1 | as `LDIDX64A`, off a multiple of 8, −1024..1016 (v3) | — |
+| `LR64 rd rs1` | 1 | rd = mem64[rs1]; reserve (MMU stage 1, see [LR/SC](#exceptions-user-mode-and-lrsc)) | — |
+| `LR32 rd rs1` | 1 | rd = zext(mem32[rs1]); reserve (MMU stage 1) | — |
+| `LR32S rd rs1` | 1 | rd = sext(mem32[rs1]); reserve (MMU stage 1); also spelt `LR32_S` | — |
 
 ### Stores
 
@@ -786,8 +790,10 @@ All of these except `COPY` and `SETFR` work in place when given one register (`N
 | `STIDX32.S rd rs1 off` | 1 | as `STIDX32`, off a multiple of 4, −512..508 (v3) | — |
 | `STIDX64.S rd rs1 off` | 1 | as `STIDX64`, off a multiple of 8, −1024..1016 (v3); also spelt `STIDX64U.S` ⚠ | — |
 | `STIDX64A.S rd rs1 off` | 1 | as `STIDX64A`, off a multiple of 8, −1024..1016 (v3) | — |
+| `SC64 rd rs2 rs1` | 1 | if reserved: mem64[rs1] = rs2, rd = 0; else rd = 1 (MMU stage 1) ⚠ | — |
+| `SC32 rd rs2 rs1` | 1 | as `SC64`, storing rs2[31:0] (MMU stage 1) ⚠ | — |
 
-Stores take the value from `rd` and the address from `rs1`: `MEMSET8 D B` stores the low byte of D at the address in B.
+Stores take the value from `rd` and the address from `rs1`: `MEMSET8 D B` stores the low byte of D at the address in B. ⚠ `SC64`/`SC32` are the exception: `rd` gets the result and the value comes from `rs2`.
 
 Byte accesses use the address as it is. A 16-bit access must be at an even address and a 32-bit one at a multiple of 4, except `MEMGET32`, which reads four bytes at any address: a misaligned one stops the CPU before it happens (a crash dump with `ERR=0A`; the emulator stops with `Misaligned`, the PC on the access). Cores before klaussCPU's hw-proposals merge (3508f87) cleared the low address bits instead. The `A` forms (`MEMGET64`, `MEMSET64`, `LDIDX64A`, `STIDX64A` and their `.S` forms) clear the low three address bits. The other 64-bit forms pass the address on unchanged, but the data cache ignores address bits 2:0, so every 64-bit memory access reaches the aligned doubleword that holds the address. The same goes for `PUSH`, `POP`, calls and returns when SP is not a multiple of 8. A device (MMIO) access without `A` keeps the address as it is. Keep the address of every 64-bit access 8-byte aligned, or use an `A` form.
 
@@ -975,7 +981,10 @@ LEAVERET                 // SP = P; pop P; return
 | `NOP` | 1 | no operation | — |
 | `HALT` | 1 | stop the CPU | — |
 | `WAIT` | 1 | sleep until an enabled interrupt is pending (see [Interrupts](#interrupts)) | — |
-| `TRAP` | 1 | stop the CPU with a trap (software abort) | — |
+| `TRAP` | 1 | stop the CPU with a trap (software abort); with `EVEC` set, a TRAP exception | — |
+| `SYSCALL` | 1 | raise a SYSCALL exception (MMU stage 1) | — |
+| `MFSR rd sr` | 1 | rd = system register `sr` (MMU stage 1) | — |
+| `MTSR sr rs1` | 1 | system register `sr` = rs1 (MMU stage 1) | — |
 | `DI rd` | 1 | rd = 1 if interrupts were enabled, else 0; then disable them (hw-proposals 7a) | — |
 | `EI rs1` | 1 | enable interrupts if rs1 bit 0 is 1, disable them if it is 0 (hw-proposals 7a) | — |
 | `RESET` | 1 | jump to address 0x4 | — |
@@ -987,7 +996,67 @@ LEAVERET                 // SP = P; pop P; return
 | `LCDDATAV imm32` | 2 | send imm32 to the LCD as data | — |
 | `LCDRST imm32` | 2 | drive the LCD reset line from imm32 bit 0; LLVM's name `LCD` is accepted too | — |
 
-`HALT` stops the CPU for good (the emulator stops with `Halt`). `TRAP` stops it as a software abort (the emulator stops with `Trap`). `RESET` jumps to address `0x4`, which in an assembled image is inside the heap header, not code. `DELAYR`/`DELAYV` busy-wait in the CPU; the emulator does not wait, but advances its clock (timer, millisecond clock, cycle counter) by the same number of cycles. The LCD instructions drive the board's SPI LCD and are no-ops in the emulator.
+`HALT` stops the CPU for good (the emulator stops with `Halt`). `SYSCALL`, `MFSR`, `MTSR` and LR/SC are MMU stage 1 instructions; see the next section. `TRAP` stops it as a software abort (the emulator stops with `Trap`). `RESET` jumps to address `0x4`, which in an assembled image is inside the heap header, not code. `DELAYR`/`DELAYV` busy-wait in the CPU; the emulator does not wait, but advances its clock (timer, millisecond clock, cycle counter) by the same number of cycles. The LCD instructions drive the board's SPI LCD and are no-ops in the emulator.
+
+### Exceptions, User Mode and LR/SC
+
+MMU stage 1 (klaussCPU `MMU_PLAN.md`, branch `mmu`; encodings in [ISA_ENCODING_V2.md](ISA_ENCODING_V2.md) §3.16) adds precise exceptions, a user mode, `SYSCALL`, the system registers and LR/SC. On a bitstream without it these instructions are illegal; a program can test `CPU_FEATURES` (a 64-bit load from `0xF00F_0048`), which reads `0x9` (bit 0 stage 1, bit 3 LR/SC) when they exist and 0 otherwise. The emulator has all of it.
+
+Nothing changes until a program sets the exception vector `EVEC`: at reset and on every program load the CPU is in supervisor mode with `EVEC` = 0, and then an illegal instruction, `TRAP` or a misaligned access stops the CPU as before, and so does every new exception (as an illegal instruction).
+
+**System registers.** `MFSR rd sr` reads one, zero-extended; `MTSR sr rs1` writes one. `sr` is a name in any case or a number 0–255 (a number above 8 assembles, and is an illegal instruction when it runs). The listing shows names for 0–8.
+
+| # | Name | Access | Contents |
+|---|---|---|---|
+| 0 | `STATUS` | read, user mode too | bit 0 = user mode, bit 1 = interrupts disabled (`DI`); writes are ignored |
+| 1 | `EVEC` | supervisor | exception handler address (bits 1:0 read 0); 0 = no handler |
+| 2 | `ECAUSE` | supervisor | the last exception's cause (table below) |
+| 3 | `EADDR` | supervisor | the last exception's address or instruction word |
+| 4 | `USP` | supervisor | the user stack pointer, while in supervisor mode |
+| 5, 6 | `SCRATCH0`, `SCRATCH1` | supervisor | 64 bits each, free for the kernel |
+| 7 | `TP` | read and write, user mode too | 64-bit thread pointer, no hardware meaning |
+| 8 | `CYCLE` | read, user mode too | 64-bit clock cycles since reset (the emulator's count is 2 per instruction); `MTSR CYCLE` is illegal |
+
+**Exceptions.** When an instruction faults, none of it happens: no register, flag, SP or memory changes. If `EVEC` is not 0, the CPU then switches to the kernel stack if it was in user mode, pushes the same 64-bit frame an interrupt pushes, with bit 44 = 1 if it came from user mode, writes `ECAUSE` and `EADDR`, disables interrupts (as `DI`), and jumps to `EVEC`. The frame PC is the faulting instruction, so `IRET` runs it again; to skip it, add its length to the frame. `SYSCALL` is the exception: its frame PC is the next instruction, so a plain `IRET` returns after it.
+
+| `ECAUSE` | Cause | `EADDR` |
+|---|---|---|
+| 1 ILLEGAL | an illegal instruction | the instruction word |
+| 2 PRIVILEGED | in user mode: `DI`, `EI`, `IRET`, `HALT`, `WAIT`, `RESET`, `DELAYR`/`DELAYV`, the LCD instructions, `MFSR` other than `STATUS`/`TP`/`CYCLE`, `MTSR` other than `TP` | the instruction word |
+| 3 TRAP | `TRAP` | the instruction word |
+| 4 SYSCALL | `SYSCALL` | 0 |
+| 5 / 6 MISALIGNED_LOAD / _STORE | a misaligned 16/32-bit access; an LR/SC not naturally aligned | the address |
+| 7 / 8 ACCESS_LOAD / _STORE | in user mode, a load or store (stack pushes and pops included) to `0xF000_0000` and up; an LR/SC there in any mode | the address |
+| 9 ACCESS_FETCH | in user mode, an instruction at `0xF000_0000` and up | its address |
+| 10 MISALIGNED_FETCH | in user mode, a PC that is not a multiple of 4 | the PC |
+
+**User mode.** A kernel enters user mode by pushing a frame with bit 44 set, setting `USP` to the user stack, and running `IRET`. In user mode the devices (`0xF000_0000` and up) and the privileged instructions are out of reach; user code asks the kernel with `SYSCALL`. On any exception or interrupt from user mode the stack pointers swap (the frame goes on the kernel stack and `USP` keeps the user SP), and the `IRET` back swaps them again.
+
+```
+// Enter user mode at USER: with the user stack at 0x0700_0000.
+SETR B HANDLER:
+MTSR EVEC B
+SETR B 0x07000000
+MTSR USP B
+SETR B USER:
+SETR64 C 0x100000000000  // frame bit 44: return to user mode
+ORR B B C
+PUSH B
+IRET
+```
+
+**LR/SC.** `LR64`/`LR32`/`LR32S` load and reserve the doubleword that holds the address; `SC64`/`SC32 rd rs2 rs1` store rs2 only if that reservation is still there, setting rd = 0, and otherwise store nothing and set rd = 1. Every `SC` clears the reservation, and so do interrupts, exceptions and `IRET`; ordinary stores do not. The address must be a multiple of the size (8 for the 64-bit forms too) and not a device address. The ISA map's names `LR_D`, `LR_W`, `LR_W_S`, `SC_D`, `SC_W` are accepted too.
+
+```
+// Atomic add of C to the doubleword at B; D, E scratch.
+RETRY:
+LR64 D B
+ADDR D D C
+SC64 E D B
+BNEI E 0 RETRY:
+```
+
+The tests in `tests/fixtures/hw_mmu.kla` run all of it on the emulator.
 
 ---
 
@@ -1020,6 +1089,7 @@ The LLVM compiler's assembler writes registers as `r0`–`r15` (`A`–`P` here) 
 | `setr`, `setru`, `addv`, `addi`, `andi`, `ldidx32`, `stidx64`, `cmprv`, … with a small literal | the `.S` form (`SETR.S`, `ADDV.S`, …) | **⚠ Same name, different length.** LLVM picks the 1-word form when the literal fits and prints it under the 2-word name; here the name chooses the length, so `SETR A 5` is always 2 words. LLVM's `setr rX, 128..255` is the 1-word `SETRU.S` |
 | `jmprel`, `jmpzrel`, … `jmpo`, `jmpno` to a near target | `JMP.S`, `JMPZ.S`, … `JMPO.S`, `JMPNO.S` | **⚠ Same name, different length**, as above: `JMPREL` here is always 2 words |
 | (none) | `CALL.S` | LLVM has no 1-word call |
+| `syscall`, `mfsr r3, ecause`, `mtsr evec, r1`, `lr64`, `lr32`, `lr32s`, `sc64 r6, r5, r1`, `sc32` | `SYSCALL`, `MFSR D ECAUSE`, `MTSR EVEC B`, `LR64`, …, `SC64 G F B` | The same names and operand order (MMU stage 1) |
 
 The aliases change nothing an existing program assembles to: each is a name that klausscc did not have before. The names that mean something else in LLVM (`LDIDX64`, `STIDX64`, and the 2-word names LLVM also uses for 1-word forms) keep their klausscc meaning.
 
@@ -1205,7 +1275,9 @@ An interrupt is taken between instructions when its mask bit is set, it is pendi
 2. clears the source's `INT_MASK` bit, so the handler is not re-entered for the same source;
 3. clears the timer's pending bit (source 0 only), and jumps to the source's vector.
 
-`IRET` pops the context word and restores PC, flags, `INT_MASK` and the `DI` bit. The hardware saves no registers, so a handler must save and restore any register it changes. The blitter's pending bit stays set until its handler acknowledges the blitter, so that handler must do so before `IRET`.
+With MMU stage 1, bit 44 of the context word is 1 when the interrupt came from user mode; the frame then goes on the kernel stack (see [Exceptions, User Mode and LR/SC](#exceptions-user-mode-and-lrsc)).
+
+`IRET` pops the context word and restores PC, flags, `INT_MASK` and the `DI` bit (and, with MMU stage 1, the mode). The hardware saves no registers, so a handler must save and restore any register it changes. The blitter's pending bit stays set until its handler acknowledges the blitter, so that handler must do so before `IRET`.
 
 `WAIT` sleeps until an enabled interrupt is pending. The handler runs, and its `IRET` returns to the instruction after the `WAIT`.
 
@@ -1260,6 +1332,7 @@ IRET
 | UART receive | Emptied when a load completes (klaussCPU 04db80e); a byte arriving during the start wait is kept | Starts empty; `--gdbserver`'s stdin feeds it |
 | Time, timer interrupts | 100 MHz clock | 2 cycles per instruction |
 | Devices other than UART, timer and three perf counters | Present | Read 0, writes ignored |
+| `CYCLE` (MMU stage 1) | Core clock cycles since reset | The emulator's clock: 2 cycles per instruction, plus `DELAY`s |
 | MMIO access at an address that is not a multiple of 8 | Up to the device's address decoder (not checked) | Decodes the exact address; no register is there, so it reads 0 or is ignored |
 
 ---
@@ -1427,6 +1500,7 @@ The `tests/fixtures/` directory holds the test corpus; `cargo test` runs every f
 | `hw_alignment.kla` | The emulator-vs-hardware check: flags, divide by zero, unaligned 64-bit access, `BEXTR`/`BDEP`, `.S` immediates, strings and inline data, each derived from the RTL |
 | `hw_div_fbr.kla`, `hw_div_smc.kla` | The klaussCPU 9ad6614 squash fixes |
 | `hw_proposals.kla` | The klaussCPU 3508f87 instructions: `W` and imm32 fused branches, `CMPRVW.S`, `MULV.S`/`MULUV.S`/`MULUV`, `LEAPC.S`, `DI`/`EI` |
+| `hw_mmu.kla` | MMU stage 1: exceptions to `EVEC`, user mode, `SYSCALL`, `MFSR`/`MTSR`, `LR64`/`SC64`/`SC32` (needs a bitstream with it) |
 | `test2.kla`, `test_64bit.kla` | Compiled C linked with the runtime (see [C Programs and the Runtime](#c-programs-and-the-runtime)); `test_64bit` runs 33 64-bit integer checks and expects `00000000`, the failure count |
 | `uart_stubs.kla` | The UART print routines the tests include |
 

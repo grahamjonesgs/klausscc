@@ -12,7 +12,8 @@ or in §5 traps as an illegal instruction.
 HTML and JSON in the current directory.
 
 The v3 additions all reuse encodings that trapped in v2, so every v2 binary
-runs unchanged on a v3 core. The flag model (`Z S C V`, which instructions
+runs unchanged on a v3 core. So do the hw-proposals (§3.15) and MMU stage 1
+(§3.16) additions. The flag model (`Z S C V`, which instructions
 write which flags, how branch conditions are derived) is in §7.
 
 The "v1 opcode" columns are **history**: the pre-v2 opcode each symbol
@@ -467,7 +468,7 @@ Divide by zero does not trap (§7.2).
 | SETSP   | `0x6500_0000` | 1 | rs1 | 0x0000_404x |
 | ADDSP   | `0xA540_0000` | 2 | imm32 (sext) | 0x0000_4050 |
 | RET     | `0x6580_0000` | 1 | — | 0x0000_1012 |
-| IRET    | `0x65C0_0000` | 1 | — (restores Z,S,C,V, INT_MASK and the DI bit) | 0x0000_6011 |
+| IRET    | `0x65C0_0000` | 1 | — (restores Z,S,C,V, INT_MASK, the DI bit and, MMU stage 1, the mode) | 0x0000_6011 |
 | NOP     | `0x6C00_0000` | 1 | — | 0x0000_F010 |
 | HALT    | `0x6C01_0000` | 1 | — | 0x0000_F011 |
 | WAIT    | `0x6C02_0000` | 1 | — | 0x0000_6012 |
@@ -735,6 +736,61 @@ a trap halt with the PC on the access). It does not execute or retire.
 doubleword) and the stack ops are exempt. The emulator stops with
 `Misaligned(EA)`.
 
+### 3.16 MMU stage 1 additions (klaussCPU `mmu`, b6fa71c)
+
+From klaussCPU's `MMU_PLAN.md` §5 and its `ISA_ENCODING_V2_MAP.md` §9
+(frozen interface; the semantics, privilege rules and exceptions are in
+`MMU_PLAN.md` §3-§6, and how the emulator runs them in
+[EMULATOR_ISA_SEMANTICS.md](EMULATOR_ISA_SEMANTICS.md#mmu-stage-1)).
+Every one of these words traps as illegal on earlier bitstreams; probe
+`CPU_FEATURES` (`0xF00F_0048`, bits 0 and 3) first. The mnemonics are
+klausscpu-llvm's (`mmu` 7b4eb67f3ba0).
+
+**System** (class B, 1 word, unused fields 0):
+
+| Symbol | Template | Operands | Fields | Operation |
+|---|---|---|---|---|
+| SYSCALL | `0x6C08_0000` | — | OP `[21:16]` = 8 | raise SYSCALL; the frame PC is the next instruction |
+| MFSR | `0x6C40_0000` | rd sr | `[25:22]` = 1, `[21]` = 0, `[20]` = 0, sr `[19:12]`, rd, `[7:0]` = 0 | rd = SR[sr], zero-extended |
+| MTSR | `0x6C60_0000` | sr rs1 | `[25:22]` = 1, `[21]` = 1, `[20]` = 0, sr `[19:12]`, rs1, `[11:8]` = 0, `[3:0]` = 0 | SR[sr] = rs1 (bits it lacks ignored); serializing |
+
+The SR operand is a name, in any case, or a number 0–255:
+
+| SR | Name | Access | Contents |
+|---|---|---|---|
+| 0 | `STATUS` | read (user mode too) | `[0]` UM, `[1]` DI; writes ignored |
+| 1 | `EVEC` | supervisor | exception vector, `[1:0]` read 0 |
+| 2 | `ECAUSE` | supervisor | the last exception's cause, `[7:0]` |
+| 3 | `EADDR` | supervisor | its address or instruction word |
+| 4 | `USP` | supervisor | `SP_ALT`: the user SP while in supervisor mode |
+| 5, 6 | `SCRATCH0`, `SCRATCH1` | supervisor | 64-bit, for the kernel |
+| 7 | `TP` | read and write, user mode too | 64-bit thread pointer |
+| 8 | `CYCLE` | read (user mode too) | 64-bit core-cycle counter; `MTSR` to it is illegal |
+
+Any other number assembles but is an illegal instruction when it runs.
+The listing shows names for 0–8 and numbers above. Examples: `MFSR D
+ECAUSE` = `0x6C40_2300` (`mfsr r3, ecause`), `MTSR EVEC B` =
+`0x6C60_1010`, `MFSR C TP` = `0x6C40_7200`.
+
+**LR/SC** (class 6/7, 1 word, MODE = 00 with `[12]` = 1; `[19:13]`, A
+`[20]` = 0). The address is a plain register, as for `MEMGET64`/
+`MEMSET64`, and must be naturally aligned (4 or 8, 64-bit too). **SC's
+fields differ from the other stores**: rd is the 0/1 result and rs2 the
+data.
+
+| Symbol | Template | Operands | Operation |
+|---|---|---|---|
+| LR64   | `0x5B00_1000` | rd rs1 | rd = mem64[rs1]; reserve its doubleword |
+| LR32   | `0x5A00_1000` | rd rs1 | rd = zext(mem32[rs1]); reserve |
+| LR32S  | `0x5A80_1000` | rd rs1 | rd = sext(mem32[rs1]); reserve |
+| SC64   | `0x5F00_1000` | rd rs2 rs1 | if reserved: mem64[rs1] = rs2, rd = 0; else rd = 1. Clears the reservation |
+| SC32   | `0x5E00_1000` | rd rs2 rs1 | as SC64, storing rs2[31:0] |
+
+`LR32_S` is another name for `LR32S`, and the ISA map's symbols `LR_D`,
+`LR_W`, `LR_W_S`, `SC_D`, `SC_W` assemble too (the spec's dotted
+`LR.D` … do not: `.S` means a short form here). Example: `SC64 G F B` =
+`0x5F00_1615` (`sc64 r6, r5, r1`, the spec's `SC.D r6, r5, [r1]`).
+
 ## 4. History: v1 → v2 migration notes
 
 These notes describe the v2 flag day. They are kept for reading old code
@@ -975,6 +1031,17 @@ STIDX64R,0x5F600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
 STIDX8R,0x5C600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2
 STIDX16R,0x5D600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2 (aligned)
 STIDX32R,0x5E600000,1,7,"rd,rs1,rs2",,,data=rd; EA=rs1+rs2 (aligned)
+LR64,0x5B001000,1,6,"rd,rs1",,,load-reserved 64; EA=rs1 aligned (mmu stage 1)
+LR32,0x5A001000,1,6,"rd,rs1",,,load-reserved 32 zext (mmu stage 1)
+LR32S,0x5A801000,1,6,"rd,rs1",,,load-reserved 32 sext (mmu stage 1)
+LR32_S,0x5A801000,1,6,"rd,rs1",,,= LR32S
+SC64,0x5F001000,1,7,"rd,rs2,rs1",,,store-conditional 64; rd = 0 ok / 1 fail; data = rs2 (mmu stage 1)
+SC32,0x5E001000,1,7,"rd,rs2,rs1",,,store-conditional 32; rd = 0 ok / 1 fail; data = rs2 (mmu stage 1)
+LR_D,0x5B001000,1,6,"rd,rs1",,,= LR64 (ISA map symbol)
+LR_W,0x5A001000,1,6,"rd,rs1",,,= LR32 (ISA map symbol)
+LR_W_S,0x5A801000,1,6,"rd,rs1",,,= LR32S (ISA map symbol)
+SC_D,0x5F001000,1,7,"rd,rs2,rs1",,,= SC64 (ISA map symbol)
+SC_W,0x5E001000,1,7,"rd,rs2,rs1",,,= SC32 (ISA map symbol)
 LDIDX32_S,0x9AA00000,2,6,"rd,rs1",off32,,sext (v3 D1)
 LDIDX32S,0x9AA00000,2,6,"rd,rs1",off32,,LLVM's name for LDIDX32_S
 ADDW,0x44280000,1,1,"rd,rs1,rs2",,ZSCV,sext32 result (v3 D3)
@@ -1167,6 +1234,9 @@ RESET,0x6C030000,1,11,,,,PC=0x4
 TRAP,0x6C040000,1,11,,,,
 DI,0x6C060000,1,11,rd,,,rd = old enable; disable (hw-proposals 7a)
 EI,0x6C070000,1,11,rs1,,,enable = rs1[0] (hw-proposals 7a)
+SYSCALL,0x6C080000,1,11,,,,raise SYSCALL (mmu stage 1)
+MFSR,0x6C400000,1,11,rd,sr[19:12],,rd = SR[sr] (mmu stage 1)
+MTSR,0x6C600000,1,11,rs1,sr[19:12],,SR[sr] = rs1; serializing (mmu stage 1)
 DELAYR,0x6C050000,1,11,rs1,,,
 DELAYV,0xAC050000,2,11,,imm32,,
 LCDCMDR,0x70000000,1,12,rs1,,,
@@ -1283,8 +1353,10 @@ HALT
   0. E is derived, so bit 62 always equals bit 63.
 - **Interrupt frame**: one doubleword pushed on interrupt entry,
   `[31:0] = PC`, `[38:32] = {Z, E, C, V, S, L, U}` (bit 38 = Z … bit 32 =
-  U), `[42:39] = INT_MASK`, `[63:43] = 0`. IRET restores the PC, INT_MASK
-  and **only Z, S, C, V** (bits 38, 34, 36, 35). The derived bits are
-  ignored and regenerate.
+  U), `[42:39] = INT_MASK`, `[43]` = DI, `[44]` = PM (MMU stage 1: the
+  mode the entry came from), `[63:45] = 0`; MMU stage 1 exceptions push
+  the same frame. IRET restores the PC, INT_MASK, DI, the mode and **only
+  Z, S, C, V** (bits 38, 34, 36, 35). The derived bits are ignored and
+  regenerate.
 - **Debugger** (gdbserver / RTL debug module): the flags register is the
   nibble `{Z, S, C, V}` in bits `[3:0]`.

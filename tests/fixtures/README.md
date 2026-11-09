@@ -147,6 +147,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 25 | `hw_div_fbr.kla` | RTL regression | A DIVR squashed by a taken FBR must not leave the divider running for the next DIVR; see [The RTL squash tests](#the-rtl-squash-tests) |
 | 26 | `hw_div_smc.kla` | RTL regression | A DIVR busy in EX must survive a self-modifying-code squash of ID; see [The RTL squash tests](#the-rtl-squash-tests) |
 | 27 | `hw_proposals.kla` | New instructions | The klaussCPU 3508f87 (hw-proposals) forms: BEQW/BLTWI/BUGEW, BNEV/BGTV/BULTWV/BLEV, FBR and FBRV with a W condition, CMPRVW.S, MULV.S, MULUV.S, MULUV, LEAPC.S, DI, EI; every one is an illegal instruction on an older core |
+| 28 | `hw_mmu.kla` | New instructions | MMU stage 1 (klaussCPU branch `mmu`): CPU_FEATURES, MTSR/MFSR (EVEC, STATUS, CYCLE, TP, USP, SCRATCH0, ECAUSE, EADDR), IRET into user mode, a user MMIO load and a user DI faulting and skipped by the handler, SYSCALL from user and supervisor mode, LR64/SC64, a misaligned LR64, SC32 to MMIO, TRAP to EVEC. Needs a bitstream whose CPU_FEATURES reads 0x9; on an older one it parks at its first MTSR |
 | — | `test_directives.kla` | Directives | `.global`, `.extern`, `.text`, `.word`, `.comm` |
 | — | `hello_world.kla` | Compiled C | Arithmetic, factorial, GCD, Fibonacci, primes |
 | — | `test_64bit.kla` | Compiled C | 33 64-bit checks; expects main's return value (the failure count) `00000000` |
