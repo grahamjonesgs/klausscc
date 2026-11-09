@@ -4109,3 +4109,24 @@ fn watchpoints_compare_the_physical_address() {
         assert_eq!(cpu.take_watch_hit().is_some(), hit, "watch 0x{watch:08X}");
     }
 }
+
+#[test]
+fn tlb_len00_word_at_a_page_end_is_illegal_not_a_next_page_fault() {
+    // LEN = 00 is a one-word (ILLEGAL) instruction: in the last word of a
+    // page it must not translate the next page (stage 3 review; the RTL had
+    // it wrong).  The page after U_CODE's is left unmapped.
+    let at = U_CODE + 0xFFFC;
+    let mut cpu = te_cpu(&[NOP], &[HALT], true);
+    cpu.tlb[1] = TlbEntry::default();
+    cpu.pc = at;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::Illegal, 0, at, true);
+    // A two-word instruction there does fetch the next page: TLB_MISS_FETCH
+    // with EADDR = that page's first word.
+    let mut cpu = te_cpu(&[NOP], &[HALT], true);
+    cpu.tlb[1] = TlbEntry::default();
+    assert!(cpu.debug_write(0xFFFC, &0x8000_0000_u32.to_le_bytes()));
+    cpu.pc = at;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissFetch, U_CODE + 0x1_0000, at, true);
+}
