@@ -13,7 +13,7 @@ HTML and JSON in the current directory.
 
 The v3 additions all reuse encodings that trapped in v2, so every v2 binary
 runs unchanged on a v3 core. So do the hw-proposals (§3.15) and MMU stage 1
-(§3.16) additions. The flag model (`Z S C V`, which instructions
+(§3.16) and stage 2/3 (§3.17) additions. The flag model (`Z S C V`, which instructions
 write which flags, how branch conditions are derived) is in §7.
 
 The "v1 opcode" columns are **history**: the pre-v2 opcode each symbol
@@ -758,17 +758,18 @@ The SR operand is a name, in any case, or a number 0–255:
 
 | SR | Name | Access | Contents |
 |---|---|---|---|
-| 0 | `STATUS` | read (user mode too) | `[0]` UM, `[1]` DI; writes ignored |
+| 0 | `STATUS` | read (user mode too); write supervisor | `[0]` UM, `[1]` DI (read-only), `[8]` MPU_EN and `[9]` TE (§3.17) |
 | 1 | `EVEC` | supervisor | exception vector, `[1:0]` read 0 |
-| 2 | `ECAUSE` | supervisor | the last exception's cause, `[7:0]` |
+| 2 | `ECAUSE` | supervisor | the last exception's cause, `[7:0]`; `[8]` GUARD (§3.17) |
 | 3 | `EADDR` | supervisor | its address or instruction word |
 | 4 | `USP` | supervisor | `SP_ALT`: the user SP while in supervisor mode |
 | 5, 6 | `SCRATCH0`, `SCRATCH1` | supervisor | 64-bit, for the kernel |
 | 7 | `TP` | read and write, user mode too | 64-bit thread pointer |
 | 8 | `CYCLE` | read (user mode too) | 64-bit core-cycle counter; `MTSR` to it is illegal |
 
-Any other number assembles but is an illegal instruction when it runs.
-The listing shows names for 0–8 and numbers above. Examples: `MFSR D
+Stage 2 and 3 add SRs 0x10–0x2F and 0x30–0x34 (§3.17). Any other number
+assembles but is an illegal instruction when it runs. The listing shows
+the name of every SR that has one and the number of any other. Examples: `MFSR D
 ECAUSE` = `0x6C40_2300` (`mfsr r3, ecause`), `MTSR EVEC B` =
 `0x6C60_1010`, `MFSR C TP` = `0x6C40_7200`.
 
@@ -790,6 +791,46 @@ data.
 `LR_W`, `LR_W_S`, `SC_D`, `SC_W` assemble too (the spec's dotted
 `LR.D` … do not: `.S` means a short form here). Example: `SC64 G F B` =
 `0x5F00_1615` (`sc64 r6, r5, r1`, the spec's `SC.D r6, r5, [r1]`).
+
+### 3.17 MMU stage 2 and 3 additions (klaussCPU `mmu`, 12b3783)
+
+From klaussCPU's `MMU_PLAN.md` §10–§11 and its `ISA_ENCODING_V2_MAP.md`
+§10. Stage 2 is the MPU, stage 3 the TLB; how the emulator runs them is in
+[EMULATOR_ISA_SEMANTICS.md](EMULATOR_ISA_SEMANTICS.md#mmu-stages-2-and-3).
+Probe `CPU_FEATURES` first: bit 1 (MPU, `[7:4]` = 15, 16 regions) and bit
+2 (TLB, `[15:8]` = 32 entries). On an earlier bitstream the new SR numbers
+and the TLB instructions are illegal. The mnemonics are klausscpu-llvm's
+(`mmu` 9596187c378a): `tlbwi`, `tlbr`, `tlbp`, `tlbinv` there, upper case
+by the `.kla` convention here (any case is accepted).
+
+**System registers** (MFSR / MTSR, supervisor only; names in any case):
+
+| SR | Name | Contents |
+|---|---|---|
+| `0x10 + 2n` (n = 0–15) | `MPU_BASE0` … `MPU_BASE15` | `[31:5]` first 32-byte granule, `[4]` GUARD, `[3]` X, `[2]` W, `[1]` R, `[0]` EN |
+| `0x11 + 2n` | `MPU_LIMIT0` … `MPU_LIMIT15` | `[31:5]` **last** granule (inclusive); `[4:0]` read 0 |
+| `0x30` | `TLB_HI` | `[31:16]` VPN, `[8]` G, `[7:0]` ASID |
+| `0x31` | `TLB_LO` | `[26:16]` PFN, `[3]` X, `[2]` W, `[1]` R, `[0]` V |
+| `0x32` | `TLB_INDEX` | `[4:0]` entry index, `[31]` P = the last TLBP found no match |
+| `0x33` | `ASID` | `[7:0]` current address-space ID |
+| `0x34` | `TLBVEC` | the vector for TLB_MISS_* exceptions; 0 = use `EVEC` |
+
+`STATUS` gains `[8]` MPU_EN and `[9]` TE (translation on), and `ECAUSE`
+gains `[8]` GUARD (the ACCESS_* fault was a denial by an MPU GUARD
+region). New causes: 11 TLB_MISS_LOAD, 12 TLB_MISS_STORE, 13
+TLB_MISS_FETCH. Examples: `MTSR MPU_BASE3 B` = `0x6C61_6010`, `MFSR D
+mpu_limit15` = `0x6C42_F300`, `MTSR TLB_HI B` = `0x6C63_0010`, `MFSR D
+tlbvec` = `0x6C43_4300`.
+
+**TLB instructions** (class B, 1 word, no operands, privileged, serializing;
+any other field set is illegal):
+
+| Symbol | Template | Operation |
+|---|---|---|
+| TLBWI  | `0x6C09_0000` | entry[`TLB_INDEX[4:0]`] ← {`TLB_HI`, `TLB_LO`} |
+| TLBR   | `0x6C0A_0000` | {`TLB_HI`, `TLB_LO`} ← entry[`TLB_INDEX[4:0]`] |
+| TLBP   | `0x6C0B_0000` | look `TLB_HI` up (VPN, and ASID unless the entry is global): hit, `TLB_INDEX` = index; miss, `TLB_INDEX[31]` set, `[4:0]` unchanged |
+| TLBINV | `0x6C0C_0000` | V ← 0 in every entry |
 
 ## 4. History: v1 → v2 migration notes
 
@@ -1237,6 +1278,10 @@ EI,0x6C070000,1,11,rs1,,,enable = rs1[0] (hw-proposals 7a)
 SYSCALL,0x6C080000,1,11,,,,raise SYSCALL (mmu stage 1)
 MFSR,0x6C400000,1,11,rd,sr[19:12],,rd = SR[sr] (mmu stage 1)
 MTSR,0x6C600000,1,11,rs1,sr[19:12],,SR[sr] = rs1; serializing (mmu stage 1)
+TLBWI,0x6C090000,1,11,,,,TLB write indexed (mmu stage 3)
+TLBR,0x6C0A0000,1,11,,,,TLB read indexed (mmu stage 3)
+TLBP,0x6C0B0000,1,11,,,,TLB probe (mmu stage 3)
+TLBINV,0x6C0C0000,1,11,,,,TLB invalidate all (mmu stage 3)
 DELAYR,0x6C050000,1,11,rs1,,,
 DELAYV,0xAC050000,2,11,,imm32,,
 LCDCMDR,0x70000000,1,12,rs1,,,

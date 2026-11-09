@@ -322,6 +322,12 @@ impl Cpu {
     /// is `ACCESS_*`; kseg is PA = VA - `0x8000_0000` and MMIO is identity;
     /// useg and kmap go through the TLB, where no matching entry is
     /// `TLB_MISS_*` and a matching one without the permission `ACCESS_*`.
+    // MMU-SPEC-Q: a user MMIO access that a user GUARD region also covers is
+    // the stage 1 MMIO fault (§10.2: that rule "still applies first"), so
+    // ECAUSE[8] GUARD is clear for it.
+    // MMU-SPEC-Q: §11.3's per-entry R/W/X is checked in supervisor mode too
+    // (the spec names no mode exemption), so a kernel access to a W = 0 page
+    // faults as a user one does.
     pub(super) fn translate(&self, va: u32, kind: Kind) -> Result<u32, XlateFault> {
         if !self.te {
             if self.um && is_mmio(va) {
@@ -395,6 +401,10 @@ impl Cpu {
     /// doubleword, so its callers pass `len` 1) translates that doubleword
     /// too, before either is touched; when only the second faults, `EADDR`
     /// is its start, the lowest faulting byte (§4.1, §11.3).
+    // MMU-SPEC-Q: when both doublewords fault, the first (lower) one's fault
+    // is reported, whatever its cause, even if the second's ranks higher in
+    // the §11.3 order (e.g. a TLB miss on the first and an address-map
+    // ACCESS on the second): "report the lowest faulting byte".
     pub(super) fn map_data(&self, ea: u32, len: u32, store: bool) -> Result<Mapped, XlateFault> {
         let kind = if store { Kind::Store } else { Kind::Load };
         let pa = self.translate(ea, kind)?;
@@ -517,6 +527,10 @@ impl Cpu {
     /// for the hole and for a page no entry maps.  The entry's R/W/X bits
     /// are not checked, so a debugger can read execute-only text and write
     /// a read-only page.
+    // MMU-SPEC-Q (klausscc, not the spec): "as a supervisor data access would"
+    // is applied to the address map and the TLB match only; the entry's R/W/X
+    // bits are not checked, so the debugger can read X-only text and write
+    // W = 0 pages (and the MPU, as §10.2 says, does not apply to it).
     #[must_use]
     pub fn debug_translate(&self, va: u32) -> Option<u32> {
         if !self.te {

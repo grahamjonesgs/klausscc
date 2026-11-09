@@ -34,6 +34,7 @@ Where the built-in emulator and the hardware disagree, this document describes t
   - [Multiply and Divide](#multiply-and-divide)
   - [System and LCD](#system-and-lcd)
   - [Exceptions, User Mode and LR/SC](#exceptions-user-mode-and-lrsc)
+  - [MPU and TLB](#mpu-and-tlb)
   - [Separate Source Registers](#separate-source-registers)
   - [LLVM Names](#llvm-names)
 - [CPU Flags](#cpu-flags)
@@ -985,6 +986,10 @@ LEAVERET                 // SP = P; pop P; return
 | `SYSCALL` | 1 | raise a SYSCALL exception (MMU stage 1) | — |
 | `MFSR rd sr` | 1 | rd = system register `sr` (MMU stage 1) | — |
 | `MTSR sr rs1` | 1 | system register `sr` = rs1 (MMU stage 1) | — |
+| `TLBWI` | 1 | write TLB entry `TLB_INDEX` from `TLB_HI`/`TLB_LO` (MMU stage 3) | — |
+| `TLBR` | 1 | read TLB entry `TLB_INDEX` into `TLB_HI`/`TLB_LO` (MMU stage 3) | — |
+| `TLBP` | 1 | find `TLB_HI`'s page in the TLB; `TLB_INDEX` = its index, or bit 31 set if none (MMU stage 3) | — |
+| `TLBINV` | 1 | invalidate every TLB entry (MMU stage 3) | — |
 | `DI rd` | 1 | rd = 1 if interrupts were enabled, else 0; then disable them (hw-proposals 7a) | — |
 | `EI rs1` | 1 | enable interrupts if rs1 bit 0 is 1, disable them if it is 0 (hw-proposals 7a) | — |
 | `RESET` | 1 | jump to address 0x4 | — |
@@ -996,7 +1001,7 @@ LEAVERET                 // SP = P; pop P; return
 | `LCDDATAV imm32` | 2 | send imm32 to the LCD as data | — |
 | `LCDRST imm32` | 2 | drive the LCD reset line from imm32 bit 0; LLVM's name `LCD` is accepted too | — |
 
-`HALT` stops the CPU for good (the emulator stops with `Halt`). `SYSCALL`, `MFSR`, `MTSR` and LR/SC are MMU stage 1 instructions; see the next section. `TRAP` stops it as a software abort (the emulator stops with `Trap`). `RESET` jumps to address `0x4`, which in an assembled image is inside the heap header, not code. `DELAYR`/`DELAYV` busy-wait in the CPU; the emulator does not wait, but advances its clock (timer, millisecond clock, cycle counter) by the same number of cycles. The LCD instructions drive the board's SPI LCD and are no-ops in the emulator.
+`HALT` stops the CPU for good (the emulator stops with `Halt`). `SYSCALL`, `MFSR`, `MTSR` and LR/SC are MMU stage 1 instructions, and `TLBWI`, `TLBR`, `TLBP` and `TLBINV` stage 3's; see the next two sections. `TRAP` stops it as a software abort (the emulator stops with `Trap`). `RESET` jumps to address `0x4`, which in an assembled image is inside the heap header, not code. `DELAYR`/`DELAYV` busy-wait in the CPU; the emulator does not wait, but advances its clock (timer, millisecond clock, cycle counter) by the same number of cycles. The LCD instructions drive the board's SPI LCD and are no-ops in the emulator.
 
 ### Exceptions, User Mode and LR/SC
 
@@ -1004,13 +1009,13 @@ MMU stage 1 (klaussCPU `MMU_PLAN.md`, branch `mmu`; encodings in [ISA_ENCODING_V
 
 Nothing changes until a program sets the exception vector `EVEC`: at reset and on every program load the CPU is in supervisor mode with `EVEC` = 0, and then an illegal instruction, `TRAP` or a misaligned access stops the CPU as before, and so does every new exception (as an illegal instruction).
 
-**System registers.** `MFSR rd sr` reads one, zero-extended; `MTSR sr rs1` writes one. `sr` is a name in any case or a number 0–255 (a number above 8 assembles, and is an illegal instruction when it runs). The listing shows names for 0–8.
+**System registers.** `MFSR rd sr` reads one, zero-extended; `MTSR sr rs1` writes one. `sr` is a name in any case or a number 0–255 (a number with no register behind it assembles, and is an illegal instruction when it runs). The listing shows the name of every register that has one. The MPU and TLB registers are in the [next section](#mpu-and-tlb).
 
 | # | Name | Access | Contents |
 |---|---|---|---|
-| 0 | `STATUS` | read, user mode too | bit 0 = user mode, bit 1 = interrupts disabled (`DI`); writes are ignored |
+| 0 | `STATUS` | read, user mode too | bit 0 = user mode, bit 1 = interrupts disabled (`DI`), both read-only; bit 8 = MPU on, bit 9 = translation on (supervisor writes these) |
 | 1 | `EVEC` | supervisor | exception handler address (bits 1:0 read 0); 0 = no handler |
-| 2 | `ECAUSE` | supervisor | the last exception's cause (table below) |
+| 2 | `ECAUSE` | supervisor | the last exception's cause (table below); bit 8 = the access was denied by an MPU GUARD region |
 | 3 | `EADDR` | supervisor | the last exception's address or instruction word |
 | 4 | `USP` | supervisor | the user stack pointer, while in supervisor mode |
 | 5, 6 | `SCRATCH0`, `SCRATCH1` | supervisor | 64 bits each, free for the kernel |
@@ -1029,6 +1034,9 @@ Nothing changes until a program sets the exception vector `EVEC`: at reset and o
 | 7 / 8 ACCESS_LOAD / _STORE | in user mode, a load or store (stack pushes and pops included) to `0xF000_0000` and up; an LR/SC there in any mode | the address |
 | 9 ACCESS_FETCH | in user mode, an instruction at `0xF000_0000` and up | its address |
 | 10 MISALIGNED_FETCH | in user mode, a PC that is not a multiple of 4 | the PC |
+| 11 / 12 / 13 TLB_MISS_LOAD / _STORE / _FETCH | with translation on, a page no TLB entry maps | the address |
+
+ACCESS_LOAD, _STORE and _FETCH are also what an MPU denial or a TLB permission or address-map fault raises ([next section](#mpu-and-tlb)).
 
 **User mode.** A kernel enters user mode by pushing a frame with bit 44 set, setting `USP` to the user stack, and running `IRET`. In user mode the devices (`0xF000_0000` and up) and the privileged instructions are out of reach; user code asks the kernel with `SYSCALL`. On any exception or interrupt from user mode the stack pointers swap (the frame goes on the kernel stack and `USP` keeps the user SP), and the `IRET` back swaps them again.
 
@@ -1057,6 +1065,80 @@ BNEI E 0 RETRY:
 ```
 
 The tests in `tests/fixtures/hw_mmu.kla` run all of it on the emulator.
+
+### MPU and TLB
+
+MMU stages 2 and 3 (klaussCPU `MMU_PLAN.md` §10–§11, branch `mmu`; encodings in [ISA_ENCODING_V2.md](ISA_ENCODING_V2.md) §3.17) protect memory: stage 2 with a 16-region MPU, stage 3 with a 32-entry, software-refilled TLB and 64 KiB pages. `CPU_FEATURES` bit 1 says the MPU is there (bits 7:4 = 15) and bit 2 the TLB (bits 15:8 = 32); the emulator reads `0x20FF`. Both are off at reset and on every program load. All their registers and instructions are supervisor-only.
+
+**The MPU** works while translation is off. Turn it on with `STATUS` bit 8. Region *n* is two registers: `MPU_BASEn` holds the first byte (a multiple of 32) with bit 4 = GUARD, 3 = X, 2 = W, 1 = R, 0 = enable; `MPU_LIMITn` holds the start of the region's **last** 32-byte block. A GUARD region denies every access to it, in supervisor mode too (for stack guards). Otherwise supervisor mode may access anything, and user mode only what an enabled region gives it (R to load, W to store, X to run; regions add up). A denied access is ACCESS_LOAD / _STORE / _FETCH, with `ECAUSE` bit 8 set for a GUARD. An exception's own frame push is not checked, so leave a frame's room below a guard, and do not push in the handler before you know the stack is good.
+
+| Register | Number | Contents |
+|---|---|---|
+| `MPU_BASE0` … `MPU_BASE15` | 0x10, 0x12, … 0x2E | first byte, GUARD/X/W/R/EN in bits 4:0 |
+| `MPU_LIMIT0` … `MPU_LIMIT15` | 0x11, 0x13, … 0x2F | the last 32-byte block (bits 4:0 read 0) |
+
+```
+// User mode may read and write 0x0600_0000-0x0600_00FF; 0x0600_0200-0x0600_021F is a guard.
+SETR B 0x06000007        // base, R W EN
+MTSR MPU_BASE1 B
+SETR B 0x060000E0        // last block
+MTSR MPU_LIMIT1 B
+SETR B 0x06000211        // base, GUARD EN
+MTSR MPU_BASE3 B
+SETR B 0x06000200
+MTSR MPU_LIMIT3 B
+SETR B 0x100             // STATUS: MPU on
+MTSR STATUS B
+```
+
+**Translation** is on while `STATUS` bit 9 is set (the MPU is then ignored). Addresses are then virtual:
+
+| Address | Who | Goes to |
+|---|---|---|
+| `0x0000_0000`–`0x7FFF_FFFF` | user and supervisor | the TLB |
+| `0x8000_0000`–`0x87FF_FFFF` | supervisor | physical memory at address − `0x8000_0000` |
+| `0x8800_0000`–`0xBFFF_FFFF` | — | ACCESS fault |
+| `0xC000_0000`–`0xEFFF_FFFF` | supervisor | the TLB |
+| `0xF000_0000`–`0xFFFF_FFFF` | supervisor | the devices, unchanged |
+
+A TLB entry maps one 64 KiB page: `TLB_HI` holds the page (address bits 31:16) in bits 31:16, bit 8 = global, and the address-space ID in bits 7:0; `TLB_LO` holds the physical page (bits 26:16) and X W R V in bits 3:0. An entry is used when V is set, the page matches, and it is global or its ID is the current `ASID`. No entry is TLB_MISS_LOAD / _STORE / _FETCH, which goes to `TLBVEC` (or `EVEC` when `TLBVEC` is 0); an entry without the R/W/X needed is ACCESS. On both, `EADDR` is the address and `TLB_HI` is already loaded with its page and the current `ASID`, so a refill handler only has to look the page up, set `TLB_LO`, pick `TLB_INDEX` and run `TLBWI`. A page with W clear faults on its first store, which is how a kernel tracks dirty pages.
+
+| Register | Number | Contents |
+|---|---|---|
+| `TLB_HI` | 0x30 | page, global bit, ASID |
+| `TLB_LO` | 0x31 | physical page, X W R V |
+| `TLB_INDEX` | 0x32 | entry 0–31 in bits 4:0; bit 31 = the last `TLBP` found nothing |
+| `ASID` | 0x33 | current address-space ID (8 bits) |
+| `TLBVEC` | 0x34 | TLB-miss handler address; 0 = use `EVEC` |
+
+`TLBWI`, `TLBINV` and writes to `ASID` and `STATUS` also cancel an `LR` reservation. While translation is on, the vectors, the refill handler, its page tables and every kernel stack must be in the `0x8000_0000` window: an exception pushes its frame there without translation, and with the stack elsewhere the CPU stops with a double fault. Setting bit 9 takes effect at the very next instruction, so code still running at its physical address needs a TLB entry for its own page first:
+
+```
+// A TLB refill handler (at TLBVEC, in the 0x8000_0000 window).  The page
+// table is an array of TLB_LO values indexed by page, at 0x8002_0000; the
+// next entry to fill is kept in SCRATCH1.
+REFILL:
+PUSH A
+PUSH B
+MFSR A TLB_HI            // the missing page and the ASID
+SHRV A 16
+SHLV A 3
+SETR B 0x80020000
+ADDR A A B
+MEMGET64 B A             // its page-table entry
+MTSR TLB_LO B
+MFSR B SCRATCH1
+MTSR TLB_INDEX B
+TLBWI
+ADDV B 1
+ANDV B 31
+MTSR SCRATCH1 B
+POP B
+POP A
+IRET
+```
+
+`tests/fixtures/hw_mpu.kla` and `hw_tlb.kla` run these on the emulator; they are not yet in `all_tests.txt`, because they need a bitstream with the MPU and TLB. In the emulator's debugger, `monitor mpu` and `monitor tlb` show the regions and entries, and while translation is on the debugger's addresses are virtual (`monitor phys on` makes them physical); the board's debugger always uses physical addresses.
 
 ---
 
@@ -1090,6 +1172,7 @@ The LLVM compiler's assembler writes registers as `r0`–`r15` (`A`–`P` here) 
 | `jmprel`, `jmpzrel`, … `jmpo`, `jmpno` to a near target | `JMP.S`, `JMPZ.S`, … `JMPO.S`, `JMPNO.S` | **⚠ Same name, different length**, as above: `JMPREL` here is always 2 words |
 | (none) | `CALL.S` | LLVM has no 1-word call |
 | `syscall`, `mfsr r3, ecause`, `mtsr evec, r1`, `lr64`, `lr32`, `lr32s`, `sc64 r6, r5, r1`, `sc32` | `SYSCALL`, `MFSR D ECAUSE`, `MTSR EVEC B`, `LR64`, …, `SC64 G F B` | The same names and operand order (MMU stage 1) |
+| `tlbwi`, `tlbr`, `tlbp`, `tlbinv`, `mtsr mpu_base0, r1`, `mfsr r3, tlb_hi` | `TLBWI`, `TLBR`, `TLBP`, `TLBINV`, `MTSR MPU_BASE0 B`, `MFSR D TLB_HI` | The same names (MMU stages 2 and 3); SR names in any case |
 
 The aliases change nothing an existing program assembles to: each is a name that klausscc did not have before. The names that mean something else in LLVM (`LDIDX64`, `STIDX64`, and the 2-word names LLVM also uses for 1-word forms) keep their klausscc meaning.
 

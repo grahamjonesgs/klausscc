@@ -343,6 +343,8 @@ impl Cpu {
                 self.reservation = None;
             }
             sr::EVEC => self.evec = value as u32 & !3,
+            // MMU-SPEC-Q: §6.1 makes ECAUSE RW with GUARD in [8]; MTSR writes
+            // [8:0], so software can set or clear GUARD.
             sr::ECAUSE => {
                 self.ecause = value as u8;
                 self.ecause_guard = value & ECAUSE_GUARD != 0;

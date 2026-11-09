@@ -26,6 +26,7 @@ RTL.
 | `src/emu/flags.rs` | the `Z S C V` register and its saved layouts (GETF, interrupt frame, trace, debugger nibble) |
 | `src/emu/mmio.rs` | UART, interrupt controller / timer, performance counters, `CPU_FEATURES` |
 | `src/emu/system.rs` | MMU stage 1: user mode, exception entry, the system registers, the LR/SC reservation |
+| `src/emu/mmu.rs` | MMU stages 2 and 3: the MPU, the TLB, the address map, and `translate`, which every memory access an instruction makes goes through |
 | `src/emu/debug.rs` | the debugger's view: registers, memory, watchpoints, stop reasons |
 | `src/emu/trace.rs` | the per-instruction trace line |
 | `src/emu/tests.rs` | unit tests, including the flag model |
@@ -203,11 +204,14 @@ with `park_kind` 2, as an old bitstream does for these encodings).
 
 **State.** `UM` (user mode), `SP_ALT` (the inactive stack pointer: the
 user SP in supervisor mode, the kernel SP in user mode), and the system
-registers `MFSR`/`MTSR` reach: 0 `STATUS` (`[0]` UM, `[1]` DI; writes
-ignored), 1 `EVEC` (`[1:0]` read 0), 2 `ECAUSE` (8 bits), 3 `EADDR`, 4
-`USP` (= `SP_ALT`), 5/6 `SCRATCH0/1`, 7 `TP`, 8 `CYCLE` (read-only). Any
-other SR number, and `MTSR` to `CYCLE`, is ILLEGAL. `CPU_FEATURES` at
-`0xF00F_0048` reads `0x9` (stage 1 and LR/SC).
+registers `MFSR`/`MTSR` reach: 0 `STATUS` (`[0]` UM, `[1]` DI, both
+read-only; `[8]` MPU_EN and `[9]` TE from stages 2 and 3), 1 `EVEC`
+(`[1:0]` read 0), 2 `ECAUSE` (the cause in `[7:0]`, GUARD in `[8]`), 3
+`EADDR`, 4 `USP` (= `SP_ALT`), 5/6 `SCRATCH0/1`, 7 `TP`, 8 `CYCLE`
+(read-only), and the stage 2/3 registers 0x10-0x2F and 0x30-0x34 (next
+section). Any other SR number, and `MTSR` to `CYCLE`, is ILLEGAL.
+`CPU_FEATURES` at `0xF00F_0048` reads `0x20FF`: stage 1, the MPU with
+16 regions, the TLB with 32 entries, LR/SC.
 
 **CYCLE** is the emulator's modelled cycle count since reset: 2 cycles
 per retired instruction (`CYCLES_PER_INSTRUCTION`), 2 per exception
@@ -227,9 +231,10 @@ line, not in `PERF_INSTR`). The causes and their `EADDR`:
 | 3 | TRAP | `TRAP` | the instruction | its word 0 |
 | 4 | SYSCALL | `SYSCALL` | **the next instruction** | 0 |
 | 5 / 6 | MISALIGNED_LOAD / _STORE | a misaligned 16/32-bit access (as before); an LR/SC not naturally aligned (64-bit too) | the instruction | the effective address |
-| 7 / 8 | ACCESS_LOAD / _STORE | in user mode, any data or stack access touching `0xF000_0000`+; LR/SC to MMIO in either mode | the instruction | the effective address ¹ |
-| 9 | ACCESS_FETCH | in user mode, an instruction with a word in MMIO | the instruction | that word's address |
+| 7 / 8 | ACCESS_LOAD / _STORE | in user mode, any data or stack access touching `0xF000_0000`+; LR/SC to MMIO in either mode; an MPU denial or an address-map or TLB permission fault (stages 2/3) | the instruction | the effective address ¹ |
+| 9 | ACCESS_FETCH | in user mode, an instruction with a word in MMIO; the same stage 2/3 faults for a fetch | the instruction | that word's address |
 | 10 | MISALIGNED_FETCH | in user mode, a PC with `[1:0]` ≠ 0 | the PC | the PC |
+| 11 / 12 / 13 | TLB_MISS_LOAD / _STORE / _FETCH | stage 3: a useg or kmap access no TLB entry matches | the instruction | the VA ¹ |
 
 ¹ The effective address as computed (base + offset), before any
 alignment: an A=1 64-bit access and a sub-word store report the raw
@@ -244,7 +249,7 @@ first of MISALIGNED_FETCH, ACCESS_FETCH, ILLEGAL, PRIVILEGED,
 TRAP/SYSCALL, MISALIGNED_LOAD/STORE, ACCESS_LOAD/STORE is raised (§4.1):
 a word fetched from MMIO in user mode is ACCESS_FETCH whatever it holds,
 an illegal encoding is ILLEGAL in either mode (legality is checked before
-privilege, so `MTSR CYCLE` and SR numbers above 8 are ILLEGAL in user
+privilege, so `MTSR CYCLE` and SR numbers with no SR are ILLEGAL in user
 mode too), and a misaligned user access to MMIO, or LR/SC, is
 MISALIGNED. In supervisor mode a PC in MMIO is still `PcOutOfRange`.
 
@@ -286,6 +291,119 @@ touch it.
 A run's instruction cap (`--max-instructions`) counts exception entries
 as well as retired instructions, so a handler that faults on its own
 first instruction still ends.
+
+## MMU stages 2 and 3
+
+The emulator implements stage 2 (the MPU) and stage 3 (the TLB) of the
+klaussCPU MMU plan (`MMU_PLAN.md` §10-§11 at klaussCPU 12b3783, branch
+`mmu`; encodings in [ISA_ENCODING_V2.md](ISA_ENCODING_V2.md) §3.17). No
+RTL exists for them yet. Both are off at reset (every program load), so
+nothing changes for code that does not turn them on.
+
+**One translation.** Every memory access an instruction makes (loads,
+stores, stack operations, LR/SC, IRET's pop, and the fetch of every word
+of every instruction) goes through `Cpu::translate` in `src/emu/mmu.rs`,
+before the instruction's first side effect: the memory helpers take only
+an address it produced. It applies, in order, the stage 1 user-mode MMIO
+rule, then with `STATUS.TE` = 0 the MPU (when `MPU_EN` is set), or with
+TE = 1 the address map and the TLB. Two accesses are not checked, as the
+spec says: the frame push of an interrupt or exception entry, and the
+debugger's.
+
+**The MPU** (`STATUS[8]` MPU_EN, with TE = 0). Sixteen regions, each an
+`MPU_BASEn` (`[31:5]` first 32-byte granule, `[4]` GUARD, `[3]` X, `[2]`
+W, `[1]` R, `[0]` EN) and an `MPU_LIMITn` (`[31:5]` the **last** granule,
+inclusive; `[4:0]` read 0). A region covers an address when it is
+enabled and the address's granule is between the two. For each access:
+
+1. any enabled GUARD region covering it denies it, in either mode
+   (ACCESS_*, with `ECAUSE[8]` GUARD set); a GUARD region's R/W/X are
+   ignored;
+2. otherwise supervisor mode is allowed;
+3. otherwise user mode needs an enabled non-GUARD region covering it
+   with the permission (R for loads and pops, W for stores and pushes, X
+   for fetches); regions are a union with no priority, and none is a
+   denial (ACCESS_*, GUARD clear).
+
+The user-mode MMIO rule comes first (a user region over MMIO does not
+open it, and a fault there is not a GUARD denial), and a supervisor GUARD
+region over MMIO denies the device. Every doubleword is checked: both of
+a two-access instruction's, and every word of an instruction, the first
+denied word being `EADDR`. A supervisor push into a guard faults with SP
+unchanged, and the entry then pushes its frame there unchecked; a vector
+that pushes first would fault again one frame lower (the spec's
+guard-safe vector rule is software's to keep).
+
+**The address map** (`STATUS[9]` TE = 1; the MPU is then ignored):
+
+| VA | Who | Translation |
+|---|---|---|
+| `0x0000_0000-0x7FFF_FFFF` (useg) | user and supervisor | TLB |
+| `0x8000_0000-0x87FF_FFFF` (kseg) | supervisor | PA = VA - `0x8000_0000` |
+| `0x8800_0000-0xBFFF_FFFF` | — | ACCESS_* |
+| `0xC000_0000-0xEFFF_FFFF` (kmap) | supervisor | TLB |
+| `0xF000_0000-0xFFFF_FFFF` (MMIO) | supervisor | identity |
+
+Any user access at or above `0x8000_0000` is ACCESS_*. Those faults are
+decided from the VA alone and do not load `TLB_HI`.
+
+**The TLB.** 32 entries, each `{VPN [15:0], ASID, G, PFN [10:0], V, R, W,
+X}` in the `TLB_HI` / `TLB_LO` layout (`TLB_HI`: `[31:16]` VPN, `[8]` G,
+`[7:0]` ASID; `TLB_LO`: `[26:16]` PFN, `[3:0]` X W R V). Pages are 64
+KiB. An entry matches a VA when V is set, its VPN is VA`[31:16]`, and it
+is global or its ASID is the `ASID` SR; if several match, the lowest
+index wins (the spec leaves that to be a kernel bug). The PA is `{PFN,
+VA[15:0]}`. No match is TLB_MISS_LOAD / _STORE / _FETCH (11-13); a match
+without the permission (R, W or X; user and supervisor alike) is
+ACCESS_*. On both, `EADDR` is the VA and `TLB_HI` is loaded with {the
+VPN of `EADDR`, G = 0, `ASID`}. A TLB miss enters `TLBVEC` when it is
+nonzero, else `EVEC`; every other cause enters `EVEC`.
+
+`TLBWI` writes entry `TLB_INDEX[4:0]` from `TLB_HI`/`TLB_LO`, `TLBR`
+reads it back, `TLBP` looks `TLB_HI` up (with its own ASID, G-aware) and
+sets `TLB_INDEX` to the index, or on a miss sets `TLB_INDEX[31]` and
+leaves `[4:0]` alone, and `TLBINV` clears every V. All four are
+privileged; any other field set is ILLEGAL. `TLBWI`, `TLBINV`, `MTSR
+ASID` and `MTSR STATUS` clear the LR/SC reservation (every such `MTSR`,
+even one that rewrites the same value). The spec also has them discard
+the fetch side's virtual copies (the fetch window, the NLB and the
+BTIC); the emulator keeps none, so that has no effect here.
+
+**Priority.** For one access: MISALIGNED > ACCESS (the address map,
+MMIO) > TLB_MISS > ACCESS (TLB permission), within the §4.1 order (an
+LR/SC to MMIO is ACCESS before any translation). A two-access
+instruction translates both doublewords before either access and
+reports the lowest faulting byte: when its first doubleword faults, that
+fault is reported whatever the second's would have been.
+
+**Turning translation on.** `MTSR STATUS` with TE takes effect at the
+next fetch, which is then a virtual address. Boot code running at its
+physical address (in useg) therefore needs a TLB entry for its own page
+before it sets TE, and then jumps to its kseg alias (the unit test
+`tlb_turning_translation_on_and_off` and `tests/fixtures/hw_tlb.kla` do
+this with a global identity entry).
+
+**Double fault.** With TE = 1 an entry's frame push is not translated: it
+writes PA = SP - 8 - `0x8000_0000`, and needs SP - 8 in kseg. When it is
+not, the machine stops with `DoubleFault(kernel SP)` (the board parks
+with `park_kind` 6, or debug-halts with a debugger attached) and nothing
+of the entry happens: no stack swap, no frame, no `ECAUSE`, `EADDR` or
+`TLB_HI`, the PC on the instruction. An interrupt entry stops the same
+way and stays pending. With TE = 0 there is no such check.
+
+**Parking.** With `EVEC` = 0 every cause parks as in stage 1, the new
+ones (TLB misses included, whatever `TLBVEC` holds) as an illegal
+instruction, and a park writes neither `ECAUSE`, `EADDR` nor `TLB_HI`.
+
+**The debugger** (`--gdbserver`). With TE = 1 the debugger's memory
+addresses are virtual: each is translated as a supervisor data access
+would be (kseg, MMIO, the TLB in the current `ASID`), but without the
+entry's R/W/X check, so execute-only text can be read and a read-only
+page patched; an address that does not translate is an error. `monitor
+phys on` makes them physical. Watchpoints and breakpoints compare virtual
+addresses. `monitor mpu` and `monitor tlb` list the regions and entries,
+and `monitor sr` shows the new SRs. The board's server stays physical,
+because its debug module reads physical memory.
 
 ## Differences from the RTL
 
@@ -369,6 +487,11 @@ access reads 0 or is ignored.
   dropped.
 - MMU stage 1 timing: `MTSR` does not serialize (nothing to serialize),
   and `MFSR CYCLE` reads the modelled count, not the board's.
+- MMU stages 2 and 3: the TLB instructions and the MTSRs do not
+  serialize, for the same reason, and there is no fetch window, NLB or
+  BTIC for a TLB change to discard. The TLB's base-register lookup with a
+  MEM replay on a page crossing (MMU_PLAN §11.4) is a timing detail with
+  no architectural effect; the emulator translates the EA.
 
 ### Flag unification: done
 
@@ -400,4 +523,5 @@ i=<n> pc=<8hex> op=<8hex> r0=<16hex> ... r15=<16hex> sp=<8hex> f=<7 bits> [wr=<a
   sub-word store, `addr` is the doubleword address, `be` the byte enables
   within it and `data` the whole doubleword after the write. For a 64-bit
   store, `addr` is the store address, `be` is `ff` and `data` the stored
-  value. For MMIO, `data` is the value written.
+  value. For MMIO, `data` is the value written. With translation on,
+  `addr` is the virtual address.

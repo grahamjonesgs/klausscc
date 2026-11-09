@@ -7,20 +7,26 @@ One binary, `klausscc`, does everything needed to get a program onto the CPU:
 - **Assembler**: `.kla` assembly source to a `.code` listing and a `.kbt`
   board image. The opcode table (ISA encoding v2, with the v3 additions:
   short one-word forms, fused compare-and-branch, `ENTER`/`LEAVE` and the
-  32-bit `W` operations, and MMU stage 1's `SYSCALL`, `MFSR`/`MTSR` and
-  LR/SC) and the standard macros are built in.
+  32-bit `W` operations, MMU stage 1's `SYSCALL`, `MFSR`/`MTSR` and LR/SC,
+  and stage 3's `TLBWI`/`TLBR`/`TLBP`/`TLBINV` with the MPU and TLB system
+  registers) and the standard macros are built in.
 - **Loaders**: send a `.kbt`, an ELF or a flat binary to the board over the
   UART, stream one over TCP to the board's network boot server, or write a
   `$readmemh` boot-ROM image.
 - **Emulator**: a golden-model ISA emulator that runs a program and prints
   its UART output, optionally with a per-instruction trace. It models MMU
-  stage 1 (user mode, precise exceptions, the system registers, LR/SC).
+  stage 1 (user mode, precise exceptions, the system registers, LR/SC),
+  stage 2 (the 16-region MPU) and stage 3 (the 32-entry software-refilled
+  TLB, the kseg/kmap address map, the double fault).
 - **Debugger**: a GDB remote-protocol server for lldb, debugging a program on
   the emulator or on the real board over its USB-JTAG. `monitor exc_pass
   on` lets illegal instructions, TRAP and misaligned accesses reach the
   program's exception handler instead of stopping in the debugger, and
   registers 20/21 are the inactive SP and the mode bits (on the board, only
-  with a version 2 debug module).
+  with a version 2 debug module). On the emulator, `monitor sr`, `monitor
+  mpu` and `monitor tlb` show the MMU state, and while translation is on
+  the debugger's addresses are virtual (`monitor phys on` makes them
+  physical); the board's debugger always uses physical addresses.
 - **Test runner**: checks a program's UART output against the expected values
   in its comments, on the board or on the emulator.
 
