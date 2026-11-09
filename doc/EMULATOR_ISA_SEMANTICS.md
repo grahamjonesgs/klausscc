@@ -357,7 +357,9 @@ VA[15:0]}`. No match is TLB_MISS_LOAD / _STORE / _FETCH (11-13); a match
 without the permission (R, W or X; user and supervisor alike) is
 ACCESS_*. On both, `EADDR` is the VA and `TLB_HI` is loaded with {the
 VPN of `EADDR`, G = 0, `ASID`}. A TLB miss enters `TLBVEC` when it is
-nonzero, else `EVEC`; every other cause enters `EVEC`.
+nonzero, else `EVEC`; every other cause enters `EVEC`. `TLBVEC[1:0]`
+read 0, as `EVEC`'s do. The points the emulator once marked as open
+were all confirmed in klaussCPU `mmu` 424e236 (MMU_PLAN §11.2–§11.3).
 
 `TLBWI` writes entry `TLB_INDEX[4:0]` from `TLB_HI`/`TLB_LO`, `TLBR`
 reads it back, `TLBP` looks `TLB_HI` up (with its own ASID, G-aware) and

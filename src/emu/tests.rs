@@ -3279,7 +3279,7 @@ fn tlb_reset_state_and_srs() {
         (SR_TLB_LO, 0xFFFF_FFFF, 0x07FF_000F),
         (SR_TLB_INDEX, 0xFFFF_FFFF, 0x8000_001F),
         (SR_ASID, 0x1FF, 0xFF),
-        (SR_TLBVEC, 0x8000_0503, 0x8000_0503),
+        (SR_TLBVEC, 0x8000_0503, 0x8000_0500), // [1:0] read 0 (424e236)
     ] {
         assert!(cpu.sr_write(sr, value), "SR {sr:#x}");
         assert_eq!(cpu.sr_read(sr), Some(back), "SR {sr:#x}");
@@ -3421,6 +3421,16 @@ fn tlb_miss_vectors_to_tlbvec_when_set() {
     assert_eq!(cpu.step_one(true), Some(StopReason::InvalidOpcode(LOAD64)));
     assert_eq!((cpu.ecause, cpu.eaddr, cpu.tlb_hi, cpu.pc), (0, 0, 0x1234_0000, U_CODE + CODE_BASE));
     assert_eq!(cpu.parked_exception(), Some((Cause::TlbMissLoad, U_DATA)));
+}
+
+#[test]
+fn tlbvec_low_bits_read_zero() {
+    // MMU_PLAN 424e236: TLBVEC[1:0] read 0, as EVEC's do.
+    let mut cpu = te_cpu(&[HALT], &[HALT], true);
+    assert!(cpu.sr_write(SR_TLBVEC, 0x8000_1003));
+    assert_eq!(cpu.tlbvec, 0x8000_1000);
+    assert!(cpu.sr_write(SR_EVEC, 0x8000_2003));
+    assert_eq!(cpu.evec, 0x8000_2000);
 }
 
 #[test]

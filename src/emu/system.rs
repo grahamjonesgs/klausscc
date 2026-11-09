@@ -247,10 +247,10 @@ impl Cpu {
     /// whatever `TLBVEC` holds, and a park writes neither `ECAUSE`, `EADDR`
     /// nor `TLB_HI`.  A double fault in the entry stops the CPU instead
     /// ([`Cpu::enter`]), with nothing written either.
-    // MMU-SPEC-Q: §4.4 parks on EVEC = 0 for every cause; §11.3 does not say
+    // Spec (confirmed in MMU_PLAN 424e236): §4.4 parks on EVEC = 0 for every cause; §11.3 does not say
     // whether a TLB miss with TLBVEC != 0 and EVEC = 0 parks or enters
     // TLBVEC.  This parks (the literal §4.4 reading).
-    // MMU-SPEC-Q: §11.3 says hardware loads TLB_HI on a TLB fault; whether a
+    // Spec (confirmed in MMU_PLAN 424e236): §11.3 says hardware loads TLB_HI on a TLB fault; whether a
     // park (EVEC = 0) or a double fault loads it is not said.  Neither does
     // here, as neither writes ECAUSE/EADDR.
     pub(super) fn raise_fault(&mut self, fault: XlateFault, word: u32, next: u32) -> bool {
@@ -329,11 +329,10 @@ impl Cpu {
     ///
     /// Writing `STATUS` or `ASID` clears the LR/SC reservation (§11.3: every
     /// TLB, ASID or STATUS change does), whatever the value.
-    // MMU-SPEC-Q: §11.3 lists MTSR ASID and MTSR STATUS among the TLB
+    // Spec (confirmed in MMU_PLAN 424e236): §11.3 lists MTSR ASID and MTSR STATUS among the TLB
     // changes that clear the reservation; it is cleared on every such MTSR,
     // also one that writes the value already there.
-    // MMU-SPEC-Q: TLBVEC's [1:0] are stored as written (§11.3 does not say
-    // they read 0, as §6.1 does for EVEC); supervisor fetch ignores them.
+    // TLBVEC's [1:0] read 0, as EVEC's do (MMU_PLAN 424e236, §11.3).
     pub(super) fn sr_write(&mut self, n: u32, value: u64) -> bool {
         match n {
             // UM and DI are read-only here (IRET / DI / EI change them).
@@ -343,7 +342,7 @@ impl Cpu {
                 self.reservation = None;
             }
             sr::EVEC => self.evec = value as u32 & !3,
-            // MMU-SPEC-Q: §6.1 makes ECAUSE RW with GUARD in [8]; MTSR writes
+            // Spec (confirmed in MMU_PLAN 424e236): §6.1 makes ECAUSE RW with GUARD in [8]; MTSR writes
             // [8:0], so software can set or clear GUARD.
             sr::ECAUSE => {
                 self.ecause = value as u8;
@@ -369,7 +368,7 @@ impl Cpu {
                 self.asid = value as u8;
                 self.reservation = None;
             }
-            sr::TLBVEC => self.tlbvec = value as u32,
+            sr::TLBVEC => self.tlbvec = value as u32 & !3,
             _ => return false,
         }
         true
