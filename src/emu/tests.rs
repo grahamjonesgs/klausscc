@@ -2664,9 +2664,10 @@ fn stage1_lr_sc() {
 }
 
 #[test]
-fn stage1_lr_sc_faults_keep_the_reservation() {
+fn stage1_lr_sc_faults_change_nothing_and_entry_clears_the_reservation() {
     // Misaligned (64-bit too, unlike ordinary 64-bit accesses) and MMIO, in
-    // supervisor mode: nothing stored, rd and the reservation kept.
+    // supervisor mode: nothing stored, rd kept; the exception entry clears
+    // the reservation, so the restarted SC fails (MMU_PLAN §4.2, e4aa44b).
     for (word, addr, cause) in [
         (lr(LR_D, 6, 1), 0x2004, Cause::MisalignedLoad),
         (lr(LR_W, 6, 1), 0x2002, Cause::MisalignedLoad),

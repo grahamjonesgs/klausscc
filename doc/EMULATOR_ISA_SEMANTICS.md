@@ -275,8 +275,12 @@ the LR/SC reservation.
 its low 32 bits) and set rd = 0 when it is valid and on the same
 doubleword (so an `SC32` to the other half of the reserved doubleword
 succeeds), and otherwise store nothing and set rd = 1; either way the
-reservation is cleared. A faulting SC leaves the reservation and rd as
-they were. Ordinary stores, and the debugger's memory writes, do not
+reservation is cleared. A faulting SC stores nothing and leaves rd as it
+was. The fault does not clear the reservation, but the exception entry
+that follows does (as every entry does), so the SC that IRET restarts
+fails and the loop retries from the LR (klaussCPU `mmu` e4aa44b fixed
+MMU_PLAN §4.2 to say this). With EVEC = 0 the core parks and the
+reservation stays as it was. Ordinary stores, and the debugger's memory writes, do not
 touch it.
 
 A run's instruction cap (`--max-instructions`) counts exception entries
