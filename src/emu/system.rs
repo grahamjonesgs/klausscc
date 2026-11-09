@@ -74,11 +74,14 @@ impl Cause {
     }
 }
 
-/// `CPU_FEATURES` (MMIO `0xF00F_0048`, §6.3): bit 0, stage 1 (exceptions,
-/// user mode, SYSCALL, MFSR/MTSR, TP, CYCLE); bit 1, the stage 2 MPU with
-/// `[7:4]` = the region count - 1; bit 2, the stage 3 TLB with `[15:8]` =
-/// its entry count; bit 3, LR/SC.
-pub(super) const CPU_FEATURES_VALUE: u64 = ((TLB_ENTRIES as u64) << 8) | (((MPU_REGIONS - 1) as u64) << 4) | 0b1111;
+/// `CPU_FEATURES` (MMIO `0xF00F_0048`, §6.3) without the MPU: bit 0, stage
+/// 1 (exceptions, user mode, SYSCALL, MFSR/MTSR, TP, CYCLE); bit 2, the
+/// stage 3 TLB with `[15:8]` = its entry count; bit 3, LR/SC.  `0x100D`,
+/// the Nexys A7 bitstream.
+const CPU_FEATURES_NO_MPU: u64 = ((TLB_ENTRIES as u64) << 8) | 0b1101;
+/// The `CPU_FEATURES` bits the stage 2 MPU adds: bit 1, with `[7:4]` = the
+/// region count - 1 (`0x10FF` in all).
+const CPU_FEATURES_MPU: u64 = (((MPU_REGIONS - 1) as u64) << 4) | 0b10;
 
 /// `STATUS[8]` `MPU_EN` (stage 2).
 const STATUS_MPU_EN: u64 = 1 << 8;
@@ -310,7 +313,9 @@ impl Cpu {
             // PERF_CTRL clear rebases; CYCLE is never cleared).  The
             // emulator has no cycle model, so this is not the board's count.
             sr::CYCLE => self.cycles,
-            sr::MPU_BASE0..=sr::MPU_LIMIT15 => {
+            // Without the MPU its SRs do not exist (ILLEGAL, as any other
+            // SR number with nothing behind it).
+            sr::MPU_BASE0..=sr::MPU_LIMIT15 if self.has_mpu => {
                 let region = self.mpu[((n - sr::MPU_BASE0) / 2) as usize];
                 // MPU_LIMITn [4:0] read 0 (§10.1); it is stored that way.
                 u64::from(if n.is_multiple_of(2) { region.base } else { region.limit })
@@ -336,8 +341,9 @@ impl Cpu {
     pub(super) fn sr_write(&mut self, n: u32, value: u64) -> bool {
         match n {
             // UM and DI are read-only here (IRET / DI / EI change them).
+            // Without the MPU, MPU_EN is not there: it ignores the write.
             sr::STATUS => {
-                self.mpu_en = value & STATUS_MPU_EN != 0;
+                self.mpu_en = self.has_mpu && value & STATUS_MPU_EN != 0;
                 self.te = value & STATUS_TE != 0;
                 self.reservation = None;
             }
@@ -353,7 +359,7 @@ impl Cpu {
             sr::SCRATCH0 => self.scratch[0] = value,
             sr::SCRATCH1 => self.scratch[1] = value,
             sr::TP => self.tp = value,
-            sr::MPU_BASE0..=sr::MPU_LIMIT15 => {
+            sr::MPU_BASE0..=sr::MPU_LIMIT15 if self.has_mpu => {
                 let region = &mut self.mpu[((n - sr::MPU_BASE0) / 2) as usize];
                 if n.is_multiple_of(2) {
                     region.base = value as u32;
@@ -404,6 +410,32 @@ impl Cpu {
         self.sp_alt = sp_alt;
         self.um = um;
         self.irq_disabled = irq_disabled;
+    }
+
+    /// Give the CPU the stage 2 MPU (`--mpu`), or take it away (the
+    /// default, as the Nexys A7 bitstream has none).  Without it
+    /// `CPU_FEATURES` reads `0x100D` (bit 1 and `[7:4]` clear), the
+    /// `MPU_BASEn`/`MPU_LIMITn` SRs (0x10-0x2F) are ILLEGAL and `STATUS[8]`
+    /// `MPU_EN` reads 0 and ignores writes, so nothing is ever checked.
+    /// Set before running; taking the MPU away also clears `MPU_EN`.
+    pub const fn set_has_mpu(&mut self, present: bool) {
+        self.has_mpu = present;
+        self.mpu_en &= present;
+    }
+
+    /// Whether this CPU has the stage 2 MPU ([`Cpu::set_has_mpu`]).
+    #[must_use]
+    pub const fn has_mpu(&self) -> bool {
+        self.has_mpu
+    }
+
+    /// `CPU_FEATURES` (MMIO `0xF00F_0048`): `0x100D`, or `0x10FF` with the MPU.
+    pub(super) const fn cpu_features(&self) -> u64 {
+        if self.has_mpu {
+            CPU_FEATURES_NO_MPU | CPU_FEATURES_MPU
+        } else {
+            CPU_FEATURES_NO_MPU
+        }
     }
 
     /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`

@@ -36,7 +36,7 @@ fn image_from_words(words: &[u32]) -> Vec<u8> {
 /// The trace of running `image` (at most 100 instructions).
 fn trace_of(image: &[u8]) -> String {
     let mut buf = Vec::new();
-    let _ = emulate_image(image, CODE_BASE, 100, Some(&mut buf));
+    let _ = emulate_image(image, CODE_BASE, 100, false, Some(&mut buf));
     String::from_utf8(buf).expect("the trace is ASCII")
 }
 
@@ -80,7 +80,7 @@ fn test_mmio_uart_tx_drops_a_store_while_busy() {
         HALT,
     ];
     let img = image_from_words(&words);
-    let r = emulate_image(&img, CODE_BASE, 100, None);
+    let r = emulate_image(&img, CODE_BASE, 100, false, None);
     assert_eq!(r.uart, b"H");
     assert_eq!(
         r.tx_busy_writes,
@@ -1071,7 +1071,7 @@ impl std::io::Write for BrokenPipe {
 fn test_trace_stops_at_the_first_write_error_and_the_run_goes_on() {
     let img = image_from_words(&[setr(0, 1)[0], 1, setr(1, 2)[0], 2, HALT]);
     let mut sink = BrokenPipe::default();
-    let r = emulate_image(&img, CODE_BASE, 100, Some(&mut sink));
+    let r = emulate_image(&img, CODE_BASE, 100, false, Some(&mut sink));
     assert_eq!(sink.writes, 1, "nothing is written after the first error");
     assert_eq!((r.instructions, r.stop), (3, StopReason::Halt));
 }
@@ -1080,7 +1080,7 @@ fn test_trace_stops_at_the_first_write_error_and_the_run_goes_on() {
 fn test_stale_v1_binary_traps() {
     // Any v1 word has bits [31:30] = 00 (LEN=00) -> ERR_INV_OPCODE on the first fetch.
     let img = image_from_words(&[0x0000_0800, 0xFF, 0x0000_F011]);
-    let r = emulate_image(&img, CODE_BASE, 100, None);
+    let r = emulate_image(&img, CODE_BASE, 100, false, None);
     assert!(matches!(r.stop, StopReason::InvalidOpcode(0x0000_0800)));
 }
 
@@ -1713,7 +1713,7 @@ fn an_illegal_word_does_not_retire() {
     // SETR A 1 ; <reserved: ADDR with F = 0>
     let img = image_from_words(&[0x8BD0_0000, 1, 0x4400_0000, HALT]);
     let mut buf = Vec::new();
-    let r = emulate_image(&img, CODE_BASE, 100, Some(&mut buf));
+    let r = emulate_image(&img, CODE_BASE, 100, false, Some(&mut buf));
     assert_eq!(r.stop, StopReason::InvalidOpcode(0x4400_0000));
     assert_eq!(r.instructions, 1, "only the SETR retired");
     assert_eq!(String::from_utf8(buf).expect("ASCII").lines().count(), 1);
@@ -1721,7 +1721,7 @@ fn an_illegal_word_does_not_retire() {
     let _ = cpu.run(100, None);
     assert_eq!(cpu.instret, 1);
     // HALT does retire (and is traced).
-    let r = emulate_image(&image_from_words(&[HALT]), CODE_BASE, 100, None);
+    let r = emulate_image(&image_from_words(&[HALT]), CODE_BASE, 100, false, None);
     assert_eq!((r.stop, r.instructions), (StopReason::Halt, 1));
 }
 
@@ -1995,7 +1995,7 @@ fn misaligned_subword_accesses_stop() {
         let words = [&setr(1, 0x1001)[..], &setr(2, 0x1002), &setr(3, 2), access, &[HALT]].concat();
         let img = image_from_words(&words);
         let mut buf = Vec::new();
-        let r = emulate_image(&img, CODE_BASE, 100, Some(&mut buf));
+        let r = emulate_image(&img, CODE_BASE, 100, false, Some(&mut buf));
         let misaligned = match access[0] >> 24 & 3 {
             1 => ea & 1 != 0,
             _ => ea & 3 != 0,
@@ -2134,12 +2134,20 @@ fn stage1_reset_state_and_cpu_features() {
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     let s = cpu.system_regs();
     assert_eq!(s, SystemRegs::default(), "supervisor, EVEC 0, no reservation at reset");
+    // By default, as on the Nexys A7, there is no MPU.
+    assert!(!cpu.has_mpu());
+    assert_eq!(
+        cpu.mmio_read(0xF00F_0048),
+        0x100D,
+        "CPU_FEATURES: stages 1 and 3 and LR/SC, 16 entries, no MPU"
+    );
+    assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
+    cpu.set_has_mpu(true);
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
         0x10FF,
-        "CPU_FEATURES: stages 1-3 and LR/SC, 16 regions, 16 entries"
+        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 16 entries"
     );
-    assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
 }
 
 #[test]
@@ -2280,10 +2288,13 @@ fn stage1_user_mode_sr_allow_list() {
         0x34,
     ] {
         for word in [mfsr(3, sr), mtsr(sr, 1)] {
+            // With the MPU, so that its SRs (0x10-0x2F) exist.
             let mut cpu = stage1_cpu(&[word], &[HALT], true);
+            cpu.set_has_mpu(true);
             assert_eq!(cpu.step_one(true), None);
             assert_entered(&cpu, Cause::Privileged, word, CODE_BASE, true);
             let mut cpu = stage1_cpu(&[word], &[HALT], false);
+            cpu.set_has_mpu(true);
             assert_eq!(cpu.step_one(true), None);
             assert_eq!(cpu.pc, CODE_BASE + 4, "{word:08x} in supervisor mode");
         }
@@ -2612,7 +2623,7 @@ fn stage1_faulting_instruction_retires_no_trace_line() {
     let trace = trace_of(&img);
     let ops: Vec<&str> = trace.lines().map(|l| l.split(' ').nth(2).unwrap()).collect();
     assert_eq!(ops, ["op=8bd00100", "op=6c601010", "op=6c010000"], "no line for the SYSCALL");
-    let r = emulate_image(&img, CODE_BASE, 100, None);
+    let r = emulate_image(&img, CODE_BASE, 100, false, None);
     assert_eq!((r.stop, r.instructions), (StopReason::Halt, 3));
 }
 
@@ -2885,11 +2896,12 @@ fn mpu_region(cpu: &mut Cpu, n: u32, first: u32, last: u32, flags: u32) {
     assert!(cpu.sr_write(SR_MPU_BASE0 + 2 * n + 1, u64::from(last)));
 }
 
-/// A [`stage1_cpu`] with the MPU on, region 15 letting user mode run the
+/// A [`stage1_cpu`] with the MPU (`--mpu`) and it on, region 15 letting user mode run the
 /// code (`0x000-0x3FF`, X) and region 14 use the top 256 bytes of the user
 /// stack (R/W).  Supervisor mode is default-allow.
 fn mpu_cpu(code: &[u32], handler: &[u32], user: bool) -> Cpu {
     let mut cpu = stage1_cpu(code, handler, user);
+    cpu.set_has_mpu(true);
     mpu_region(&mut cpu, 15, 0, 0x3FF, MPU_X);
     mpu_region(&mut cpu, 14, USER_SP - 0x100, USER_SP - 1, MPU_R | MPU_W);
     assert!(cpu.sr_write(SR_STATUS, STATUS_MPU_EN));
@@ -2916,6 +2928,7 @@ fn assert_mpu_fault(cpu: &Cpu, cause: Cause, eaddr: u32, frame_pc: u32, user: bo
 #[test]
 fn mpu_sr_layout_and_status_bits() {
     let mut cpu = stage1_cpu(&[HALT], &[HALT], false);
+    cpu.set_has_mpu(true);
     // A base keeps all 32 bits; a limit's [4:0] read 0.
     assert!(cpu.sr_write(0x10, 0x1_2345_67FF));
     assert!(cpu.sr_write(0x11, 0xFFFF_FFFF));
@@ -2938,6 +2951,57 @@ fn mpu_sr_layout_and_status_bits() {
     // Reset (every program load): every region off, MPU_EN and TE clear.
     let cpu = cpu_with(&image_from_words(&[HALT]));
     assert!(cpu.mpu_regions().iter().all(|r| *r == MpuRegion::default()));
+    assert_eq!(cpu.sr_read(SR_STATUS), Some(0));
+}
+
+#[test]
+fn no_mpu_by_default_its_srs_are_illegal() {
+    // Without the MPU (the default, as on the Nexys A7), MFSR/MTSR of
+    // MPU_BASE0 (0x10) and MPU_LIMIT15 (0x2F) are ILLEGAL in either mode,
+    // exactly as an SR number with nothing behind it (0x0F, 0x35).
+    for sr in [0x0F, 0x10, 0x2F, 0x35] {
+        for word in [mfsr(3, sr), mtsr(sr, 1)] {
+            for user in [false, true] {
+                let mut cpu = stage1_cpu(&[word], &[HALT], user);
+                cpu.regs[1] = 0x2011;
+                assert_eq!(cpu.step_one(true), None, "{word:08x}");
+                assert_entered(&cpu, Cause::Illegal, word, CODE_BASE, user);
+                assert_eq!(cpu.regs[3], 0, "{word:08x}: nothing read");
+                assert_eq!(cpu.mpu_regions()[0], MpuRegion::default(), "{word:08x}: nothing written");
+            }
+        }
+    }
+    let mut cpu = stage1_cpu(&[HALT], &[HALT], false);
+    assert_eq!((cpu.sr_read(0x10), cpu.sr_read(0x2F)), (None, None));
+    assert!(!cpu.sr_write(0x10, 0x2011) && !cpu.sr_write(0x2F, 0x3F));
+    // With the MPU they are there.
+    cpu.set_has_mpu(true);
+    assert!(cpu.sr_write(0x10, 0x2011) && cpu.sr_write(0x2F, 0x3F));
+    assert_eq!((cpu.sr_read(0x10), cpu.sr_read(0x2F)), (Some(0x2011), Some(0x20)));
+}
+
+#[test]
+fn no_mpu_by_default_status_mpu_en_ignores_writes() {
+    // MTSR STATUS with MPU_EN (and TE): TE is taken, MPU_EN reads 0.
+    let mut cpu = stage1_cpu(&[mtsr(SR_STATUS, 1), mfsr(3, SR_STATUS), HALT], &[HALT], false);
+    cpu.regs[1] = STATUS_MPU_EN | STATUS_TE;
+    assert_eq!(cpu.step_one(true), None);
+    assert!(!cpu.mpu_en && cpu.te);
+    assert!(!cpu.system_regs().mpu_en);
+    assert!(cpu.sr_write(SR_STATUS, STATUS_MPU_EN));
+    assert_eq!(cpu.sr_read(SR_STATUS), Some(0));
+    // So the MPU never checks anything: a supervisor fetch from MMIO is not
+    // the MPU_EN fake fill (ILLEGAL), but outside RAM as with MPU_EN clear.
+    let mut cpu = stage1_cpu(&[NOP], &[HALT], false);
+    assert!(cpu.sr_write(SR_STATUS, STATUS_MPU_EN));
+    cpu.pc = 0xF000_0000;
+    assert_eq!(cpu.step_one(true), Some(StopReason::PcOutOfRange(0xF000_0000)));
+    assert_eq!(cpu.ecause, 0, "no exception entered");
+    // Taking the MPU away clears MPU_EN.
+    let mut cpu = mpu_cpu(&[HALT], &[HALT], false);
+    assert!(cpu.mpu_en);
+    cpu.set_has_mpu(false);
+    assert!(!cpu.mpu_en);
     assert_eq!(cpu.sr_read(SR_STATUS), Some(0));
 }
 
@@ -3136,6 +3200,7 @@ fn mpu_off_checks_nothing() {
     }
     // With TE = 1 the MPU is ignored too (the kseg alias of a guard).
     let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
+    cpu.set_has_mpu(true);
     mpu_region(&mut cpu, 0, 0x2000, 0x2000, MPU_GUARD);
     cpu.mpu_en = true;
     cpu.regs[1] = 0x8000_2000;
@@ -3318,7 +3383,7 @@ fn tlb_kseg_is_direct_and_the_hole_faults() {
     // MMIO is identity in supervisor mode.
     let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
     step_with_b(&mut cpu, 0xF00F_0048);
-    assert_eq!(cpu.regs[3], 0x10FF, "CPU_FEATURES");
+    assert_eq!(cpu.regs[3], 0x100D, "CPU_FEATURES (no MPU)");
 }
 
 #[test]
@@ -3603,6 +3668,7 @@ fn tlb_changes_clear_the_reservation() {
         (mtsr(SR_MPU_BASE0, 0), false),
     ] {
         let mut cpu = stage1_cpu(&[word, HALT], &[HALT], false);
+        cpu.set_has_mpu(true);
         cpu.reservation = Some(0x400);
         assert_eq!(cpu.step_one(true), None, "{word:08x}");
         assert_eq!(cpu.reservation.is_none(), clears, "{word:08x}");

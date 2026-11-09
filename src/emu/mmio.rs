@@ -1,7 +1,6 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
 //! the performance counters.
 
-use super::system::CPU_FEATURES_VALUE;
 use super::{CYCLES_PER_MS, Cpu, PerfBase};
 
 /// Interrupt controller / timer device select (`addr[27:16]`).
@@ -247,7 +246,7 @@ impl Cpu {
             TIMER_PERIOD => u64::from(self.timer_period),
             TIMER_COUNT => u64::from(self.timer_count),
             MS_CLOCK => self.cycles / CYCLES_PER_MS,
-            CPU_FEATURES => CPU_FEATURES_VALUE,
+            CPU_FEATURES => self.cpu_features(),
             _ => 0,
         }
     }

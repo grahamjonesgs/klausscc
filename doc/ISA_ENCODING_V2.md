@@ -798,8 +798,9 @@ From klaussCPU's `MMU_PLAN.md` §10–§11 and its `ISA_ENCODING_V2_MAP.md`
 §10. Stage 2 is the MPU, stage 3 the TLB; how the emulator runs them is in
 [EMULATOR_ISA_SEMANTICS.md](EMULATOR_ISA_SEMANTICS.md#mmu-stages-2-and-3).
 Probe `CPU_FEATURES` first: bit 1 (MPU, `[7:4]` = 15, 16 regions) and bit
-2 (TLB, `[15:8]` = 32 entries). On an earlier bitstream the new SR numbers
-and the TLB instructions are illegal. The mnemonics are klausscpu-llvm's
+2 (TLB, `[15:8]` = 16 entries). On an earlier bitstream the new SR numbers
+and the TLB instructions are illegal, and on one without the MPU (the
+Nexys A7's, `0x100D`; the emulator without `--mpu`) SRs 0x10-0x2F are. The mnemonics are klausscpu-llvm's
 (`mmu` 9596187c378a): `tlbwi`, `tlbr`, `tlbp`, `tlbinv` there, upper case
 by the `.kla` convention here (any case is accepted).
 

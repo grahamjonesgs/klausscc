@@ -162,8 +162,8 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         }
         Mode::Gdb {
             input, port, board: false, ..
-        } => run_gdbserver(cli.binary_input(input), port, msg_list),
-        Mode::EmulateBinary { input, trace } => run_emulate_elf(cli.binary_input(input), trace, cli.max_instructions, msg_list),
+        } => run_gdbserver(cli.binary_input(input), port, cli.mpu, msg_list),
+        Mode::EmulateBinary { input, trace } => run_emulate_elf(cli.binary_input(input), trace, cli.max_instructions, cli.mpu, msg_list),
         Mode::SendBinary { input, ref kbt } => run_elf2serial(cli.binary_input(input), kbt, serial, send, msg_list),
         // .kbt input: already in board wire format — send and/or monitor verbatim.
         Mode::SendKbt(input) => run_kbt_send(Path::new(input), serial, send, msg_list),
@@ -187,7 +187,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // Emulator batch-verify mode: assemble + emulate each .kla and check UART.
         Mode::EmulateTest(path) => {
             let (isa, macro_list) = opcode_tables(msg_list);
-            run_emulate_test(&isa, &macro_list, Path::new(path), cli.max_instructions, msg_list)
+            run_emulate_test(&isa, &macro_list, Path::new(path), cli.max_instructions, cli.mpu, msg_list)
         }
         // Batch test list mode.
         Mode::TestList { list, port } => {
@@ -199,7 +199,7 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // and run the golden-model.
         Mode::Emulate { input, trace } => {
             let assembly = assemble(input, msg_list)?;
-            run_emulate(&assembly, input, trace, cli.max_instructions, msg_list)
+            run_emulate(&assembly, input, trace, cli.max_instructions, cli.mpu, msg_list)
         }
         Mode::Assemble { input, ref code, ref kbt } => run_assemble(cli, input, code, kbt, serial, send, msg_list),
     }

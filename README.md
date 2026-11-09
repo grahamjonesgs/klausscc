@@ -16,8 +16,10 @@ One binary, `klausscc`, does everything needed to get a program onto the CPU:
 - **Emulator**: a golden-model ISA emulator that runs a program and prints
   its UART output, optionally with a per-instruction trace. It models MMU
   stage 1 (user mode, precise exceptions, the system registers, LR/SC),
-  stage 2 (the 16-region MPU) and stage 3 (the 32-entry software-refilled
-  TLB, the kseg/kmap address map, the double fault).
+  stage 3 (the 16-entry software-refilled TLB, the kseg/kmap address map,
+  the double fault) and, with `--mpu`, stage 2 (the 16-region MPU). By
+  default it has no MPU, as the Nexys A7 bitstream has none:
+  `CPU_FEATURES` reads `0x100D` (`0x10FF` with `--mpu`).
 - **Debugger**: a GDB remote-protocol server for lldb, debugging a program on
   the emulator or on the real board over its USB-JTAG. `monitor exc_pass
   on` lets illegal instructions, TRAP and misaligned accesses reach the
@@ -83,6 +85,7 @@ klausscc --mem-out prog.elf [--mem-file boot.mem]
 # Run on the emulator, optionally tracing every instruction
 klausscc -i prog.kla --emulate
 klausscc -i prog.elf --emulate --trace trace.txt --max-instructions 1000000
+klausscc -i prog.elf --emulate --mpu    # with the MMU stage 2 MPU (the Nexys A7 has none)
 
 # Debug with lldb (gdb-remote 127.0.0.1:3333) on the emulator, or on the
 # board over JTAG (needs the board feature)

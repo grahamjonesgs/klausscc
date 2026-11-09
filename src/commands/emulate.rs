@@ -64,13 +64,15 @@ fn finish_trace_writer(mut writer: Option<Box<dyn std::io::Write>>, trace_file: 
 /// per-instruction trace to `trace_file` (or, for `"-"`, stdout), prints the
 /// summary, then the instruction count, the stop reason, any `TX_DATA` store
 /// made while the transmitter was busy, and the captured UART output on stdout.
+/// `mpu` gives the emulated CPU the stage 2 MPU (`--mpu`).
 #[cfg(not(tarpaulin_include))]
-fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions: u64, msg_list: &mut Diagnostics) -> Result<(), Error> {
+fn emulate_and_report(image: &Image, trace_file: Option<&str>, max_instructions: u64, mpu: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let mut trace_writer = open_trace_writer(trace_file, msg_list)?;
     let result = emu::emulate_image(
         &image.to_ddr(),
         image.entry,
         max_instructions,
+        mpu,
         trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
     );
     finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
@@ -108,6 +110,7 @@ pub(crate) fn run_emulate(
     input_file_name: &str,
     trace_file: Option<&str>,
     max_instructions: u64,
+    mpu: bool,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     if msg_list.has_errors() {
@@ -123,7 +126,7 @@ pub(crate) fn run_emulate(
         image.bytes.len(),
         image.entry
     ));
-    emulate_and_report(&image, trace_file, max_instructions, msg_list)
+    emulate_and_report(&image, trace_file, max_instructions, mpu, msg_list)
 }
 
 /// Run the emulator on an ELF or flat binary input (`--emulate` with binary input).
@@ -136,6 +139,7 @@ pub(crate) fn run_emulate_elf(
     input: BinaryInput<'_>,
     trace_file: Option<&str>,
     max_instructions: u64,
+    mpu: bool,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     let binary_path = input.path;
@@ -151,20 +155,22 @@ pub(crate) fn run_emulate_elf(
         msg_list.info(format!("Emulating flat binary {binary_path}"));
     }
 
-    emulate_and_report(&image, trace_file, max_instructions, msg_list)
+    emulate_and_report(&image, trace_file, max_instructions, mpu, msg_list)
 }
 
 /// Batch-verify the emulator against `.kla` files with expected `// ` UART values.
 ///
 /// `test_path` may be a single `.kla` file, a directory (all `*.kla` inside),
 /// or a test-list file (one path per line).  For each file with expected
-/// values, assemble + emulate and compare captured UART tokens in order.
+/// values, assemble + emulate and compare captured UART tokens in order,
+/// with the stage 2 MPU if `mpu` (`--mpu`).
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_emulate_test(
     isa: &Isa,
     macro_list: &[macros::Macro],
     test_path: &Path,
     max_instructions: u64,
+    mpu: bool,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     // Resolve the list of .kla files to test.
@@ -198,7 +204,7 @@ pub(crate) fn run_emulate_test(
     let mut failed_files: Vec<String> = Vec::new();
 
     for file in &files {
-        match verify_emulated(file, isa, macro_list, max_instructions) {
+        match verify_emulated(file, isa, macro_list, max_instructions, mpu) {
             Ok(Verdict::NotValidatable) => {} // skip non-validatable files silently
             Ok(Verdict::Pass { matched, instructions }) => {
                 total_files += 1;
@@ -271,9 +277,10 @@ pub(crate) enum Verdict {
 /// expected values in its `// ` comments.
 ///
 /// Each UART line contributes its leading 8 upper-case hex digits (mirroring the
-/// serial test runner), and the values are compared in order.  Returns `Err`
-/// with a short reason when the file cannot be read or does not assemble.
-pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro], max_instructions: u64) -> Result<Verdict, String> {
+/// serial test runner), and the values are compared in order.  The CPU has
+/// the stage 2 MPU if `mpu` (`--mpu`).  Returns `Err` with a short reason
+/// when the file cannot be read or does not assemble.
+pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro], max_instructions: u64, mpu: bool) -> Result<Verdict, String> {
     // A file that cannot be read is a failure, not a silently skipped file.
     let source = fs::read_to_string(file).map_err(|e| format!("cannot read: {e}"))?;
     let raw_lines: Vec<String> = source.lines().map(String::from).collect();
@@ -288,7 +295,7 @@ pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro
         return Err("assembly error".to_owned());
     };
 
-    let result = emu::emulate_image(&image.to_ddr(), image.entry, max_instructions, None);
+    let result = emu::emulate_image(&image.to_ddr(), image.entry, max_instructions, mpu, None);
     // Each byte as one `char` (Latin-1): every byte survives into the lines.
     let uart: String = result.uart.iter().copied().map(char::from).collect();
     let got: Vec<&str> = uart.lines().filter_map(hex_token).collect();
@@ -352,9 +359,14 @@ mod tests {
     }
 
     /// The corpus `--emulate-test tests/fixtures` runs: every file with expected
-    /// UART values must assemble and print exactly those values on the emulator.
+    /// UART values must assemble and print exactly those values on the emulator,
+    /// both with the stage 2 MPU (`--mpu`) and without it (the default, the
+    /// Nexys A7), except that `hw_mpu.kla` needs the MPU: without it the
+    /// program reads `CPU_FEATURES` bit 1 clear, prints 0 and stops.
     #[test]
     fn emulator_corpus_passes() {
+        /// The fixtures that only pass with `--mpu`.
+        const NEEDS_MPU: [&str; 1] = ["hw_mpu.kla"];
         let (isa, macro_list) = v2_tables();
         let mut files: Vec<PathBuf> = fs::read_dir(fixture_dir())
             .expect("read fixture dir")
@@ -364,20 +376,40 @@ mod tests {
             .collect();
         files.sort();
 
-        let mut passed: Vec<String> = Vec::new();
-        let mut failures: Vec<String> = Vec::new();
-        for path in &files {
-            let file = path.to_string_lossy();
-            match verify_emulated(&file, &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS) {
-                Ok(Verdict::NotValidatable) => {}
-                Ok(Verdict::Pass { .. }) => passed.push(file.into_owned()),
-                other => failures.push(format!("{file}: {other:?}")),
+        for mpu in [true, false] {
+            let mut passed: Vec<String> = Vec::new();
+            let mut failures: Vec<String> = Vec::new();
+            for path in &files {
+                let file = path.to_string_lossy();
+                let verdict = verify_emulated(&file, &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, mpu);
+                if !mpu && NEEDS_MPU.iter().any(|name| file.ends_with(name)) {
+                    // a1, CPU_FEATURES bit 1 and [7:4], reads 0.
+                    let no_mpu = Verdict::Fail {
+                        matched: 0,
+                        expected: 17,
+                        diff: "at #1: expected 000000F2, got 00000000".to_owned(),
+                    };
+                    if verdict != Ok(no_mpu) {
+                        failures.push(format!("{file} without the MPU: {verdict:?}"));
+                    }
+                    continue;
+                }
+                match verdict {
+                    Ok(Verdict::NotValidatable) => {}
+                    Ok(Verdict::Pass { .. }) => passed.push(file.into_owned()),
+                    other => failures.push(format!("{file}: {other:?}")),
+                }
             }
+            assert!(failures.is_empty(), "emulator corpus failures (mpu {mpu}): {failures:#?}");
+            // Guards against the corpus silently shrinking (e.g. a file that stops
+            // declaring its expected values).
+            let want = if mpu { 31 } else { 30 };
+            assert!(
+                passed.len() >= want,
+                "only {} validated files passed (mpu {mpu}): {passed:#?}",
+                passed.len()
+            );
         }
-        assert!(failures.is_empty(), "emulator corpus failures: {failures:#?}");
-        // Guards against the corpus silently shrinking (e.g. a file that stops
-        // declaring its expected values).
-        assert!(passed.len() >= 31, "only {} validated files passed: {passed:#?}", passed.len());
     }
 
     /// `all_tests.txt` is what a board run (`-L`) checks, so it must list every
@@ -433,7 +465,7 @@ mod tests {
         fs::write(&file, source).expect("write fixture");
 
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false);
         assert_eq!(
             verdict,
             Ok(Verdict::Fail {
@@ -460,7 +492,7 @@ mod tests {
         fs::write(&file, source).expect("write test_regs");
 
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false);
         assert!(matches!(verdict, Ok(Verdict::Pass { matched: 6, .. })), "{verdict:?}");
     }
 
@@ -480,7 +512,7 @@ mod tests {
         fs::copy(fixture_dir().join("test_regs.kla"), &file).expect("copy test_regs");
 
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false);
         let Ok(Verdict::Fail { expected: 6, diff, .. }) = &verdict else {
             panic!("{verdict:?}");
         };
@@ -512,7 +544,7 @@ mod tests {
         let file = dir.path().join("plain.kla");
         fs::write(&file, "// no expected values here\nHALT\n").expect("write fixture");
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false);
         assert_eq!(verdict, Ok(Verdict::NotValidatable));
     }
 
@@ -521,7 +553,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("missing.kla");
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false);
         assert!(matches!(&verdict, Err(reason) if reason.starts_with("cannot read: ")), "{verdict:?}");
     }
 
@@ -531,7 +563,7 @@ mod tests {
         let file = dir.path().join("bad.kla");
         fs::write(&file, "//   00000001  (never printed)\nNOTANOPCODE A\nHALT\n").expect("write fixture");
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false);
         assert_eq!(verdict, Err("assembly error".to_owned()));
     }
 }

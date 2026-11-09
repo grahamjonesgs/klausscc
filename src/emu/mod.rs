@@ -239,6 +239,10 @@ pub struct Cpu {
     /// The exception the CPU last stopped on instead of entering a handler.
     parked: Option<(Cause, u32)>,
     // ---- MMU stages 2 and 3 (`mmu`) ----
+    /// This CPU has the stage 2 MPU ([`Cpu::set_has_mpu`]).  The Nexys A7
+    /// bitstream does not, so by default neither does the emulator: its SRs
+    /// are ILLEGAL, `STATUS.MPU_EN` reads 0 and `CPU_FEATURES` says so.
+    has_mpu: bool,
     /// The MPU regions (`MPU_BASEn`, `MPU_LIMITn`).
     mpu: [MpuRegion; MPU_REGIONS],
     /// `STATUS.MPU_EN`.
@@ -320,6 +324,7 @@ impl Cpu {
             exc_pass: false,
             exc_entries: 0,
             parked: None,
+            has_mpu: false,
             mpu: [MpuRegion::default(); MPU_REGIONS],
             mpu_en: false,
             te: false,
@@ -567,8 +572,11 @@ impl Cpu {
 /// Nothing is buffered: each retired instruction's line is written straight to
 /// the sink, so a multi-million instruction run uses no extra memory
 /// regardless of trace length.
+///
+/// `mpu` gives the CPU the stage 2 MPU ([`Cpu::set_has_mpu`], `--mpu`).
 #[must_use]
-pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
+pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, mpu: bool, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
+    cpu.set_has_mpu(mpu);
     cpu.run(max_instructions, trace)
 }

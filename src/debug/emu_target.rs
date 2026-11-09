@@ -35,7 +35,8 @@
 //! stops there).  `monitor sr` shows the system registers.
 //!
 //! MMU stages 2 and 3 (`MMU_PLAN.md` §10-§11): `monitor mpu` shows the MPU
-//! regions and `monitor tlb` the TLB.  While translation is on
+//! regions (on a CPU with the MPU, `--mpu`; the Nexys A7 has none) and
+//! `monitor tlb` the TLB.  While translation is on
 //! (`STATUS.TE` = 1) the debugger's memory addresses are virtual, as the
 //! program's are: each is translated as a supervisor data access would be
 //! (kseg direct, MMIO identity, useg and kmap through the TLB in the
@@ -273,12 +274,17 @@ impl EmuTarget {
             }
             "sr" => {
                 let s = self.cpu.system_regs();
+                // MPU_EN only on a CPU with the MPU (--mpu).
+                let mpu_en = if self.cpu.has_mpu() {
+                    format!("   MPU_EN {}", u8::from(s.mpu_en))
+                } else {
+                    String::new()
+                };
                 outputln!(
                     out,
-                    "mode {}   DI {}   MPU_EN {}   TE {}   SP_ALT 0x{:08X}",
+                    "mode {}   DI {}{mpu_en}   TE {}   SP_ALT 0x{:08X}",
                     if s.um { "user" } else { "supervisor" },
                     u8::from(s.irq_disabled),
-                    u8::from(s.mpu_en),
                     u8::from(s.te),
                     s.sp_alt
                 );
@@ -309,6 +315,9 @@ impl EmuTarget {
                 if let Some((cause, addr)) = self.cpu.parked_exception() {
                     outputln!(out, "last stop on an exception: {cause:?} (ECAUSE {}) at 0x{addr:08X}", cause as u8);
                 }
+            }
+            "mpu" if !self.cpu.has_mpu() => {
+                outputln!(out, "no MPU (as on the Nexys A7; klausscc --mpu gives the emulator one)");
             }
             "mpu" => {
                 let s = self.cpu.system_regs();
@@ -403,7 +412,7 @@ impl EmuTarget {
                 outputln!(out, "  mmio on|off       allow debugger reads/writes of 0xF000_0000+ (default off)");
                 outputln!(out, "  irq               interrupt controller and timer state");
                 outputln!(out, "  sr                MMU system registers and mode");
-                outputln!(out, "  mpu               MPU regions (stage 2)");
+                outputln!(out, "  mpu               MPU regions (stage 2, with --mpu)");
                 outputln!(out, "  tlb               TLB entries (stage 3)");
                 outputln!(
                     out,
@@ -732,6 +741,7 @@ mod tests {
         // MTSR TLB_LO B; TLBWI; MTSR STATUS C (MPU_EN and TE).
         let code: [u32; 7] = [0x6C61_0030, 0x6C61_1040, 0x6C60_2050, 0x6C63_0000, 0x6C63_1010, 0x6C09_0000, 0x6C60_0020];
         let mut target = target_with(code[0]);
+        target.cpu.set_has_mpu(true);
         let bytes: Vec<u8> = code.iter().flat_map(|w| w.to_le_bytes()).collect();
         assert!(target.cpu.debug_write(0x20, &bytes));
         assert!(target.cpu.debug_write(0x3_0010, &0x1122_3344_u32.to_le_bytes()));
@@ -786,6 +796,21 @@ mod tests {
         target.monitor("phys off", &mut out);
         assert!(out.contains("memory addresses are physical\n"), "{out}");
         assert!(target.read_addrs(0x0009_0000, &mut buf).is_err());
+    }
+
+    #[test]
+    fn mpu_monitors_without_the_mpu() {
+        // The default CPU, like the Nexys A7, has no MPU.
+        let mut target = target_with(0);
+        let mut out = String::new();
+        target.monitor("sr", &mut out);
+        target.monitor("mpu", &mut out);
+        assert!(out.contains("mode supervisor   DI 0   TE 0   SP_ALT"), "{out}");
+        assert!(!out.contains("MPU_EN"), "{out}");
+        assert!(
+            out.contains("no MPU (as on the Nexys A7; klausscc --mpu gives the emulator one)"),
+            "{out}"
+        );
     }
 
     #[test]

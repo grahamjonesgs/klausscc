@@ -110,7 +110,7 @@ fn run(lines: Vec<SourceLine>) -> (Vec<u8>, crate::emu::TxBusyWrites) {
     let assembly = assemble_lines(lines, &isa, &macro_list, &mut msg_list);
     assert!(!msg_list.has_errors(), "{:?}", msg_list.messages());
     let image = assembly.image().expect("the driver has a _start");
-    let result = crate::emu::emulate_image(&image.to_ddr(), image.entry, 1_000_000, None);
+    let result = crate::emu::emulate_image(&image.to_ddr(), image.entry, 1_000_000, false, None);
     assert_eq!(result.stop, crate::emu::StopReason::Halt);
     (result.uart, result.tx_busy_writes)
 }

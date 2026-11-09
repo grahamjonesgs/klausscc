@@ -178,6 +178,10 @@ pub(crate) struct Cli {
     /// Instruction-count cap for the emulator
     #[arg(long, value_name = "COUNT", default_value_t = DEFAULT_MAX_INSTRUCTIONS)]
     pub(crate) max_instructions: u64,
+
+    /// Give the emulator the MMU stage 2 MPU (16 regions; CPU_FEATURES reads 0x10FF). Without it the emulator matches the Nexys A7 bitstream, which has no MPU: CPU_FEATURES reads 0x100D, the MPU_BASEn/MPU_LIMITn system registers are illegal and STATUS bit 8 (MPU_EN) stays 0. For --emulate, --emulate-test and --gdbserver on the emulator
+    #[arg(long, conflicts_with = "board")]
+    pub(crate) mpu: bool,
 }
 
 /// What an `-i` input file holds, judged by its extension (case-insensitive).
@@ -498,6 +502,10 @@ mod tests {
             &["-i", "prog.kla", "--emulate", "--trace", "trace.txt", "--max-instructions", "100"],
             &["--emulate-test", "tests"],
             &["--emulate-test", "list.txt", "--max-instructions", "1000"],
+            &["-i", "prog.kla", "--emulate", "--mpu"],
+            &["-i", "prog.elf", "--emulate", "--mpu", "--max-instructions", "100"],
+            &["--emulate-test", "tests", "--mpu"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--mpu"],
             // A pre-built image.
             &["-i", "prog.kbt", "-s", "/dev/ttyUSB1"],
             &["-i", "prog.kbt", "-m"],
@@ -573,6 +581,8 @@ mod tests {
             &["-i", "prog.kla", "--trace"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--jtag-khz", "5000"],
             &["--opcodes", "--jtag-khz", "5000"],
+            // The board has the MPU its bitstream has.
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--mpu"],
             // What used to be reported only once the work was done.
             &["-N", "prog.elf"],
             &["-N", "prog.elf", "--ip", ""],
@@ -688,6 +698,9 @@ mod tests {
         let cli = parse(&["--emulate-test", "dir", "--max-instructions", "1000"]).unwrap();
         assert_eq!(cli.emulate_test, Some(PathBuf::from("dir")));
         assert_eq!(cli.max_instructions, 1000);
+        assert!(!cli.mpu, "no MPU by default, as on the Nexys A7");
+
+        assert!(parse(&["-i", "prog.elf", "--emulate", "--mpu"]).unwrap().mpu);
     }
 
     #[test]

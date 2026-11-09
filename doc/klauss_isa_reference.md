@@ -124,6 +124,7 @@ The input's extension picks what `-i` does: a `.kla` file is assembled, a `.kbt`
 | `--emulate` | Assemble the input (or load the ELF or flat binary) and run it on the built-in ISA emulator, starting with the UART idle as on the board; prints the captured UART output, and any write to the UART made while it was busy (see [UART](#uart--0xf001_0000)) |
 | `--trace [FILE]` | With `--emulate`, write the per-instruction trace to `FILE`, or to stdout with no value (or `-`) |
 | `--max-instructions <COUNT>` | Instruction-count cap for the emulator (default: 50000000) |
+| `--mpu` | Give the emulator the MMU stage 2 MPU (see [MPU and TLB](#mpu-and-tlb)), for `--emulate`, `--emulate-test` and `--gdbserver` without `--board`. Without it the emulator has no MPU, as the Nexys A7 bitstream has none |
 | `--gdbserver <PORT>` | Debug an ELF on the emulator over the GDB remote protocol on `127.0.0.1:PORT` (for lldb) |
 | `--board` | With `--gdbserver`, debug the real board over its USB-JTAG instead (needs a `DEBUG_EN=1` bitstream and a klausscc built with `--features board`). With `-s`, the ELF is first loaded over the UART. |
 | `--jtag-khz <KHZ>` | JTAG clock for `--board` (default: 10000) |
@@ -1068,7 +1069,7 @@ The tests in `tests/fixtures/hw_mmu.kla` run all of it on the emulator.
 
 ### MPU and TLB
 
-MMU stages 2 and 3 (klaussCPU `MMU_PLAN.md` §10–§11, branch `mmu`; encodings in [ISA_ENCODING_V2.md](ISA_ENCODING_V2.md) §3.17) protect memory: stage 2 with a 16-region MPU, stage 3 with a 32-entry, software-refilled TLB and 64 KiB pages. `CPU_FEATURES` bit 1 says the MPU is there (bits 7:4 = 15) and bit 2 the TLB (bits 15:8 = 32); the emulator reads `0x20FF`. Both are off at reset and on every program load. All their registers and instructions are supervisor-only.
+MMU stages 2 and 3 (klaussCPU `MMU_PLAN.md` §10–§11, branch `mmu`; encodings in [ISA_ENCODING_V2.md](ISA_ENCODING_V2.md) §3.17) protect memory: stage 2 with a 16-region MPU, stage 3 with a 16-entry, software-refilled TLB and 64 KiB pages. `CPU_FEATURES` bit 1 says the MPU is there (bits 7:4 = 15) and bit 2 the TLB (bits 15:8 = 16). The MPU is an optional build feature: the Nexys A7 bitstream has none, and nor does the emulator unless run with `--mpu`. Without it `CPU_FEATURES` reads `0x100D`, the `MPU_BASEn`/`MPU_LIMITn` registers are illegal instructions, and `STATUS` bit 8 reads 0 whatever is written; with it (`--mpu`) `CPU_FEATURES` reads `0x10FF`. Both are off at reset and on every program load. All their registers and instructions are supervisor-only.
 
 **The MPU** works while translation is off. Turn it on with `STATUS` bit 8. Region *n* is two registers: `MPU_BASEn` holds the first byte (a multiple of 32) with bit 4 = GUARD, 3 = X, 2 = W, 1 = R, 0 = enable; `MPU_LIMITn` holds the start of the region's **last** 32-byte block. A GUARD region denies every access to it, in supervisor mode too (for stack guards). Otherwise supervisor mode may access anything, and user mode only what an enabled region gives it (R to load, W to store, X to run; regions add up). A denied access is ACCESS_LOAD / _STORE / _FETCH, with `ECAUSE` bit 8 set for a GUARD. An exception's own frame push is not checked, so leave a frame's room below a guard, and do not push in the handler before you know the stack is good.
 
@@ -1138,7 +1139,7 @@ POP A
 IRET
 ```
 
-`tests/fixtures/hw_mpu.kla` and `hw_tlb.kla` run these on the emulator; they are not yet in `all_tests.txt`, because they need a bitstream with the MPU and TLB. In the emulator's debugger, `monitor mpu` and `monitor tlb` show the regions and entries, and while translation is on the debugger's addresses are virtual (`monitor phys on` makes them physical); the board's debugger always uses physical addresses.
+`tests/fixtures/hw_mpu.kla` and `hw_tlb.kla` run these on the emulator (`hw_mpu.kla` only with `--mpu`: `klausscc --emulate-test tests/fixtures/hw_mpu.kla --mpu`). Neither is in `all_tests.txt`: the Nexys A7 bitstream has no MPU, and `hw_tlb.kla` waits for a TLB bitstream to pass it. In the emulator's debugger, `monitor mpu` and `monitor tlb` show the regions and entries, and while translation is on the debugger's addresses are virtual (`monitor phys on` makes them physical); the board's debugger always uses physical addresses.
 
 ---
 

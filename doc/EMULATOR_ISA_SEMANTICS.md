@@ -210,8 +210,10 @@ read-only; `[8]` MPU_EN and `[9]` TE from stages 2 and 3), 1 `EVEC`
 `EADDR`, 4 `USP` (= `SP_ALT`), 5/6 `SCRATCH0/1`, 7 `TP`, 8 `CYCLE`
 (read-only), and the stage 2/3 registers 0x10-0x2F and 0x30-0x34 (next
 section). Any other SR number, and `MTSR` to `CYCLE`, is ILLEGAL.
-`CPU_FEATURES` at `0xF00F_0048` reads `0x20FF`: stage 1, the MPU with
-16 regions, the TLB with 32 entries, LR/SC.
+`CPU_FEATURES` at `0xF00F_0048` reads `0x100D`: stage 1, the TLB with
+16 entries, LR/SC, and no MPU, as on the Nexys A7 bitstream. With
+`--mpu` (`Cpu::set_has_mpu`) the emulator has the stage 2 MPU too and
+reads `0x10FF` (bit 1, and `[7:4]` = 15 for 16 regions).
 
 **CYCLE** is the emulator's modelled cycle count since reset: 2 cycles
 per retired instruction (`CYCLES_PER_INSTRUCTION`), 2 per exception
@@ -310,7 +312,13 @@ TE = 1 the address map and the TLB. Two accesses are not checked, as the
 spec says: the frame push of an interrupt or exception entry, and the
 debugger's.
 
-**The MPU** (`STATUS[8]` MPU_EN, with TE = 0). Sixteen regions, each an
+**The MPU** (`--mpu` only). Without `--mpu`, the default, the CPU has
+none, as the Nexys A7 bitstream has none: `MFSR`/`MTSR` of SRs
+0x10-0x2F are ILLEGAL like any SR number with nothing behind it,
+`STATUS[8]` MPU_EN ignores writes and reads 0, so nothing below is ever
+checked (and a supervisor fetch from MMIO is a zero word only while TE
+= 1), and the debugger's `monitor mpu` says there is none. With `--mpu`
+(`STATUS[8]` MPU_EN, with TE = 0): sixteen regions, each an
 `MPU_BASEn` (`[31:5]` first 32-byte granule, `[4]` GUARD, `[3]` X, `[2]`
 W, `[1]` R, `[0]` EN) and an `MPU_LIMITn` (`[31:5]` the **last** granule,
 inclusive; `[4:0]` read 0). A region covers an address when it is
@@ -347,7 +355,7 @@ guard-safe vector rule is software's to keep).
 Any user access at or above `0x8000_0000` is ACCESS_*. Those faults are
 decided from the VA alone and do not load `TLB_HI`.
 
-**The TLB.** 32 entries, each `{VPN [15:0], ASID, G, PFN [10:0], V, R, W,
+**The TLB.** 16 entries, each `{VPN [15:0], ASID, G, PFN [10:0], V, R, W,
 X}` in the `TLB_HI` / `TLB_LO` layout (`TLB_HI`: `[31:16]` VPN, `[8]` G,
 `[7:0]` ASID; `TLB_LO`: `[26:16]` PFN, `[3:0]` X W R V). Pages are 64
 KiB. An entry matches a VA when V is set, its VPN is VA`[31:16]`, and it
