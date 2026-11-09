@@ -369,7 +369,7 @@ nonzero, else `EVEC`; every other cause enters `EVEC`. `TLBVEC[1:0]`
 read 0, as `EVEC`'s do. The points the emulator once marked as open
 were all confirmed in klaussCPU `mmu` 424e236 (MMU_PLAN §11.2–§11.3).
 
-`TLBWI` writes entry `TLB_INDEX[4:0]` from `TLB_HI`/`TLB_LO`, `TLBR`
+`TLBWI` writes entry `TLB_INDEX[3:0]` (16 entries; `[4]` ignored, reads 0) from `TLB_HI`/`TLB_LO`, `TLBR`
 reads it back, `TLBP` looks `TLB_HI` up (with its own ASID, G-aware) and
 sets `TLB_INDEX` to the index, or on a miss sets `TLB_INDEX[31]` and
 leaves `[4:0]` alone, and `TLBINV` clears every V. All four are
