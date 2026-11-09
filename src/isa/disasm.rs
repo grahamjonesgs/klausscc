@@ -1,6 +1,6 @@
 //! Disassembling instruction words back into assembler text.
 
-use super::{Opcode, Operand, REG_NAMES, SR_NAMES};
+use super::{Opcode, Operand, REG_NAMES, sr_name};
 use crate::asm::line::{Emitted, LineType, Pass2};
 use std::fmt::Write as _;
 
@@ -69,7 +69,7 @@ impl Disassembler {
                 Operand::Off8(shift) => write!(text, " {}", i64::from((((word >> 12) & 0xFF) as u8) as i8) << shift),
                 Operand::Frame22 => write!(text, " {}", word & 0x3F_FFFF),
                 // By name where there is one, else the number.
-                Operand::Sr => match SR_NAMES.get(((word >> 12) & 0xFF) as usize) {
+                Operand::Sr => match sr_name((word >> 12) & 0xFF) {
                     Some(name) => write!(text, " {name}"),
                     None => write!(text, " {}", (word >> 12) & 0xFF),
                 },

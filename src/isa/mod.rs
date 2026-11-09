@@ -28,17 +28,61 @@ pub(crate) fn reg_index(name: &str) -> Option<u32> {
     REG_NAMES.iter().zip(0..).find_map(|(&reg, index)| (reg == name).then_some(index))
 }
 
-/// The MMU stage 1 system-register names, by SR number (`MFSR`/`MTSR`,
-/// `MMU_PLAN.md` §6.1).  Numbers 9 and up are reserved (illegal in stage 1).
-pub(crate) const SR_NAMES: [&str; 9] = ["STATUS", "EVEC", "ECAUSE", "EADDR", "USP", "SCRATCH0", "SCRATCH1", "TP", "CYCLE"];
+/// The system-register names with a fixed number (`MFSR`/`MTSR`,
+/// `MMU_PLAN.md` §6.1, §10.1, §11.3): stage 1's 0-8 and stage 3's TLB
+/// registers 0x30-0x34.  The MPU's 0x10-0x2F are numbered ([`sr_name`]).
+const SR_FIXED: [(u32, &str); 14] = [
+    (0x00, "STATUS"),
+    (0x01, "EVEC"),
+    (0x02, "ECAUSE"),
+    (0x03, "EADDR"),
+    (0x04, "USP"),
+    (0x05, "SCRATCH0"),
+    (0x06, "SCRATCH1"),
+    (0x07, "TP"),
+    (0x08, "CYCLE"),
+    (0x30, "TLB_HI"),
+    (0x31, "TLB_LO"),
+    (0x32, "TLB_INDEX"),
+    (0x33, "ASID"),
+    (0x34, "TLBVEC"),
+];
 
-/// The SR number a `MFSR`/`MTSR` operand names: one of [`SR_NAMES`] in any
-/// case, or a literal 0..=255 (the 8-bit field; a number with no SR behind
-/// it assembles, and is an illegal instruction when it runs).
+/// The first MPU system register, `MPU_BASE0` (`MMU_PLAN.md` §10.1):
+/// `MPU_BASEn` is `0x10 + 2n` and `MPU_LIMITn` `0x11 + 2n`, n = 0-15.
+const SR_MPU_FIRST: u32 = 0x10;
+/// The number of MPU regions, each a base and a limit SR.
+const SR_MPU_REGIONS: u32 = 16;
+
+/// The upper-case name of SR `n`, as the listing shows it, or `None` for a
+/// number with no SR behind it (an illegal `MFSR`/`MTSR` when it runs).
+pub(crate) fn sr_name(n: u32) -> Option<String> {
+    if let Some(&(_, name)) = SR_FIXED.iter().find(|&&(number, _)| number == n) {
+        return Some(name.to_owned());
+    }
+    let mpu = n.checked_sub(SR_MPU_FIRST).filter(|&k| k < 2 * SR_MPU_REGIONS)?;
+    Some(format!("{}{}", if mpu % 2 == 0 { "MPU_BASE" } else { "MPU_LIMIT" }, mpu / 2))
+}
+
+/// The SR number a `MFSR`/`MTSR` operand names: an SR name in any case
+/// (`STATUS` ... `CYCLE`, `MPU_BASE0` ... `MPU_BASE15`, `MPU_LIMIT0` ...
+/// `MPU_LIMIT15`, `TLB_HI`, `TLB_LO`, `TLB_INDEX`, `ASID`, `TLBVEC`), or a
+/// literal 0..=255 (the 8-bit field; a number with no SR behind it
+/// assembles, and is an illegal instruction when it runs).
 pub(crate) fn sr_index(token: &str) -> Option<u32> {
     let name = token.to_uppercase();
-    if let Some(index) = SR_NAMES.iter().zip(0..).find_map(|(&sr, index)| (sr == name).then_some(index)) {
-        return Some(index);
+    if let Some(&(number, _)) = SR_FIXED.iter().find(|&&(_, sr)| sr == name) {
+        return Some(number);
+    }
+    for (prefix, first) in [("MPU_BASE", SR_MPU_FIRST), ("MPU_LIMIT", SR_MPU_FIRST + 1)] {
+        // Decimal region numbers with no leading zero, as `sr_name` writes them.
+        if let Some(digits) = name.strip_prefix(prefix)
+            && let Ok(region) = digits.parse::<u32>()
+            && region < SR_MPU_REGIONS
+            && digits == region.to_string()
+        {
+            return Some(first + 2 * region);
+        }
     }
     crate::num::parse_int(token).ok().and_then(|v| u8::try_from(v).ok()).map(u32::from)
 }
@@ -98,7 +142,7 @@ pub(crate) enum Operand {
     /// this instruction, high byte in `word0[19:12]` and low byte in
     /// `word0[7:0]`. Filled in pass 2.
     Rel16,
-    /// MMU stage 1 `MFSR`/`MTSR` system register, by name ([`SR_NAMES`]) or
+    /// MMU `MFSR`/`MTSR` system register, by name ([`sr_index`]) or
     /// number → `word0[19:12]`.
     Sr,
 }

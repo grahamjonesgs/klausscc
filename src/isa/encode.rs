@@ -424,7 +424,9 @@ mod tests {
         let names: Vec<&str> = zero_operand.iter().map(|o| o.name).collect();
         assert_eq!(
             names,
-            ["LEAVE", "LEAVERET", "RET", "IRET", "NOP", "HALT", "WAIT", "RESET", "TRAP", "SYSCALL"]
+            [
+                "LEAVE", "LEAVERET", "RET", "IRET", "NOP", "HALT", "WAIT", "RESET", "TRAP", "SYSCALL", "TLBWI", "TLBR", "TLBP", "TLBINV"
+            ]
         );
         for opcode in zero_operand {
             let line = opcode.name;
@@ -791,6 +793,49 @@ mod tests {
         assert_eq!(disassembler.word(0x6C40_9300).unwrap().0, "MFSR D 9");
         assert_eq!(disassembler.word(0x5F00_1615).unwrap().0, "SC64 G F B");
         assert_eq!(disassembler.word(0x5A80_1310).unwrap().0, "LR32S D B");
+        // MMU stages 2 and 3 (ISA_ENCODING_V2_MAP §10), spelled as
+        // klausscpu-llvm mmu 9596187c378a spells them.
+        let cases = [
+            ("TLBWI", "6C090000"),              // tlbwi
+            ("TLBR", "6C0A0000"),               // tlbr
+            ("TLBP", "6C0B0000"),               // tlbp
+            ("TLBINV", "6C0C0000"),             // tlbinv
+            ("tlbinv", "6C0C0000"),             // any case
+            ("MFSR D mpu_base0", "6C410300"),   // mfsr r3, mpu_base0
+            ("MTSR MPU_LIMIT0 B", "6C611010"),  // mtsr mpu_limit0, r1
+            ("MTSR Mpu_Base15 B", "6C62E010"),  // 0x10 + 2*15
+            ("MFSR D mpu_limit15", "6C42F300"), // 0x11 + 2*15
+            ("MTSR mpu_base7 B", "6C61E010"),   // 0x1E
+            ("MTSR tlb_hi B", "6C630010"),      // 0x30
+            ("MTSR TLB_LO B", "6C631010"),      // 0x31
+            ("MFSR D tlb_index", "6C432300"),   // 0x32
+            ("MTSR asid B", "6C633010"),        // 0x33
+            ("MTSR TLBVEC B", "6C634010"),      // 0x34
+            ("MTSR 0x35 B", "6C635010"),        // no SR there: still a number
+        ];
+        for (src, want) in cases {
+            assert_eq!(hex(src), want, "{src}");
+        }
+        for bad in ["MPU_BASE16", "mpu_limit", "MPU_BASE01", "MPU_BASE+1", "TLB"] {
+            assert_eq!(
+                faults(&format!("MFSR D {bad}")).1,
+                [format!("Unknown system register {bad} - \"MFSR D {bad}\"")],
+                "{bad}"
+            );
+        }
+        assert_eq!(disassembler.word(0x6C09_0000).unwrap().0, "TLBWI");
+        assert_eq!(disassembler.word(0x6C0C_0000).unwrap().0, "TLBINV");
+        assert_eq!(disassembler.word(0x6C41_0300).unwrap().0, "MFSR D MPU_BASE0");
+        assert_eq!(disassembler.word(0x6C62_F010).unwrap().0, "MTSR MPU_LIMIT15 B");
+        assert_eq!(disassembler.word(0x6C63_4010).unwrap().0, "MTSR TLBVEC B");
+        assert_eq!(disassembler.word(0x6C43_2300).unwrap().0, "MFSR D TLB_INDEX");
+        assert_eq!(disassembler.word(0x6C43_5300).unwrap().0, "MFSR D 53");
+        assert_eq!(disassembler.word(0x6C40_F300).unwrap().0, "MFSR D 15");
+        for n in 0..=255 {
+            if let Some(name) = super::super::sr_name(n) {
+                assert_eq!(super::super::sr_index(&name.to_lowercase()), Some(n), "{name}");
+            }
+        }
         assert_eq!(hex("FBRV B -100000 13 0x28"), hex("BNEWV B -100000 0x28"));
     }
 

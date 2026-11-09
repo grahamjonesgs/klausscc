@@ -16,6 +16,7 @@
 //! that file.
 
 use super::flags::Flags;
+use super::mmu::{Mapped, XlateFault};
 use super::system::{Cause, sr_user_readable, sr_user_writable};
 use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, CTX_PREV_MODE_SHIFT, Cpu, StopReason};
 use crate::layout::is_mmio;
@@ -36,8 +37,10 @@ struct Fields {
     /// rs2 `[3:0]`.
     rs2: usize,
     /// The 32-bit immediate: word 1, or a short 1-word form's immediate (see
-    /// [`short_imm`]).  Read unconditionally; unused by most 1-word forms.
+    /// [`short_imm`]).  Unused by most 1-word forms.
     imm32: u32,
+    /// Word 2, the high half of a 3-word form's 64-bit immediate.
+    word2: u32,
     /// The fall-through PC (the next instruction).
     next: u32,
 }
@@ -51,6 +54,11 @@ impl Fields {
     /// The `width`-bit field of word 0 whose lowest bit is `lo`.
     const fn field(self, lo: u32, width: u32) -> u32 {
         (self.word >> lo) & ((1 << width) - 1)
+    }
+
+    /// The 64-bit immediate of a 3-word form: lo32 in word 1, hi32 in word 2.
+    const fn imm64(self) -> u64 {
+        ((self.word2 as u64) << 32) | self.imm32 as u64
     }
 }
 
@@ -76,6 +84,15 @@ enum Fault {
     Illegal,
     /// Any other exception, with its `EADDR`.
     Exception(Cause, u32),
+    /// A memory access that did not translate (the user-mode MMIO rule,
+    /// the MPU, the TLB), with the detail `ECAUSE[8]` and `TLB_HI` take.
+    Mmu(XlateFault),
+}
+
+impl From<XlateFault> for Fault {
+    fn from(fault: XlateFault) -> Self {
+        Self::Mmu(fault)
+    }
 }
 
 impl From<Illegal> for Fault {
@@ -204,54 +221,32 @@ impl Cpu {
         self.regs[rd] = if set_z { self.with_z(res) } else { res };
     }
 
-    /// The 64-bit immediate of a 3-word form: lo32 at PC+4, hi32 at PC+8.
-    fn imm64(&self) -> u64 {
-        let lo = self.read32(self.pc.wrapping_add(4));
-        let hi = self.read32(self.pc.wrapping_add(8));
-        (u64::from(hi) << 32) | u64::from(lo)
+    /// Check and translate the doubleword a push writes, at SP - 8.
+    fn map_push(&self) -> Result<Mapped, XlateFault> {
+        self.map_data(self.sp.wrapping_sub(8), 1, true)
     }
 
-    /// MMU stage 1 §3.6: in user mode, an access to the bytes `[addr,
-    /// addr + len)` that touches MMIO (`0xF000_0000` up) raises `ACCESS_LOAD`
-    /// or `ACCESS_STORE`.  `addr` is the effective address as computed,
-    /// before any alignment, and is the `EADDR` (§4.1); an access whose
-    /// first doubleword is RAM and second MMIO (a spanning `MEMGET32`)
-    /// reports the second doubleword's start, `0xF000_0000`.  A 64-bit RAM
-    /// access reaches only the aligned doubleword (see [`Cpu::read64`]), so
-    /// its callers pass `len` 1; only `MEMGET32` can span a doubleword.
-    fn check_user(&self, addr: u32, len: u32, store: bool) -> Result<(), Fault> {
-        if !self.um {
-            return Ok(());
-        }
-        let last = addr.wrapping_add(len - 1);
-        let first_mmio = if is_mmio(addr) {
-            Some(addr)
-        } else if last < addr || is_mmio(last) {
-            // Crosses into MMIO: the second doubleword's start.
-            Some(0xF000_0000)
-        } else {
-            None
-        };
-        match first_mmio {
-            Some(at) => Err(Fault::Exception(if store { Cause::AccessStore } else { Cause::AccessLoad }, at)),
-            None => Ok(()),
-        }
+    /// Check and translate the doubleword a pop reads, at SP.
+    fn map_pop(&self) -> Result<Mapped, XlateFault> {
+        self.map_data(self.sp, 1, false)
     }
 
-    /// Push a doubleword (SP grows down).
-    pub(super) fn push(&mut self, value: u64) {
+    /// Push a doubleword (SP grows down) to `slot`, from [`Cpu::map_push`].
+    fn push(&mut self, slot: Mapped, value: u64) {
+        self.write64(slot, value);
         self.sp = self.sp.wrapping_sub(8);
-        self.write64(self.sp, value);
     }
 
-    /// Pop a doubleword.
-    fn pop(&mut self) -> u64 {
-        let value = self.read64(self.sp);
+    /// Pop a doubleword from `slot`, from [`Cpu::map_pop`].
+    fn pop(&mut self, slot: Mapped) -> u64 {
+        let value = self.read64(slot);
         self.sp = self.sp.wrapping_add(8);
         value
     }
 
-    /// Decode + execute a single v2 instruction word, then move the PC on.
+    /// Decode + execute a single v2 instruction, then move the PC on.
+    /// `words` are its words as [`Cpu::fetch`] translated and read them
+    /// (word 0, then the immediate words, 0 past its length).
     ///
     /// The word is decoded straight from its bit fields (`doc/ISA_ENCODING_V2.md` §1):
     /// LEN gives the instruction length, CLASS selects the handler, and each
@@ -259,7 +254,8 @@ impl Cpu {
     ///
     /// Returns whether the instruction retired; one that raised an
     /// exception did not ([`Cpu::raise`]).
-    pub(super) fn execute(&mut self, word: u32) -> bool {
+    pub(super) fn execute(&mut self, words: [u32; 3]) -> bool {
+        let word = words[0];
         let len = word >> 30;
         if len == 0 {
             // LEN=00 is illegal — this is how a stale v1 binary fails fast.
@@ -275,7 +271,8 @@ impl Cpu {
             rd: ((word >> 8) & 0xF) as usize,
             rs1: ((word >> 4) & 0xF) as usize,
             rs2: (word & 0xF) as usize,
-            imm32: short_imm(word).unwrap_or_else(|| self.read32(self.pc.wrapping_add(4))),
+            imm32: short_imm(word).unwrap_or(words[1]),
+            word2: words[2],
             next: self.pc.wrapping_add(4 * len),
         };
         let flow = match f.field(26, 4) {
@@ -301,6 +298,7 @@ impl Cpu {
             // ECAUSE ILLEGAL: EADDR is the instruction word.
             Err(Fault::Illegal) => return self.raise(Cause::Illegal, word, word, f.next),
             Err(Fault::Exception(cause, eaddr)) => return self.raise(cause, eaddr, word, f.next),
+            Err(Fault::Mmu(fault)) => return self.raise_fault(fault, word, f.next),
         }
         true
     }
@@ -357,7 +355,7 @@ impl Cpu {
         if f.len == 3 {
             // SETR64: MOV with [21:12], rs1 and rs2 zero (:431-433).
             legal(op == 15 && f.field(12, 10) == 0 && f.field(0, 8) == 0)?;
-            self.regs[f.rd] = self.imm64();
+            self.regs[f.rd] = f.imm64();
             return Ok(Flow::Next);
         }
         if f.len == 1 && op == 14 && f.bit(21) {
@@ -641,12 +639,12 @@ impl Cpu {
             return Err(Fault::Exception(Cause::MisalignedLoad, ea));
         }
         // EADDR is the raw EA, before the A=1 alignment (MMU_PLAN §4.1).
-        self.check_user(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, false)?;
-        let ea = ea & align_mask(size_bytes, f.bit(20));
+        let at = self.map_data(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, false)?;
+        let at = at.masked(align_mask(size_bytes, f.bit(20)));
         let val = if size_bytes == 8 {
-            self.read64(ea)
+            self.read64(at)
         } else {
-            self.read_sub(ea, size_bytes)
+            self.read_sub(at, size_bytes)
         };
         self.regs[f.rd] = if f.bit(23) { sign_extend(val, size_bytes) } else { val };
         Ok(Flow::Next)
@@ -663,13 +661,13 @@ impl Cpu {
         if misaligned(ea, size_bytes) {
             return Err(Fault::Exception(Cause::MisalignedStore, ea));
         }
-        self.check_user(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, true)?;
-        let ea = ea & align_mask(size_bytes, f.bit(20));
+        let at = self.map_data(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, true)?;
+        let at = at.masked(align_mask(size_bytes, f.bit(20)));
         let data = self.regs[f.rd];
         if size_bytes == 8 {
-            self.write64(ea, data);
+            self.write64(at, data);
         } else {
-            self.write_sub(ea, data, size_bytes);
+            self.write_sub(at, data, size_bytes);
         }
         Ok(Flow::Next)
     }
@@ -684,7 +682,8 @@ impl Cpu {
         let bytes = if size == 3 { 8 } else { 4 };
         let ea = self.regs[f.rs1] as u32;
         atomic_check(ea, bytes, false)?;
-        let val = if bytes == 8 { self.read64(ea) } else { self.read_sub(ea, 4) };
+        let at = self.map_data(ea, 1, false)?;
+        let val = if bytes == 8 { self.read64(at) } else { self.read_sub(at, 4) };
         self.regs[f.rd] = if f.bit(23) { sign_extend(val, 4) } else { val };
         self.reservation = Some(ea >> 3);
         Ok(Flow::Next)
@@ -702,13 +701,16 @@ impl Cpu {
         let bytes = if size == 3 { 8 } else { 4 };
         let ea = self.regs[f.rs1] as u32;
         atomic_check(ea, bytes, true)?;
+        // A failing SC stores nothing, but is checked as a store all the
+        // same (MMU_PLAN §10.2: SC is a store).
+        let at = self.map_data(ea, 1, true)?;
         let data = self.regs[f.rs2];
         let reserved = self.reservation == Some(ea >> 3);
         if reserved {
             if bytes == 8 {
-                self.write64(ea, data);
+                self.write64(at, data);
             } else {
-                self.write_sub(ea, data, 4);
+                self.write_sub(at, data, 4);
             }
         }
         self.regs[f.rd] = u64::from(!reserved);
@@ -757,8 +759,8 @@ impl Cpu {
         };
         if link {
             // Push the (zero-extended) return address = the fall-through PC.
-            self.check_user(self.sp.wrapping_sub(8), 1, true)?;
-            self.push(u64::from(f.next));
+            let slot = self.map_push()?;
+            self.push(slot, u64::from(f.next));
         }
         Ok(Flow::Jump(target))
     }
@@ -792,8 +794,8 @@ impl Cpu {
             (1, 8) => {
                 // v3 C: ENTER N — push R15; R15 = SP; SP -= 8*N  (N = [21:0],
                 // any value, :587).
-                self.check_user(self.sp.wrapping_sub(8), 1, true)?;
-                self.push(self.regs[15]);
+                let slot = self.map_push()?;
+                self.push(slot, self.regs[15]);
                 self.regs[15] = u64::from(self.sp);
                 self.sp = self.sp.wrapping_sub(f.field(0, 22) << 3);
             }
@@ -801,8 +803,8 @@ impl Cpu {
                 // v3 C: LEAVE — SP = R15; pop R15 ([21:0] = 0, :591).
                 legal(f.field(0, 22) == 0)?;
                 let fp = self.regs[15] as u32;
-                self.check_user(fp, 1, false)?;
-                self.regs[15] = self.read64(fp);
+                let at = self.map_data(fp, 1, false)?;
+                self.regs[15] = self.read64(at);
                 self.sp = fp.wrapping_add(8);
             }
             (1, 10) => {
@@ -810,13 +812,14 @@ impl Cpu {
                 // ([21:0] = 0, :595).
                 legal(f.field(0, 22) == 0)?;
                 let fp = self.regs[15] as u32;
-                // Both loads are checked before either happens (MMU_PLAN
-                // §4.1).  EADDR is R15 when the first faults; when only the
-                // second does, the start of its doubleword.
-                self.check_user(fp, 1, false)?;
-                self.check_user(fp.wrapping_add(8) & !7, 1, false)?;
-                self.regs[15] = self.read64(fp);
-                let ra = self.read64(fp.wrapping_add(8));
+                // Both loads are checked and translated before either
+                // happens (MMU_PLAN §4.1, §10.2, §11.3).  EADDR is R15 when
+                // the first faults; when only the second does, the start of
+                // its doubleword.
+                let first = self.map_data(fp, 1, false)?;
+                let second = self.map_data(fp.wrapping_add(8) & !7, 1, false)?;
+                self.regs[15] = self.read64(first);
+                let ra = self.read64(second);
                 self.sp = fp.wrapping_add(16);
                 return Ok(Flow::Jump(ra as u32));
             }
@@ -837,26 +840,40 @@ impl Cpu {
             _ => return Err(Fault::Illegal),
         };
         legal(f.rs2 == 0 && (rd || f.rd == 0) && (rs1 || f.rs1 == 0))?;
-        // MMU stage 1: the stack accesses are checked in user mode (pushes
-        // are stores, pops loads), and IRET is privileged.
-        match op {
-            0 | 1 => self.check_user(self.sp.wrapping_sub(8), 1, true)?,
-            2 | 6 => self.check_user(self.sp, 1, false)?,
-            7 if self.um => return Err(privileged(f)),
-            _ => {}
+        // MMU: IRET is privileged, checked first; then the stack access is
+        // checked and translated (pushes are stores, pops loads).
+        if op == 7 && self.um {
+            return Err(privileged(f));
         }
         match op {
-            0 => self.push(self.regs[f.rs1]), // PUSH rs1
-            // PUSHI: PUSHV (2-word, zero-ext imm32) or PUSHV64 (3-word, imm64).
-            1 if f.len == 3 => self.push(self.imm64()),
-            1 => self.push(u64::from(f.imm32)),
-            2 => self.regs[f.rd] = self.pop(),            // POP rd
+            0 | 1 => {
+                let slot = self.map_push()?;
+                // PUSH rs1, or PUSHI: PUSHV (2-word, zero-ext imm32) or
+                // PUSHV64 (3-word, imm64).
+                let value = match (op, f.len) {
+                    (0, _) => self.regs[f.rs1],
+                    (_, 3) => f.imm64(),
+                    _ => u64::from(f.imm32),
+                };
+                self.push(slot, value);
+            }
+            2 => {
+                // POP rd
+                let slot = self.map_pop()?;
+                self.regs[f.rd] = self.pop(slot);
+            }
             3 => self.regs[f.rd] = u64::from(self.sp),    // GETSP
             4 => self.sp = self.regs[f.rs1] as u32,       // SETSP
             5 => self.sp = self.sp.wrapping_add(f.imm32), // ADDSP (imm sign-ext, 32-bit add)
             // RET — restore PC from [31:0] of the popped slot.
-            6 => return Ok(Flow::Jump(self.pop() as u32)),
-            _ => return Ok(self.iret()),
+            6 => {
+                let slot = self.map_pop()?;
+                return Ok(Flow::Jump(self.pop(slot) as u32));
+            }
+            _ => {
+                let slot = self.map_pop()?;
+                return Ok(self.iret(slot));
+            }
         }
         Ok(Flow::Next)
     }
@@ -872,8 +889,8 @@ impl Cpu {
     /// the stacks swap after the pop, so the SP is the user SP and `SP_ALT`
     /// the kernel SP just above the popped frame.  The LR/SC reservation is
     /// cleared.
-    fn iret(&mut self) -> Flow {
-        let ctx = self.pop();
+    fn iret(&mut self, slot: Mapped) -> Flow {
+        let ctx = self.pop(slot);
         self.flags = Flags::from_ctx((ctx >> CTX_FLAGS_SHIFT) as u8 & 0x7F);
         self.int_mask = ((ctx >> CTX_INT_MASK_SHIFT) & 0xF) as u8;
         self.irq_disabled = (ctx >> CTX_IRQ_DISABLED_SHIFT) & 1 != 0;
@@ -977,8 +994,9 @@ impl Cpu {
     }
 
     /// Class B — system: NOP / HALT / WAIT / RESET / TRAP / DELAY, DI / EI,
-    /// and MMU stage 1's SYSCALL and MFSR / MTSR.  In user mode everything
-    /// but NOP, TRAP and SYSCALL (and the user's SRs) is PRIVILEGED.
+    /// MMU stage 1's SYSCALL and MFSR / MTSR, and stage 3's TLBWI / TLBR /
+    /// TLBP / TLBINV.  In user mode everything but NOP, TRAP and SYSCALL
+    /// (and the user's SRs) is PRIVILEGED.
     fn exec_system(&mut self, f: Fields) -> Exec {
         if f.field(22, 4) == 1 {
             return self.exec_sr(f);
@@ -1007,8 +1025,9 @@ impl Cpu {
         let op = f.field(16, 6);
         // rs1 is used only by DELAYR (:675-684).
         legal(f.rs1 == 0 || (f.len == 1 && op == 5))?;
-        // MMU stage 1 §3.5: HALT, WAIT, RESET and DELAY are privileged.
-        if self.um && matches!((f.len, op), (1, 1..=3) | (1 | 2, 5)) {
+        // MMU stage 1 §3.5: HALT, WAIT, RESET and DELAY are privileged, and
+        // so are stage 3's TLB instructions (§11.3).
+        if self.um && matches!((f.len, op), (1, 1..=3 | 9..=12) | (1 | 2, 5)) {
             return Err(privileged(f));
         }
         Ok(match (f.len, op) {
@@ -1034,6 +1053,24 @@ impl Cpu {
             // EVEC = 0 a TRAP stops the CPU as before stage 1.
             (1, 4) => return Err(Fault::Exception(Cause::Trap, f.word)),
             (1, 8) => return Err(Fault::Exception(Cause::Syscall, 0)),
+            // MMU stage 3 (§11.3).  They serialize on the board; the
+            // emulator, one instruction at a time, needs nothing for that.
+            (1, 9) => {
+                self.tlbwi();
+                Flow::Next
+            }
+            (1, 10) => {
+                self.tlbr();
+                Flow::Next
+            }
+            (1, 11) => {
+                self.tlbp();
+                Flow::Next
+            }
+            (1, 12) => {
+                self.tlbinv();
+                Flow::Next
+            }
             _ => return Err(Fault::Illegal),
         })
     }

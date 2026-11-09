@@ -26,6 +26,12 @@ pub enum StopReason {
     /// (`park_kind` 5) and prints the crash dump with `ERR=0A`.  `MEMGET32`,
     /// byte, 64-bit and stack accesses never stop with it.
     Misaligned(u32),
+    /// MMU stage 3 double fault (`MMU_PLAN.md` §11.3): with `STATUS.TE` = 1
+    /// an interrupt or exception entry would push its frame outside kseg
+    /// (the kernel SP is given).  Nothing of the entry happened; the PC is
+    /// on the instruction that faulted or was interrupted.  The board parks
+    /// with `park_kind` 6, or debug-halts with a debugger attached.
+    DoubleFault(u32),
 }
 
 /// Data access a debugger watchpoint triggers on.
@@ -184,10 +190,12 @@ impl Cpu {
         true
     }
 
-    /// The instruction word at `addr` (0 outside RAM).
+    /// The instruction word at `addr` (0 outside RAM), a virtual address
+    /// when translation is on ([`Cpu::debug_translate`]; 0 if it does not
+    /// translate).
     #[must_use]
     pub fn fetch_word(&self, addr: u32) -> u32 {
-        self.read32(addr)
+        self.debug_translate(addr).map_or(0, |pa| self.read32(pa))
     }
 
     /// Advance one step — retire one instruction, or take a ready interrupt

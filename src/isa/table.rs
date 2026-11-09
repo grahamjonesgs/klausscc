@@ -442,6 +442,13 @@ pub(crate) static V2_OPCODES: &[Opcode] = &[
     op("SYSCALL", 0x6C08_0000, &[]),
     op("MFSR", 0x6C40_0000, &[Operand::Rd, Operand::Sr]),
     op("MTSR", 0x6C60_0000, &[Operand::Sr, Operand::Rs1]),
+    // MMU stage 3 (ISA_ENCODING_V2_MAP §10.2, MMU_PLAN §11.3): the TLB
+    // instructions, no operands, privileged and serializing.  LLVM spells
+    // them tlbwi / tlbr / tlbp / tlbinv (klausscpu-llvm mmu 9596187c378a).
+    op("TLBWI", 0x6C09_0000, &[]),
+    op("TLBR", 0x6C0A_0000, &[]),
+    op("TLBP", 0x6C0B_0000, &[]),
+    op("TLBINV", 0x6C0C_0000, &[]),
     op("DELAYR", 0x6C05_0000, &[Operand::Rs1]),
     op("DELAYV", 0xAC05_0000, &[Operand::Imm]),
     op("LCDCMDR", 0x7000_0000, &[Operand::Rs1]),

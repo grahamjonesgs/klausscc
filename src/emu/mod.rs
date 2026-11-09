@@ -61,13 +61,16 @@
 //! and its saved layouts, `mmio` models the UART, interrupt controller /
 //! timer and performance counters, `debug` is the debugger's view (registers,
 //! memory, watchpoints, stop reasons) and `trace` writes the per-instruction
-//! trace, and `system` is MMU stage 1: user mode, exceptions, the system
-//! registers and the LR/SC reservation.
+//! trace, `system` is MMU stage 1: user mode, exceptions, the system
+//! registers and the LR/SC reservation, and `mmu` is MMU stages 2 and 3:
+//! the MPU, the TLB and the one translation every memory access an
+//! instruction makes goes through.
 
 mod debug;
 mod exec;
 mod flags;
 mod mmio;
+mod mmu;
 mod system;
 #[cfg(test)]
 mod tests;
@@ -75,10 +78,12 @@ mod trace;
 
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
 pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE};
+pub use mmu::{MpuRegion, TlbEntry};
 pub use system::{Cause, SystemRegs};
 
 use crate::layout::is_mmio;
 use flags::Flags;
+use mmu::{Fetch, MPU_REGIONS, Mapped, TLB_ENTRIES};
 use std::collections::VecDeque;
 
 /// Modelled `i_Clk` cycles per retired instruction (timer, millisecond clock and
@@ -211,8 +216,10 @@ pub struct Cpu {
     sp_alt: u32,
     /// `EVEC`: the exception vector; 0 parks on every exception.
     evec: u32,
-    /// `ECAUSE`.
+    /// `ECAUSE[7:0]`, the cause code.
     ecause: u8,
+    /// `ECAUSE[8]` GUARD: the last `ACCESS_*` was an MPU GUARD denial.
+    ecause_guard: bool,
     /// `EADDR`.
     eaddr: u32,
     /// `SCRATCH0`, `SCRATCH1`.
@@ -231,6 +238,25 @@ pub struct Cpu {
     exc_entries: u64,
     /// The exception the CPU last stopped on instead of entering a handler.
     parked: Option<(Cause, u32)>,
+    // ---- MMU stages 2 and 3 (`mmu`) ----
+    /// The MPU regions (`MPU_BASEn`, `MPU_LIMITn`).
+    mpu: [MpuRegion; MPU_REGIONS],
+    /// `STATUS.MPU_EN`.
+    mpu_en: bool,
+    /// `STATUS.TE`: translation on.
+    te: bool,
+    /// The TLB.
+    tlb: [TlbEntry; TLB_ENTRIES],
+    /// `TLB_HI`.
+    tlb_hi: u32,
+    /// `TLB_LO`.
+    tlb_lo: u32,
+    /// `TLB_INDEX`.
+    tlb_index: u32,
+    /// `ASID`, the current address space.
+    asid: u8,
+    /// `TLBVEC`: the TLB-miss vector; 0 = use `EVEC`.
+    tlbvec: u32,
 }
 
 impl Cpu {
@@ -285,6 +311,7 @@ impl Cpu {
             sp_alt: 0,
             evec: 0,
             ecause: 0,
+            ecause_guard: false,
             eaddr: 0,
             scratch: [0; 2],
             tp: 0,
@@ -293,6 +320,15 @@ impl Cpu {
             exc_pass: false,
             exc_entries: 0,
             parked: None,
+            mpu: [MpuRegion::default(); MPU_REGIONS],
+            mpu_en: false,
+            te: false,
+            tlb: [TlbEntry::default(); TLB_ENTRIES],
+            tlb_hi: 0,
+            tlb_lo: 0,
+            tlb_index: 0,
+            asid: 0,
+            tlbvec: 0,
         }
     }
 
@@ -304,104 +340,111 @@ impl Cpu {
         self.mem.get(a..a + N)?.try_into().ok()
     }
 
-    /// Read a 32-bit little-endian word (used for instruction fetch and imm);
-    /// 0 past the end of RAM.
+    /// Read the 32-bit little-endian word at physical address `addr` (an
+    /// instruction word, once [`Cpu::fetch`] has translated it); 0 past the
+    /// end of RAM.
     fn read32(&self, addr: u32) -> u32 {
         self.bytes(addr).map_or(0, u32::from_le_bytes)
     }
 
-    /// Read a 64-bit little-endian doubleword.
+    /// Read a 64-bit little-endian doubleword at the checked and
+    /// translated address `at` ([`Cpu::map_data`]).
     ///
-    /// A RAM access reaches the aligned doubleword that holds `addr`: the
-    /// RTL's data cache picks the doubleword by `addr[4:3]` and ignores
+    /// A RAM access reaches the aligned doubleword that holds the address:
+    /// the RTL's data cache picks the doubleword by `addr[4:3]` and ignores
     /// `addr[2:0]` (`mem_read_write.sv` :274-277, :569, :672-676, :818-822),
     /// which is what a 64-bit load, POP, RET or IRET with an unaligned address
-    /// gets.  An MMIO read keeps the address as issued.
+    /// gets.  An MMIO read keeps the address as issued.  Watchpoints see the
+    /// virtual address.
     ///
     /// Takes `&mut self` because an MMIO read (`RX_DATA`) is read-to-consume and
-    /// mutates the UART FIFO.  Instruction/immediate fetch uses `read32` instead,
-    /// so this never fires on a code fetch.
-    fn read64(&mut self, addr: u32) -> u64 {
+    /// mutates the UART FIFO.  Instruction fetch uses `read32` instead, so
+    /// this never fires on a code fetch.
+    fn read64(&mut self, at: Mapped) -> u64 {
+        let addr = at.pa();
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO load at 0x{addr:08X}");
         if is_mmio(addr) {
-            self.note_access(addr, 8, Access::Load);
+            self.note_access(at.va(), 8, Access::Load);
             return self.mmio_read(addr);
         }
-        let addr = addr & !7;
-        self.note_access(addr, 8, Access::Load);
-        self.bytes(addr).map_or(0, u64::from_le_bytes)
+        self.note_access(at.va() & !7, 8, Access::Load);
+        self.bytes(addr & !7).map_or(0, u64::from_le_bytes)
     }
 
-    /// Read `n` bytes (1/2/4) zero-extended into a u64, little-endian.
-    fn read_sub(&mut self, addr: u32, n: usize) -> u64 {
+    /// Read `n` bytes (1/2/4) at `at`, zero-extended into a u64,
+    /// little-endian.  A `MEMGET32` that runs into the next doubleword
+    /// reads its bytes there through that doubleword's own translation.
+    fn read_sub(&mut self, at: Mapped, n: usize) -> u64 {
+        let addr = at.pa();
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO load at 0x{addr:08X}");
-        self.note_access(addr, n as u32, Access::Load);
+        self.note_access(at.va(), n as u32, Access::Load);
         if is_mmio(addr) {
             // MMIO presents its value in the low bits; a sub-word load takes the
             // low `n` bytes (addr[2]==0 lands the value in [31:0]).
             let mask = if n >= 8 { u64::MAX } else { (1_u64 << (8 * n)) - 1 };
             return self.mmio_read(addr) & mask;
         }
-        let a = addr as usize;
         let mut v: u64 = 0;
         for i in 0..n {
-            if a + i < self.mem.len() {
-                v |= u64::from(self.mem[a + i]) << (8 * i);
+            if let Some(&byte) = self.mem.get(at.pa_at(i as u32) as usize) {
+                v |= u64::from(byte) << (8 * i);
             }
         }
         v
     }
 
-    /// Write a 64-bit doubleword, record the write for the trace.
+    /// Write a 64-bit doubleword at `at`, record the write for the trace.
     ///
     /// As with [`Cpu::read64`], a RAM write lands on the aligned doubleword
-    /// that holds `addr` (all eight byte enables at `addr[4:3]`,
-    /// `mem_read_write.sv` :610-632, :725-745).  The trace records the address
-    /// as issued, as the RTL's `ret_wr_addr` does (`pipeline_core.sv` :1895).
-    fn write64(&mut self, addr: u32, val: u64) {
+    /// that holds the address (all eight byte enables at `addr[4:3]`,
+    /// `mem_read_write.sv` :610-632, :725-745).  The trace records the
+    /// virtual address as issued, as the RTL's `ret_wr_addr` does
+    /// (`pipeline_core.sv` :1895).
+    fn write64(&mut self, at: Mapped, val: u64) {
+        let addr = at.pa();
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO store at 0x{addr:08X}");
         if is_mmio(addr) {
-            self.note_access(addr, 8, Access::Store);
+            self.note_access(at.va(), 8, Access::Store);
             self.mmio_write(addr, val);
         } else {
-            let at = (addr & !7) as usize;
-            self.note_access(at as u32, 8, Access::Store);
-            if let Some(dst) = self.mem.get_mut(at..at + 8) {
+            self.note_access(at.va() & !7, 8, Access::Store);
+            let pa = (addr & !7) as usize;
+            if let Some(dst) = self.mem.get_mut(pa..pa + 8) {
                 dst.copy_from_slice(&val.to_le_bytes());
             }
         }
         self.last_write = Some(MemWrite {
-            addr,
+            addr: at.va(),
             byte_enable: 0xFF,
             data: val,
         });
     }
 
-    /// Write the low `n` bytes (1/2/4) at `addr`, little-endian; record write.
-    fn write_sub(&mut self, addr: u32, val: u64, n: usize) {
+    /// Write the low `n` bytes (1/2/4) at `at`, little-endian; record write.
+    fn write_sub(&mut self, at: Mapped, val: u64, n: usize) {
+        let addr = at.pa();
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO store at 0x{addr:08X}");
         // Byte-enable mask placed at the byte-lane within the doubleword, matching
         // the RTL's byte-enable semantics for the trace `be` field.
-        self.note_access(addr, n as u32, Access::Store);
+        self.note_access(at.va(), n as u32, Access::Store);
         let lane = (addr & 7) as usize;
         let be_bits: u8 = ((1_u16 << n) - 1).rotate_left(lane as u32) as u8;
         if is_mmio(addr) {
             self.mmio_write(addr, val);
             self.last_write = Some(MemWrite {
-                addr: addr & !7,
+                addr: at.va() & !7,
                 byte_enable: be_bits,
                 data: val,
             });
             return;
         }
-        let a = addr as usize;
         for i in 0..n {
-            if a + i < self.mem.len() {
-                self.mem[a + i] = (val >> (8 * i)) as u8;
+            if let Some(byte) = self.mem.get_mut(at.pa_at(i as u32) as usize) {
+                *byte = (val >> (8 * i)) as u8;
             }
         }
         self.last_write = Some(MemWrite {
-            addr: addr & !7,
+            addr: at.va() & !7,
             byte_enable: be_bits,
             data: self.peek64(addr & !7),
         });
@@ -452,19 +495,21 @@ impl Cpu {
         }
         let pc = self.pc;
         self.last_write = None;
-        if self.um
-            && let Some((cause, eaddr)) = self.user_fetch_fault(pc)
-        {
-            // MMU stage 1 §3.6: nothing of the instruction is fetched.
-            self.raise(cause, eaddr, self.read32(pc), pc);
-            return None;
-        }
-        if (pc as usize) + 4 > self.mem.len() {
-            self.stop = Some(StopReason::PcOutOfRange(pc));
-            return None;
-        }
-        let word = self.read32(pc);
-        if !self.execute(word) {
+        let words = match self.fetch(pc) {
+            Fetch::Words(words) => words,
+            Fetch::Fault(fault, word) => {
+                // A fetch fault (MMU stage 1 §3.6, the MPU, the TLB):
+                // nothing of the instruction runs.
+                self.raise_fault(fault, word, pc);
+                return None;
+            }
+            Fetch::OutOfRange => {
+                self.stop = Some(StopReason::PcOutOfRange(pc));
+                return None;
+            }
+        };
+        let word = words[0];
+        if !self.execute(words) {
             // An illegal word or a misaligned access parks without retiring:
             // the RTL gives it no trace line (`pipeline_core.sv` WB park,
             // kinds 2 and 5) and `PERF_INSTR` counts only retirements

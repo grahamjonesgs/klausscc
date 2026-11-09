@@ -162,6 +162,10 @@ impl EmuTarget {
             // The PC stays on the access, as on the board.
             StopReason::Misaligned(_) => SingleThreadStopReason::Signal(Signal::SIGBUS),
             StopReason::PcOutOfRange(_) => SingleThreadStopReason::Signal(Signal::SIGSEGV),
+            StopReason::DoubleFault(sp) => {
+                eprintln!("klausscc gdbserver: double fault: the kernel SP 0x{sp:08X} is not in kseg (translation on)");
+                SingleThreadStopReason::Signal(Signal::SIGSEGV)
+            }
             StopReason::InstructionCap => SingleThreadStopReason::Signal(Signal::SIGXCPU),
             StopReason::WaitForever(pc) => {
                 eprintln!("klausscc gdbserver: WAIT at 0x{pc:08X} can never be woken (no unmasked, vectored interrupt)");

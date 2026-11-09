@@ -1600,7 +1600,11 @@ fn rtl_reserved_encodings_trap() {
         (0x6C00_0010, "NOP with rs1 set", 675),
         (0xAC01_0000, "2-word HALT", 683),
         (0xAC05_0010, "DELAYV with rs1 set", 683),
-        (0x6C41_0000, "system with [25:22] set", 672),
+        (0x6C80_0000, "system with [25:22] = 2", 672),
+        (0x6C0D_0000, "system OP 13", 672),
+        (0x6C09_0010, "TLBWI with rs1 set", 675),
+        (0xAC0A_0000, "2-word TLBR", 683),
+        (0x6C0B_0100, "TLBP with rd set", 672),
         (0x7200_0000, "1-word LCDRST", 700),
         (0x7000_0100, "LCDCMDR with rd set", 700),
         (0xB000_0010, "LCDCMDV with rs1 set", 703),
@@ -2130,7 +2134,11 @@ fn stage1_reset_state_and_cpu_features() {
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     let s = cpu.system_regs();
     assert_eq!(s, SystemRegs::default(), "supervisor, EVEC 0, no reservation at reset");
-    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x9, "CPU_FEATURES: stage 1 and LR/SC");
+    assert_eq!(
+        cpu.mmio_read(0xF00F_0048),
+        0x20FF,
+        "CPU_FEATURES: stages 1-3 and LR/SC, 16 regions, 32 entries"
+    );
     assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
 }
 
@@ -2256,7 +2264,21 @@ fn stage1_user_mode_sr_allow_list() {
     assert_eq!(cpu.regs[3], 0b01, "STATUS: UM set, DI clear");
     assert_eq!(cpu.regs[5] - cpu.regs[4], CYCLES_PER_INSTRUCTION, "CYCLE counts");
     // The others are PRIVILEGED in user mode and run in supervisor mode.
-    for sr in [SR_EVEC, SR_ECAUSE, SR_EADDR, SR_USP, SR_SCRATCH0, 6] {
+    for sr in [
+        SR_EVEC,
+        SR_ECAUSE,
+        SR_EADDR,
+        SR_USP,
+        SR_SCRATCH0,
+        6,
+        0x10,
+        0x2F,
+        0x30,
+        0x31,
+        0x32,
+        0x33,
+        0x34,
+    ] {
         for word in [mfsr(3, sr), mtsr(sr, 1)] {
             let mut cpu = stage1_cpu(&[word], &[HALT], true);
             assert_eq!(cpu.step_one(true), None);
@@ -2271,7 +2293,9 @@ fn stage1_user_mode_sr_allow_list() {
     for word in [
         mfsr(3, 9),
         mtsr(9, 1),
-        mfsr(3, 0x10),
+        mfsr(3, 0x0F),
+        mtsr(0x35, 1),
+        mfsr(3, 0xFF),
         mtsr(SR_CYCLE, 1),
         mfsr(3, SR_TP) | 1,
         mtsr(SR_TP, 1) | 0x100,
@@ -2290,7 +2314,7 @@ fn stage1_supervisor_sr_reads_and_writes() {
     let mut cpu = stage1_cpu(&[HALT], &[HALT], false);
     for (sr, value, back) in [
         (SR_EVEC, 0x1237, 0x1234),
-        (SR_ECAUSE, 0x1FF, 0xFF),
+        (SR_ECAUSE, 0x3FF, 0x1FF),
         (SR_EADDR, 0x1_2345_6789, 0x2345_6789),
         (SR_USP, 0x1_0000_7000, 0x7000),
         (SR_SCRATCH0, u64::MAX, u64::MAX),
@@ -2817,4 +2841,1147 @@ fn stage1_misaligned_fetch_never_debug_halts() {
     cpu.pc = CODE_BASE + 2;
     assert!(matches!(cpu.step_one(false), Some(StopReason::InvalidOpcode(_))));
     assert_eq!(cpu.ecause, 0, "a park writes no ECAUSE");
+}
+
+// ---- MMU stage 2: the MPU (klaussCPU MMU_PLAN.md §10, mmu 12b3783) ---------
+
+/// `MPU_BASE0`; region n's base is `SR_MPU_BASE0 + 2n`, its limit the next.
+const SR_MPU_BASE0: u32 = 0x10;
+const SR_TLB_HI: u32 = 0x30;
+const SR_TLB_LO: u32 = 0x31;
+const SR_TLB_INDEX: u32 = 0x32;
+const SR_ASID: u32 = 0x33;
+const SR_TLBVEC: u32 = 0x34;
+/// `STATUS[8]` `MPU_EN` and `[9]` TE.
+const STATUS_MPU_EN: u64 = 1 << 8;
+const STATUS_TE: u64 = 1 << 9;
+/// `MPU_BASEn` permission and kind bits (EN is added by [`mpu_region`]).
+const MPU_R: u32 = 1 << 1;
+const MPU_W: u32 = 1 << 2;
+const MPU_X: u32 = 1 << 3;
+const MPU_GUARD: u32 = 1 << 4;
+/// `MEMGET64 D [B]`, `MEMSET64 D [B]`, `MEMGET32 D [B]`, `MEMGET16 D [B]`,
+/// `MEMGET8 D [B]`, `MEMSET8 D [B]`.
+const LOAD64: u32 = 0x5B10_0310;
+const STORE64: u32 = 0x5F10_0310;
+const LOAD32: u32 = 0x5A00_0310;
+const LOAD16: u32 = 0x5900_0310;
+const LOAD8: u32 = 0x5800_0310;
+const STORE8: u32 = 0x5C00_0310;
+/// `PUSH B`, `POP D`, `LEAVERET`, `JMPR B`.
+const PUSH_B: u32 = 0x6400_0010;
+const POP_D: u32 = 0x6480_0300;
+const LEAVERET: u32 = 0x6680_0000;
+const JMPR_B: u32 = 0x6080_0001;
+/// The TLB instructions.
+const TLBWI: u32 = 0x6C09_0000;
+const TLBR: u32 = 0x6C0A_0000;
+const TLBP: u32 = 0x6C0B_0000;
+const TLBINV: u32 = 0x6C0C_0000;
+
+/// Enable MPU region `n` over the granules of `first`..=`last` with `flags`.
+fn mpu_region(cpu: &mut Cpu, n: u32, first: u32, last: u32, flags: u32) {
+    assert!(cpu.sr_write(SR_MPU_BASE0 + 2 * n, u64::from(first | flags | 1)));
+    assert!(cpu.sr_write(SR_MPU_BASE0 + 2 * n + 1, u64::from(last)));
+}
+
+/// A [`stage1_cpu`] with the MPU on, region 15 letting user mode run the
+/// code (`0x000-0x3FF`, X) and region 14 use the top 256 bytes of the user
+/// stack (R/W).  Supervisor mode is default-allow.
+fn mpu_cpu(code: &[u32], handler: &[u32], user: bool) -> Cpu {
+    let mut cpu = stage1_cpu(code, handler, user);
+    mpu_region(&mut cpu, 15, 0, 0x3FF, MPU_X);
+    mpu_region(&mut cpu, 14, USER_SP - 0x100, USER_SP - 1, MPU_R | MPU_W);
+    assert!(cpu.sr_write(SR_STATUS, STATUS_MPU_EN));
+    cpu
+}
+
+/// Run one instruction with B = `b` and say whether it ran (else it
+/// faulted; the caller checks how).
+fn mpu_runs(cpu: &mut Cpu, b: u32) -> bool {
+    cpu.regs[1] = u64::from(b);
+    let pc = cpu.pc;
+    assert_eq!(cpu.step_one(true), None);
+    cpu.pc != HANDLER && cpu.pc != pc
+}
+
+/// [`assert_entered`], plus `ECAUSE[8]` GUARD = `guard` (in the field and
+/// in what `MFSR ECAUSE` reads).
+fn assert_mpu_fault(cpu: &Cpu, cause: Cause, eaddr: u32, frame_pc: u32, user: bool, guard: bool) {
+    assert_entered(cpu, cause, eaddr, frame_pc, user);
+    assert_eq!(cpu.ecause_guard, guard, "{cause:?} at 0x{eaddr:08X}: GUARD");
+    assert_eq!(cpu.sr_read(SR_ECAUSE), Some(u64::from(cause as u8) | if guard { 0x100 } else { 0 }));
+}
+
+#[test]
+fn mpu_sr_layout_and_status_bits() {
+    let mut cpu = stage1_cpu(&[HALT], &[HALT], false);
+    // A base keeps all 32 bits; a limit's [4:0] read 0.
+    assert!(cpu.sr_write(0x10, 0x1_2345_67FF));
+    assert!(cpu.sr_write(0x11, 0xFFFF_FFFF));
+    assert_eq!((cpu.sr_read(0x10), cpu.sr_read(0x11)), (Some(0x2345_67FF), Some(0xFFFF_FFE0)));
+    assert!(cpu.sr_write(0x2F, 0x3F));
+    assert_eq!(cpu.sr_read(0x2F), Some(0x20), "MPU_LIMIT15");
+    assert_eq!(cpu.mpu_regions()[15].limit, 0x20);
+    let r = cpu.mpu_regions()[0];
+    assert!(r.enabled() && r.guard());
+    assert_eq!((r.first(), r.last(), r.permissions().as_str()), (0x2345_67E0, 0xFFFF_FFFF, "rwx"));
+    // STATUS: MPU_EN and TE are read/write; UM and DI stay read-only.
+    assert!(cpu.sr_write(SR_STATUS, STATUS_MPU_EN | STATUS_TE | 3));
+    assert_eq!(cpu.sr_read(SR_STATUS), Some(STATUS_MPU_EN | STATUS_TE));
+    assert!(cpu.sr_write(SR_STATUS, 0));
+    assert_eq!(cpu.sr_read(SR_STATUS), Some(0));
+    // ECAUSE has GUARD in [8].
+    assert!(cpu.sr_write(SR_ECAUSE, 0x107));
+    assert_eq!(cpu.sr_read(SR_ECAUSE), Some(0x107));
+    assert_eq!(cpu.system_regs().ecause, 0x107);
+    // Reset (every program load): every region off, MPU_EN and TE clear.
+    let cpu = cpu_with(&image_from_words(&[HALT]));
+    assert!(cpu.mpu_regions().iter().all(|r| *r == MpuRegion::default()));
+    assert_eq!(cpu.sr_read(SR_STATUS), Some(0));
+}
+
+#[test]
+fn mpu_guard_denies_in_either_mode() {
+    for user in [false, true] {
+        for (word, cause) in [(LOAD64, Cause::AccessLoad), (STORE64, Cause::AccessStore)] {
+            let mut cpu = mpu_cpu(&[word, HALT], &[HALT], user);
+            // A guard granule inside a region user mode may otherwise use;
+            // the guard's own R/W bits are ignored.
+            mpu_region(&mut cpu, 0, 0x2000, 0x2000, MPU_GUARD | MPU_R | MPU_W);
+            mpu_region(&mut cpu, 1, 0x1000, 0x3FFF, MPU_R | MPU_W);
+            let regs = cpu.regs;
+            assert!(!mpu_runs(&mut cpu, 0x2008), "{word:08x} user {user}");
+            assert_mpu_fault(&cpu, cause, 0x2008, CODE_BASE, user, true);
+            assert_eq!(cpu.regs[3], regs[3], "nothing loaded");
+            // The next granule is not guarded.
+            let mut cpu = mpu_cpu(&[word, HALT], &[HALT], user);
+            mpu_region(&mut cpu, 0, 0x2000, 0x2000, MPU_GUARD);
+            mpu_region(&mut cpu, 1, 0x1000, 0x3FFF, MPU_R | MPU_W);
+            assert!(mpu_runs(&mut cpu, 0x2020), "{word:08x} user {user}");
+        }
+    }
+    // A later fault that is not a guard denial clears GUARD.
+    let mut cpu = mpu_cpu(&[LOAD64, HALT], &[IRET], true);
+    mpu_region(&mut cpu, 0, 0x2000, 0x2000, MPU_GUARD);
+    assert!(!mpu_runs(&mut cpu, 0x2000));
+    assert!(cpu.ecause_guard);
+    assert_eq!(cpu.step_one(true), None); // IRET: retry, now with B elsewhere
+    assert!(!mpu_runs(&mut cpu, 0x3000));
+    assert_eq!((cpu.ecause, cpu.eaddr, cpu.ecause_guard), (Cause::AccessLoad as u8, 0x3000, false));
+}
+
+#[test]
+fn mpu_user_mode_is_a_union_of_regions_and_default_deny() {
+    // Region 0 gives R over 0x2000-0x203F, region 1 W over 0x2020-0x205F.
+    // (word, B, runs)
+    for (word, b, runs) in [
+        (LOAD64, 0x2000, true),
+        (STORE64, 0x2000, false), // R only
+        (STORE64, 0x2020, true),  // W from region 1
+        (LOAD64, 0x2020, true),   // R from region 0
+        (LOAD64, 0x2040, false),  // W only
+        (STORE64, 0x2058, true),
+        (LOAD8, 0x3000, false), // no region: default deny
+        (STORE8, 0x3000, false),
+    ] {
+        let mut cpu = mpu_cpu(&[word, HALT], &[HALT], true);
+        mpu_region(&mut cpu, 0, 0x2000, 0x2020, MPU_R);
+        mpu_region(&mut cpu, 1, 0x2020, 0x2040, MPU_W);
+        assert_eq!(mpu_runs(&mut cpu, b), runs, "{word:08x} at 0x{b:X}");
+        if !runs {
+            let cause = if word == LOAD64 || word == LOAD8 {
+                Cause::AccessLoad
+            } else {
+                Cause::AccessStore
+            };
+            assert_mpu_fault(&cpu, cause, b, CODE_BASE, true, false);
+        }
+        // Supervisor mode is default-allow.
+        let mut cpu = mpu_cpu(&[word, HALT], &[HALT], false);
+        mpu_region(&mut cpu, 0, 0x2000, 0x2020, MPU_R);
+        assert!(mpu_runs(&mut cpu, b), "{word:08x} at 0x{b:X} in supervisor mode");
+    }
+}
+
+#[test]
+fn mpu_r_w_x_are_separate() {
+    for perm in [MPU_R, MPU_W, MPU_X] {
+        // Data: region 0 over 0x2000-0x201F with one permission.
+        for (word, needs) in [(LOAD64, MPU_R), (STORE64, MPU_W)] {
+            let mut cpu = mpu_cpu(&[word, HALT], &[HALT], true);
+            mpu_region(&mut cpu, 0, 0x2000, 0x2000, perm);
+            assert_eq!(mpu_runs(&mut cpu, 0x2000), perm == needs, "{word:08x} with {perm:#x}");
+        }
+        // Fetch: the code region has just this permission.
+        let mut cpu = mpu_cpu(&[NOP, HALT], &[HALT], true);
+        mpu_region(&mut cpu, 15, 0, 0x3FF, perm);
+        assert_eq!(cpu.step_one(true), None);
+        if perm == MPU_X {
+            assert_eq!(cpu.pc, CODE_BASE + 4);
+        } else {
+            assert_mpu_fault(&cpu, Cause::AccessFetch, CODE_BASE, CODE_BASE, true, false);
+        }
+    }
+    // Stack instructions are checked by direction: a push needs W, a pop R.
+    for (code, b_sp, cause) in [
+        (vec![PUSH_B, HALT], USER_SP - 0x100, Cause::AccessStore),            // writes 0x7EF8
+        (vec![0xA200_0000, 0x40, HALT], USER_SP - 0x100, Cause::AccessStore), // CALL 0x40
+        (vec![POP_D, HALT], USER_SP - 0x200, Cause::AccessLoad),
+    ] {
+        let mut cpu = mpu_cpu(&code, &[HALT], true);
+        cpu.sp = b_sp;
+        let eaddr = if cause == Cause::AccessStore { b_sp - 8 } else { b_sp };
+        assert_eq!(cpu.step_one(true), None);
+        assert_eq!((cpu.pc, cpu.ecause, cpu.eaddr), (HANDLER, cause as u8, eaddr), "{:08x}", code[0]);
+        assert_eq!(cpu.sp_alt, b_sp, "the user SP is unchanged");
+    }
+}
+
+#[test]
+fn mpu_two_access_instructions_check_both_doublewords_first() {
+    // User R over 0x2000-0x203F only.  MEMGET32 at 0x203E needs 0x2038 and
+    // 0x2040: the second is denied, EADDR its start, nothing loaded.
+    let mut cpu = mpu_cpu(&[LOAD32, HALT], &[HALT], true);
+    mpu_region(&mut cpu, 0, 0x2000, 0x2020, MPU_R);
+    cpu.regs[3] = 0x5555;
+    assert!(!mpu_runs(&mut cpu, 0x203E));
+    assert_mpu_fault(&cpu, Cause::AccessLoad, 0x2040, CODE_BASE, true, false);
+    assert_eq!(cpu.regs[3], 0x5555);
+    // Within one doubleword it runs.
+    let mut cpu = mpu_cpu(&[LOAD32, HALT], &[HALT], true);
+    mpu_region(&mut cpu, 0, 0x2000, 0x2020, MPU_R);
+    assert!(cpu.debug_write(0x203C, &0x1234_5678_u32.to_le_bytes()));
+    assert!(mpu_runs(&mut cpu, 0x203C));
+    assert_eq!(cpu.regs[3], 0x1234_5678);
+    // LEAVERET: R15 = 0x2038 reads 0x2038 and 0x2040; the second is denied.
+    for (fp, runs) in [(0x2038_u32, false), (0x2030, true)] {
+        let mut cpu = mpu_cpu(&[LEAVERET, HALT], &[HALT], true);
+        mpu_region(&mut cpu, 0, 0x2000, 0x2020, MPU_R);
+        assert!(cpu.debug_write(0x2038, &u64::from(CODE_BASE + 4).to_le_bytes()));
+        cpu.regs[15] = u64::from(fp);
+        let sp = cpu.sp;
+        assert_eq!(cpu.step_one(true), None);
+        if runs {
+            assert_eq!((cpu.pc, cpu.sp), (CODE_BASE + 4, fp + 16));
+        } else {
+            assert_mpu_fault(&cpu, Cause::AccessLoad, 0x2040, CODE_BASE, true, false);
+            assert_eq!((cpu.regs[15], cpu.sp_alt), (u64::from(fp), sp), "R15 and SP unchanged");
+        }
+    }
+    // A guard on the second doubleword denies it in supervisor mode too.
+    let mut cpu = mpu_cpu(&[LOAD32, HALT], &[HALT], false);
+    mpu_region(&mut cpu, 0, 0x2040, 0x2040, MPU_GUARD);
+    assert!(!mpu_runs(&mut cpu, 0x203E));
+    assert_mpu_fault(&cpu, Cause::AccessLoad, 0x2040, CODE_BASE, false, true);
+}
+
+#[test]
+fn mpu_fetch_checks_every_word_of_an_instruction() {
+    // SETR A 0x1234 (two words) at 0x3C, its second word in the next
+    // granule, 0x40.  User mode with X over 0x20-0x3F only: ACCESS_FETCH at
+    // the second word, the frame PC the instruction.
+    let mut code = vec![NOP; 7];
+    code.extend(setr(0, 0x1234));
+    code.push(HALT);
+    let mut cpu = mpu_cpu(&code, &[HALT], true);
+    mpu_region(&mut cpu, 15, 0x20, 0x20, MPU_X);
+    cpu.pc = 0x3C;
+    assert_eq!(cpu.step_one(true), None);
+    assert_mpu_fault(&cpu, Cause::AccessFetch, 0x40, 0x3C, true, false);
+    assert_eq!(cpu.regs[0], 0, "not executed");
+    // With X over both granules it runs.
+    let mut cpu = mpu_cpu(&code, &[HALT], true);
+    cpu.pc = 0x3C;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.pc, cpu.regs[0]), (0x44, 0x1234));
+    // A guard on the second word stops supervisor mode as well.
+    let mut cpu = mpu_cpu(&code, &[HALT], false);
+    mpu_region(&mut cpu, 0, 0x40, 0x40, MPU_GUARD);
+    cpu.pc = 0x3C;
+    assert_eq!(cpu.step_one(true), None);
+    assert_mpu_fault(&cpu, Cause::AccessFetch, 0x40, 0x3C, false, true);
+}
+
+#[test]
+fn mpu_limit_is_the_inclusive_last_granule() {
+    // Base 0x2000, limit written 0x203F: granules 0x2000 and 0x2020.
+    for (b, runs) in [(0x1FFF, false), (0x2000, true), (0x203F, true), (0x2040, false)] {
+        let mut cpu = mpu_cpu(&[LOAD8, HALT], &[HALT], true);
+        mpu_region(&mut cpu, 3, 0x2000, 0x203F, MPU_R);
+        assert_eq!(cpu.sr_read(SR_MPU_BASE0 + 7), Some(0x2020));
+        assert_eq!(mpu_runs(&mut cpu, b), runs, "0x{b:X}");
+    }
+    // A disabled region covers nothing, and a limit below the base neither.
+    let mut cpu = mpu_cpu(&[LOAD8, HALT], &[HALT], true);
+    mpu_region(&mut cpu, 3, 0x2000, 0x2000, MPU_R);
+    assert!(cpu.sr_write(SR_MPU_BASE0 + 6, u64::from(0x2000 | MPU_R)));
+    assert!(!mpu_runs(&mut cpu, 0x2000));
+    let mut cpu = mpu_cpu(&[LOAD8, HALT], &[HALT], true);
+    mpu_region(&mut cpu, 3, 0x2020, 0x2000, MPU_R);
+    assert!(!mpu_runs(&mut cpu, 0x2000));
+}
+
+#[test]
+fn mpu_off_checks_nothing() {
+    // MPU_EN = 0: a guard and user default deny do not apply.
+    for user in [false, true] {
+        let mut cpu = mpu_cpu(&[LOAD64, HALT], &[HALT], user);
+        mpu_region(&mut cpu, 0, 0x2000, 0x2000, MPU_GUARD);
+        assert!(cpu.sr_write(SR_STATUS, 0));
+        assert!(mpu_runs(&mut cpu, 0x2000));
+        let mut cpu = mpu_cpu(&[LOAD64, HALT], &[HALT], user);
+        assert!(cpu.sr_write(SR_STATUS, 0));
+        assert!(mpu_runs(&mut cpu, 0x3000));
+    }
+    // With TE = 1 the MPU is ignored too (the kseg alias of a guard).
+    let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
+    mpu_region(&mut cpu, 0, 0x2000, 0x2000, MPU_GUARD);
+    cpu.mpu_en = true;
+    cpu.regs[1] = 0x8000_2000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.pc, KSEG + CODE_BASE + 4);
+}
+
+#[test]
+fn mpu_keeps_the_stage1_user_mmio_rule_and_guards_mmio_in_supervisor_mode() {
+    // A user region over MMIO does not open it: ACCESS_LOAD, not a guard.
+    let mut cpu = mpu_cpu(&[LOAD64, HALT], &[HALT], true);
+    mpu_region(&mut cpu, 0, 0xF000_0000, 0xFFFF_FFE0, MPU_R | MPU_W);
+    cpu.feed_uart_rx(b"x");
+    assert!(!mpu_runs(&mut cpu, 0xF001_0008));
+    assert_mpu_fault(&cpu, Cause::AccessLoad, 0xF001_0008, CODE_BASE, true, false);
+    assert_eq!(cpu.uart_rx.len(), 1);
+    // ... and a user guard over MMIO is still the MMIO fault, not GUARD.
+    let mut cpu = mpu_cpu(&[LOAD64, HALT], &[HALT], true);
+    mpu_region(&mut cpu, 0, 0xF000_0000, 0xFFFF_FFE0, MPU_GUARD);
+    assert!(!mpu_runs(&mut cpu, 0xF001_0008));
+    assert_mpu_fault(&cpu, Cause::AccessLoad, 0xF001_0008, CODE_BASE, true, false);
+    // A supervisor guard over a device denies it; the device is not touched.
+    let mut cpu = mpu_cpu(&[LOAD64, HALT], &[HALT], false);
+    mpu_region(&mut cpu, 0, 0xF001_0000, 0xF001_0000, MPU_GUARD);
+    cpu.feed_uart_rx(b"x");
+    assert!(!mpu_runs(&mut cpu, 0xF001_0008));
+    assert_mpu_fault(&cpu, Cause::AccessLoad, 0xF001_0008, CODE_BASE, false, true);
+    assert_eq!(cpu.uart_rx.len(), 1);
+    // Without the guard supervisor mode reads it.
+    let mut cpu = mpu_cpu(&[LOAD64, HALT], &[HALT], false);
+    cpu.feed_uart_rx(b"x");
+    assert!(mpu_runs(&mut cpu, 0xF001_0008));
+    assert_eq!(cpu.regs[3], u64::from(b'x'));
+}
+
+#[test]
+fn mpu_does_not_check_the_entry_frame_push() {
+    // A supervisor PUSH into a guard faults with SP unchanged; the entry
+    // then pushes its frame at SP - 8, inside the guard, unchecked (§10.2).
+    // A vector that pushes faults again, one frame lower (the descent the
+    // spec's guard-safe vector rule is about).
+    let mut cpu = mpu_cpu(&[PUSH_B, HALT], &[PUSH_B], false);
+    mpu_region(&mut cpu, 0, 0x2000, 0x2000, MPU_GUARD);
+    cpu.sp = 0x2018;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(
+        (cpu.pc, cpu.ecause, cpu.eaddr, cpu.ecause_guard),
+        (HANDLER, Cause::AccessStore as u8, 0x2010, true)
+    );
+    assert_eq!(cpu.sp, 0x2010, "the frame went into the guard");
+    assert_eq!(cpu.peek64(0x2010) as u32, CODE_BASE);
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.pc, cpu.eaddr, cpu.sp), (HANDLER, 0x2008, 0x2008));
+    assert_eq!(cpu.peek64(0x2008) as u32, HANDLER);
+}
+
+// ---- MMU stage 3: the TLB (klaussCPU MMU_PLAN.md §11, mmu 12b3783) ---------
+
+/// kseg: PA = VA - `KSEG`.
+const KSEG: u32 = 0x8000_0000;
+/// The exception vector and kernel stack top under TE = 1: the kseg
+/// aliases of [`HANDLER`] and [`KERNEL_SP`].
+const K_HANDLER: u32 = KSEG + HANDLER;
+const K_SP: u32 = KSEG + KERNEL_SP;
+/// User code under TE = 1: page 1, mapped (global, R/X) to frame 0, the image.
+const U_CODE: u32 = 0x0001_0000;
+/// The user stack top under TE = 1: page 2 is mapped (global, R/W) to frame 1.
+const U_SP: u32 = 0x0003_0000;
+/// A user data page, mapped by the tests that use it, and its frame.
+const U_DATA: u32 = 0x0005_0000;
+const DATA_FRAME: u32 = 0x3_0000;
+/// TLB entry bits.
+const TLB_V: u32 = 1;
+const TLB_R: u32 = 1 << 1;
+const TLB_W: u32 = 1 << 2;
+const TLB_X: u32 = 1 << 3;
+
+/// Set TLB entry `i` to map the page of `va` to the frame of `pa` with
+/// `bits`, for address space `asid` or (`None`) every one.
+fn tlb_map(cpu: &mut Cpu, i: usize, va: u32, pa: u32, bits: u32, asid: Option<u8>) {
+    cpu.tlb[i] = TlbEntry {
+        hi: (va & 0xFFFF_0000) | asid.map_or(0x100, u32::from),
+        lo: (pa & 0x07FF_0000) | bits,
+    };
+}
+
+/// A [`stage1_cpu`] with translation on: `EVEC` and the kernel stack in
+/// kseg, user code at [`U_CODE`] and the user stack below [`U_SP`] (TLB
+/// entries 0 and 1), supervisor code at the kseg alias of the code base.
+fn te_cpu(code: &[u32], handler: &[u32], user: bool) -> Cpu {
+    let mut cpu = stage1_cpu(code, handler, user);
+    cpu.te = true;
+    cpu.evec = K_HANDLER;
+    tlb_map(&mut cpu, 0, U_CODE, 0, TLB_V | TLB_R | TLB_X, None);
+    tlb_map(&mut cpu, 1, U_SP - 1, 0x1_0000, TLB_V | TLB_R | TLB_W, None);
+    if user {
+        (cpu.pc, cpu.sp, cpu.sp_alt) = (U_CODE + CODE_BASE, U_SP, K_SP);
+    } else {
+        (cpu.pc, cpu.sp, cpu.sp_alt) = (KSEG + CODE_BASE, K_SP, U_SP);
+    }
+    cpu
+}
+
+/// Assert `cpu` (from [`te_cpu`]) has just entered `vector` for `cause`
+/// with `eaddr` from the instruction at `frame_pc`: the frame is on the
+/// kernel stack (kseg), DI set, supervisor mode.
+fn assert_entered_te(cpu: &Cpu, vector: u32, cause: Cause, eaddr: u32, frame_pc: u32, from_user: bool) {
+    let what = format!("{cause:?} at 0x{eaddr:08X}");
+    assert_eq!(cpu.stop, None, "{what}");
+    assert_eq!(
+        (cpu.pc, cpu.ecause, cpu.eaddr),
+        (vector, cause as u8, eaddr),
+        "{what}: vector, ECAUSE, EADDR"
+    );
+    assert!(!cpu.um && cpu.irq_disabled, "{what}");
+    assert_eq!(cpu.sp, K_SP - 8, "{what}: the frame is on the kernel stack");
+    assert_eq!(cpu.sp_alt, U_SP, "{what}: SP_ALT is the user SP");
+    // The frame push is untranslated: PA = SP - 8 - 0x8000_0000.
+    let frame = cpu.peek64(KERNEL_SP - 8);
+    assert_eq!((frame as u32, (frame >> 44) & 1), (frame_pc, u64::from(from_user)), "{what}: frame");
+}
+
+/// Step once with B = `b` and the CPU as set up.
+fn step_with_b(cpu: &mut Cpu, b: u32) {
+    cpu.regs[1] = u64::from(b);
+    assert_eq!(cpu.step_one(true), None);
+}
+
+#[test]
+fn tlb_reset_state_and_srs() {
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    // Reset (and so every program load): TE, ASID and TLBVEC clear and
+    // every entry invalid.
+    let s = cpu.system_regs();
+    assert!(!s.te && !s.mpu_en);
+    assert_eq!((s.asid, s.tlbvec, s.tlb_hi, s.tlb_lo, s.tlb_index), (0, 0, 0, 0, 0));
+    assert!(cpu.tlb_entries().iter().all(|e| !e.valid()));
+    // The SRs keep only their bits.
+    for (sr, value, back) in [
+        (SR_TLB_HI, 0xFFFF_FFFF_u64, 0xFFFF_01FF_u64),
+        (SR_TLB_LO, 0xFFFF_FFFF, 0x07FF_000F),
+        (SR_TLB_INDEX, 0xFFFF_FFFF, 0x8000_001F),
+        (SR_ASID, 0x1FF, 0xFF),
+        (SR_TLBVEC, 0x8000_0503, 0x8000_0503),
+    ] {
+        assert!(cpu.sr_write(sr, value), "SR {sr:#x}");
+        assert_eq!(cpu.sr_read(sr), Some(back), "SR {sr:#x}");
+    }
+}
+
+#[test]
+fn tlb_kseg_is_direct_and_the_hole_faults() {
+    // Supervisor code runs from kseg; kseg data is PA = VA - 0x8000_0000.
+    let code = [LOAD64, 0x5F10_0420, HALT]; // D = [B]; [C] = E
+    let mut cpu = te_cpu(&code, &[HALT], false);
+    assert!(cpu.debug_write(0x2000, &0x1234_u64.to_le_bytes()));
+    cpu.regs[2] = 0x8000_2008;
+    cpu.regs[4] = 0x5678;
+    step_with_b(&mut cpu, 0x8000_2000);
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.regs[3], cpu.peek64(0x2008)), (0x1234, 0x5678));
+    assert_eq!(cpu.pc, KSEG + CODE_BASE + 8);
+    // 0x8800_0000-0xBFFF_FFFF has no DDR: ACCESS_*, and TLB_HI is not loaded.
+    for (word, b, cause) in [
+        (LOAD64, 0x8800_0000, Cause::AccessLoad),
+        (LOAD8, 0xBFFF_FFFF, Cause::AccessLoad),
+        (STORE64, 0x9000_0000, Cause::AccessStore),
+    ] {
+        let mut cpu = te_cpu(&[word, HALT], &[HALT], false);
+        cpu.tlb_hi = 0xAAAA_0000;
+        step_with_b(&mut cpu, b);
+        assert_entered_te(&cpu, K_HANDLER, cause, b, KSEG + CODE_BASE, false);
+        assert_eq!(cpu.tlb_hi, 0xAAAA_0000, "a segment fault does not load TLB_HI");
+    }
+    // A fetch from the hole.
+    let mut cpu = te_cpu(&[HALT], &[HALT], false);
+    cpu.pc = 0x9000_0000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::AccessFetch, 0x9000_0000, 0x9000_0000, false);
+    // MMIO is identity in supervisor mode.
+    let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
+    step_with_b(&mut cpu, 0xF00F_0048);
+    assert_eq!(cpu.regs[3], 0x20FF, "CPU_FEATURES");
+}
+
+#[test]
+fn tlb_kmap_and_everything_above_useg_are_supervisor_only() {
+    // kmap at 0xC000_0000 (global entry to frame 2) works in supervisor mode.
+    let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
+    tlb_map(&mut cpu, 2, 0xC000_0000, 0x2_0000, TLB_V | TLB_R, None);
+    assert!(cpu.debug_write(0x2_0010, &0x77_u64.to_le_bytes()));
+    step_with_b(&mut cpu, 0xC000_0010);
+    assert_eq!(cpu.regs[3], 0x77);
+    // Supervisor mode also reaches useg through the TLB.
+    let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
+    tlb_map(&mut cpu, 2, U_DATA, DATA_FRAME, TLB_V | TLB_R, Some(0));
+    assert!(cpu.debug_write(DATA_FRAME + 8, &0x99_u64.to_le_bytes()));
+    step_with_b(&mut cpu, U_DATA + 8);
+    assert_eq!(cpu.regs[3], 0x99);
+    // In user mode any address at or above 0x8000_0000 is ACCESS_*, even
+    // one a TLB entry maps; TLB_HI is not loaded.
+    for (word, b, cause) in [
+        (LOAD64, 0xC000_0010, Cause::AccessLoad),
+        (LOAD64, 0x8000_2000, Cause::AccessLoad),
+        (STORE64, 0x8000_2000, Cause::AccessStore),
+        (LOAD64, 0x8800_0000, Cause::AccessLoad),
+        (LOAD64, 0xF001_0008, Cause::AccessLoad),
+    ] {
+        let mut cpu = te_cpu(&[word, HALT], &[HALT], true);
+        tlb_map(&mut cpu, 2, 0xC000_0000, 0x2_0000, TLB_V | TLB_R | TLB_W, None);
+        cpu.tlb_hi = 0xAAAA_0000;
+        step_with_b(&mut cpu, b);
+        assert_entered_te(&cpu, K_HANDLER, cause, b, U_CODE + CODE_BASE, true);
+        assert_eq!(cpu.tlb_hi, 0xAAAA_0000);
+    }
+    // A user fetch from kseg.
+    let mut cpu = te_cpu(&[HALT], &[HALT], true);
+    cpu.pc = KSEG + CODE_BASE;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::AccessFetch, KSEG + CODE_BASE, KSEG + CODE_BASE, true);
+}
+
+#[test]
+fn tlb_misses_raise_tlb_miss_with_eaddr_and_load_tlb_hi() {
+    // User mode, ASID 7: a load, a store and a jump to an unmapped page.
+    for (word, b, cause) in [
+        (LOAD64, U_DATA + 0x1234, Cause::TlbMissLoad),
+        (STORE64, U_DATA + 0x1236, Cause::TlbMissStore),
+        (LOAD16, U_DATA + 2, Cause::TlbMissLoad),
+    ] {
+        let mut cpu = te_cpu(&[word, HALT], &[HALT], true);
+        cpu.asid = 7;
+        cpu.tlb_hi = 0x100;
+        step_with_b(&mut cpu, b);
+        assert_entered_te(&cpu, K_HANDLER, cause, b, U_CODE + CODE_BASE, true);
+        assert_eq!(cpu.tlb_hi, U_DATA | 7, "TLB_HI = {{VPN, G = 0, ASID}}");
+        assert_eq!(cpu.sr_read(SR_ECAUSE), Some(u64::from(cause as u8)));
+    }
+    // JMPR to an unmapped page: the jump retires; the fetch there misses,
+    // with the frame PC and EADDR the target.
+    let mut cpu = te_cpu(&[JMPR_B, HALT], &[HALT], true);
+    cpu.asid = 7;
+    step_with_b(&mut cpu, 0x0006_0040);
+    assert_eq!(cpu.pc, 0x0006_0040);
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissFetch, 0x0006_0040, 0x0006_0040, true);
+    assert_eq!(cpu.tlb_hi, 0x0006_0007);
+    // An instruction whose second word is on an unmapped page: page 7 maps
+    // frame 0, so SETR A at 0x0007_FFFC has its word 0 at PA 0xFFFC.
+    let mut cpu = te_cpu(&[HALT], &[HALT], true);
+    tlb_map(&mut cpu, 2, 0x0007_0000, 0, TLB_V | TLB_X, None);
+    assert!(cpu.debug_write(0xFFFC, &setr(0, 5)[0].to_le_bytes()));
+    cpu.pc = 0x0007_FFFC;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissFetch, 0x0008_0000, 0x0007_FFFC, true);
+    assert_eq!(cpu.regs[0], 0);
+}
+
+#[test]
+fn tlb_miss_vectors_to_tlbvec_when_set() {
+    // (TLBVEC, a miss or a permission fault, where it goes)
+    for (tlbvec, miss, vector) in [
+        (K_HANDLER + 0x40, true, K_HANDLER + 0x40),
+        (0, true, K_HANDLER),
+        (K_HANDLER + 0x40, false, K_HANDLER), // ACCESS_* always EVEC
+    ] {
+        let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], true);
+        cpu.tlbvec = tlbvec;
+        if !miss {
+            tlb_map(&mut cpu, 2, U_DATA, DATA_FRAME, TLB_V | TLB_W, None); // no R
+        }
+        step_with_b(&mut cpu, U_DATA);
+        let cause = if miss { Cause::TlbMissLoad } else { Cause::AccessLoad };
+        assert_entered_te(&cpu, vector, cause, U_DATA, U_CODE + CODE_BASE, true);
+        assert_eq!(cpu.tlb_hi, U_DATA, "loaded on both");
+    }
+    // EVEC = 0 parks, TLBVEC or not, and writes no ECAUSE/EADDR/TLB_HI.
+    let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], true);
+    cpu.evec = 0;
+    cpu.tlbvec = K_HANDLER;
+    cpu.tlb_hi = 0x1234_0000;
+    cpu.regs[1] = u64::from(U_DATA);
+    assert_eq!(cpu.step_one(true), Some(StopReason::InvalidOpcode(LOAD64)));
+    assert_eq!((cpu.ecause, cpu.eaddr, cpu.tlb_hi, cpu.pc), (0, 0, 0x1234_0000, U_CODE + CODE_BASE));
+    assert_eq!(cpu.parked_exception(), Some((Cause::TlbMissLoad, U_DATA)));
+}
+
+#[test]
+fn tlb_permission_faults_and_the_dirty_bit_flow() {
+    // (entry bits, the instruction, its cause): a matching entry without
+    // the permission is ACCESS_*, which loads TLB_HI too.
+    for (bits, word, cause) in [
+        (TLB_V | TLB_W | TLB_X, LOAD64, Cause::AccessLoad),
+        (TLB_V | TLB_R | TLB_X, STORE64, Cause::AccessStore),
+        (TLB_R | TLB_W, LOAD64, Cause::TlbMissLoad), // V = 0 never matches
+    ] {
+        let mut cpu = te_cpu(&[word, HALT], &[HALT], true);
+        cpu.asid = 3;
+        tlb_map(&mut cpu, 5, U_DATA, DATA_FRAME, bits, Some(3));
+        step_with_b(&mut cpu, U_DATA + 0x10);
+        assert_entered_te(&cpu, K_HANDLER, cause, U_DATA + 0x10, U_CODE + CODE_BASE, true);
+        assert_eq!((cpu.tlb_hi, cpu.ecause_guard), (U_DATA | 3, false));
+    }
+    // A page without X cannot be fetched from.
+    let mut cpu = te_cpu(&[HALT], &[HALT], true);
+    tlb_map(&mut cpu, 0, U_CODE, 0, TLB_V | TLB_R, None);
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::AccessFetch, U_CODE + CODE_BASE, U_CODE + CODE_BASE, true);
+    // Dirty tracking: the page starts W = 0; the first store faults; the
+    // handler finds the entry with TLBP (TLB_HI was loaded), sets W with
+    // TLBR / TLBWI and returns; the store runs again and lands.
+    let handler = [
+        TLBP,
+        TLBR,
+        mfsr(12, SR_TLB_LO), // M = TLB_LO
+        0x8940_0CC0,         // ORV M 4 (W)
+        4,
+        mtsr(SR_TLB_LO, 12),
+        TLBWI,
+        IRET,
+    ];
+    let mut cpu = te_cpu(&[STORE64, HALT], &handler, true);
+    cpu.asid = 3;
+    tlb_map(&mut cpu, 5, U_DATA, DATA_FRAME, TLB_V | TLB_R, Some(3));
+    tlb_map(&mut cpu, 6, 0x0009_0000, 0x4_0000, TLB_V | TLB_R, Some(3));
+    cpu.regs[3] = 0xD1D1;
+    step_with_b(&mut cpu, U_DATA + 0x18);
+    assert_entered_te(&cpu, K_HANDLER, Cause::AccessStore, U_DATA + 0x18, U_CODE + CODE_BASE, true);
+    for _ in 0..7 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert!(cpu.um);
+    assert_eq!(cpu.pc, U_CODE + CODE_BASE, "back at the store");
+    assert_eq!(cpu.tlb_index, 5, "TLBP found entry 5");
+    assert_eq!(cpu.tlb[5].lo, DATA_FRAME | TLB_V | TLB_R | TLB_W);
+    assert_eq!(cpu.tlb[6].lo, 0x4_0000 | TLB_V | TLB_R, "the other entry is untouched");
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.pc, U_CODE + CODE_BASE + 4, "the retried store ran");
+    assert_eq!(cpu.peek64(DATA_FRAME + 0x18), 0xD1D1);
+}
+
+#[test]
+fn tlb_global_and_asid_matching_and_asid_changes() {
+    // Two non-global entries for the same page in ASIDs 1 and 2 (frames 3
+    // and 4) and a global one for another page (frame 5).
+    let code = [LOAD64, mtsr(SR_ASID, 2), 0x5B10_0410, 0x5B10_0520, HALT]; // D = [B]; ASID = C; E = [B]; F = [C]
+    let mut cpu = te_cpu(&code, &[HALT], false);
+    tlb_map(&mut cpu, 3, U_DATA, 0x3_0000, TLB_V | TLB_R, Some(1));
+    tlb_map(&mut cpu, 4, U_DATA, 0x4_0000, TLB_V | TLB_R, Some(2));
+    tlb_map(&mut cpu, 5, 0x0006_0000, 0x5_0000, TLB_V | TLB_R, None);
+    for (pa, v) in [(0x3_0000_u32, 0x33_u64), (0x4_0000, 0x44), (0x5_0000, 0x55)] {
+        assert!(cpu.debug_write(pa, &v.to_le_bytes()));
+    }
+    cpu.asid = 1;
+    cpu.regs[2] = 2;
+    cpu.reservation = Some(0x10);
+    step_with_b(&mut cpu, U_DATA);
+    assert_eq!(cpu.regs[3], 0x33, "ASID 1");
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.asid, cpu.reservation), (2, None), "MTSR ASID clears the reservation");
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.regs[4], 0x44, "ASID 2: the other entry");
+    cpu.regs[2] = 0x0006_0000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.regs[5], 0x55, "a global entry in ASID 2");
+    // In ASID 9 the page misses, and the global page still hits.
+    for (b, hits) in [(U_DATA, false), (0x0006_0000, true)] {
+        let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], true);
+        tlb_map(&mut cpu, 3, U_DATA, 0x3_0000, TLB_V | TLB_R, Some(1));
+        tlb_map(&mut cpu, 5, 0x0006_0000, 0x5_0000, TLB_V | TLB_R, None);
+        cpu.asid = 9;
+        step_with_b(&mut cpu, b);
+        assert_eq!(cpu.pc != K_HANDLER, hits, "0x{b:08X}");
+        if !hits {
+            assert_eq!((cpu.ecause, cpu.tlb_hi), (Cause::TlbMissLoad as u8, U_DATA | 9));
+        }
+    }
+}
+
+#[test]
+fn tlbwi_tlbr_tlbp_tlbinv() {
+    // Supervisor mode, TE off (the TLB instructions work either way).
+    let mut cpu = stage1_cpu(&[TLBWI, TLBR, TLBP, TLBP, TLBINV, TLBP, HALT], &[HALT], false);
+    assert!(cpu.sr_write(SR_TLB_HI, 0x1234_0105)); // VPN 0x1234, G, ASID 5
+    assert!(cpu.sr_write(SR_TLB_LO, 0xFFFF_FFFF)); // PFN 0x7FF, X W R V
+    assert!(cpu.sr_write(SR_TLB_INDEX, 0x8000_0007)); // P set: TLBWI uses [4:0]
+    assert_eq!(cpu.step_one(true), None); // TLBWI
+    assert_eq!(
+        cpu.tlb[7],
+        TlbEntry {
+            hi: 0x1234_0105,
+            lo: 0x07FF_000F
+        }
+    );
+    let e = cpu.tlb_entries()[7];
+    assert!(e.valid() && e.global());
+    assert_eq!((e.vpn(), e.asid(), e.pfn(), e.permissions().as_str()), (0x1234, 5, 0x7FF, "rwx"));
+    cpu.tlb_hi = 0;
+    cpu.tlb_lo = 0;
+    assert_eq!(cpu.step_one(true), None); // TLBR
+    assert_eq!((cpu.tlb_hi, cpu.tlb_lo), (0x1234_0105, 0x07FF_000F));
+    // TLBP hit (a global entry, another ASID): TLB_INDEX = index, P clear.
+    cpu.tlb_hi = 0x1234_0009;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.tlb_index, 7);
+    // TLBP miss: P set, the index bits unchanged.
+    cpu.tlb_hi = 0x9999_0005;
+    cpu.tlb_index = 3;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.tlb_index, 0x8000_0003);
+    // TLBINV: every V cleared, the rest kept; TLBP then misses.
+    cpu.tlb[0] = TlbEntry { hi: 0x1, lo: 0x3_000F };
+    assert_eq!(cpu.step_one(true), None);
+    assert!(cpu.tlb_entries().iter().all(|e| !e.valid()));
+    assert_eq!(cpu.tlb[0].lo, 0x3_000E);
+    cpu.tlb_hi = 0x1234_0005;
+    cpu.tlb_index = 2;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.tlb_index, 0x8000_0002);
+    // A non-global entry matches TLBP only in its own ASID.
+    let mut cpu = stage1_cpu(&[TLBP, TLBP, HALT], &[HALT], false);
+    cpu.tlb[4] = TlbEntry { hi: 0x0042_0003, lo: TLB_V };
+    cpu.tlb_hi = 0x0042_0004;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.tlb_index, 0x8000_0000);
+    cpu.tlb_hi = 0x0042_0003;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.tlb_index, 4);
+    // All four are privileged in user mode, and illegal with a field set.
+    for word in [TLBWI, TLBR, TLBP, TLBINV] {
+        let mut cpu = stage1_cpu(&[word], &[HALT], true);
+        assert_eq!(cpu.step_one(true), None);
+        assert_entered(&cpu, Cause::Privileged, word, CODE_BASE, true);
+        let mut cpu = stage1_cpu(&[word | 0x100], &[HALT], true);
+        assert_eq!(cpu.step_one(true), None);
+        assert_entered(&cpu, Cause::Illegal, word | 0x100, CODE_BASE, true);
+    }
+}
+
+#[test]
+fn tlb_changes_clear_the_reservation() {
+    // TLBWI, TLBINV, MTSR ASID and MTSR STATUS clear it (§11.3); TLBR,
+    // TLBP and the other TLB SRs do not.
+    for (word, clears) in [
+        (TLBWI, true),
+        (TLBINV, true),
+        (mtsr(SR_ASID, 0), true),
+        (mtsr(SR_STATUS, 0), true),
+        (TLBR, false),
+        (TLBP, false),
+        (mtsr(SR_TLB_HI, 0), false),
+        (mtsr(SR_TLB_LO, 0), false),
+        (mtsr(SR_TLB_INDEX, 0), false),
+        (mtsr(SR_TLBVEC, 0), false),
+        (mtsr(SR_MPU_BASE0, 0), false),
+    ] {
+        let mut cpu = stage1_cpu(&[word, HALT], &[HALT], false);
+        cpu.reservation = Some(0x400);
+        assert_eq!(cpu.step_one(true), None, "{word:08x}");
+        assert_eq!(cpu.reservation.is_none(), clears, "{word:08x}");
+    }
+    // So an SC after a TLB change fails.
+    let code = [lr(LR_D, 3, 1), TLBWI, sc(SC_D, 6, 5, 1), HALT];
+    let mut cpu = stage1_cpu(&code, &[HALT], false);
+    cpu.regs[1] = 0x2000;
+    for _ in 0..3 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert_eq!(cpu.regs[6], 1, "SC failed");
+}
+
+#[test]
+fn tlb_two_access_instructions_translate_both_pages_first() {
+    // MEMGET32 at the last two bytes of page 5 (frame 3): page 6 has no
+    // entry, so TLB_MISS_LOAD at its start and nothing loaded.
+    let mut cpu = te_cpu(&[LOAD32, HALT], &[IRET], true);
+    cpu.asid = 2;
+    tlb_map(&mut cpu, 2, U_DATA, DATA_FRAME, TLB_V | TLB_R, Some(2));
+    assert!(cpu.debug_write(DATA_FRAME + 0xFFFE, &[0x11, 0x22]));
+    assert!(cpu.debug_write(0x9_0000, &[0x33, 0x44]));
+    cpu.regs[3] = 0x5555;
+    step_with_b(&mut cpu, U_DATA + 0xFFFE);
+    assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissLoad, 0x0006_0000, U_CODE + CODE_BASE, true);
+    assert_eq!((cpu.regs[3], cpu.tlb_hi), (0x5555, 0x0006_0002));
+    // Refill page 6 with frame 9 (not frame 3's neighbour) and retry: the
+    // bytes come from both frames.
+    tlb_map(&mut cpu, 3, 0x0006_0000, 0x9_0000, TLB_V | TLB_R, Some(2));
+    assert_eq!(cpu.step_one(true), None); // IRET
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.pc, cpu.regs[3]), (U_CODE + CODE_BASE + 4, 0x4433_2211));
+    // LEAVERET reading the last doubleword of page 5 and the first of page 6.
+    let mut cpu = te_cpu(&[LEAVERET, HALT], &[HALT], true);
+    tlb_map(&mut cpu, 2, U_DATA, DATA_FRAME, TLB_V | TLB_R, None);
+    cpu.regs[15] = u64::from(U_DATA + 0xFFF8);
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissLoad, 0x0006_0000, U_CODE + CODE_BASE, true);
+    assert_eq!(cpu.regs[15], u64::from(U_DATA + 0xFFF8), "R15 unchanged");
+}
+
+#[test]
+fn tlb_cause_priority() {
+    // MISALIGNED > ACCESS (segment, MMIO) > TLB_MISS > ACCESS (permission),
+    // and for two accesses the lowest faulting byte.  User mode, ASID 0.
+    // (word, B, cause, EADDR, TLB_HI loaded)
+    for (word, b, cause, eaddr, loads) in [
+        (LOAD16, 0x8000_0001, Cause::MisalignedLoad, 0x8000_0001, false), // misaligned > segment
+        (LOAD16, 0x0009_0001, Cause::MisalignedLoad, 0x0009_0001, false), // misaligned > miss
+        (lr(LR_D, 3, 1), 0x0009_0004, Cause::MisalignedLoad, 0x0009_0004, false),
+        (LOAD64, 0x9000_0000, Cause::AccessLoad, 0x9000_0000, false), // segment, no TLB look-up
+        // Page 0x7FFF readable: the second doubleword is kseg, a segment fault.
+        (LOAD32, 0x7FFF_FFFE, Cause::AccessLoad, 0x8000_0000, false),
+        // Page 5 without R and page 6 missing: the first (lower) doubleword's
+        // permission fault is reported.
+        (LOAD32, U_DATA + 0xFFFE, Cause::AccessLoad, U_DATA + 0xFFFE, true),
+        // Page 0xA missing and page 0xB mapped: the first doubleword's miss.
+        (LOAD32, 0x000A_FFFE, Cause::TlbMissLoad, 0x000A_FFFE, true),
+    ] {
+        let mut cpu = te_cpu(&[word, HALT], &[HALT], true);
+        tlb_map(&mut cpu, 2, 0x7FFF_0000, 0x4_0000, TLB_V | TLB_R, None);
+        tlb_map(&mut cpu, 3, U_DATA, DATA_FRAME, TLB_V | TLB_W, None);
+        tlb_map(&mut cpu, 4, 0x000B_0000, 0x5_0000, TLB_V | TLB_R, None);
+        cpu.tlb_hi = 0xAAAA_0000;
+        step_with_b(&mut cpu, b);
+        assert_entered_te(&cpu, K_HANDLER, cause, eaddr, U_CODE + CODE_BASE, true);
+        assert_eq!(cpu.tlb_hi == 0xAAAA_0000, !loads, "{word:08x} at 0x{b:08X}: TLB_HI");
+    }
+    // An LR or SC to MMIO is ACCESS in supervisor mode too, before any
+    // translation.
+    let mut cpu = te_cpu(&[lr(LR_D, 3, 1), HALT], &[HALT], false);
+    step_with_b(&mut cpu, 0xF001_0000);
+    assert_entered_te(&cpu, K_HANDLER, Cause::AccessLoad, 0xF001_0000, KSEG + CODE_BASE, false);
+    // MISALIGNED_FETCH > a fetch miss.
+    let mut cpu = te_cpu(&[HALT], &[HALT], true);
+    cpu.pc = 0x0009_0002;
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::MisalignedFetch, 0x0009_0002, 0x0009_0002, true);
+}
+
+#[test]
+fn tlb_double_fault_on_an_entry_outside_kseg() {
+    // Supervisor TRAP with TE = 1 and SP in useg: the frame push has no
+    // kseg address, so the CPU stops (park_kind 6) with nothing entered.
+    for (sp, entered) in [
+        (U_SP, false),
+        (KSEG, false), // the push would be at 0x7FFF_FFF8
+        (0x8800_0008, false),
+        (0x8800_0000, true), // the top of DDR: the push is the last doubleword
+        (KSEG + 8, true),
+    ] {
+        let mut cpu = te_cpu(&[TRAP, HALT], &[HALT], false);
+        cpu.sp = sp;
+        let stop = cpu.step_one(true);
+        if entered {
+            assert_eq!((stop, cpu.pc, cpu.sp), (None, K_HANDLER, sp - 8), "SP 0x{sp:08X}");
+        } else {
+            assert_eq!(stop, Some(StopReason::DoubleFault(sp)), "SP 0x{sp:08X}");
+            assert_eq!((cpu.pc, cpu.sp, cpu.ecause, cpu.eaddr), (KSEG + CODE_BASE, sp, 0, 0));
+            assert_eq!(cpu.parked_exception(), Some((Cause::Trap, TRAP)));
+        }
+    }
+    // From user mode the kernel SP is SP_ALT; the mode is unchanged.
+    let mut cpu = te_cpu(&[SYSCALL, HALT], &[HALT], true);
+    cpu.sp_alt = 0x7000;
+    assert_eq!(cpu.step_one(true), Some(StopReason::DoubleFault(0x7000)));
+    assert!(cpu.um);
+    assert_eq!((cpu.sp, cpu.sp_alt, cpu.pc), (U_SP, 0x7000, U_CODE + CODE_BASE));
+    // A debugger attached sees the same stop (the board debug-halts).
+    let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], true);
+    cpu.set_debugger_attached(true);
+    cpu.sp_alt = 0x7000;
+    cpu.regs[1] = u64::from(U_DATA);
+    assert_eq!(cpu.step_one(true), Some(StopReason::DoubleFault(0x7000)));
+    // An interrupt entry too; the interrupt stays pending.
+    let mut cpu = te_cpu(&[0x6100_0000], &[IRET], false); // JMP.S .
+    cpu.int_vec[0] = K_HANDLER;
+    cpu.int_mask = 1;
+    cpu.timer_pending = true;
+    cpu.sp = 0x7000;
+    assert_eq!(cpu.step_one(true), Some(StopReason::DoubleFault(0x7000)));
+    assert!(cpu.timer_pending);
+    assert_eq!(cpu.int_mask, 1);
+    // With TE = 0 there is no such check.
+    let mut cpu = stage1_cpu(&[TRAP, HALT], &[HALT], false);
+    cpu.sp = 0x7000;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.pc, HANDLER);
+}
+
+#[test]
+fn tlb_turning_translation_on_and_off() {
+    // MTSR STATUS with TE: the next fetch is translated.  Boot code at its
+    // physical address needs an entry for its own page first (entry 31,
+    // global, identity), then jumps to its kseg alias.
+    let code = [
+        mtsr(SR_STATUS, 0), // A = 0x200: TE on
+        JMPR_B,             // B = the kseg alias of the HALT
+        HALT,
+    ];
+    let mut cpu = stage1_cpu(&code, &[HALT], false);
+    tlb_map(&mut cpu, 31, 0, 0, TLB_V | TLB_X, None);
+    cpu.regs[0] = STATUS_TE;
+    step_with_b(&mut cpu, KSEG + CODE_BASE + 8);
+    assert!(cpu.te);
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.pc, KSEG + CODE_BASE + 8);
+    assert_eq!(cpu.step_one(true), Some(StopReason::Halt));
+    // Without that entry, the fetch after the MTSR misses (with EVEC 0, a
+    // park).
+    let mut cpu = stage1_cpu(&code, &[HALT], false);
+    cpu.evec = 0;
+    cpu.regs[0] = STATUS_TE;
+    assert_eq!(cpu.step_one(true), None);
+    assert!(matches!(cpu.step_one(true), Some(StopReason::InvalidOpcode(_))));
+    assert_eq!(cpu.parked_exception(), Some((Cause::TlbMissFetch, CODE_BASE + 4)));
+}
+
+#[test]
+fn debugger_accesses_translate_with_te_and_are_unchecked() {
+    let mut cpu = te_cpu(&[HALT], &[HALT], false);
+    tlb_map(&mut cpu, 2, U_DATA, DATA_FRAME, TLB_V | TLB_X, None); // no R or W
+    cpu.mpu_en = true;
+    assert!(cpu.debug_write(DATA_FRAME + 0x10, &0x1122_3344_u32.to_le_bytes()));
+    assert_eq!(cpu.debug_translate(U_DATA + 0x10), Some(DATA_FRAME + 0x10));
+    assert_eq!(cpu.debug_translate(KSEG + 0x2000), Some(0x2000));
+    assert_eq!(cpu.debug_translate(0xF001_0000), Some(0xF001_0000));
+    assert_eq!(cpu.debug_translate(0x9000_0000), None, "the hole");
+    assert_eq!(cpu.debug_translate(0x0009_0000), None, "no entry");
+    let mut buf = [0_u8; 4];
+    assert_eq!(cpu.debug_read_virtual(U_DATA + 0x10, &mut buf), 4);
+    assert_eq!(u32::from_le_bytes(buf), 0x1122_3344);
+    assert!(cpu.debug_write_virtual(U_DATA + 0x14, &[0xAB]));
+    assert_eq!(cpu.peek64(DATA_FRAME + 0x10) >> 32, 0xAB);
+    assert_eq!(cpu.fetch_word(KSEG + CODE_BASE), HALT);
+    // A read across into an unmapped page stops there; a write that would
+    // cross writes nothing.
+    let mut buf = [0_u8; 8];
+    assert_eq!(cpu.debug_read_virtual(U_DATA + 0xFFFC, &mut buf), 4);
+    assert!(!cpu.debug_write_virtual(U_DATA + 0xFFFC, &[1; 8]));
+    assert_eq!(cpu.peek64(DATA_FRAME + 0xFFF8) >> 32, 0, "nothing written");
+    // With TE = 0 addresses are physical.
+    cpu.te = false;
+    assert_eq!(cpu.debug_translate(U_DATA), Some(U_DATA));
+}
+
+/// Assemble `.kla` source (no file I/O) and return its DDR image and entry.
+fn assemble_kla(source: &str) -> (Vec<u8>, u32) {
+    use crate::asm::assemble_lines;
+    use crate::asm::line::SourceLine;
+    use crate::asm::macros::{builtin_macros, expand_embedded_macros};
+    let mut msg_list = crate::diag::Diagnostics::new();
+    let macro_list = expand_embedded_macros(builtin_macros(), &mut msg_list);
+    let input = source
+        .lines()
+        .zip(1..)
+        .map(|(line, n)| SourceLine {
+            file_name: "test.kla".to_owned(),
+            input_text_line: line.to_owned(),
+            line_counter: n,
+        })
+        .collect();
+    let assembly = assemble_lines(input, &crate::isa::Isa::v2(), &macro_list, &mut msg_list);
+    assert!(!msg_list.has_errors(), "{:?}", msg_list.messages());
+    let image = assembly.image().expect("a _start");
+    (image.to_ddr(), image.entry)
+}
+
+/// A kernel with a software TLB refill handler, and a user program that
+/// runs across several pages (`MMU_PLAN.md` §11.2-§11.3).
+///
+/// The page table is a flat array of `TLB_LO` values indexed by VPN, at
+/// PA `0x2_0000` (kseg `0x8002_0000`); 0 = unmapped.  User code is at VA
+/// `0x0040_0000` + its offset in frame 0, data on pages 0x41-0x43 (frames
+/// 3-5; page 0x43 starts read-only, for the dirty-bit flow), the stack on
+/// page 0x50 (frame 6).  The refill handler at `TLBVEC` copies the PTE
+/// into the next entry, round robin (the counter in `SCRATCH1`), and counts
+/// refills at PA `0x2_0800`; the `EVEC` handler sets W on a store to a
+/// read-only page that may be written (counted at `0x2_0808`) and halts on a
+/// SYSCALL.  The kernel, its vectors, its stack and the page table are all
+/// in kseg, so the refill path cannot miss.
+const REFILL_KLA: &str = "
+_start
+// The page table (TE is still off: physical addresses).
+SETR B 0x20000
+SETR C 0x0000000B          // VPN 0x40, user code: frame 0, X R V
+STIDX64 C B 0x200
+SETR C 0x00030007          // VPN 0x41: frame 3, W R V
+STIDX64 C B 0x208
+SETR C 0x00040007          // VPN 0x42: frame 4
+STIDX64 C B 0x210
+SETR C 0x00050003          // VPN 0x43: frame 5, read-only for now
+STIDX64 C B 0x218
+SETR C 0x00060007          // VPN 0x50: the user stack, frame 6
+STIDX64 C B 0x280
+// The vectors, at their kseg aliases.
+SETR B REFILL:
+ORV B 0x80000000
+MTSR TLBVEC B
+SETR B HANDLER:
+ORV B 0x80000000
+MTSR evec B
+// Map this page (global, identity) so the fetches after TE = 1 work, then
+// turn translation on and jump to the kseg alias.
+SETR A 0x00000100
+MTSR TLB_HI A
+SETR A 0x0000000B
+MTSR TLB_LO A
+SETR A 31
+MTSR TLB_INDEX A
+TLBWI
+SETR B KMAIN:
+ORV B 0x80000000
+SETR A 0x200
+MTSR STATUS A
+JMPR B
+KMAIN:
+GETSP A                    // the kernel stack moves to kseg too
+ORV A 0x80000000
+SETSP A
+SETR A 0                   // drop the boot entry
+MTSR TLB_LO A
+TLBWI
+MTSR SCRATCH1 A            // the refill counter
+SETR A 1
+MTSR ASID A
+SETR A 0x00510000          // the user SP: top of page 0x50
+MTSR USP A
+SETR A USER:               // enter user mode at USER's VA
+ORV A 0x00400000
+SETR64 C 0x100000000000    // frame PM = user
+ORR A A C
+PUSH A
+IRET
+
+// TLB refill (TLBVEC).  TLB_HI already holds {VPN, ASID}.
+REFILL:
+PUSH A
+PUSH B
+MFSR A TLB_HI
+SHRV A 16
+SHLV A 3
+SETR B 0x80020000
+ADDR A A B
+MEMGET64 B A               // the PTE
+BEQI B 0 FATAL:
+MTSR TLB_LO B
+MFSR B SCRATCH1
+MTSR TLB_INDEX B
+TLBWI
+ADDV B 1
+ANDV B 31
+MTSR SCRATCH1 B
+SETR A 0x80020800
+MEMGET64 B A
+ADDV B 1
+MEMSET64 B A
+POP B
+POP A
+IRET
+
+// Other exceptions (EVEC).
+HANDLER:
+PUSH A
+PUSH B
+MFSR A ECAUSE
+BEQI A 4 DONE:             // SYSCALL: the user program is finished
+BNEV A 8 FATAL:            // only ACCESS_STORE is handled
+MFSR A TLB_HI              // the dirty bit: set W in the PTE and the entry
+SHRV A 16
+SHLV A 3
+SETR B 0x80020000
+ADDR A A B
+MEMGET64 B A
+ORV B 4
+MEMSET64 B A
+MTSR TLB_LO B
+TLBP
+TLBWI
+SETR A 0x80020808
+MEMGET64 B A
+ADDV B 1
+MEMSET64 B A
+POP B
+POP A
+IRET
+DONE:
+HALT
+FATAL:
+TRAP
+
+// The user program (runs at VA 0x0040_0000 + its offset).
+USER:
+SETR A 0x00410000
+SETR B 0x11
+MEMSET64 B A               // page 0x41: miss, refill, store
+SETR A 0x00420008
+SETR B 0x22
+MEMSET64 B A               // page 0x42
+SETR A 0x0042FFFE
+MEMGET32 C A               // spans pages 0x42 and 0x43: the second misses
+SETR A 0x00430000
+SETR B 0x33
+MEMSET64 B A               // page 0x43 is read-only: ACCESS_STORE, then W
+PUSH B                     // page 0x50: the stack
+POP D
+CALLREL USUB:
+SETR A 0x00410000
+MEMGET64 E A               // a TLB hit now
+SETR A 0
+SYSCALL
+USUB:
+ADDV D 1
+RET
+";
+
+#[test]
+fn tlb_software_refill_runs_a_user_program_across_pages() {
+    let (image, entry) = assemble_kla(REFILL_KLA);
+    let mut cpu = Cpu::with_mem_size(&image, entry, TEST_MEM);
+    // The bytes the spanning MEMGET32 reads, at the end of frame 4 and the
+    // start of frame 5.
+    assert!(cpu.debug_write(0x4_FFFE, &[0xAA, 0xBB]));
+    assert!(cpu.debug_write(0x5_0000, &[0xCC, 0xDD]));
+    let r = cpu.run(10_000, None);
+    assert_eq!(
+        r.stop,
+        StopReason::Halt,
+        "pc 0x{:08X} ECAUSE {} EADDR 0x{:08X}",
+        cpu.pc,
+        cpu.ecause,
+        cpu.eaddr
+    );
+    assert!(cpu.te && !cpu.um, "halted in the kernel, translation on");
+    assert_eq!(cpu.ecause, Cause::Syscall as u8);
+    // Refills: the code page, 0x41, 0x42, 0x43 (the MEMGET32's second
+    // doubleword) and the stack; one dirty-bit fault.
+    assert_eq!((cpu.peek64(0x2_0800), cpu.peek64(0x2_0808)), (5, 1));
+    assert_eq!(cpu.peek64(0x2_0218), 0x0005_0007, "the PTE is now writable");
+    assert_eq!(cpu.peek64(0x3_0000), 0x11);
+    assert_eq!(cpu.peek64(0x4_0008), 0x22);
+    assert_eq!(cpu.peek64(0x5_0000) & 0xFF, 0x33);
+    assert_eq!(cpu.regs[2], 0xDDCC_BBAA, "C: the MEMGET32 across the pages");
+    assert_eq!(cpu.regs[3], 0x34, "D: the stack page and CALLREL/RET");
+    assert_eq!(cpu.regs[4], 0x11, "E: page 0x41 read back");
+    assert_eq!(cpu.system_regs().asid, 1);
+    // The entries the refills wrote (round robin from 0), in ASID 1.
+    let vpns: Vec<u32> = cpu.tlb_entries()[..5].iter().map(|e| e.vpn()).collect();
+    assert_eq!(vpns, [0x40, 0x41, 0x42, 0x43, 0x50]);
+    assert!(cpu.tlb_entries()[..5].iter().all(|e| e.valid() && !e.global() && e.asid() == 1));
 }

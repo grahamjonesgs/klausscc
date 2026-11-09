@@ -299,8 +299,12 @@ impl Cpu {
     /// word at SP-8, mask the source, acknowledge it, jump to its vector.
     /// From user mode the frame goes on the kernel stack, with PM set
     /// (`MMU_PLAN.md` §3.3, §4.5); DI and `ECAUSE` are left alone.
+    /// With `TE` = 1 and a kernel SP outside kseg the entry is a double
+    /// fault instead ([`Cpu::enter`]), and the interrupt stays pending.
     pub(super) fn take_irq(&mut self, src: usize) {
-        self.enter(self.pc);
+        if !self.enter(self.pc) {
+            return;
+        }
         self.int_mask &= !(1 << src);
         if src == 0 {
             self.timer_pending = false;
