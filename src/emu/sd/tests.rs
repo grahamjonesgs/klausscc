@@ -1394,3 +1394,31 @@ fn no_faults_no_summary() {
     let cpu = cpu_with_init();
     assert_eq!(cpu.sd_fault_summary(), None);
 }
+
+#[test]
+fn native_write_thresh_uses_the_latched_count() {
+    // FIFO_THRESH's "pushed < count" uses the count latched by the data
+    // command (§4.8, klaussCPU c1e540a): rewriting SDM_BLK mid-phase
+    // changes neither it nor the block size.
+    let mut cpu = cpu(true, true);
+    native_init(&mut cpu);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (2 << 16) | 512);
+    sdm_ok(&mut cpu, 25, 60, R1, CMD_DATA | CMD_WRITE);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 8);
+    for w in 0..64 {
+        wr(&mut cpu, SDM_DATA, w);
+    }
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 1, "a whole 512-byte block went out");
+    assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "one of two blocks pushed");
+    wr(&mut cpu, SDM_BLK, (9 << 16) | 512);
+    for w in 0..64 {
+        wr(&mut cpu, SDM_DATA, w);
+    }
+    let status = rd(&mut cpu, SDM_STATUS) as u32;
+    assert_eq!(
+        status & (ST_FIFO_THRESH | ST_DATA_DONE | ST_DATA_BUSY),
+        ST_DATA_DONE,
+        "done after the latched two"
+    );
+}

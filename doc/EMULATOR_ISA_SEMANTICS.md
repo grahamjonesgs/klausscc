@@ -478,8 +478,12 @@ card's states are idle/ready/ident/stby/tran/data/rcv/prg (prg passes at
 once) and ina; CMD0, 2, 3, 6 (high speed unsupported), 7, 8, 9, 10, 12,
 13, 15, 16, 17, 18, 23, 24, 25, 55 and ACMD6, 13, 22, 23, 41, 42, 51
 (ACMD22: the blocks the last CMD24/CMD25 wrote, 4 bytes big-endian). The
-emulator does not reload programs, so the plan's reset at
-`LOAD_COMPLETE` has nothing to act on. Reset values and corner cases
+emulator does not reload programs: every `--emulate` run and every
+`--gdbserver` session starts from reset (the gdbserver has no load or
+restart command), so the plan's resets at `LOAD_COMPLETE`, `INT2_EN`
+back to `0b01` on every load included, always hold. The write-side
+`FIFO_THRESH` uses the block count and size latched by the data
+command. Reset values and corner cases
 follow the plan's §4.3 and §4.8 (klaussCPU mmu-sd 57a5a8c): `SDM_BLK` resets to
 `0x0001_0200`; the block size is a multiple of 4 (`[1:0]` read 0), a
 field of 0 acts as 8, and a block takes ceil(size / 8) FIFO words, each
