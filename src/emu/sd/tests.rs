@@ -373,6 +373,16 @@ fn spi_single_block_read_and_write_plain_and_pipelined() {
         assert_eq!(&card_bytes(&cpu)[8 * BLOCK..9 * BLOCK], &pattern(8)[..], "neighbours untouched");
         assert_eq!(&card_bytes(&cpu)[10 * BLOCK..11 * BLOCK], &pattern(10)[..]);
     }
+    // ACMD22 in SPI mode: R1, then a 4-byte data block, big-endian.
+    cs(&mut cpu, true);
+    assert_eq!(spi_cmd(&mut cpu, 55, 0), 0x00);
+    assert_eq!(spi_cmd(&mut cpu, 22, 0), 0x00);
+    assert_eq!(spi_token(&mut cpu), 0xFE);
+    let count: Vec<u8> = (0..4).map(|_| xfer(&mut cpu, 0xFF)).collect();
+    assert_eq!(count, [0, 0, 0, 1], "the last CMD24 wrote one block");
+    xfer(&mut cpu, 0xFF);
+    xfer(&mut cpu, 0xFF);
+    cs(&mut cpu, false);
 }
 
 #[test]
@@ -619,7 +629,10 @@ fn native_init_r2_layout_and_registers() {
     wr(&mut cpu, SDM_CFG, 0xFFFF_FFFF);
     assert_eq!(rd(&mut cpu, SDM_CFG), 0b101, "only 4-bit and CLK_ON");
     wr(&mut cpu, SDM_BLK, 0xFFFF_FFFF);
-    assert_eq!(rd(&mut cpu, SDM_BLK), 0xFFFF_0FF8, "size [2:0] reads 0");
+    assert_eq!(rd(&mut cpu, SDM_BLK), 0xFFFF_0FFC, "size [1:0] reads 0");
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 3);
+    assert_eq!(rd(&mut cpu, SDM_BLK), 1 << 16, "sizes 1-3 read 0");
+    assert_eq!(cpu.sd.as_ref().unwrap().blk_size(), 8, "and act as 8");
     wr(&mut cpu, SDM_CFG, 0);
     // A command with SD_MODE clear is ignored.
     wr(&mut cpu, SDM_CMD, cmd_word(8, R1, 0));
@@ -793,6 +806,19 @@ fn native_multi_block_write_with_prefill() {
     // CMD12 ends the card's receive: rcv -> prg -> tran.
     let r1 = sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
     assert_eq!(state_of(r1), 6, "the R1 shows rcv");
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
+    // ACMD22: the blocks the last write wrote, a 4-byte big-endian block
+    // in [31:0] of one FIFO word ([63:32] = 0).
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 4);
+    sdm_ok(&mut cpu, 55, rca, R1, 0);
+    sdm_ok(&mut cpu, 22, 0, R1, CMD_DATA);
+    let status = rd(&mut cpu, SDM_STATUS) as u32;
+    assert_eq!(status & (ST_DATA_DONE | ST_FIFO_THRESH | ST_ERR_ANY), ST_DATA_DONE | ST_FIFO_THRESH);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 1);
+    let word = rd(&mut cpu, SDM_DATA);
+    assert_eq!(word >> 32, 0);
+    assert_eq!(u32::from_be_bytes((word as u32).to_le_bytes()), 3, "three blocks written");
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
     // FIFO_THRESH on a counted write drops once every block is pushed
     // (counted in words since the FIFO reset).
@@ -1064,4 +1090,39 @@ fn native_corner_cases_of_plan_4_8() {
     // SDM_CMD is ignored with SD_MODE clear.
     wr(&mut cpu, SDM_CMD, cmd_word(13, R1, 0));
     assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_CMD_DONE, 0);
+}
+
+#[test]
+fn native_blocks_of_4_mod_8_bytes() {
+    // 12-byte blocks take two words each; the second carries bytes 8-11 in
+    // [31:0] and 0 in [63:32], and each block starts in a new word.
+    let blocks: Vec<Vec<u8>> = (0..3_u8).map(|b| (0..12).map(|i| 0x10 * (b + 1) + i).collect()).collect();
+    let mut cpu = cpu(true, true);
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    cpu.sd.as_mut().unwrap().card.as_mut().unwrap().queue_blocks(blocks.clone());
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (3 << 16) | 0xC);
+    sdm_ok(&mut cpu, 13, rca, R1, CMD_DATA);
+    let status = rd(&mut cpu, SDM_STATUS) as u32;
+    assert_eq!(status & (ST_DATA_DONE | ST_ERR_ANY), ST_DATA_DONE);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 3);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 6, "ceil(12 / 8) words a block");
+    for block in &blocks {
+        assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "two words: a block");
+        let lo = rd(&mut cpu, SDM_DATA);
+        let hi = rd(&mut cpu, SDM_DATA);
+        assert_eq!(lo.to_le_bytes(), block[..8]);
+        assert_eq!(hi, u64::from(u32::from_le_bytes(block[8..].try_into().unwrap())));
+    }
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0);
+
+    // The packing both ways: a write takes only [31:0] of a last half word.
+    let words: Vec<u64> = block_to_words(&blocks[0]).collect();
+    assert_eq!(words.len(), 2);
+    let garbage = words[1] | 0xDEAD_BEEF_0000_0000;
+    assert_eq!(words_to_block([words[0], garbage].into_iter(), 12), blocks[0]);
+    assert_eq!(block_words(4), 1);
+    assert_eq!(block_words(12), 2);
+    assert_eq!(block_words(512), 64);
 }

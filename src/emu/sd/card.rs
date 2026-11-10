@@ -155,8 +155,9 @@ enum Storage {
 enum Pending {
     /// Nothing.
     None,
-    /// One block of register data (SD status, SCR, switch status).
-    Bytes(Vec<u8>),
+    /// Blocks of register data (SD status, SCR, switch status, the
+    /// written-block count): one each.
+    Blocks(VecDeque<Vec<u8>>),
     /// Memory blocks from this block address, `left` of them (`None`:
     /// until CMD12).
     Read { lba: u64, left: Option<u32> },
@@ -234,6 +235,8 @@ pub struct SdCard {
     status_err: u32,
     /// The block count CMD23 set for the next CMD18/CMD25.
     block_count: Option<u32>,
+    /// Blocks written well by the last CMD24/CMD25 (ACMD22).
+    written: u32,
     /// Data an SD-mode command left to transfer.
     pending: Pending,
     /// SPI-mode state.
@@ -347,6 +350,7 @@ impl SdCard {
             bus4: false,
             status_err: 0,
             block_count: None,
+            written: 0,
             pending: Pending::None,
             spi_io: Spi::default(),
             cid: Self::make_cid(),
@@ -628,7 +632,7 @@ impl SdCard {
             }
             (16, State::Tran) => self.r1(16, state, false),
             (6, State::Tran) => {
-                self.pending = Pending::Bytes(Self::switch_status(arg));
+                self.pending = Pending::Blocks([Self::switch_status(arg)].into());
                 self.state = State::Data;
                 self.r1(6, state, false)
             }
@@ -644,6 +648,7 @@ impl SdCard {
                     self.state = State::Data;
                 } else {
                     self.pending = Pending::Write { lba, left };
+                    self.written = 0;
                     self.state = State::Rcv;
                 }
                 self.r1(index, state, false)
@@ -669,9 +674,14 @@ impl SdCard {
                 self.r1(6, state, true)
             }
             (13, State::Tran) => {
-                self.pending = Pending::Bytes(self.sd_status());
+                self.pending = Pending::Blocks([self.sd_status()].into());
                 self.state = State::Data;
                 self.r1(13, state, true)
+            }
+            (22, State::Tran) => {
+                self.pending = Pending::Blocks([self.written.to_be_bytes().to_vec()].into());
+                self.state = State::Data;
+                self.r1(22, state, true)
             }
             (23 | 42, State::Tran) => self.r1(index, state, true),
             (41, State::Idle) => {
@@ -682,7 +692,7 @@ impl SdCard {
             }
             (41, _) => self.illegal(),
             (51, State::Tran) => {
-                self.pending = Pending::Bytes(Self::scr());
+                self.pending = Pending::Blocks([Self::scr()].into());
                 self.state = State::Data;
                 self.r1(51, state, true)
             }
@@ -697,9 +707,14 @@ impl SdCard {
             return ReadBlock::None;
         }
         let data = match std::mem::replace(&mut self.pending, Pending::None) {
-            Pending::Bytes(bytes) => {
-                self.state = State::Tran;
-                bytes
+            Pending::Blocks(mut blocks) => {
+                let block = blocks.pop_front().unwrap_or_default();
+                if blocks.is_empty() {
+                    self.state = State::Tran;
+                } else {
+                    self.pending = Pending::Blocks(blocks);
+                }
+                block
             }
             Pending::Read { lba, left } => {
                 if lba >= self.blocks {
@@ -743,6 +758,7 @@ impl SdCard {
             return WriteBlock::NoToken;
         }
         self.write_block(lba, data);
+        self.written = self.written.wrapping_add(1);
         match left.map(|n| n - 1) {
             Some(0) => {
                 self.state = State::Tran;
@@ -757,7 +773,7 @@ impl SdCard {
     /// it rejected: the card sends that block anyway and returns to tran.
     pub(super) fn abandon_single(&mut self) {
         let single = match &self.pending {
-            Pending::Bytes(_) => true,
+            Pending::Blocks(blocks) => blocks.len() == 1,
             Pending::Read { left, .. } => *left == Some(1),
             _ => false,
         };
@@ -862,6 +878,7 @@ impl SdCard {
         let ok = lba < self.blocks;
         if ok {
             self.write_block(lba, &buf);
+            self.written = self.written.wrapping_add(1);
         }
         self.spi_io.out.clear();
         self.spi_io.out.push_back(if ok { DATA_ACCEPTED } else { DATA_WRITE_ERROR });
@@ -924,6 +941,10 @@ impl SdCard {
                 out.extend([r1, 0xFF]);
                 out.extend(data_block(&Self::scr()));
             }
+            (true, 22) => {
+                out.extend([r1, 0xFF]);
+                out.extend(data_block(&self.written.to_be_bytes()));
+            }
             (true, 23) | (_, 16 | 59) => out.push(r1),
             (_, 6) => {
                 out.extend([r1, 0xFF]);
@@ -951,6 +972,7 @@ impl SdCard {
                         18 => self.spi_io.stream = Stream::Next(lba),
                         _ => {
                             self.spi_io.rx = SpiRx::Token { multi: index == 25, lba };
+                            self.written = 0;
                             self.state = State::Rcv;
                         }
                     }
@@ -973,6 +995,14 @@ impl SdCard {
     #[cfg(test)]
     pub(super) const fn in_spi_mode(&self) -> bool {
         self.spi
+    }
+
+    /// Queue `blocks` for the native read engine as if a command had put
+    /// the card in the data state (tests of block sizes no command uses).
+    #[cfg(test)]
+    pub(super) fn queue_blocks(&mut self, blocks: Vec<Vec<u8>>) {
+        self.pending = Pending::Blocks(blocks.into());
+        self.state = State::Data;
     }
 
     /// The SD-mode state (tests).

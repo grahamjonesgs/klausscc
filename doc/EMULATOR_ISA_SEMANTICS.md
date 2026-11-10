@@ -445,7 +445,7 @@ the file is reported at the end of the run.
 (`+0x200..+0x3F8`, `addr[9]`, plain RAM; sub-word accesses use the byte
 lanes of `addr[2:0]`). Commands: CMD0, 1, 6, 8, 9, 10, 12 (stuff byte,
 R1, busy), 13 (R2), 16, 17, 18, 24, 25 (`0xFC` tokens, `0xFD` stop), 55,
-58 (R3), 59, ACMD13, 23, 41, 51; R1 `0x40` for an address past the end,
+58 (R3), 59, ACMD13, 22, 23, 41, 51; R1 `0x40` for an address past the end,
 the `0x08` error token when a CMD18 runs off it, data response `0xE5`.
 An exchange runs `16 * (div + 1) + 1` modelled cycles, and a `SD_DATA`
 write while one runs is ignored, as in the RTL; but the first
@@ -476,11 +476,15 @@ else `DATA_CRC_ERR` / `WRITE_CRC_ERR`; a read past the end gives
 `DATA_TIMEOUT`, a write the card is not receiving `WRITE_NO_TOKEN`. The
 card's states are idle/ready/ident/stby/tran/data/rcv/prg (prg passes at
 once) and ina; CMD0, 2, 3, 6 (high speed unsupported), 7, 8, 9, 10, 12,
-13, 15, 16, 17, 18, 23, 24, 25, 55 and ACMD6, 13, 23, 41, 42, 51. The
+13, 15, 16, 17, 18, 23, 24, 25, 55 and ACMD6, 13, 22, 23, 41, 42, 51
+(ACMD22: the blocks the last CMD24/CMD25 wrote, 4 bytes big-endian). The
 emulator does not reload programs, so the plan's reset at
 `LOAD_COMPLETE` has nothing to act on. Reset values and corner cases
-follow the plan's §4.8 (klaussCPU mmu-sd ca23b13): `SDM_BLK` resets to
-`0x0001_0200` and a size field of 0 acts as 8; `FIFO_THRESH` follows the
+follow the plan's §4.3 and §4.8 (klaussCPU mmu-sd 57a5a8c): `SDM_BLK` resets to
+`0x0001_0200`; the block size is a multiple of 4 (`[1:0]` read 0), a
+field of 0 acts as 8, and a block takes ceil(size / 8) FIFO words, each
+block starting in a new word, with the last 4 bytes of a size that is
+4 mod 8 in `[31:0]` (`[63:32]` reads 0, and is ignored on a write); `FIFO_THRESH` follows the
 direction latch (NONE after a reset or a FIFO reset, so a write pre-fill
 never raises it; READ: a block in the FIFO, of the size latched by the
 last data command, during the phase and after it; WRITE: a write phase runs,

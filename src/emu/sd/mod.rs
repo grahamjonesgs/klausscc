@@ -28,7 +28,8 @@
 //! (`SDM_DATA`, 64-bit, little-endian), sticky write-1-to-clear status
 //! bits and an interrupt that reaches the CPU through the source 2 cascade
 //! (`INT2_EN`, `INT2_PENDING`). Reset values and corner cases follow the
-//! plan's §4.8 (klaussCPU mmu-sd ca23b13). Everything happens at once: a command
+//! plan's §4.3 and §4.8 (klaussCPU mmu-sd 57a5a8c): blocks of 4 to
+//! 2048 bytes in steps of 4, ceil(size / 8) FIFO words each. Everything happens at once: a command
 //! completes during the `SDM_CMD` store (`CMD_BUSY` never reads 1), and the
 //! data engine moves whole blocks between the card and the FIFO whenever
 //! the FIFO has room for one (a read) or holds one (a write), so `DATA_BUSY`
@@ -149,8 +150,8 @@ const ST_STICKY: u32 = ST_CMD_DONE | ST_DATA_DONE | ST_ERRORS;
 const IRQ_EN_MASK: u32 = ST_FIFO_THRESH | ST_STICKY;
 
 // ---- other native registers ----
-/// `SDM_BLK`: `[11:3]` of the block size and `[31:16]` the count.
-const BLK_MASK: u64 = 0xFFFF_0FF8;
+/// `SDM_BLK`: `[11:2]` of the block size and `[31:16]` the count.
+const BLK_MASK: u64 = 0xFFFF_0FFC;
 /// `SDM_BLK` reset (§4.8): 512 bytes, 1 block.
 const BLK_RESET: u64 = (1 << 16) | 0x200;
 /// `SDM_TIMEOUT` reset: 2 500 000 data / 12 500 000 busy CLK cycles.
@@ -195,7 +196,7 @@ struct Phase {
 impl Phase {
     /// Block size in FIFO words.
     const fn words(&self) -> usize {
-        self.size / 8
+        block_words(self.size)
     }
 }
 
@@ -465,7 +466,7 @@ impl SdController {
     }
 
     /// The block size in bytes, `SDM_BLK[11:0]`; a size field of 0 acts as
-    /// 8 (§4.8).
+    /// 8 (§4.8; the field's `[1:0]` read 0, so sizes 1-3 are 0 too).
     const fn blk_size(&self) -> usize {
         match (self.blk & 0xFFF) as usize {
             0 => 8,
@@ -483,7 +484,7 @@ impl SdController {
     /// the phase and after it; writing `SDM_BLK` changes it only at the
     /// next data command.
     fn fifo_thresh(&self) -> bool {
-        let words = self.thresh_size / 8;
+        let words = block_words(self.thresh_size);
         match (self.dir, self.phase) {
             (Some(false), _) => self.fifo.len() >= words,
             (Some(true), Some(phase)) => {
@@ -616,7 +617,7 @@ impl SdController {
                 if self.fifo.len() < words {
                     break;
                 }
-                let block: Vec<u8> = self.fifo.drain(..words).flat_map(u64::to_le_bytes).collect();
+                let block = words_to_block(self.fifo.drain(..words), phase.size);
                 let outcome = self.card.as_mut().map_or(WriteBlock::NoToken, |card| card.sd_write_block(&block, bus4));
                 match outcome {
                     WriteBlock::Ok => self.blkdone = self.blkdone.wrapping_add(1),
@@ -630,7 +631,7 @@ impl SdController {
                 let outcome = self.card.as_mut().map_or(ReadBlock::None, |card| card.sd_read_block(phase.size, bus4));
                 match outcome {
                     ReadBlock::Good(block) => {
-                        self.fifo.extend(block.as_chunks::<8>().0.iter().map(|w| u64::from_le_bytes(*w)));
+                        self.fifo.extend(block_to_words(&block));
                         self.blkdone = self.blkdone.wrapping_add(1);
                     }
                     ReadBlock::Bad => error = ST_DATA_CRC_ERR,
@@ -651,4 +652,28 @@ impl SdController {
             self.phase = Some(phase);
         }
     }
+}
+
+/// FIFO words a block of `size` bytes takes: ceil(size / 8), each block
+/// starting in a new word (§4.3).
+const fn block_words(size: usize) -> usize {
+    size.div_ceil(8)
+}
+
+/// A block as FIFO words, little-endian; when its size is 4 mod 8 the
+/// last word carries the final 4 bytes in `[31:0]` and 0 in `[63:32]`.
+fn block_to_words(block: &[u8]) -> impl Iterator<Item = u64> + '_ {
+    block.chunks(8).map(|chunk| {
+        let mut word = [0_u8; 8];
+        word[..chunk.len()].copy_from_slice(chunk);
+        u64::from_le_bytes(word)
+    })
+}
+
+/// The `size` bytes of a block from its FIFO words: of a last word with
+/// only 4 bytes left, `[31:0]` (`[63:32]` is ignored).
+fn words_to_block(words: impl Iterator<Item = u64>, size: usize) -> Vec<u8> {
+    let mut block: Vec<u8> = words.flat_map(u64::to_le_bytes).collect();
+    block.truncate(size);
+    block
 }
