@@ -277,7 +277,8 @@ fn spi_controller_without_native_matches_release_bitstream() {
     // sd_spi.sv's reset values and read-back.
     assert_eq!(rd(&mut cpu, SD_CTRL), CLK_INIT | CTRL_CS_HI);
     assert_eq!(rd(&mut cpu, SD_DATA), 0xFF);
-    assert_eq!(rd(&mut cpu, SD_STATUS), STATUS_CARD);
+    assert_eq!(rd(&mut cpu, SD_STATUS), 0, "card detect is active low: a card is in");
+    assert_eq!(rd(&mut cpu, SDM_STATUS), 0, "no native controller");
     wr(&mut cpu, SD_CTRL, 0xFFFF_FFFF);
     assert_eq!(rd(&mut cpu, SD_CTRL), 0x3_FFFF, "no SD_MODE bit");
     // The native registers and the cascade are absent.
@@ -298,7 +299,8 @@ fn spi_controller_without_native_matches_release_bitstream() {
     assert_eq!(rd(&mut cpu, 0x206) & 0xFF, 0x22);
     // An empty slot: no card, MISO high.
     let mut empty = cpu_without_card();
-    assert_eq!(rd(&mut empty, SD_STATUS), 0);
+    assert_eq!(rd(&mut empty, SD_STATUS), STATUS_NO_CARD, "the raw pin is high with no card");
+    assert_eq!(rd(&mut empty, SDM_STATUS) as u32 & ST_CARD_PRESENT, 0);
     wr(&mut empty, SD_CTRL, CTRL_PWR_ON);
     assert_eq!(xfer(&mut empty, 0x40), 0xFF);
 }
@@ -624,6 +626,7 @@ fn native_init_r2_layout_and_registers() {
         assert_eq!(rd(&mut cpu, offset), 0, "offset 0x{offset:03X}");
     }
     assert_eq!(rd(&mut cpu, SDM_STATUS) as u32, ST_DAT0 | ST_CARD_PRESENT);
+    assert_eq!(rd(&mut cpu, SD_STATUS) & STATUS_NO_CARD, 0, "the raw pin: low with a card in");
     assert_eq!(rd(&mut cpu, SDM_CMD), 0, "write-only");
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR_TEST), 0, "reserved");
     wr(&mut cpu, SDM_CFG, 0xFFFF_FFFF);

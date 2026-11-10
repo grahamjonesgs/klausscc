@@ -2,13 +2,16 @@
 //! and the card behind it (`--sd-image`, `--sd-native`).
 //!
 //! Without either option the emulator has no SD controller at all: the
-//! whole window reads 0 and ignores writes, as it always has, and that is
-//! what software sees on a board with no card too (`SD_STATUS.CARD` = 0).
+//! whole window reads 0 and ignores writes, as it always has.  Note that
+//! the card-detect pin is active low (`SD_STATUS[1]` = 0 with a card in,
+//! measured on the board), so that all-zero window reads as "card present"
+//! on the raw pin, while every command gets no answer (MISO reads 0).
 //!
 //! **SPI mode** (`sd_spi.sv`, `MMIO_MAP.md` "SD card"): `SD_CTRL` (+0x00)
 //! `[15:0]` clock divider, `[16]` CS high, `[17]` slot power; `SD_DATA`
 //! (+0x08), whose write starts an 8-bit exchange and whose read returns the
-//! last byte received; `SD_STATUS` (+0x10) `[0]` BUSY, `[1]` CARD; and the
+//! last byte received; `SD_STATUS` (+0x10) `[0]` BUSY, `[1]` the raw,
+//! active-low card-detect pin (0 = a card is in); and the
 //! 512-byte scratch RAM `SD_BUF` (+0x200..+0x3F8, `addr[9]` set). Writing
 //! `SD_DATA` while BUSY is ignored, as in the RTL.
 //!
@@ -96,8 +99,9 @@ const CTRL_RESET: u64 = CLK_DIV_INIT | CTRL_CS_HI;
 const CLK_DIV_INIT: u64 = 249;
 /// `SD_STATUS[0]`: an exchange is running.
 const STATUS_BUSY: u64 = 1;
-/// `SD_STATUS[1]`: a card is in the slot.
-const STATUS_CARD: u64 = 1 << 1;
+/// `SD_STATUS[1]`: the raw card-detect pin, active low: 1 = the slot is
+/// empty, 0 = a card is in (Nexys A7, measured on the board).
+const STATUS_NO_CARD: u64 = 1 << 1;
 
 // ---- SDM_CMD fields ----
 /// `[5:0]` the command index.
@@ -314,7 +318,7 @@ impl SdController {
                 u64::from(self.rx_byte)
             }
             SD_STATUS => {
-                let card = if self.card.is_some() { STATUS_CARD } else { 0 };
+                let card = if self.card.is_some() { 0 } else { STATUS_NO_CARD };
                 let busy = match self.shift.take() {
                     // The first poll that finds the byte shifting sees BUSY,
                     // and ends the exchange.

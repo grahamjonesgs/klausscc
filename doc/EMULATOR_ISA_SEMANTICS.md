@@ -423,7 +423,10 @@ The SD window `0xF000_0000` (device `0x000`) is modelled only with
 `--sd-image FILE` or `--sd-native`. Without either, it reads 0 and
 ignores writes, exactly as before, and `CPU_FEATURES`, `INT_PENDING` and
 `0xF00F_0050`/`0x58` are unchanged (traces of a program run without the
-options are bit-identical to the emulator before the SD model).
+options are bit-identical to the emulator before the SD model). The
+card-detect pin is active low on the Nexys A7 (`SD_STATUS[1]` = 0 with a
+card in, measured on the board), so that all-zero window reads as "card
+present" on the raw pin, though no command is ever answered.
 
 **The card** (`--sd-image FILE`): an SDHC card whose blocks are the raw
 disk image `FILE` (a whole number of 512-byte blocks, at least 512 KiB),
@@ -441,7 +444,10 @@ the file is reported at the end of the run.
 
 **SPI mode** (`sd_spi.sv`): `SD_CTRL` (`[15:0]` divider, reset 249;
 `[16]` CS high, reset 1; `[17]` power, reset 0; read back as written),
-`SD_DATA`, `SD_STATUS` (`[0]` BUSY, `[1]` CARD) and `SD_BUF`
+`SD_DATA`, `SD_STATUS` (`[0]` BUSY; `[1]` the raw card-detect pin,
+active low: 0 with `--sd-image`, 1 with `--sd-native` and no card;
+`SDM_STATUS[3]` `CARD_PRESENT` is the inverted, active-high form) and
+`SD_BUF`
 (`+0x200..+0x3F8`, `addr[9]`, plain RAM; sub-word accesses use the byte
 lanes of `addr[2:0]`). Commands: CMD0, 1, 6, 8, 9, 10, 12 (stuff byte,
 R1, busy), 13 (R2), 16, 17, 18, 24, 25 (`0xFC` tokens, `0xFD` stop), 55,
