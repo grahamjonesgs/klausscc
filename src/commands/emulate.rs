@@ -100,6 +100,9 @@ fn emulate_and_report(
     if let Some(e) = &result.sd_error {
         msg_list.warning(e.clone());
     }
+    if let Some(faults) = &result.sd_faults {
+        msg_list.info(faults.clone());
+    }
 
     msg_list.print_summary();
     println!(

@@ -1126,3 +1126,271 @@ fn native_blocks_of_4_mod_8_bytes() {
     assert_eq!(block_words(12), 2);
     assert_eq!(block_words(512), 64);
 }
+
+// ---- fault injection (`--sd-fault`) ----
+
+/// Give the card these `--sd-fault` specs.
+fn inject(cpu: &mut Cpu, specs: &[&str]) {
+    let specs = specs.iter().map(|s| s.parse().unwrap()).collect();
+    cpu.sd.as_mut().unwrap().card.as_mut().unwrap().set_faults(specs);
+}
+
+/// SPI ACMD22: the blocks the last write wrote.
+fn spi_acmd22(cpu: &mut Cpu) -> u32 {
+    cs(cpu, true);
+    assert_eq!(spi_cmd(cpu, 55, 0), 0x00);
+    assert_eq!(spi_cmd(cpu, 22, 0), 0x00);
+    assert_eq!(spi_token(cpu), 0xFE);
+    let n = u32::from_be_bytes(std::array::from_fn(|_| xfer(cpu, 0xFF)));
+    xfer(cpu, 0xFF);
+    xfer(cpu, 0xFF);
+    cs(cpu, false);
+    n
+}
+
+/// Native ACMD22.
+fn native_acmd22(cpu: &mut Cpu) -> u32 {
+    wr(cpu, SDM_FIFO, FIFO_RESET);
+    wr(cpu, SDM_BLK, (1 << 16) | 4);
+    sdm_ok(cpu, 55, u32::from(RCA) << 16, R1, 0);
+    sdm_ok(cpu, 22, 0, R1, CMD_DATA);
+    u32::from_be_bytes((rd(cpu, SDM_DATA) as u32).to_le_bytes())
+}
+
+#[test]
+fn fault_specs_parse_and_print() {
+    for (spec, kind, cmd, at, count) in [
+        ("wcrc@37", FaultKind::WriteCrc, None, 37, 1),
+        ("wbusy@1x3", FaultKind::WriteBusy, None, 1, 3),
+        ("rerr@5", FaultKind::ReadError, None, 5, 1),
+        ("rcrc@5x2", FaultKind::ReadError, None, 5, 2),
+        ("cmdto@100", FaultKind::CmdTimeout, None, 100, 1),
+        ("cmdto:17@2x4", FaultKind::CmdTimeout, Some(17), 2, 4),
+    ] {
+        let fault: SdFault = spec.parse().unwrap();
+        assert_eq!((fault.kind, fault.cmd, fault.at, fault.count), (kind, cmd, at, count), "{spec}");
+        assert_eq!(fault.to_string(), spec.replace("rcrc", "rerr"));
+    }
+    for bad in [
+        "",
+        "wcrc",
+        "wcrc@0",
+        "wcrc@x2",
+        "wcrc@3x0",
+        "wcrc@3x",
+        "foo@1",
+        "wcrc:17@1",
+        "cmdto:64@1",
+        "cmdto:x@1",
+        "wcrc@-1",
+    ] {
+        assert!(bad.parse::<SdFault>().is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn spi_write_faults() {
+    let mut cpu = cpu_with_init();
+    // wcrc@2: the second block of a CMD25 gets data response 0x0B and is
+    // not programmed; the driver stops, and ACMD22 says one block.
+    inject(&mut cpu, &["wcrc@2", "wbusy@4"]);
+    cs(&mut cpu, true);
+    assert_eq!(spi_cmd(&mut cpu, 25, 200), 0x00);
+    let mut responses = Vec::new();
+    for b in 0..3_u8 {
+        xfer(&mut cpu, 0xFF);
+        xfer(&mut cpu, 0xFC);
+        tx_block(&mut cpu, &[0x70 + b; BLOCK], true);
+        xfer(&mut cpu, 0xFF);
+        xfer(&mut cpu, 0xFF);
+        let resp = xfer(&mut cpu, 0xFF) & 0x1F;
+        responses.push(resp);
+        if resp != 0x05 {
+            break;
+        }
+        spi_wait_not_busy(&mut cpu);
+    }
+    assert_eq!(responses, [0x05, 0x0B]);
+    spi_wait_not_busy(&mut cpu);
+    xfer(&mut cpu, 0xFD);
+    xfer(&mut cpu, 0xFF);
+    spi_wait_not_busy(&mut cpu);
+    cs(&mut cpu, false);
+    assert_eq!(spi_acmd22(&mut cpu), 1);
+    assert_eq!(card_bytes(&cpu)[200 * BLOCK..201 * BLOCK], [0x70; BLOCK]);
+    assert_eq!(card_bytes(&cpu)[201 * BLOCK..202 * BLOCK], pattern(201)[..], "not programmed");
+    // The retry (write event 3) succeeds: the fault was transient.
+    spi_write(&mut cpu, 201, &[0x71; BLOCK], false);
+    assert_eq!(card_bytes(&cpu)[201 * BLOCK..202 * BLOCK], [0x71; BLOCK]);
+    // wbusy@4: accepted, then MISO stays low until CS goes high; the block
+    // is not programmed.
+    cs(&mut cpu, true);
+    assert_eq!(spi_cmd(&mut cpu, 24, 202), 0x00);
+    xfer(&mut cpu, 0xFF);
+    xfer(&mut cpu, 0xFE);
+    tx_block(&mut cpu, &[0x72; BLOCK], false);
+    xfer(&mut cpu, 0xFF);
+    xfer(&mut cpu, 0xFF);
+    assert_eq!(xfer(&mut cpu, 0xFF) & 0x1F, 0x05);
+    assert!((0..10_000).all(|_| xfer(&mut cpu, 0xFF) == 0x00), "busy for good");
+    cs(&mut cpu, false);
+    cs(&mut cpu, true);
+    assert_eq!(xfer(&mut cpu, 0xFF), 0xFF, "CS high ended it");
+    cs(&mut cpu, false);
+    assert_eq!(card_bytes(&cpu)[202 * BLOCK..203 * BLOCK], pattern(202)[..]);
+    assert_eq!(spi_acmd22(&mut cpu), 0);
+    spi_write(&mut cpu, 202, &[0x72; BLOCK], true);
+    assert_eq!(spi_acmd22(&mut cpu), 1);
+    let summary = card(&cpu).fault_summary().unwrap();
+    assert_eq!(summary, "SD faults injected: 2 (wcrc@2: 1, wbusy@4: 1)");
+}
+
+#[test]
+fn spi_read_and_command_faults() {
+    let mut cpu = cpu_with_init();
+    // rerr@1: CMD17 gets the error token 0x04; the retry reads the block.
+    // rerr@5: counted over CMD18 blocks the host actually receives (a
+    // block cut short by CMD12 is no event).
+    inject(&mut cpu, &["rerr@1", "rerr@5", "cmdto:17@3x2"]);
+    cs(&mut cpu, true);
+    assert_eq!(spi_cmd(&mut cpu, 17, 3), 0x00);
+    assert_eq!(spi_token(&mut cpu), 0x04);
+    cs(&mut cpu, false);
+    assert_eq!(spi_read(&mut cpu, 3, true), pattern(3), "read event 2");
+    let cmd18 = |cpu: &mut Cpu, lba: u32, n: usize| -> Result<Vec<u8>, u8> {
+        cs(cpu, true);
+        assert_eq!(spi_cmd(cpu, 18, lba), 0x00);
+        let mut got = Vec::new();
+        let mut result = Ok(());
+        for _ in 0..n {
+            let token = spi_token(cpu);
+            if token != 0xFE {
+                result = Err(token);
+                break;
+            }
+            got.extend(rx_block(cpu, true).unwrap());
+            xfer(cpu, 0xFF);
+            xfer(cpu, 0xFF);
+        }
+        for b in [0x4C, 0, 0, 0, 0, 0x61, 0xFF] {
+            xfer(cpu, b);
+        }
+        assert_eq!((0..8).map(|_| xfer(cpu, 0xFF)).find(|r| r & 0x80 == 0), Some(0x00));
+        spi_wait_not_busy(cpu);
+        cs(cpu, false);
+        result.map(|()| got)
+    };
+    assert_eq!(cmd18(&mut cpu, 10, 2), Ok([pattern(10), pattern(11)].concat()), "read events 3-4");
+    assert_eq!(cmd18(&mut cpu, 20, 3), Err(0x04), "read event 5 is the first block");
+    assert_eq!(cmd18(&mut cpu, 20, 3), Ok((20..23).flat_map(pattern).collect()));
+    // cmdto:17@3x2: the third and fourth CMD17 get no R1, the fifth works.
+    cs(&mut cpu, true);
+    assert_eq!(spi_cmd(&mut cpu, 17, 0), 0xFF);
+    assert_eq!(spi_cmd(&mut cpu, 17, 0), 0xFF);
+    assert_eq!(spi_cmd(&mut cpu, 13, 0), 0x00, "other commands answer");
+    xfer(&mut cpu, 0xFF);
+    cs(&mut cpu, false);
+    assert_eq!(spi_read(&mut cpu, 0, false), pattern(0));
+    // A dropped CMD55 is no APP_CMD: the next command is an ordinary one.
+    inject(&mut cpu, &["cmdto:55@1"]);
+    cs(&mut cpu, true);
+    assert_eq!(spi_cmd(&mut cpu, 55, 0), 0xFF);
+    assert_eq!(spi_cmd(&mut cpu, 22, 0), 0x04, "CMD22 is illegal");
+    cs(&mut cpu, false);
+}
+
+#[test]
+fn native_write_faults_and_acmd22() {
+    let mut cpu = cpu(true, true);
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    inject(&mut cpu, &["wcrc@3", "wbusy@5"]);
+    let push_block = |cpu: &mut Cpu, byte: u8| {
+        for _ in 0..64 {
+            wr(cpu, SDM_DATA, u64::from_le_bytes([byte; 8]));
+        }
+    };
+    // CMD25 of four blocks: the third gets CRC status 101.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (4 << 16) | 512);
+    sdm_ok(&mut cpu, 25, 300, R1, CMD_DATA | CMD_WRITE);
+    for b in 0..4 {
+        push_block(&mut cpu, 0x80 + b);
+    }
+    let status = rd(&mut cpu, SDM_STATUS) as u32;
+    assert_eq!(status & (ST_WRITE_CRC_ERR | ST_DATA_BUSY | ST_DATA_DONE), ST_WRITE_CRC_ERR);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 2);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(native_acmd22(&mut cpu), 2, "ACMD22 counts the blocks before the failed one");
+    assert_eq!(card_bytes(&cpu)[301 * BLOCK..302 * BLOCK], [0x81; BLOCK]);
+    assert_eq!(card_bytes(&cpu)[302 * BLOCK..303 * BLOCK], pattern(302)[..], "not programmed");
+    // Linux's recovery: rewrite from the first unwritten block.  Write
+    // events 4 and 5: the second block's busy never ends.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (2 << 16) | 512);
+    sdm_ok(&mut cpu, 25, 302, R1, CMD_DATA | CMD_WRITE);
+    push_block(&mut cpu, 0x82);
+    push_block(&mut cpu, 0x83);
+    let status = rd(&mut cpu, SDM_STATUS) as u32;
+    assert_eq!(status & (ST_BUSY_TIMEOUT | ST_DATA_BUSY | ST_DATA_DONE), ST_BUSY_TIMEOUT);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 1);
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 6, "still rcv");
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(native_acmd22(&mut cpu), 1);
+    // The retry succeeds.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
+    sdm_ok(&mut cpu, 24, 303, R1, CMD_DATA | CMD_WRITE);
+    push_block(&mut cpu, 0x83);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & (ST_DATA_DONE | ST_ERR_ANY), ST_DATA_DONE);
+    assert_eq!(native_acmd22(&mut cpu), 1);
+    let want: Vec<u8> = (0x80..0x84).flat_map(|b| [b; BLOCK]).collect();
+    assert_eq!(card_bytes(&cpu)[300 * BLOCK..304 * BLOCK], want[..]);
+}
+
+#[test]
+fn native_read_and_command_faults() {
+    let mut cpu = cpu(true, true);
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    inject(&mut cpu, &["rcrc@2", "cmdto:13@1"]);
+    // CMD18 of four: the second block arrives with a bad CRC and never
+    // reaches the FIFO; the first stays to be drained.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (4 << 16) | 512);
+    let status = sdm(&mut cpu, 18, 40, R1, CMD_DATA);
+    assert_eq!(status & (ST_DATA_CRC_ERR | ST_DATA_BUSY | ST_DATA_DONE), ST_DATA_CRC_ERR);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 1);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 64);
+    assert_eq!(pop(&mut cpu, 64), pattern(40));
+    // cmdto: the first CMD13 gets no response and leaves SDM_RESP* alone.
+    let resp = (rd(&mut cpu, SDM_RESP0), rd(&mut cpu, SDM_RESP1));
+    assert_ne!(sdm(&mut cpu, 13, rca, R1, 0) & ST_CMD_TIMEOUT, 0);
+    assert_eq!((rd(&mut cpu, SDM_RESP0), rd(&mut cpu, SDM_RESP1)), resp);
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 5, "the card still streams");
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    // The retry reads all four.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 18, 40, R1, CMD_DATA);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 4);
+    assert_eq!(pop(&mut cpu, 256), (40..44).flat_map(pattern).collect::<Vec<_>>());
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(cpu.sd_fault_summary().unwrap(), "SD faults injected: 2 (rerr@2: 1, cmdto:13@1: 1)");
+    // A CMD12 that gets no response leaves the card streaming; the phase
+    // still ends at the host.
+    inject(&mut cpu, &["cmdto:12@1"]);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, 512);
+    sdm_ok(&mut cpu, 18, 0, R1, CMD_DATA);
+    assert_ne!(sdm(&mut cpu, 12, 0, R1B, CMD_STOP) & ST_CMD_TIMEOUT, 0);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & (ST_DATA_BUSY | ST_DATA_DONE), 0);
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 5);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4);
+}
+
+#[test]
+fn no_faults_no_summary() {
+    let cpu = cpu_with_init();
+    assert_eq!(cpu.sd_fault_summary(), None);
+}

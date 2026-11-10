@@ -80,7 +80,7 @@ mod trace;
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
 pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE, UART_SCRIPT_GAP};
 pub use mmu::{MpuRegion, TlbEntry};
-pub use sd::SdCard;
+pub use sd::{FaultKind, SdCard, SdFault};
 pub use system::{Cause, SystemRegs};
 
 use crate::layout::is_mmio;
@@ -134,6 +134,8 @@ pub struct EmulateResult {
     /// The first I/O error on the `--sd-image` file, if any (the card read
     /// zeros or dropped the write).
     pub sd_error: Option<String>,
+    /// The faults `--sd-fault` injected, if any were asked for.
+    pub sd_faults: Option<String>,
 }
 
 /// The optional hardware of an emulated machine.  The default is the
@@ -393,6 +395,12 @@ impl Cpu {
         self.sd.as_ref().is_some_and(|sd| sd.native())
     }
 
+    /// The faults `--sd-fault` injected so far, if any were asked for.
+    #[must_use]
+    pub fn sd_fault_summary(&self) -> Option<String> {
+        self.sd.as_ref()?.card()?.fault_summary()
+    }
+
     /// Take the first I/O error on the SD image, if any.
     pub fn take_sd_error(&mut self) -> Option<String> {
         self.sd.as_mut()?.card_mut()?.take_io_error()
@@ -622,6 +630,7 @@ impl Cpu {
             stop,
             tx_busy_writes: std::mem::take(&mut self.tx_busy_writes),
             sd_error: self.take_sd_error(),
+            sd_faults: self.sd_fault_summary(),
         }
     }
 }

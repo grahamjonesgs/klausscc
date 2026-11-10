@@ -97,6 +97,9 @@ klausscc -i prog.elf --emulate --mpu    # with the MMU stage 2 MPU (the Nexys A7
 truncate -s 64M sd.img && echo 'start=2048, type=c' | sfdisk sd.img
 mkfs.vfat -F 32 --offset 2048 sd.img
 klausscc -i test_sd.elf --emulate --sd-image sd.img [--sd-native]
+# Fault injection for drivers' error recovery: KIND[:CMD]@N[xCOUNT] fails
+# the Nth matching event (and COUNT-1 more); KIND = wcrc, wbusy, rerr, cmdto
+klausscc -i prog.elf --emulate --sd-image sd.img --sd-fault wcrc@3 --sd-fault cmdto:17@2x2
 
 # Debug with lldb (gdb-remote 127.0.0.1:3333) on the emulator, or on the
 # board over JTAG (needs the board feature)

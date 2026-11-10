@@ -677,6 +677,9 @@ pub(crate) fn serve(cpu: Cpu, port: u16) -> Result<String, GdbError> {
     if let Some(e) = target.cpu.take_sd_error() {
         eprintln!("klausscc gdbserver: {e}");
     }
+    if let Some(faults) = target.cpu.sd_fault_summary() {
+        eprintln!("klausscc gdbserver: {faults}");
+    }
     session_summary(result, "debugger disconnected", "debugger killed the program")
 }
 

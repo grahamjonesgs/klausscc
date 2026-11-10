@@ -191,6 +191,10 @@ pub(crate) struct Cli {
     #[arg(long, value_name = "FILE", requires = "emu_host", conflicts_with = "board")]
     pub(crate) sd_image: Option<PathBuf>,
 
+    /// With --sd-image, make the card fail: KIND[:CMD]@N[xCOUNT] fails the Nth matching event since the start and the COUNT-1 after it (default 1), then the card behaves again, so retries succeed. KIND: wcrc (a written block gets a CRC error and is not programmed), wbusy (a written block's busy never ends: BUSY_TIMEOUT in SD mode, MISO held low until CS goes high in SPI mode), rerr or rcrc (a read block arrives bad: DATA_CRC_ERR in SD mode, error token 0x04 in SPI mode), cmdto (a command, or only command CMD, gets no response). Repeatable; each injected fault is logged on stderr
+    #[arg(long, value_name = "SPEC", requires = "sd_image", value_parser = clap::value_parser!(crate::emu::SdFault))]
+    pub(crate) sd_fault: Vec<crate::emu::SdFault>,
+
     /// Give the emulator the native 4-bit SD controller (klaussCPU SD_NATIVE_PLAN.md v1): SD_CTRL[18] SD_MODE, the SDM_* registers at 0xF000_0100..0x1F8, the interrupt cascade on source 2 (INT2_EN 0xF00F_0050, INT2_PENDING 0xF00F_0058) and CPU_FEATURES bit 21. Without it the emulator matches the release bitstream, which has only the SPI controller. For --emulate and --gdbserver on the emulator
     #[arg(long, requires = "emu_host", conflicts_with = "board")]
     pub(crate) sd_native: bool,
@@ -529,6 +533,17 @@ mod tests {
             &["-i", "prog.elf", "--emulate", "--sd-image", "sd.img"],
             &["-i", "prog.kla", "--emulate", "--sd-image", "sd.img", "--sd-native"],
             &["-i", "prog.elf", "--emulate", "--sd-native"],
+            &[
+                "-i",
+                "prog.elf",
+                "--emulate",
+                "--sd-image",
+                "sd.img",
+                "--sd-fault",
+                "wcrc@3",
+                "--sd-fault",
+                "cmdto:17@1x2",
+            ],
             &["-i", "prog.elf", "--gdbserver", "1234", "--sd-image", "sd.img", "--sd-native"],
             // A pre-built image.
             &["-i", "prog.kbt", "-s", "/dev/ttyUSB1"],
@@ -613,6 +628,10 @@ mod tests {
             &["-i", "prog.elf", "--sd-image", "sd.img"],
             &["-i", "prog.elf", "-s", "COM3", "--sd-native"],
             &["--emulate-test", "tests", "--sd-image", "sd.img"],
+            // Faults need a card.
+            &["-i", "prog.elf", "--emulate", "--sd-fault", "wcrc@3"],
+            &["-i", "prog.elf", "--emulate", "--sd-image", "sd.img", "--sd-fault", "wcrc@0"],
+            &["-i", "prog.elf", "--emulate", "--sd-image", "sd.img", "--sd-fault", "bogus@1"],
             // What used to be reported only once the work was done.
             &["-N", "prog.elf"],
             &["-N", "prog.elf", "--ip", ""],
@@ -736,6 +755,21 @@ mod tests {
         let cli = parse(&["-i", "prog.elf", "--emulate", "--sd-image", "card.img", "--sd-native"]).unwrap();
         assert_eq!(cli.sd_image, Some(PathBuf::from("card.img")));
         assert!(cli.sd_native);
+        assert_eq!(cli.sd_fault, Vec::new());
+        let cli = parse(&[
+            "-i",
+            "p.elf",
+            "--emulate",
+            "--sd-image",
+            "c.img",
+            "--sd-fault",
+            "rerr@2x3",
+            "--sd-fault",
+            "cmdto@9",
+        ])
+        .unwrap();
+        let specs: Vec<String> = cli.sd_fault.iter().map(ToString::to_string).collect();
+        assert_eq!(specs, ["rerr@2x3", "cmdto@9"]);
 
         let cli = parse(&["-i", "prog.elf", "--emulate", "--uart-in", "keys.txt"]).unwrap();
         assert_eq!(cli.uart_in, Some(PathBuf::from("keys.txt")));

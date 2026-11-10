@@ -19,6 +19,7 @@
 //! card's own CRCs (CRC7 on responses and registers, CRC16 on SPI data
 //! blocks) are real.
 
+use super::fault::{Event, FaultKind, Faults, SdFault};
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read as _, Seek as _, SeekFrom, Write as _};
@@ -71,10 +72,14 @@ const TOKEN_MULTI: u8 = 0xFC;
 const TOKEN_STOP: u8 = 0xFD;
 /// Data error token: out of range.
 const TOKEN_OUT_OF_RANGE: u8 = 0x08;
+/// Data error token: card ECC failed (`--sd-fault rerr`).
+const TOKEN_ECC_FAILED: u8 = 0x04;
 /// Data response: accepted (`xxx0_0101`).
 const DATA_ACCEPTED: u8 = 0xE5;
 /// Data response: write error (`xxx0_1101`).
 const DATA_WRITE_ERROR: u8 = 0xED;
+/// Data response: CRC error (`xxx0_1011`, `--sd-fault wcrc`).
+const DATA_CRC_ERROR: u8 = 0xEB;
 /// SPI busy bytes after an R1b response, a write or a stop token.
 const SPI_BUSY: [u8; 2] = [0x00, 0x00];
 
@@ -137,6 +142,9 @@ pub(super) enum WriteBlock {
     NoToken,
     /// CRC status token 101: the card got another block length or bus width.
     CrcError,
+    /// The busy after the CRC status token never ends (`--sd-fault
+    /// wbusy`); the block is not programmed.
+    BusyTimeout,
     /// CRC status token 010; the block is programmed and the busy is over.
     Ok,
 }
@@ -203,6 +211,10 @@ struct Spi {
     rx: SpiRx,
     /// A running CMD18.
     stream: Stream,
+    /// A CMD18 block (or its error token) queued at this block address
+    /// whose read event counts only once its token goes out with no
+    /// command frame started: a block cut short by CMD12 is no event.
+    uncounted: Option<u64>,
 }
 
 /// The emulated SDHC card.
@@ -245,6 +257,10 @@ pub struct SdCard {
     cid: u128,
     /// The CSD, with its CRC7 and end bit.
     csd: u128,
+    /// `--sd-fault` specs.
+    faults: Faults,
+    /// SPI mode: a `wbusy` fault holds MISO low until CS goes high.
+    stuck_busy: bool,
 }
 
 impl std::fmt::Debug for SdCard {
@@ -355,6 +371,8 @@ impl SdCard {
             spi_io: Spi::default(),
             cid: Self::make_cid(),
             csd: Self::make_csd(len),
+            faults: Faults::default(),
+            stuck_busy: false,
         }
     }
 
@@ -447,6 +465,17 @@ impl SdCard {
         (unit != len).then(|| format!("the SD image is {len} bytes, not a multiple of 512 KiB: the card's CSD reports {unit} bytes"))
     }
 
+    /// Inject the faults `specs` (`--sd-fault`).
+    pub fn set_faults(&mut self, specs: Vec<SdFault>) {
+        self.faults = Faults::new(specs);
+    }
+
+    /// The faults injected so far, or `None` without `--sd-fault`.
+    #[must_use]
+    pub fn fault_summary(&self) -> Option<String> {
+        self.faults.summary()
+    }
+
     /// Take the first I/O error on the image, if any.
     pub fn take_io_error(&mut self) -> Option<String> {
         self.io_error.take()
@@ -516,6 +545,7 @@ impl SdCard {
         self.reset();
         self.status_err = 0;
         self.spi_io = Spi::default();
+        self.stuck_busy = false;
     }
 
     /// CMD0: back to idle, keeping the bus mode.
@@ -583,6 +613,10 @@ impl SdCard {
             return Response::None;
         }
         let app = std::mem::take(&mut self.app_cmd);
+        if self.faults.check(Event::Command(index)) == Some(FaultKind::CmdTimeout) {
+            // Taken as a frame with a bad CRC: not executed, no response.
+            return Response::None;
+        }
         let state = self.state;
         if app && let Some(response) = self.sd_app_command(index, arg, state) {
             return response;
@@ -728,6 +762,9 @@ impl SdCard {
                     Some(0) => self.state = State::Tran,
                     left => self.pending = Pending::Read { lba: lba + 1, left },
                 }
+                if self.faults.check(Event::Read(lba)) == Some(FaultKind::ReadError) {
+                    return ReadBlock::Bad;
+                }
                 block
             }
             other => {
@@ -756,6 +793,11 @@ impl SdCard {
         if lba >= self.blocks {
             self.status_err |= ST_OUT_OF_RANGE;
             return WriteBlock::NoToken;
+        }
+        match self.faults.check(Event::Write(lba)) {
+            Some(FaultKind::WriteCrc) => return WriteBlock::CrcError,
+            Some(FaultKind::WriteBusy) => return WriteBlock::BusyTimeout,
+            _ => {}
         }
         self.write_block(lba, data);
         self.written = self.written.wrapping_add(1);
@@ -792,6 +834,17 @@ impl SdCard {
         if !self.powered || !cs_low {
             return 0xFF;
         }
+        if self.stuck_busy {
+            // The data response, then busy; MOSI is ignored.
+            return self.spi_io.out.pop_front().unwrap_or(0x00);
+        }
+        let token_next = self.spi_io.uncounted.take();
+        if let Some(lba) = token_next
+            && self.spi_io.frame_len == 0
+        {
+            // The block's token goes out now: that is the read event.
+            self.faults.check(Event::Read(lba));
+        }
         if self.spi_io.out.is_empty()
             && self.spi
             && let Stream::Next(lba) = self.spi_io.stream
@@ -807,6 +860,14 @@ impl SdCard {
     fn queue_stream_block(&mut self, lba: u64) {
         if lba >= self.blocks {
             self.spi_io.out.extend([0xFF, TOKEN_OUT_OF_RANGE]);
+            self.spi_io.stream = Stream::End;
+            return;
+        }
+        // The N_AC byte goes out with this exchange, the token with the
+        // next, which counts the event (see `uncounted`).
+        self.spi_io.uncounted = Some(lba);
+        if self.faults.peek(Event::Read(lba)) == Some(FaultKind::ReadError) {
+            self.spi_io.out.extend([0xFF, TOKEN_ECC_FAILED]);
             self.spi_io.stream = Stream::End;
             return;
         }
@@ -865,6 +926,11 @@ impl SdCard {
             io.frame_len = 0;
             let index = io.frame[0] & 0x3F;
             let arg = u32::from_be_bytes([io.frame[1], io.frame[2], io.frame[3], io.frame[4]]);
+            if self.faults.check(Event::Command(index)) == Some(FaultKind::CmdTimeout) {
+                // Taken as a frame with a bad CRC: not executed, no R1.
+                self.app_cmd = false;
+                return;
+            }
             self.spi_command(index, arg);
         }
     }
@@ -876,15 +942,28 @@ impl SdCard {
             return;
         };
         let ok = lba < self.blocks;
-        if ok {
-            self.write_block(lba, &buf);
-            self.written = self.written.wrapping_add(1);
-        }
+        let fault = if ok { self.faults.check(Event::Write(lba)) } else { None };
         self.spi_io.out.clear();
-        self.spi_io.out.push_back(if ok { DATA_ACCEPTED } else { DATA_WRITE_ERROR });
-        self.spi_io.out.extend(SPI_BUSY);
+        match fault {
+            Some(FaultKind::WriteCrc) => self.spi_io.out.push_back(DATA_CRC_ERROR),
+            Some(FaultKind::WriteBusy) => {
+                self.spi_io.out.push_back(DATA_ACCEPTED);
+                self.stuck_busy = true;
+            }
+            _ => {
+                if ok {
+                    self.write_block(lba, &buf);
+                    self.written = self.written.wrapping_add(1);
+                }
+                self.spi_io.out.push_back(if ok { DATA_ACCEPTED } else { DATA_WRITE_ERROR });
+                self.spi_io.out.extend(SPI_BUSY);
+            }
+        }
+        // After a failed block the card expects the next token at the same
+        // address (the host sends the stop token).
+        let next = if ok && fault.is_none() { lba + 1 } else { lba };
         if multi {
-            self.spi_io.rx = SpiRx::Token { multi, lba: lba + 1 };
+            self.spi_io.rx = SpiRx::Token { multi, lba: next };
         } else {
             self.state = State::Tran;
         }
@@ -965,9 +1044,12 @@ impl SdCard {
                     out.push(r1);
                     match index {
                         17 => {
-                            let block = self.read_block(lba);
                             out.push(0xFF);
-                            out.extend(data_block(&block));
+                            if self.faults.check(Event::Read(lba)) == Some(FaultKind::ReadError) {
+                                out.push(TOKEN_ECC_FAILED);
+                            } else {
+                                out.extend(data_block(&self.read_block(lba)));
+                            }
                         }
                         18 => self.spi_io.stream = Stream::Next(lba),
                         _ => {
@@ -989,6 +1071,11 @@ impl SdCard {
             _ => out.push(r1 | R1_ILLEGAL),
         }
         self.spi_io.out.extend(out);
+    }
+
+    /// CS went high: a stuck SPI busy (`wbusy`) ends.
+    pub(super) const fn cs_released(&mut self) {
+        self.stuck_busy = false;
     }
 
     /// The card is in SPI mode (tests).

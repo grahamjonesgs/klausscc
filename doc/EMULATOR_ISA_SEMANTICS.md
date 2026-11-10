@@ -501,6 +501,32 @@ received, a
 48-bit response leaves `SDM_RESP1` = 0 and `SDM_RESP0[63:38]` = 0;
 response types 5-7 act as 0; `SDM_ARG` keeps 32 bits.
 
+### Fault injection
+
+`--sd-fault SPEC` (repeatable, needs `--sd-image`) makes the card fail,
+so drivers' error recovery can be tested. `SPEC` is
+`KIND[:CMD]@N[xCOUNT]`: the `N`th matching event since the start of the
+run (1-based) and the `COUNT - 1` after it (default 1) fail; then the
+card behaves again, so a retry, which is a new event, succeeds. Each
+spec counts its own events.
+
+| `KIND` | Event | SD mode (`--sd-native`) | SPI mode |
+|---|---|---|---|
+| `wcrc` | a memory block written (CMD24/25) | CRC status 101: `WRITE_CRC_ERR` | data response `0x0B` (`0xEB`), no busy |
+| `wbusy` | the same | busy never ends: `BUSY_TIMEOUT` at once | data response `0x05`, then MISO `0x00` until CS goes high or power is cut |
+| `rerr` (`rcrc`) | a memory block read (CMD17/18) | bad CRC: `DATA_CRC_ERR`, the block never reaches the FIFO | error token `0x04` instead of the block; a CMD18 then sends nothing until CMD12 |
+| `cmdto` | a command the card receives; `cmdto:CMD` only index `CMD` (as sent, so `cmdto:41` is ACMD41) | `CMD_TIMEOUT` | R1 stays `0xFF` |
+
+A failed or never-finished write is not programmed, so ACMD22 counts
+only the blocks before it, and the card stays in rcv (SD mode) or waits
+for the next token (SPI CMD25) until the host stops it. A command that
+gets no response is not executed (as a frame with a bad CRC), and it
+cancels a preceding CMD55. A CMD18 block cut short by CMD12 in SPI mode
+is not a read event. Each injected fault is logged on stderr
+(`klausscc sd: injected wcrc at write block 2 (block address 201)`), and
+the run ends with the totals (`SD faults injected: ...`). Without
+`--sd-fault` nothing changes.
+
 ## Differences from the RTL
 
 No difference in the architectural effect of an instruction is known.

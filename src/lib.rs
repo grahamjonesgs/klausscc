@@ -310,7 +310,7 @@ fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, 
     let sd_card = match cli.sd_image.as_deref() {
         None => None,
         Some(path) => {
-            let card = emu::SdCard::open(path).map_err(|source| {
+            let mut card = emu::SdCard::open(path).map_err(|source| {
                 msg_list.error(format!("Unable to use --sd-image {}: {source}", path.display()));
                 Error::Read {
                     path: path.to_path_buf(),
@@ -320,6 +320,7 @@ fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, 
             if let Some(note) = card.capacity_note() {
                 msg_list.warning(note);
             }
+            card.set_faults(cli.sd_fault.clone());
             Some(card)
         }
     };

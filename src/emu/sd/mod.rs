@@ -38,11 +38,13 @@
 //! (an illegal command, a read past its end) times out at once.
 
 mod card;
+mod fault;
 #[cfg(test)]
 mod tests;
 
 pub use card::SdCard;
 use card::{ReadBlock, Response, WriteBlock, crc7};
+pub use fault::{FaultKind, SdFault};
 use std::collections::VecDeque;
 
 // ---- register offsets (`addr[15:0]`) ----
@@ -138,6 +140,8 @@ const ST_DATA_CRC_ERR: u32 = 1 << 21;
 const ST_WRITE_CRC_ERR: u32 = 1 << 23;
 /// `[24]` `WRITE_NO_TOKEN`.
 const ST_WRITE_NO_TOKEN: u32 = 1 << 24;
+/// `[25]` `BUSY_TIMEOUT`.
+const ST_BUSY_TIMEOUT: u32 = 1 << 25;
 /// `[26]` `FIFO_ERR`.
 const ST_FIFO_ERR: u32 = 1 << 26;
 /// `[31]` `ERR_ANY` (live): any of `[26:16]`.
@@ -281,6 +285,11 @@ impl SdController {
     }
 
     /// The card, if any.
+    pub(super) const fn card(&self) -> Option<&SdCard> {
+        self.card.as_ref()
+    }
+
+    /// The card, if any, to change.
     pub(super) const fn card_mut(&mut self) -> Option<&mut SdCard> {
         self.card.as_mut()
     }
@@ -412,6 +421,9 @@ impl SdController {
         let on = self.ctrl & CTRL_PWR_ON != 0;
         if let Some(card) = self.card.as_mut() {
             card.set_power(on);
+            if self.ctrl & CTRL_CS_HI != 0 {
+                card.cs_released();
+            }
         }
         if was_sd_mode && !self.sd_mode() {
             // Leaving SD mode abandons a native data phase.
@@ -623,6 +635,7 @@ impl SdController {
                     WriteBlock::Ok => self.blkdone = self.blkdone.wrapping_add(1),
                     WriteBlock::CrcError => error = ST_WRITE_CRC_ERR,
                     WriteBlock::NoToken => error = ST_WRITE_NO_TOKEN,
+                    WriteBlock::BusyTimeout => error = ST_BUSY_TIMEOUT,
                 }
             } else {
                 if FIFO_WORDS - self.fifo.len() < words {
