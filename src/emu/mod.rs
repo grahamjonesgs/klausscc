@@ -71,6 +71,7 @@ mod exec;
 mod flags;
 mod mmio;
 mod mmu;
+mod sd;
 mod system;
 #[cfg(test)]
 mod tests;
@@ -79,11 +80,13 @@ mod trace;
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
 pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE, UART_SCRIPT_GAP};
 pub use mmu::{MpuRegion, TlbEntry};
+pub use sd::SdCard;
 pub use system::{Cause, SystemRegs};
 
 use crate::layout::is_mmio;
 use flags::Flags;
 use mmu::{Fetch, MPU_REGIONS, Mapped, TLB_ENTRIES};
+use sd::SdController;
 use std::collections::VecDeque;
 
 /// Modelled `i_Clk` cycles per retired instruction (timer, millisecond clock and
@@ -128,6 +131,23 @@ pub struct EmulateResult {
     /// `TX_DATA` stores made while the transmitter was busy (their bytes are
     /// dropped, as on the board, and are not in [`EmulateResult::uart`]).
     pub tx_busy_writes: TxBusyWrites,
+    /// The first I/O error on the `--sd-image` file, if any (the card read
+    /// zeros or dropped the write).
+    pub sd_error: Option<String>,
+}
+
+/// The optional hardware of an emulated machine.  The default is the
+/// Nexys A7 release bitstream with no SD card: no MPU, no native SD
+/// controller.
+#[derive(Debug, Default)]
+pub struct Hardware {
+    /// The stage 2 MPU (`--mpu`, [`Cpu::set_has_mpu`]).
+    pub mpu: bool,
+    /// The SD card in the slot (`--sd-image`).
+    pub sd_card: Option<SdCard>,
+    /// The native 4-bit SD controller (`--sd-native`): `SD_CTRL[18]`, the
+    /// `SDM_*` registers, the source 2 cascade and `CPU_FEATURES[21]`.
+    pub sd_native: bool,
 }
 
 /// A memory write, as the trace annotates it.
@@ -274,6 +294,10 @@ pub struct Cpu {
     asid: u8,
     /// `TLBVEC`: the TLB-miss vector; 0 = use `EVEC`.
     tlbvec: u32,
+    // ---- devices ----
+    /// The SD controller, if it is modelled (`--sd-image`, `--sd-native`);
+    /// without it the SD window reads 0, as it always has.
+    sd: Option<Box<SdController>>,
 }
 
 impl Cpu {
@@ -352,7 +376,26 @@ impl Cpu {
             tlb_index: 0,
             asid: 0,
             tlbvec: 0,
+            sd: None,
         }
+    }
+
+    /// Fit the optional hardware: the MPU, and an SD controller when there
+    /// is a card or the native controller.  Without a card and
+    /// `sd_native`, the SD window stays unmodelled (reads 0).
+    pub fn install(&mut self, hw: Hardware) {
+        self.set_has_mpu(hw.mpu);
+        self.sd = (hw.sd_card.is_some() || hw.sd_native).then(|| Box::new(SdController::new(hw.sd_card, hw.sd_native)));
+    }
+
+    /// The native SD controller is modelled (`--sd-native`).
+    pub(super) fn has_sd_native(&self) -> bool {
+        self.sd.as_ref().is_some_and(|sd| sd.native())
+    }
+
+    /// Take the first I/O error on the SD image, if any.
+    pub fn take_sd_error(&mut self) -> Option<String> {
+        self.sd.as_mut()?.card_mut()?.take_io_error()
     }
 
     // ---- memory helpers (little-endian) --------------------------------------
@@ -454,7 +497,7 @@ impl Cpu {
         let lane = (addr & 7) as usize;
         let be_bits: u8 = ((1_u16 << n) - 1).rotate_left(lane as u32) as u8;
         if is_mmio(addr) {
-            self.mmio_write(addr, val);
+            self.mmio_store(addr, val, n as u32);
             self.last_write = Some(MemWrite {
                 addr: at.va() & !7,
                 byte_enable: be_bits,
@@ -578,6 +621,7 @@ impl Cpu {
             instructions: count,
             stop,
             tx_busy_writes: std::mem::take(&mut self.tx_busy_writes),
+            sd_error: self.take_sd_error(),
         }
     }
 }
@@ -595,24 +639,26 @@ impl Cpu {
 /// `mpu` gives the CPU the stage 2 MPU ([`Cpu::set_has_mpu`], `--mpu`).
 #[must_use]
 pub fn emulate_image(image: &[u8], entry: u32, max_instructions: u64, mpu: bool, trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
-    emulate_image_input(image, entry, max_instructions, mpu, &[], &[], trace)
+    let hw = Hardware { mpu, ..Hardware::default() };
+    emulate_image_input(image, entry, max_instructions, hw, &[], &[], trace)
 }
 
 /// [`emulate_image`] with scripted UART input (`--uart-in`): `uart_in` is
 /// typed into the UART receiver a byte at a time, each line after the
-/// program prints `uart_prompt` if that isn't empty ([`Cpu::set_uart_script`]).
+/// program prints `uart_prompt` if that isn't empty ([`Cpu::set_uart_script`]),
+/// on a machine with the optional hardware `hw` ([`Cpu::install`]).
 #[must_use]
 pub fn emulate_image_input(
     image: &[u8],
     entry: u32,
     max_instructions: u64,
-    mpu: bool,
+    hw: Hardware,
     uart_in: &[u8],
     uart_prompt: &[u8],
     trace: Option<&mut dyn std::io::Write>,
 ) -> EmulateResult {
     let mut cpu = Cpu::new(image, entry);
-    cpu.set_has_mpu(mpu);
+    cpu.install(hw);
     cpu.set_uart_script(uart_in, uart_prompt);
     cpu.run(max_instructions, trace)
 }

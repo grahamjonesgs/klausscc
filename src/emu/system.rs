@@ -83,6 +83,10 @@ const CPU_FEATURES_NO_MPU: u64 = ((TLB_ENTRIES as u64) << 8) | 0b1101;
 /// region count - 1 (`0x10FF` in all).
 const CPU_FEATURES_MPU: u64 = (((MPU_REGIONS - 1) as u64) << 4) | 0b10;
 
+/// The `CPU_FEATURES` bit for the native SD controller (`--sd-native`,
+/// `SD_NATIVE_PLAN.md` §4.1): bit 21.  The release bitstream has none.
+const CPU_FEATURES_SD_NATIVE: u64 = 1 << 21;
+
 /// `STATUS[8]` `MPU_EN` (stage 2).
 const STATUS_MPU_EN: u64 = 1 << 8;
 /// `STATUS[9]` TE (stage 3).
@@ -429,13 +433,12 @@ impl Cpu {
         self.has_mpu
     }
 
-    /// `CPU_FEATURES` (MMIO `0xF00F_0048`): `0x100D`, or `0x10FF` with the MPU.
-    pub(super) const fn cpu_features(&self) -> u64 {
-        if self.has_mpu {
-            CPU_FEATURES_NO_MPU | CPU_FEATURES_MPU
-        } else {
-            CPU_FEATURES_NO_MPU
-        }
+    /// `CPU_FEATURES` (MMIO `0xF00F_0048`): `0x100D`, or `0x10FF` with the MPU,
+    /// plus bit 21 with the native SD controller.
+    pub(super) fn cpu_features(&self) -> u64 {
+        let mpu = if self.has_mpu { CPU_FEATURES_MPU } else { 0 };
+        let sd = if self.has_sd_native() { CPU_FEATURES_SD_NATIVE } else { 0 };
+        CPU_FEATURES_NO_MPU | mpu | sd
     }
 
     /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`

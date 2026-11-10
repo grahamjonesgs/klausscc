@@ -674,6 +674,9 @@ pub(crate) fn serve(cpu: Cpu, port: u16) -> Result<String, GdbError> {
     let mut target = EmuTarget::new(cpu, spawn_stdin_reader());
     let result = run_session(conn, &mut target);
     target.pump_uart();
+    if let Some(e) = target.cpu.take_sd_error() {
+        eprintln!("klausscc gdbserver: {e}");
+    }
     session_summary(result, "debugger disconnected", "debugger killed the program")
 }
 

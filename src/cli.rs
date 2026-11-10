@@ -40,7 +40,9 @@ pub(crate) const DEFAULT_JTAG_KHZ: u32 = 10_000;
     long_about = None,
     arg_required_else_help = true,
     // --uart-in / --uart-prompt types at the emulated UART or the board monitor.
-    group(clap::ArgGroup::new("uart_host").multiple(true).args(["emulate", "monitor"]))
+    group(clap::ArgGroup::new("uart_host").multiple(true).args(["emulate", "monitor"])),
+    // --sd-image / --sd-native fit the emulated machine.
+    group(clap::ArgGroup::new("emu_host").multiple(true).args(["emulate", "gdbserver"]))
 )]
 // At most one mode: an input file, a net-load, a boot-ROM image, a board or
 // emulator test run, or the opcode lists (--opcodes and -t may go together).
@@ -184,6 +186,14 @@ pub(crate) struct Cli {
     /// Give the emulator the MMU stage 2 MPU (16 regions; CPU_FEATURES reads 0x10FF). Without it the emulator matches the Nexys A7 bitstream, which has no MPU: CPU_FEATURES reads 0x100D, the MPU_BASEn/MPU_LIMITn system registers are illegal and STATUS bit 8 (MPU_EN) stays 0. For --emulate, --emulate-test and --gdbserver on the emulator
     #[arg(long, conflicts_with = "board")]
     pub(crate) mpu: bool,
+
+    /// Put an SD card in the emulator's slot holding this raw disk image (e.g. a FAT-partitioned image; a whole number of 512-byte blocks, at least 512 KiB). The card is SDHC (block addressed, CSD 2.0, capacity = the image rounded down to 512 KiB); writes go to the file. Without it the slot is empty and, unless --sd-native, the SD registers at 0xF000_0000 read 0 as before. For --emulate and --gdbserver on the emulator
+    #[arg(long, value_name = "FILE", requires = "emu_host", conflicts_with = "board")]
+    pub(crate) sd_image: Option<PathBuf>,
+
+    /// Give the emulator the native 4-bit SD controller (klaussCPU SD_NATIVE_PLAN.md v1): SD_CTRL[18] SD_MODE, the SDM_* registers at 0xF000_0100..0x1F8, the interrupt cascade on source 2 (INT2_EN 0xF00F_0050, INT2_PENDING 0xF00F_0058) and CPU_FEATURES bit 21. Without it the emulator matches the release bitstream, which has only the SPI controller. For --emulate and --gdbserver on the emulator
+    #[arg(long, requires = "emu_host", conflicts_with = "board")]
+    pub(crate) sd_native: bool,
 
     /// Type the bytes of this file into the UART receiver like keyboard input, for scripted sessions with programs that read the console. With --emulate: one byte at a time whenever the receive FIFO has room (with a short gap between bytes). With -m (serial monitor): sent to the board line by line, one byte every 3 ms, instead of forwarding the keyboard (no raw mode; Ctrl+C still ends the run). Needs --emulate or -m
     #[arg(long, value_name = "FILE", requires = "uart_host", conflicts_with = "gdbserver")]
@@ -516,6 +526,10 @@ mod tests {
             &["-i", "prog.elf", "--emulate", "--mpu", "--max-instructions", "100"],
             &["--emulate-test", "tests", "--mpu"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--mpu"],
+            &["-i", "prog.elf", "--emulate", "--sd-image", "sd.img"],
+            &["-i", "prog.kla", "--emulate", "--sd-image", "sd.img", "--sd-native"],
+            &["-i", "prog.elf", "--emulate", "--sd-native"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--sd-image", "sd.img", "--sd-native"],
             // A pre-built image.
             &["-i", "prog.kbt", "-s", "/dev/ttyUSB1"],
             &["-i", "prog.kbt", "-m"],
@@ -591,8 +605,14 @@ mod tests {
             &["-i", "prog.kla", "--trace"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--jtag-khz", "5000"],
             &["--opcodes", "--jtag-khz", "5000"],
-            // The board has the MPU its bitstream has.
+            // The board has the MPU its bitstream has, and its own SD card.
             &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--mpu"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--sd-image", "sd.img"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--sd-native"],
+            // The SD card is the emulator's.
+            &["-i", "prog.elf", "--sd-image", "sd.img"],
+            &["-i", "prog.elf", "-s", "COM3", "--sd-native"],
+            &["--emulate-test", "tests", "--sd-image", "sd.img"],
             // What used to be reported only once the work was done.
             &["-N", "prog.elf"],
             &["-N", "prog.elf", "--ip", ""],
@@ -711,6 +731,11 @@ mod tests {
         assert!(!cli.mpu, "no MPU by default, as on the Nexys A7");
 
         assert!(parse(&["-i", "prog.elf", "--emulate", "--mpu"]).unwrap().mpu);
+        assert_eq!(cli.sd_image, None, "no SD card by default");
+        assert!(!cli.sd_native, "no native SD controller by default, as on the release bitstream");
+        let cli = parse(&["-i", "prog.elf", "--emulate", "--sd-image", "card.img", "--sd-native"]).unwrap();
+        assert_eq!(cli.sd_image, Some(PathBuf::from("card.img")));
+        assert!(cli.sd_native);
 
         let cli = parse(&["-i", "prog.elf", "--emulate", "--uart-in", "keys.txt"]).unwrap();
         assert_eq!(cli.uart_in, Some(PathBuf::from("keys.txt")));

@@ -169,10 +169,11 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         }
         Mode::Gdb {
             input, port, board: false, ..
-        } => run_gdbserver(cli.binary_input(input), port, cli.mpu, msg_list),
+        } => run_gdbserver(cli.binary_input(input), port, emu_hardware(cli, msg_list)?, msg_list),
         Mode::EmulateBinary { input, trace } => {
             let uart_in = read_uart_in(cli, msg_list)?;
-            run_emulate_elf(cli.binary_input(input), trace, cli.max_instructions, cli.mpu, &uart_in, msg_list)
+            let hw = emu_hardware(cli, msg_list)?;
+            run_emulate_elf(cli.binary_input(input), trace, cli.max_instructions, hw, &uart_in, msg_list)
         }
         Mode::SendBinary { input, ref kbt } => run_elf2serial(cli.binary_input(input), kbt, serial, send, msg_list),
         // .kbt input: already in board wire format — send and/or monitor verbatim.
@@ -210,7 +211,8 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         Mode::Emulate { input, trace } => {
             let assembly = assemble(input, msg_list)?;
             let uart_in = read_uart_in(cli, msg_list)?;
-            run_emulate(&assembly, input, trace, cli.max_instructions, cli.mpu, &uart_in, msg_list)
+            let hw = emu_hardware(cli, msg_list)?;
+            run_emulate(&assembly, input, trace, cli.max_instructions, hw, &uart_in, msg_list)
         }
         Mode::Assemble { input, ref code, ref kbt } => run_assemble(cli, input, code, kbt, serial, send, msg_list),
     }
@@ -300,6 +302,32 @@ fn run_assemble(
         return Err(Error::Assembly(error_count));
     }
     Ok(())
+}
+
+/// The emulated machine's optional hardware: `--mpu`, and the SD card
+/// (`--sd-image`, opened read-write) and controller (`--sd-native`).
+fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, Error> {
+    let sd_card = match cli.sd_image.as_deref() {
+        None => None,
+        Some(path) => {
+            let card = emu::SdCard::open(path).map_err(|source| {
+                msg_list.error(format!("Unable to use --sd-image {}: {source}", path.display()));
+                Error::Read {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })?;
+            if let Some(note) = card.capacity_note() {
+                msg_list.warning(note);
+            }
+            Some(card)
+        }
+    };
+    Ok(emu::Hardware {
+        mpu: cli.mpu,
+        sd_card,
+        sd_native: cli.sd_native,
+    })
 }
 
 /// The `--uart-in` file's bytes and the `--uart-prompt` text (both empty

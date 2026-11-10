@@ -18,9 +18,9 @@ use crate::loader::{BinaryInput, Loaded, load_flat};
 /// The image is laid out exactly as `--emulate` does (heap header, then the
 /// program at 0x20), so ELF addresses equal emulator addresses when the ELF is
 /// linked at 0x20 — the normal `klausscpu.ld` layout.  The CPU has the
-/// stage 2 MPU if `mpu` (`--mpu`).
+/// optional hardware `hw` (`--mpu`, `--sd-image`, `--sd-native`).
 #[cfg(not(tarpaulin_include))]
-pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, mpu: bool, msg_list: &mut Diagnostics) -> Result<(), Error> {
+pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, hw: emu::Hardware, msg_list: &mut Diagnostics) -> Result<(), Error> {
     let binary_path = input.path;
     let Loaded { image, elf } = load_flat(input, msg_list)?;
     let code_base = u64::from(CODE_BASE);
@@ -35,7 +35,7 @@ pub(crate) fn run_gdbserver(input: BinaryInput<'_>, port: u16, mpu: bool, msg_li
     msg_list.print_summary();
 
     let mut cpu = emu::Cpu::new(&image.to_ddr(), image.entry);
-    cpu.set_has_mpu(mpu);
+    cpu.install(hw);
     match emu_target::serve(cpu, port) {
         Ok(summary) => {
             eprintln!("klausscc gdbserver: {summary}");

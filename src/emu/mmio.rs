@@ -1,5 +1,5 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
-//! the performance counters.
+//! the performance counters, and the decode for the SD controller (`sd`).
 
 use super::{CYCLES_PER_MS, Cpu, PerfBase, StopReason};
 
@@ -7,11 +7,14 @@ use super::{CYCLES_PER_MS, Cpu, PerfBase, StopReason};
 const IRQ_DEV_SELECT: u32 = 0x00F;
 /// Performance-counter device select (`addr[27:16]`).
 const PERF_DEV_SELECT: u32 = 0x00D;
+/// SD card controller device select (`addr[27:16]`).
+const SD_DEV_SELECT: u32 = 0x000;
 
 // Interrupt controller / timer register offsets (`addr[15:0]`).
 /// `INT_MASK`: per-source enables (4 bits).
 const INT_MASK: u32 = 0x0000;
-/// `INT_PENDING` (read-only): bit 0 = timer (blitter / Ethernet not modelled).
+/// `INT_PENDING` (read-only): bit 0 = timer, bit 2 = the source 2 cascade
+/// with `--sd-native` (the blitter and Ethernet are not modelled).
 const INT_PENDING: u32 = 0x0008;
 /// `INT_VEC0`; `INT_VEC1..3` follow at 8-byte steps.
 const INT_VEC0: u32 = 0x0010;
@@ -26,6 +29,13 @@ const MS_CLOCK: u32 = 0x0040;
 /// `CPU_FEATURES` (read-only, `MMU_PLAN.md` §6.3): which of the MMU stages
 /// and LR/SC the core has.  Older bitstreams read 0 here.
 const CPU_FEATURES: u32 = 0x0048;
+/// `INT2_EN` (`SD_NATIVE_PLAN.md` §4.5, `--sd-native` only): `[0]` Ethernet,
+/// `[1]` SD, reset `0b01`.  Reads 0 without the native SD controller, as on
+/// the release bitstream.
+const INT2_EN: u32 = 0x0050;
+/// `INT2_PENDING` (read-only, `--sd-native` only): `[0]` Ethernet (0 here),
+/// `[1]` the SD interrupt, before `INT2_EN`.
+const INT2_PENDING: u32 = 0x0058;
 
 // Performance-counter register offsets (`addr[15:0]`).
 /// `PERF_CTRL`: writing bit 0 clears the counters.
@@ -175,7 +185,7 @@ impl std::fmt::Display for TxBusyWrites {
 pub struct IrqState {
     /// `INT_MASK`.
     pub mask: u8,
-    /// `INT_PENDING` (bit 0 = timer).
+    /// `INT_PENDING` (bit 0 = timer, bit 2 = the source 2 cascade).
     pub pending: u8,
     /// `INT_VEC0..3`.
     pub vectors: [u32; 4],
@@ -205,6 +215,10 @@ impl Cpu {
                     _ => 0,
                 };
             }
+            SD_DEV_SELECT => {
+                let now = self.cycles;
+                return self.sd.as_mut().map_or(0, |sd| sd.read(addr & 0xFFFF, now));
+            }
             UART_DEV_SELECT => {}
             _ => return 0,
         }
@@ -225,7 +239,19 @@ impl Cpu {
     /// while the transmitter is busy, is dropped); every other device/offset
     /// is ignored (RTL `default: 0`).
     pub(super) fn mmio_write(&mut self, addr: u32, data: u64) {
+        self.mmio_store(addr, data, 8);
+    }
+
+    /// Service an MMIO store of `bytes` (1, 2, 4 or 8) bytes: as
+    /// [`Cpu::mmio_write`], with the width the SD scratch RAM needs.
+    pub(super) fn mmio_store(&mut self, addr: u32, data: u64, bytes: u32) {
         match (addr >> 16) & 0xFFF {
+            SD_DEV_SELECT => {
+                let now = self.cycles;
+                if let Some(sd) = self.sd.as_mut() {
+                    sd.write(addr & 0xFFFF, data, bytes, now);
+                }
+            }
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
             IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
             PERF_DEV_SELECT if addr & 0xFFFF == PERF_CTRL && data & 1 != 0 => {
@@ -244,12 +270,14 @@ impl Cpu {
     fn irq_mmio_read(&self, offset: u32) -> u64 {
         match offset {
             INT_MASK => u64::from(self.int_mask),
-            INT_PENDING => u64::from(self.timer_pending),
+            INT_PENDING => u64::from(self.timer_pending) | (u64::from(self.int2_line()) << 2),
             INT_VEC0..=INT_VEC3 if offset.is_multiple_of(8) => u64::from(self.int_vec[((offset - INT_VEC0) / 8) as usize]),
             TIMER_PERIOD => u64::from(self.timer_period),
             TIMER_COUNT => u64::from(self.timer_count),
             MS_CLOCK => self.cycles / CYCLES_PER_MS,
             CPU_FEATURES => self.cpu_features(),
+            INT2_EN => self.sd.as_ref().filter(|sd| sd.native()).map_or(0, |sd| u64::from(sd.int2_en())),
+            INT2_PENDING => self.sd.as_ref().filter(|sd| sd.native()).map_or(0, |sd| u64::from(sd.int2_pending())),
             _ => 0,
         }
     }
@@ -258,6 +286,11 @@ impl Cpu {
     fn irq_mmio_write(&mut self, offset: u32, data: u64) {
         match offset {
             INT_MASK => self.int_mask = (data & 0xF) as u8,
+            INT2_EN => {
+                if let Some(sd) = self.sd.as_mut().filter(|sd| sd.native()) {
+                    sd.set_int2_en(data);
+                }
+            }
             INT_VEC0..=INT_VEC3 if offset.is_multiple_of(8) => self.int_vec[((offset - INT_VEC0) / 8) as usize] = data as u32,
             TIMER_PERIOD => {
                 self.timer_period = data as u32;
@@ -281,9 +314,21 @@ impl Cpu {
     }
 
     /// The source that would be dispatched now: pending, vectored and unmasked
-    /// (priority timer > blitter > Ethernet; only the timer is modelled).
+    /// (priority timer > blitter > Ethernet).  The timer is source 0; with
+    /// `--sd-native`, source 2 is the cascade, a level that stays pending
+    /// until the SD status bits behind it are cleared.  The blitter is not
+    /// modelled.
     pub(super) fn irq_ready(&self) -> Option<usize> {
-        (self.timer_pending && self.timer_can_fire()).then_some(0)
+        if self.timer_pending && self.timer_can_fire() {
+            return Some(0);
+        }
+        (self.int_vec[2] != 0 && self.int_mask & 0b100 != 0 && self.int2_line()).then_some(2)
+    }
+
+    /// Interrupt source 2 with `--sd-native`: `|(INT2_PENDING & INT2_EN)`
+    /// (`SD_NATIVE_PLAN.md` §4.5); without it, 0, as Ethernet is not modelled.
+    fn int2_line(&self) -> bool {
+        self.sd.as_ref().is_some_and(|sd| sd.native() && sd.int2_line())
     }
 
     /// True if the timer can raise a dispatchable interrupt.
@@ -316,10 +361,10 @@ impl Cpu {
 
     /// Interrupt controller and timer state.
     #[must_use]
-    pub const fn irq_state(&self) -> IrqState {
+    pub fn irq_state(&self) -> IrqState {
         IrqState {
             mask: self.int_mask,
-            pending: self.timer_pending as u8,
+            pending: u8::from(self.timer_pending) | (u8::from(self.int2_line()) << 2),
             vectors: self.int_vec,
             timer_period: self.timer_period,
             timer_count: self.timer_count,

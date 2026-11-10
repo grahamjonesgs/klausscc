@@ -26,6 +26,7 @@ RTL.
 | `src/emu/flags.rs` | the `Z S C V` register and its saved layouts (GETF, interrupt frame, trace, debugger nibble) |
 | `src/emu/mmio.rs` | UART, interrupt controller / timer, performance counters, `CPU_FEATURES` |
 | `src/emu/system.rs` | MMU stage 1: user mode, exception entry, the system registers, the LR/SC reservation |
+| `src/emu/sd/` | the SD controller at `0xF000_0000` (SPI mode, and the native controller with `--sd-native`) and the emulated card (`--sd-image`) |
 | `src/emu/mmu.rs` | MMU stages 2 and 3: the MPU, the TLB, the address map, and `translate`, which every memory access an instruction makes goes through |
 | `src/emu/debug.rs` | the debugger's view: registers, memory, watchpoints, stop reasons |
 | `src/emu/trace.rs` | the per-instruction trace line |
@@ -177,7 +178,8 @@ unless the program sets it; see [MMU stage 1](#mmu-stage-1)).
 - The interrupt controller is at `0xF00F_0000` (`INT_MASK`,
   `INT_PENDING`, `INT_VEC0..3`, `TIMER_PERIOD`, `TIMER_COUNT`, the
   millisecond clock), with source 0 the periodic timer. `WAIT` sleeps
-  until a source is ready.
+  until a source is ready. With `--sd-native`, source 2 is the cascade
+  of the native SD controller (see "SD card").
 - `DI rd` sets rd to the old enable bit (1 = enabled, as at reset) and
   disables; `EI rs1` sets enable = rs1[0]. No interrupt is taken while
   disabled (`irq_take`), but a ready source still wakes a `WAIT`, and the
@@ -415,6 +417,81 @@ addresses. `monitor mpu` and `monitor tlb` list the regions and entries,
 and `monitor sr` shows the new SRs. The board's server stays physical,
 because its debug module reads physical memory.
 
+## SD card
+
+The SD window `0xF000_0000` (device `0x000`) is modelled only with
+`--sd-image FILE` or `--sd-native`. Without either, it reads 0 and
+ignores writes, exactly as before, and `CPU_FEATURES`, `INT_PENDING` and
+`0xF00F_0050`/`0x58` are unchanged (traces of a program run without the
+options are bit-identical to the emulator before the SD model).
+
+**The card** (`--sd-image FILE`): an SDHC card whose blocks are the raw
+disk image `FILE` (a whole number of 512-byte blocks, at least 512 KiB),
+read and written in place. Block addressing, OCR `0xC0FF_8000` once
+ready (CCS = 1; the second ACMD41 with HCS completes it, without HCS it
+never does), CSD 2.0 with `C_SIZE` = the image's whole 512 KiB units − 1
+(a tail beyond them is reported with a warning), CCC `0x515` (no erase or
+lock commands), and an SCR offering 1- and 4-bit buses and CMD23. The
+card comes up in SD mode when `SD_CTRL.PWR_ON` is set, loses all state
+when it is cleared, and enters SPI mode on a CMD0 sent with CS low. Host
+CRCs are not checked; the card's own CRC7s and CRC16s are real. Nothing
+takes time: a busy period is two `0x00` bytes in SPI mode and nothing in
+SD mode, and no timeout fires for a card that answers. An I/O error on
+the file is reported at the end of the run.
+
+**SPI mode** (`sd_spi.sv`): `SD_CTRL` (`[15:0]` divider, reset 249;
+`[16]` CS high, reset 1; `[17]` power, reset 0; read back as written),
+`SD_DATA`, `SD_STATUS` (`[0]` BUSY, `[1]` CARD) and `SD_BUF`
+(`+0x200..+0x3F8`, `addr[9]`, plain RAM; sub-word accesses use the byte
+lanes of `addr[2:0]`). Commands: CMD0, 1, 6, 8, 9, 10, 12 (stuff byte,
+R1, busy), 13 (R2), 16, 17, 18, 24, 25 (`0xFC` tokens, `0xFD` stop), 55,
+58 (R3), 59, ACMD13, 23, 41, 51; R1 `0x40` for an address past the end,
+the `0x08` error token when a CMD18 runs off it, data response `0xE5`.
+An exchange runs `16 * (div + 1) + 1` modelled cycles, and a `SD_DATA`
+write while one runs is ignored, as in the RTL; but the first
+`SD_STATUS` read that finds it running returns BUSY = 1 and ends it, so
+a poll loop spins once per byte at any clock, while a `SD_DATA` read
+right after the write still returns the previous byte. Zephyr's and
+Linux's pipelined read loop therefore sees the next byte still shifting
+and never retries a block.
+
+**Native SD mode** (`--sd-native`, klaussCPU `SD_NATIVE_PLAN.md` v1):
+`SD_CTRL[18]` `SD_MODE`, the `SDM_*` registers (`+0x100..+0x1F8`),
+`CPU_FEATURES[21]`, and the source 2 cascade: `INT2_EN` (`0xF00F_0050`,
+reset `0b01`), `INT2_PENDING` (`0xF00F_0058`; `[0]` Ethernet is always
+0, as Ethernet is not modelled), `INT_PENDING[2]` =
+`|(INT2_PENDING & INT2_EN)`, a level that is dispatched like the timer
+(vector `INT_VEC2`, `INT_MASK[2]`) and stays pending until the
+`SDM_STATUS` bits behind it are cleared. A command completes during its
+`SDM_CMD` store (`CMD_BUSY` never reads 1): the card's 48- or 136-bit
+frame is built with its CRC7 and checked as the response type asks, so a
+wrong type gives `CMD_CRC_ERR`/`CMD_END_ERR`/`CMD_IDX_ERR`, and a card
+that does not answer (an illegal command, CMD5, a card in SPI mode) gives
+`CMD_TIMEOUT` at once. The data engine moves whole blocks between the
+card and the 512-word FIFO whenever the FIFO has room for one (read) or
+holds one (write), so `DATA_BUSY` lasts until the count is exhausted
+(`DATA_DONE`), an error, or a CMD12 with `SDM_CMD[13]`. Host and card
+must agree on the block size and bus width (`SDM_CFG[0]` and ACMD6),
+else `DATA_CRC_ERR` / `WRITE_CRC_ERR`; a read past the end gives
+`DATA_TIMEOUT`, a write the card is not receiving `WRITE_NO_TOKEN`. The
+card's states are idle/ready/ident/stby/tran/data/rcv/prg (prg passes at
+once) and ina; CMD0, 2, 3, 6 (high speed unsupported), 7, 8, 9, 10, 12,
+13, 15, 16, 17, 18, 23, 24, 25, 55 and ACMD6, 13, 23, 41, 42, 51. The
+emulator does not reload programs, so the plan's reset at
+`LOAD_COMPLETE` has nothing to act on. Points the plan leaves open, and
+the reading taken: `SDM_BLK` resets to 0; with no write phase running
+and the last data command a read (or none), `FIFO_THRESH` means "at
+least one block of `SDM_BLK`'s size (at least one word) in the FIFO",
+which a write pre-fill also sets until its command is written; a CMD12
+with the stop flag that ends a running open-ended (count 0) phase sets
+`DATA_DONE`, one that ends a counted phase early does not; a data
+command written while a data phase runs replaces it; clearing `SD_MODE`
+abandons a data phase; `SDM_CMD` and the data engine act only with
+`SD_MODE` set, while the other registers (the FIFO port included) work
+at any time; a 48-bit
+response leaves `SDM_RESP1` = 0 and `SDM_RESP0[63:38]` = 0; response
+types 5-7 act as 0 (none); `SDM_ARG` keeps 32 bits.
+
 ## Differences from the RTL
 
 No difference in the architectural effect of an instruction is known.
@@ -450,11 +527,13 @@ access reads 0 or is ignored.
   RTL's spin, value × 8192 cycles (value = rs1[31:0] or imm32). LCD
   instructions do nothing once their encoding has been checked.
 - Interrupt sources 1–2 (blitter, Ethernet) are not modelled; only the
-  timer (source 0) fires.
+  timer (source 0) fires, and with `--sd-native` the SD controller
+  through the source 2 cascade.
 - MMIO is the UART (`0xF001_0000`: `TX_DATA`, `RX_DATA`, `STATUS`), the
-  interrupt controller / timer (`0xF00F_0000`) and the performance
-  counters (`0xF00D_0000`). Other MMIO reads return 0 and writes are
-  ignored.
+  interrupt controller / timer (`0xF00F_0000`), the performance
+  counters (`0xF00D_0000`) and, with `--sd-image` or `--sd-native`, the
+  SD controller (`0xF000_0000`, see "SD card"). Other MMIO reads return
+  0 and writes are ignored.
 - The UART transmitter is timed on the modelled clock, not on the
   board's. A `TX_DATA` store sets `STATUS.TX_BUSY` for
   `UART_CYCLES_PER_STORE` = 334 cycles: a frame of

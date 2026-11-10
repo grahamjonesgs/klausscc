@@ -73,13 +73,13 @@ pub(crate) struct UartInput {
 /// per-instruction trace to `trace_file` (or, for `"-"`, stdout), prints the
 /// summary, then the instruction count, the stop reason, any `TX_DATA` store
 /// made while the transmitter was busy, and the captured UART output on stdout.
-/// `mpu` gives the emulated CPU the stage 2 MPU (`--mpu`).
+/// `hw` is the optional hardware (`--mpu`, `--sd-image`, `--sd-native`).
 #[cfg(not(tarpaulin_include))]
 fn emulate_and_report(
     image: &Image,
     trace_file: Option<&str>,
     max_instructions: u64,
-    mpu: bool,
+    hw: emu::Hardware,
     uart_in: &UartInput,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
@@ -88,7 +88,7 @@ fn emulate_and_report(
         &image.to_ddr(),
         image.entry,
         max_instructions,
-        mpu,
+        hw,
         &uart_in.bytes,
         &uart_in.prompt,
         trace_writer.as_mut().map(|w| w.as_mut() as &mut dyn std::io::Write),
@@ -96,6 +96,9 @@ fn emulate_and_report(
     finish_trace_writer(trace_writer, trace_file, result.instructions, msg_list);
     if !result.tx_busy_writes.is_empty() {
         msg_list.warning(tx_busy_reason(&result.tx_busy_writes));
+    }
+    if let Some(e) = &result.sd_error {
+        msg_list.warning(e.clone());
     }
 
     msg_list.print_summary();
@@ -128,7 +131,7 @@ pub(crate) fn run_emulate(
     input_file_name: &str,
     trace_file: Option<&str>,
     max_instructions: u64,
-    mpu: bool,
+    hw: emu::Hardware,
     uart_in: &UartInput,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
@@ -145,7 +148,7 @@ pub(crate) fn run_emulate(
         image.bytes.len(),
         image.entry
     ));
-    emulate_and_report(&image, trace_file, max_instructions, mpu, uart_in, msg_list)
+    emulate_and_report(&image, trace_file, max_instructions, hw, uart_in, msg_list)
 }
 
 /// Run the emulator on an ELF or flat binary input (`--emulate` with binary input).
@@ -158,7 +161,7 @@ pub(crate) fn run_emulate_elf(
     input: BinaryInput<'_>,
     trace_file: Option<&str>,
     max_instructions: u64,
-    mpu: bool,
+    hw: emu::Hardware,
     uart_in: &UartInput,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
@@ -175,7 +178,7 @@ pub(crate) fn run_emulate_elf(
         msg_list.info(format!("Emulating flat binary {binary_path}"));
     }
 
-    emulate_and_report(&image, trace_file, max_instructions, mpu, uart_in, msg_list)
+    emulate_and_report(&image, trace_file, max_instructions, hw, uart_in, msg_list)
 }
 
 /// Batch-verify the emulator against `.kla` files with expected `// ` UART values.

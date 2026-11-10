@@ -19,7 +19,10 @@ One binary, `klausscc`, does everything needed to get a program onto the CPU:
   stage 3 (the 16-entry software-refilled TLB, the kseg/kmap address map,
   the double fault) and, with `--mpu`, stage 2 (the 16-region MPU). By
   default it has no MPU, as the Nexys A7 bitstream has none:
-  `CPU_FEATURES` reads `0x100D` (`0x10FF` with `--mpu`).
+  `CPU_FEATURES` reads `0x100D` (`0x10FF` with `--mpu`). `--sd-image
+  FILE` puts an SDHC card holding a raw disk image in the SD slot, for
+  today's SPI-mode controller, and `--sd-native` adds the native 4-bit
+  SD controller (`CPU_FEATURES` bit 21, the source 2 interrupt cascade).
 - **Debugger**: a GDB remote-protocol server for lldb, debugging a program on
   the emulator or on the real board over its USB-JTAG. `monitor exc_pass
   on` lets illegal instructions, TRAP and misaligned accesses reach the
@@ -86,6 +89,14 @@ klausscc --mem-out prog.elf [--mem-file boot.mem]
 klausscc -i prog.kla --emulate
 klausscc -i prog.elf --emulate --trace trace.txt --max-instructions 1000000
 klausscc -i prog.elf --emulate --mpu    # with the MMU stage 2 MPU (the Nexys A7 has none)
+
+# An SD card for the emulator: a raw disk image (e.g. FAT-partitioned),
+# read and written in place, through the SPI-mode controller; --sd-native
+# adds the native 4-bit controller (klaussCPU SD_NATIVE_PLAN.md v1).
+# Also with --gdbserver on the emulator.
+truncate -s 64M sd.img && echo 'start=2048, type=c' | sfdisk sd.img
+mkfs.vfat -F 32 --offset 2048 sd.img
+klausscc -i test_sd.elf --emulate --sd-image sd.img [--sd-native]
 
 # Debug with lldb (gdb-remote 127.0.0.1:3333) on the emulator, or on the
 # board over JTAG (needs the board feature)
