@@ -28,7 +28,7 @@
 //! (`SDM_DATA`, 64-bit, little-endian), sticky write-1-to-clear status
 //! bits and an interrupt that reaches the CPU through the source 2 cascade
 //! (`INT2_EN`, `INT2_PENDING`). Reset values and corner cases follow the
-//! plan's §4.8 (klaussCPU mmu-sd 6c23771). Everything happens at once: a command
+//! plan's §4.8 (klaussCPU mmu-sd ca23b13). Everything happens at once: a command
 //! completes during the `SDM_CMD` store (`CMD_BUSY` never reads 1), and the
 //! data engine moves whole blocks between the card and the FIFO whenever
 //! the FIFO has room for one (a read) or holds one (a write), so `DATA_BUSY`
@@ -239,6 +239,9 @@ pub(super) struct SdController {
     dir: Option<bool>,
     /// Words pushed since the last FIFO reset (a pre-fill included).
     pushed: u64,
+    /// The block size in bytes latched by the last data command, which
+    /// `FIFO_THRESH` uses during the phase and after it.
+    thresh_size: usize,
     /// `INT2_EN` (in the interrupt controller, but only with `native`).
     int2_en: u8,
 }
@@ -266,6 +269,7 @@ impl SdController {
             phase: None,
             dir: None,
             pushed: 0,
+            thresh_size: BLK_RESET as usize & 0xFFF,
             int2_en: INT2_EN_RESET,
         }
     }
@@ -474,8 +478,12 @@ impl SdController {
     /// transfer); WRITE, a write phase runs, the FIFO has room for a block
     /// and fewer words were pushed since the FIFO reset than the count's
     /// blocks hold (or the count is open-ended); NONE, 0.
+    ///
+    /// The block size is the one latched by the last data command, during
+    /// the phase and after it; writing `SDM_BLK` changes it only at the
+    /// next data command.
     fn fifo_thresh(&self) -> bool {
-        let words = self.phase.map_or(self.blk_size(), |phase| phase.size) / 8;
+        let words = self.thresh_size / 8;
         match (self.dir, self.phase) {
             (Some(false), _) => self.fifo.len() >= words,
             (Some(true), Some(phase)) => {
@@ -500,6 +508,7 @@ impl SdController {
             }
             self.blkdone = 0;
             self.dir = Some(cmd & CMD_WRITE != 0);
+            self.thresh_size = self.blk_size();
         }
         let stopped = if cmd & CMD_STOP != 0 { self.phase.take() } else { None };
         let response = match self.card.as_mut() {
@@ -532,6 +541,8 @@ impl SdController {
     /// Capture the card's response as response type `rtype` sees it and
     /// return the error bits: no start bit (timeout), a bad CRC7, a bad
     /// end bit, or (types 1 and 2) an echoed index other than `index`.
+    /// `SDM_RESP*` hold the response as received, errors or not; after a
+    /// timeout, or for type 0, they are unchanged (§4.8).
     fn take_response(&mut self, index: u8, rtype: u64, response: Response) -> u32 {
         if !matches!(rtype, 1..=4) {
             return 0;

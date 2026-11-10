@@ -479,17 +479,21 @@ once) and ina; CMD0, 2, 3, 6 (high speed unsupported), 7, 8, 9, 10, 12,
 13, 15, 16, 17, 18, 23, 24, 25, 55 and ACMD6, 13, 23, 41, 42, 51. The
 emulator does not reload programs, so the plan's reset at
 `LOAD_COMPLETE` has nothing to act on. Reset values and corner cases
-follow the plan's §4.8 (klaussCPU mmu-sd 6c23771): `SDM_BLK` resets to
+follow the plan's §4.8 (klaussCPU mmu-sd ca23b13): `SDM_BLK` resets to
 `0x0001_0200` and a size field of 0 acts as 8; `FIFO_THRESH` follows the
 direction latch (NONE after a reset or a FIFO reset, so a write pre-fill
-never raises it; READ: a block in the FIFO; WRITE: a write phase runs,
+never raises it; READ: a block in the FIFO, of the size latched by the
+last data command, during the phase and after it; WRITE: a write phase runs,
 there is room for a block and fewer words were pushed since the FIFO
 reset than the count's blocks hold); a data `SDM_CMD` while `DATA_BUSY`
-is ignored entirely, a non-data one goes out (CMD12 with `[13]` stops
+is ignored entirely (DIR, `SDM_BLKDONE` and the latched size
+included), a non-data one goes out (CMD12 with `[13]` stops
 the phase, setting `DATA_DONE` only for an open-ended phase; with no
 phase it is an ordinary R1b); clearing `SD_MODE` abandons the engines
 (no DONE) and keeps the registers, the FIFO and DIR; only `SDM_CMD`
-needs `SD_MODE`; a type-0 command leaves `SDM_RESP*` unchanged, a
+needs `SD_MODE`; a type-0 command or a `CMD_TIMEOUT` leaves `SDM_RESP*`
+unchanged, a response with a CRC, end-bit or index error is held as
+received, a
 48-bit response leaves `SDM_RESP1` = 0 and `SDM_RESP0[63:38]` = 0;
 response types 5-7 act as 0; `SDM_ARG` keeps 32 bits.
 

@@ -642,9 +642,17 @@ fn native_init_r2_layout_and_registers() {
     assert_eq!(linux[0] >> 30, 1, "CSD_STRUCTURE in resp[0][31:30]");
     assert_eq!(linux[1] >> 20 & 0xFFF, 0x515, "CCC in resp[1][31:20]");
     // R2 asked for as R1: the first 48 bits have index 0x3F and a bad CRC.
+    // SDM_RESP* hold the response as received.
     let status = sdm(&mut cpu, 9, rca, R1, 0);
     assert_ne!(status & ST_CMD_IDX_ERR, 0);
     assert_ne!(status & ST_ERR_ANY, 0);
+    let head = (raw >> 96) as u64; // the 32 bits after the index field
+    assert_eq!(rd(&mut cpu, SDM_RESP0), (0x3F << 32) | (head & 0xFFFF_FFFF));
+    assert_eq!(rd(&mut cpu, SDM_RESP1), 0);
+    // A timeout leaves SDM_RESP* unchanged.
+    sdm(&mut cpu, 9, rca, R2, 0);
+    assert_ne!(sdm(&mut cpu, 2, 0, R2, 0) & ST_CMD_TIMEOUT, 0, "CMD2 in stby: no answer");
+    assert_eq!((rd(&mut cpu, SDM_RESP1), rd(&mut cpu, SDM_RESP0)), (r1, r0));
     // R1 asked for as R2: a bad CRC over the padding.
     let status = sdm(&mut cpu, 13, rca, R2, 0);
     assert_ne!(status & ST_CMD_CRC_ERR, 0);
@@ -1001,7 +1009,17 @@ fn native_corner_cases_of_plan_4_8() {
     assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_DATA_DONE, ST_DATA_DONE);
     assert_eq!(rd(&mut cpu, SDM_FIFO), 1);
     assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "READ: one 8-byte block in the FIFO");
+    // FIFO_THRESH uses the block size latched by the data command, even
+    // after the phase: a new SDM_BLK counts only from the next one.
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
+    assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "still the latched 8 bytes");
     wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 17, 0, R1, CMD_DATA);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 8);
+    assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "a 512-byte block");
+    pop(&mut cpu, 63);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "one word left: below 512 bytes");
+    pop(&mut cpu, 1);
 
     // A data command while DATA_BUSY is ignored entirely; a non-data one
     // (CMD13) goes out and leaves the phase running.
@@ -1010,12 +1028,15 @@ fn native_corner_cases_of_plan_4_8() {
     assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8);
     wr(&mut cpu, SDM_STATUS, u64::from(ST_STICKY));
     let before = (rd(&mut cpu, SDM_RESP0), rd(&mut cpu, SDM_STATUS));
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 8);
     wr(&mut cpu, SDM_ARG, 100);
     wr(&mut cpu, SDM_CMD, cmd_word(17, R1, CMD_DATA));
     wr(&mut cpu, SDM_CMD, cmd_word(24, R1, CMD_DATA | CMD_WRITE));
     assert_eq!((rd(&mut cpu, SDM_RESP0), rd(&mut cpu, SDM_STATUS)), before, "no bit changes");
     assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8);
     assert_eq!(card(&cpu).state(), card::State::Data, "nothing sent");
+    assert_eq!(cpu.sd.as_ref().unwrap().thresh_size, 512, "nor the latched size");
+    wr(&mut cpu, SDM_BLK, 512);
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 5, "CMD13 during the phase");
     assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_DATA_BUSY, 0, "still running");
     // A stop that ends the open-ended phase sets DATA_DONE.
