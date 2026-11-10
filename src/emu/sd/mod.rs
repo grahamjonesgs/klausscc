@@ -27,7 +27,8 @@
 //! +0x100..+0x1F8: a command engine, a data engine with a 4 KiB FIFO
 //! (`SDM_DATA`, 64-bit, little-endian), sticky write-1-to-clear status
 //! bits and an interrupt that reaches the CPU through the source 2 cascade
-//! (`INT2_EN`, `INT2_PENDING`). Everything happens at once: a command
+//! (`INT2_EN`, `INT2_PENDING`). Reset values and corner cases follow the
+//! plan's §4.8 (klaussCPU mmu-sd 6c23771). Everything happens at once: a command
 //! completes during the `SDM_CMD` store (`CMD_BUSY` never reads 1), and the
 //! data engine moves whole blocks between the card and the FIFO whenever
 //! the FIFO has room for one (a read) or holds one (a write), so `DATA_BUSY`
@@ -150,6 +151,8 @@ const IRQ_EN_MASK: u32 = ST_FIFO_THRESH | ST_STICKY;
 // ---- other native registers ----
 /// `SDM_BLK`: `[11:3]` of the block size and `[31:16]` the count.
 const BLK_MASK: u64 = 0xFFFF_0FF8;
+/// `SDM_BLK` reset (§4.8): 512 bytes, 1 block.
+const BLK_RESET: u64 = (1 << 16) | 0x200;
 /// `SDM_TIMEOUT` reset: 2 500 000 data / 12 500 000 busy CLK cycles.
 const TIMEOUT_RESET: u64 = (BUSY_TIMEOUT_RESET << 32) | DATA_TIMEOUT_RESET;
 /// `SDM_TIMEOUT[31:0]` reset: 100 ms at 25 MHz.
@@ -187,8 +190,6 @@ struct Phase {
     size: usize,
     /// Block count, 0 = open-ended.
     count: u16,
-    /// Words pushed for this write, a FIFO pre-fill included.
-    pushed: u64,
 }
 
 impl Phase {
@@ -233,8 +234,11 @@ pub(super) struct SdController {
     blkdone: u16,
     /// The data phase running.
     phase: Option<Phase>,
-    /// The last data command wrote (`FIFO_THRESH`'s direction once idle).
-    last_write: bool,
+    /// The direction latch `DIR` (§4.5): `None` after a reset or a FIFO
+    /// reset, else whether the last data command wrote.
+    dir: Option<bool>,
+    /// Words pushed since the last FIFO reset (a pre-fill included).
+    pushed: u64,
     /// `INT2_EN` (in the interrupt controller, but only with `native`).
     int2_en: u8,
 }
@@ -252,7 +256,7 @@ impl SdController {
             buf: [0; 64],
             arg: 0,
             resp: [0; 2],
-            blk: 0,
+            blk: BLK_RESET,
             status: 0,
             irq_en: 0,
             timeout: TIMEOUT_RESET,
@@ -260,7 +264,8 @@ impl SdController {
             fifo: VecDeque::with_capacity(FIFO_WORDS),
             blkdone: 0,
             phase: None,
-            last_write: false,
+            dir: None,
+            pushed: 0,
             int2_en: INT2_EN_RESET,
         }
     }
@@ -353,13 +358,15 @@ impl SdController {
             SDM_IRQ_EN => self.irq_en = data as u32 & IRQ_EN_MASK,
             SDM_TIMEOUT => self.timeout = data,
             SDM_CFG => self.cfg = data & CFG_MASK,
-            SDM_FIFO if data & FIFO_RESET != 0 => self.fifo.clear(),
+            SDM_FIFO if data & FIFO_RESET != 0 => {
+                self.fifo.clear();
+                self.dir = None;
+                self.pushed = 0;
+            }
             SDM_DATA => {
                 if self.fifo.len() < FIFO_WORDS {
                     self.fifo.push_back(data);
-                    if let Some(phase) = self.phase.as_mut().filter(|p| p.write) {
-                        phase.pushed += 1;
-                    }
+                    self.pushed += 1;
                     self.pump();
                 } else {
                     self.status |= ST_FIFO_ERR;
@@ -453,24 +460,28 @@ impl SdController {
         status
     }
 
-    /// The block size `SDM_BLK[11:0]` in words.
-    const fn blk_words(&self) -> usize {
-        (self.blk & 0xFFF) as usize / 8
+    /// The block size in bytes, `SDM_BLK[11:0]`; a size field of 0 acts as
+    /// 8 (§4.8).
+    const fn blk_size(&self) -> usize {
+        match (self.blk & 0xFFF) as usize {
+            0 => 8,
+            size => size,
+        }
     }
 
-    /// `FIFO_THRESH` (§4.5): reading, a whole block of unread data is in the
-    /// FIFO (until it is drained, also after the transfer); writing, a
-    /// write phase runs, the FIFO has room for a block and fewer blocks
-    /// were pushed than the count. Never while idle after a write.
+    /// `FIFO_THRESH` (§4.5), by the direction latch: READ, a whole block
+    /// of unread data is in the FIFO (until it is drained, also after the
+    /// transfer); WRITE, a write phase runs, the FIFO has room for a block
+    /// and fewer words were pushed since the FIFO reset than the count's
+    /// blocks hold (or the count is open-ended); NONE, 0.
     fn fifo_thresh(&self) -> bool {
-        match self.phase {
-            Some(phase) if phase.write => {
-                let words = phase.words();
-                words > 0 && FIFO_WORDS - self.fifo.len() >= words && (phase.count == 0 || phase.pushed < u64::from(phase.count) * words as u64)
+        let words = self.phase.map_or(self.blk_size(), |phase| phase.size) / 8;
+        match (self.dir, self.phase) {
+            (Some(false), _) => self.fifo.len() >= words,
+            (Some(true), Some(phase)) => {
+                FIFO_WORDS - self.fifo.len() >= words && (phase.count == 0 || self.pushed < u64::from(phase.count) * words as u64)
             }
-            _ if self.last_write => false,
-            Some(phase) => self.fifo.len() >= phase.words().max(1),
-            None => self.fifo.len() >= self.blk_words().max(1),
+            _ => false,
         }
     }
 
@@ -483,10 +494,12 @@ impl SdController {
         let rtype = (cmd >> CMD_RESP_SHIFT) & 7;
         let data = cmd & CMD_DATA != 0;
         if data {
-            // A new data command replaces one still running.
-            self.phase = None;
+            if self.phase.is_some() {
+                // A data command while DATA_BUSY is ignored entirely.
+                return;
+            }
             self.blkdone = 0;
-            self.last_write = cmd & CMD_WRITE != 0;
+            self.dir = Some(cmd & CMD_WRITE != 0);
         }
         let stopped = if cmd & CMD_STOP != 0 { self.phase.take() } else { None };
         let response = match self.card.as_mut() {
@@ -503,12 +516,10 @@ impl SdController {
         }
         if data {
             if errors == 0 {
-                let write = cmd & CMD_WRITE != 0;
                 self.phase = Some(Phase {
-                    write,
-                    size: (self.blk & 0xFFF) as usize,
+                    write: cmd & CMD_WRITE != 0,
+                    size: self.blk_size(),
                     count: (self.blk >> 16) as u16,
-                    pushed: if write { self.fifo.len() as u64 } else { 0 },
                 });
                 self.pump();
             } else if let Some(card) = self.card.as_mut() {
@@ -591,7 +602,7 @@ impl SdController {
         let mut error = 0;
         while phase.count == 0 || self.blkdone < phase.count {
             if phase.write {
-                if self.fifo.len() < words.max(1) {
+                if self.fifo.len() < words {
                     break;
                 }
                 let block: Vec<u8> = self.fifo.drain(..words).flat_map(u64::to_le_bytes).collect();
@@ -602,7 +613,7 @@ impl SdController {
                     WriteBlock::NoToken => error = ST_WRITE_NO_TOKEN,
                 }
             } else {
-                if FIFO_WORDS - self.fifo.len() < words.max(1) {
+                if FIFO_WORDS - self.fifo.len() < words {
                     break;
                 }
                 let outcome = self.card.as_mut().map_or(ReadBlock::None, |card| card.sd_read_block(phase.size, bus4));

@@ -508,6 +508,11 @@ fn spi_card_in_a_file() {
 
 // ---- native SD mode ----
 
+/// An `SDM_CMD` value: index, response type, flags.
+const fn cmd_word(index: u64, rtype: u64, flags: u64) -> u64 {
+    index | (rtype << 8) | flags
+}
+
 /// Clear the sticky bits, write `SDM_ARG` and `SDM_CMD`, return `SDM_STATUS`.
 fn sdm(cpu: &mut Cpu, index: u64, arg: u32, rtype: u64, flags: u64) -> u32 {
     wr(cpu, SDM_STATUS, u64::from(ST_STICKY));
@@ -604,6 +609,10 @@ fn native_init_r2_layout_and_registers() {
     let mut cpu = cpu(true, true);
     // Reset values.
     assert_eq!(rd(&mut cpu, SDM_TIMEOUT), TIMEOUT_RESET);
+    assert_eq!(rd(&mut cpu, SDM_BLK), 0x0001_0200, "512 bytes, 1 block");
+    for offset in [SDM_ARG, SDM_RESP0, SDM_RESP1, SDM_IRQ_EN, SDM_CFG, SDM_FIFO, SDM_BLKDONE] {
+        assert_eq!(rd(&mut cpu, offset), 0, "offset 0x{offset:03X}");
+    }
     assert_eq!(rd(&mut cpu, SDM_STATUS) as u32, ST_DAT0 | ST_CARD_PRESENT);
     assert_eq!(rd(&mut cpu, SDM_CMD), 0, "write-only");
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR_TEST), 0, "reserved");
@@ -613,7 +622,7 @@ fn native_init_r2_layout_and_registers() {
     assert_eq!(rd(&mut cpu, SDM_BLK), 0xFFFF_0FF8, "size [2:0] reads 0");
     wr(&mut cpu, SDM_CFG, 0);
     // A command with SD_MODE clear is ignored.
-    wr(&mut cpu, SDM_CMD, 8 | (R1 << 8));
+    wr(&mut cpu, SDM_CMD, cmd_word(8, R1, 0));
     assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_CMD_DONE, 0);
 
     native_init(&mut cpu);
@@ -749,9 +758,11 @@ fn native_multi_block_write_with_prefill() {
         }
     };
     wr(&mut cpu, SDM_FIFO, FIFO_RESET);
-    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "never while idle");
-    // Pre-fill one block, then CMD25 for three: it goes out at once.
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "DIR = NONE after a FIFO reset");
+    // Pre-fill one block (no FIFO_THRESH: DIR is still NONE), then CMD25
+    // for three: the block goes out at once.
     push(&mut cpu, &data[0]);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "a pre-fill does not raise it");
     wr(&mut cpu, SDM_BLK, (3 << 16) | 512);
     sdm_ok(&mut cpu, 25, 40, R1, CMD_DATA | CMD_WRITE);
     assert_eq!(rd(&mut cpu, SDM_BLKDONE), 1);
@@ -775,7 +786,9 @@ fn native_multi_block_write_with_prefill() {
     let r1 = sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
     assert_eq!(state_of(r1), 6, "the R1 shows rcv");
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
-    // FIFO_THRESH on a counted write drops once every block is pushed.
+    // FIFO_THRESH on a counted write drops once every block is pushed
+    // (counted in words since the FIFO reset).
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
     wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
     sdm_ok(&mut cpu, 24, 50, R1, CMD_DATA | CMD_WRITE);
     assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0);
@@ -944,4 +957,90 @@ fn native_interrupt_wakes_a_waiting_program() {
     assert_eq!(result.stop, crate::emu::StopReason::Halt, "the source 2 handler ran");
     assert_eq!(result.instructions, 1);
     assert_eq!(cpu.int_mask & 0b100, 0, "source 2 masked on entry");
+}
+
+#[test]
+fn native_corner_cases_of_plan_4_8() {
+    let mut cpu = cpu(true, true);
+    // Before any data command DIR is NONE: pushed words raise nothing.
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 8);
+    wr(&mut cpu, SDM_DATA, 1);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0);
+    // Registers other than SDM_CMD work with SD_MODE = 0: pop, W1C, reset.
+    assert_eq!(rd(&mut cpu, SDM_DATA), 1);
+    wr(&mut cpu, SDM_DATA, 2);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 0);
+    // SDM_ARG keeps 32 bits.
+    wr(&mut cpu, SDM_ARG, 0xDEAD_BEEF_1234_5678);
+    assert_eq!(rd(&mut cpu, SDM_ARG), 0x1234_5678);
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+
+    // A type-0 command leaves SDM_RESP* as they were.
+    let resp = sdm_ok(&mut cpu, 13, rca, R1, 0);
+    sdm_ok(&mut cpu, 13, rca, R_NONE, 0);
+    assert_eq!(rd(&mut cpu, SDM_RESP0), resp);
+    // A stop with no data phase is an ordinary R1b: DATA_* unchanged.
+    wr(&mut cpu, SDM_STATUS, u64::from(ST_STICKY));
+    wr(&mut cpu, SDM_ARG, 0);
+    wr(&mut cpu, SDM_CMD, cmd_word(12, R1B, CMD_STOP));
+    let status = rd(&mut cpu, SDM_STATUS) as u32;
+    assert_eq!(
+        status & (ST_CMD_DONE | ST_CMD_TIMEOUT | ST_DATA_DONE | ST_DATA_BUSY),
+        ST_CMD_DONE | ST_CMD_TIMEOUT,
+        "CMD12 in tran: no answer"
+    );
+
+    // A size field of 0 reads 0 and acts as 8: the 8-byte SCR.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, 1 << 16);
+    assert_eq!(rd(&mut cpu, SDM_BLK), 1 << 16);
+    sdm_ok(&mut cpu, 55, rca, R1, 0);
+    sdm_ok(&mut cpu, 51, 0, R1, CMD_DATA);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_DATA_DONE, ST_DATA_DONE);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 1);
+    assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_FIFO_THRESH, 0, "READ: one 8-byte block in the FIFO");
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+
+    // A data command while DATA_BUSY is ignored entirely; a non-data one
+    // (CMD13) goes out and leaves the phase running.
+    wr(&mut cpu, SDM_BLK, 512);
+    sdm_ok(&mut cpu, 18, 0, R1, CMD_DATA);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8);
+    wr(&mut cpu, SDM_STATUS, u64::from(ST_STICKY));
+    let before = (rd(&mut cpu, SDM_RESP0), rd(&mut cpu, SDM_STATUS));
+    wr(&mut cpu, SDM_ARG, 100);
+    wr(&mut cpu, SDM_CMD, cmd_word(17, R1, CMD_DATA));
+    wr(&mut cpu, SDM_CMD, cmd_word(24, R1, CMD_DATA | CMD_WRITE));
+    assert_eq!((rd(&mut cpu, SDM_RESP0), rd(&mut cpu, SDM_STATUS)), before, "no bit changes");
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8);
+    assert_eq!(card(&cpu).state(), card::State::Data, "nothing sent");
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 5, "CMD13 during the phase");
+    assert_ne!(rd(&mut cpu, SDM_STATUS) as u32 & ST_DATA_BUSY, 0, "still running");
+    // A stop that ends the open-ended phase sets DATA_DONE.
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & (ST_DATA_DONE | ST_DATA_BUSY), ST_DATA_DONE);
+
+    // A stop that ends a counted phase early: no DATA_DONE.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (20 << 16) | 512);
+    sdm_ok(&mut cpu, 18, 0, R1, CMD_DATA);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & (ST_DATA_DONE | ST_DATA_BUSY), 0);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8);
+
+    // Clearing SD_MODE abandons the phase (no DONE) but keeps the FIFO,
+    // DIR and the registers.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 18, 0, R1, CMD_DATA);
+    wr(&mut cpu, SDM_STATUS, u64::from(ST_STICKY));
+    wr(&mut cpu, SD_CTRL, 1 | CTRL_PWR_ON);
+    let status = rd(&mut cpu, SDM_STATUS) as u32;
+    assert_eq!(status & (ST_DATA_BUSY | ST_DATA_DONE | ST_FIFO_THRESH), ST_FIFO_THRESH, "READ still");
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 512);
+    assert_eq!(rd(&mut cpu, SDM_BLK), (20 << 16) | 512);
+    // SDM_CMD is ignored with SD_MODE clear.
+    wr(&mut cpu, SDM_CMD, cmd_word(13, R1, 0));
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32 & ST_CMD_DONE, 0);
 }

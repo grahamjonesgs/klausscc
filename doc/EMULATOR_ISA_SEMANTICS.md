@@ -478,19 +478,20 @@ card's states are idle/ready/ident/stby/tran/data/rcv/prg (prg passes at
 once) and ina; CMD0, 2, 3, 6 (high speed unsupported), 7, 8, 9, 10, 12,
 13, 15, 16, 17, 18, 23, 24, 25, 55 and ACMD6, 13, 23, 41, 42, 51. The
 emulator does not reload programs, so the plan's reset at
-`LOAD_COMPLETE` has nothing to act on. Points the plan leaves open, and
-the reading taken: `SDM_BLK` resets to 0; with no write phase running
-and the last data command a read (or none), `FIFO_THRESH` means "at
-least one block of `SDM_BLK`'s size (at least one word) in the FIFO",
-which a write pre-fill also sets until its command is written; a CMD12
-with the stop flag that ends a running open-ended (count 0) phase sets
-`DATA_DONE`, one that ends a counted phase early does not; a data
-command written while a data phase runs replaces it; clearing `SD_MODE`
-abandons a data phase; `SDM_CMD` and the data engine act only with
-`SD_MODE` set, while the other registers (the FIFO port included) work
-at any time; a 48-bit
-response leaves `SDM_RESP1` = 0 and `SDM_RESP0[63:38]` = 0; response
-types 5-7 act as 0 (none); `SDM_ARG` keeps 32 bits.
+`LOAD_COMPLETE` has nothing to act on. Reset values and corner cases
+follow the plan's §4.8 (klaussCPU mmu-sd 6c23771): `SDM_BLK` resets to
+`0x0001_0200` and a size field of 0 acts as 8; `FIFO_THRESH` follows the
+direction latch (NONE after a reset or a FIFO reset, so a write pre-fill
+never raises it; READ: a block in the FIFO; WRITE: a write phase runs,
+there is room for a block and fewer words were pushed since the FIFO
+reset than the count's blocks hold); a data `SDM_CMD` while `DATA_BUSY`
+is ignored entirely, a non-data one goes out (CMD12 with `[13]` stops
+the phase, setting `DATA_DONE` only for an open-ended phase; with no
+phase it is an ordinary R1b); clearing `SD_MODE` abandons the engines
+(no DONE) and keeps the registers, the FIFO and DIR; only `SDM_CMD`
+needs `SD_MODE`; a type-0 command leaves `SDM_RESP*` unchanged, a
+48-bit response leaves `SDM_RESP1` = 0 and `SDM_RESP0[63:38]` = 0;
+response types 5-7 act as 0; `SDM_ARG` keeps 32 bits.
 
 ## Differences from the RTL
 
