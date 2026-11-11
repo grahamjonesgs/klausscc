@@ -687,8 +687,9 @@ impl Cpu {
     /// the 32-byte line holding EA = rs1 (aligned down to `CACHE_INFO`'s
     /// line size), checked as a store at EA (EADDR is the raw EA); MMIO is
     /// `ACCESS_STORE` in either mode; never `MISALIGNED`, not even with
-    /// MAL64.  Any other encoding with `[13]` set is ILLEGAL.  The trace
-    /// shows the line's first doubleword as the write.
+    /// MAL64.  Any other MODE 00 encoding with `[13]` set is ILLEGAL.  The
+    /// trace shows the line's first doubleword (its physical address) as
+    /// the write.
     fn exec_dcbz(&mut self, f: Fields) -> Exec {
         legal(f.field(24, 2) == 3 && !f.bit(23) && !f.bit(20) && f.field(14, 6) == 0 && !f.bit(12) && f.field(8, 4) == 0 && f.field(0, 4) == 0)?;
         let ea = self.regs[f.rs1] as u32;
@@ -704,7 +705,7 @@ impl Cpu {
             self.write64(line.offset(dw * 8), 0);
         }
         self.last_write = Some(super::MemWrite {
-            addr: at.va() & !(DCBZ_LINE - 1),
+            addr: at.pa() & !(DCBZ_LINE - 1),
             byte_enable: 0xFF,
             data: 0,
         });

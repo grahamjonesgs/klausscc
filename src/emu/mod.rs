@@ -484,8 +484,9 @@ impl Cpu {
     /// As with [`Cpu::read64`], a RAM write lands on the aligned doubleword
     /// that holds the address (all eight byte enables at `addr[4:3]`,
     /// `mem_read_write.sv` :610-632, :725-745).  The trace records the
-    /// virtual address as issued, as the RTL's `ret_wr_addr` does
-    /// (`pipeline_core.sv` :1895).
+    /// physical address, as the RTL's `ret_wr_addr` does: it is the
+    /// translated port address (`pipeline_core.sv` :2997, :3659, :3758);
+    /// with translation off that is the address as issued.
     fn write64(&mut self, at: Mapped, val: u64) {
         let addr = at.pa();
         debug_assert!(!(self.um && is_mmio(addr)), "unchecked user-mode MMIO store at 0x{addr:08X}");
@@ -500,7 +501,7 @@ impl Cpu {
             }
         }
         self.last_write = Some(MemWrite {
-            addr: at.va(),
+            addr: at.pa(),
             byte_enable: 0xFF,
             data: val,
         });
@@ -518,7 +519,7 @@ impl Cpu {
         if is_mmio(addr) {
             self.mmio_store(addr, val, n as u32);
             self.last_write = Some(MemWrite {
-                addr: at.va() & !7,
+                addr: at.pa() & !7,
                 byte_enable: be_bits,
                 data: val,
             });
@@ -530,7 +531,7 @@ impl Cpu {
             }
         }
         self.last_write = Some(MemWrite {
-            addr: at.va() & !7,
+            addr: at.pa() & !7,
             byte_enable: be_bits,
             data: self.peek64(addr & !7),
         });

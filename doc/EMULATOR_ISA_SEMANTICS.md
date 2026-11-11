@@ -658,4 +658,8 @@ i=<n> pc=<8hex> op=<8hex> r0=<16hex> ... r15=<16hex> sp=<8hex> f=<7 bits> [wr=<a
   within it and `data` the whole doubleword after the write. For a 64-bit
   store, `addr` is the store address, `be` is `ff` and `data` the stored
   value. For MMIO, `data` is the value written. With translation on,
-  `addr` is the virtual address.
+  `addr` is the **physical** address: the RTL's `ret_wr_addr` is the
+  translated port address (`pipeline_core.sv` :2997, :3659, :3758). (Up to
+  klausscc 8463af5 the emulator recorded the virtual address here.) DCBZ
+  shows one write: the line's first doubleword (`PA & ~31`), `be` `ff`,
+  `data` 0 (`HW_PERF_PLAN.md` §1).

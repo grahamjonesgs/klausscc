@@ -4280,3 +4280,23 @@ fn short_form_stores_with_displacement_bit_13_stay_legal() {
     assert_eq!(cpu.peek64(0x2010), 0x55);
     assert_eq!(cpu.zero_lines, 0);
 }
+
+#[test]
+fn trace_store_address_is_physical_under_translation() {
+    // The RTL's ret_wr_addr is the translated port address
+    // (pipeline_core.sv :2997, :3659, :3758): a store's trace address is
+    // the PA with TE = 1, for 64-bit, sub-word and DCBZ alike.
+    for (word, va, pa) in [
+        (0x5F10_0510, U_DATA + 0x18, 0x3_0018), // MEMSET64 F, [B]
+        (0x5E00_0510, U_DATA + 0x0C, 0x3_0008), // MEMSET32 F, [B]: its doubleword
+        (dcbz(1), U_DATA + 0x23, 0x3_0020),     // DCBZ [B]: the line base
+    ] {
+        let mut cpu = te_cpu(&[word, HALT], &[HALT], true);
+        tlb_map(&mut cpu, 2, U_DATA, 0x3_0000, TLB_V | TLB_R | TLB_W, None);
+        cpu.regs[1] = u64::from(va);
+        cpu.regs[5] = 0x1234;
+        assert_eq!(cpu.step_one(true), None, "{word:08x}");
+        assert_eq!(cpu.exc_entries, 0, "{word:08x}: no exception");
+        assert_eq!(cpu.last_write.map(|w| w.addr), Some(pa), "{word:08x}: PA in the trace");
+    }
+}
