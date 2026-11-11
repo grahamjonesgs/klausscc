@@ -66,6 +66,7 @@
 //! the MPU, the TLB and the one translation every memory access an
 //! instruction makes goes through.
 
+mod cachesim;
 mod debug;
 mod exec;
 mod flags;
@@ -296,6 +297,8 @@ pub struct Cpu {
     asid: u8,
     /// `TLBVEC`: the TLB-miss vector; 0 = use `EVEC`.
     tlbvec: u32,
+    /// Cache what-if counts (`KLAUSSCC_CACHESIM`, [`cachesim`]).
+    cachesim: Option<Box<cachesim::CacheSim>>,
     // ---- devices ----
     /// The SD controller, if it is modelled (`--sd-image`, `--sd-native`);
     /// without it the SD window reads 0, as it always has.
@@ -378,6 +381,7 @@ impl Cpu {
             tlb_index: 0,
             asid: 0,
             tlbvec: 0,
+            cachesim: cachesim::CacheSim::from_env(),
             sd: None,
         }
     }
@@ -584,6 +588,12 @@ impl Cpu {
             }
         };
         let word = words[0];
+        if self.cachesim.is_some() {
+            let pa = self.translate(pc, mmu::Kind::Fetch).unwrap_or(pc);
+            if let Some(sim) = self.cachesim.as_mut() {
+                sim.fetch(pa, (word >> 30).max(1));
+            }
+        }
         if !self.execute(words) {
             // An illegal word or a misaligned access parks without retiring:
             // the RTL gives it no trace line (`pipeline_core.sv` WB park,
@@ -622,6 +632,9 @@ impl Cpu {
                     trace = None;
                 }
             }
+        }
+        if let Some(sim) = &self.cachesim {
+            sim.report();
         }
         let stop = self.stop.unwrap_or(StopReason::InstructionCap);
         EmulateResult {
