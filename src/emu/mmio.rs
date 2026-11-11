@@ -245,7 +245,14 @@ impl Cpu {
                 return match addr & 0xFFFF {
                     CACHE_INFO => CACHE_INFO_VALUE,
                     ICACHE_INFO => ICACHE_INFO_VALUE,
-                    CNT_ZERO_LINES => self.zero_lines,
+                    CNT_ZERO_LINES => {
+                        // The last hardware counter /proc/klausscpu_perf reads.
+                        let instret = self.instret - self.perf_base.instret;
+                        if let Some(sim) = self.tlbsim.get_mut() {
+                            sim.report(instret, false);
+                        }
+                        self.zero_lines
+                    }
                     _ => 0,
                 };
             }
@@ -286,6 +293,9 @@ impl Cpu {
             IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
             CACHE_DEV_SELECT if addr & 0xFFFF == CACHE_CTRL && data & 1 != 0 => self.zero_lines = 0,
             PERF_DEV_SELECT if addr & 0xFFFF == PERF_CTRL && data & 1 != 0 => {
+                if let Some(sim) = self.tlbsim.get_mut() {
+                    sim.clear();
+                }
                 self.perf_base = PerfBase {
                     cycles: self.cycles,
                     instret: self.instret,

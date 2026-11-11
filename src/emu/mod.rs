@@ -67,6 +67,7 @@
 //! instruction makes goes through.
 
 mod cachesim;
+mod tlbsim;
 mod debug;
 mod exec;
 mod flags;
@@ -311,6 +312,8 @@ pub struct Cpu {
     tlbvec: u32,
     /// Cache what-if counts (`KLAUSSCC_CACHESIM`, [`cachesim`]).
     cachesim: Option<Box<cachesim::CacheSim>>,
+    /// TLB what-if counts (`KLAUSSCC_TLBSIM`, [`tlbsim`]).
+    tlbsim: std::cell::RefCell<Option<Box<tlbsim::TlbSim>>>,
     // ---- devices ----
     /// The SD controller, if it is modelled (`--sd-image`, `--sd-native`);
     /// without it the SD window reads 0, as it always has.
@@ -397,6 +400,7 @@ impl Cpu {
             asid: 0,
             tlbvec: 0,
             cachesim: cachesim::CacheSim::from_env(),
+            tlbsim: std::cell::RefCell::new(tlbsim::TlbSim::from_env()),
             sd: None,
         }
     }
@@ -652,6 +656,9 @@ impl Cpu {
         }
         if let Some(sim) = &self.cachesim {
             sim.report();
+        }
+        if let Some(sim) = self.tlbsim.get_mut() {
+            sim.report(self.instret - self.perf_base.instret, true);
         }
         let stop = self.stop.unwrap_or(StopReason::InstructionCap);
         EmulateResult {

@@ -412,7 +412,11 @@ impl Cpu {
             guard: false,
             tlb: true,
         };
-        let entry = self.tlb_lookup(va, self.asid).ok_or_else(|| fault(kind.tlb_miss()))?;
+        let found = self.tlb_lookup(va, self.asid);
+        if let Some(sim) = self.tlbsim.borrow_mut().as_mut() {
+            sim.access(va, self.asid, kind, found.is_none(), self.instret);
+        }
+        let entry = found.ok_or_else(|| fault(kind.tlb_miss()))?;
         if entry.lo & kind.permission() == 0 {
             return Err(fault(kind.access()));
         }
@@ -520,6 +524,9 @@ impl Cpu {
     /// `TLBWI`: entry[`TLB_INDEX` index] = {`TLB_HI`, `TLB_LO`}.  Clears the
     /// reservation (§11.3 side effects).
     pub(super) fn tlbwi(&mut self) {
+        if let Some(sim) = self.tlbsim.get_mut() {
+            sim.tlbwi(self.tlb_hi, self.tlb_lo);
+        }
         self.tlb[(self.tlb_index & self.tlb_index_mask()) as usize] = TlbEntry {
             hi: self.tlb_hi,
             lo: self.tlb_lo,
@@ -538,6 +545,9 @@ impl Cpu {
     /// hit sets `TLB_INDEX` = {P = 0, index}; a miss sets P and leaves the
     /// index bits alone (`MMU_PLAN.md` 12b3783).
     pub(super) fn tlbp(&mut self) {
+        if let Some(sim) = self.tlbsim.get_mut() {
+            sim.tlbp(self.tlb_hi);
+        }
         let vpn = self.tlb_hi >> PAGE_SHIFT;
         match self.tlb_entries().iter().position(|e| e.matches(vpn, self.tlb_hi as u8)) {
             Some(index) => self.tlb_index = index as u32,
@@ -547,6 +557,9 @@ impl Cpu {
 
     /// `TLBINV`: V = 0 in every entry.  Clears the reservation.
     pub(super) fn tlbinv(&mut self) {
+        if let Some(sim) = self.tlbsim.get_mut() {
+            sim.tlbinv();
+        }
         for entry in &mut self.tlb {
             entry.lo &= !TLB_V;
         }
@@ -646,6 +659,9 @@ impl Cpu {
         assert!(n.is_power_of_two() && (2..=TLB_MAX as u32).contains(&n), "TLB entries: {n}");
         self.tlb_n = n;
         self.tlb = [TlbEntry::default(); TLB_MAX];
+        if let Some(sim) = self.tlbsim.get_mut() {
+            sim.set_real_entries(n);
+        }
         self.tlb_index &= self.tlb_index_bits();
     }
 
