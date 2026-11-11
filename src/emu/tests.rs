@@ -2138,15 +2138,15 @@ fn stage1_reset_state_and_cpu_features() {
     assert!(!cpu.has_mpu());
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x100D,
-        "CPU_FEATURES: stages 1 and 3 and LR/SC, 16 entries, no MPU"
+        0x100D | (3 << 22),
+        "CPU_FEATURES: stages 1 and 3 and LR/SC, 16 entries, no MPU, DCBZ and MAL64"
     );
     assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
     cpu.set_has_mpu(true);
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x10FF,
-        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 16 entries"
+        0x10FF | (3 << 22),
+        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 16 entries, DCBZ and MAL64"
     );
 }
 
@@ -3383,7 +3383,7 @@ fn tlb_kseg_is_direct_and_the_hole_faults() {
     // MMIO is identity in supervisor mode.
     let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
     step_with_b(&mut cpu, 0xF00F_0048);
-    assert_eq!(cpu.regs[3], 0x100D, "CPU_FEATURES (no MPU)");
+    assert_eq!(cpu.regs[3], 0x100D | (3 << 22), "CPU_FEATURES (no MPU)");
 }
 
 #[test]
@@ -4184,4 +4184,87 @@ fn uart_script_waits_for_the_prompt_before_each_line() {
     cpu.uart.extend_from_slice(b"x\n$ ");
     let r = cpu.run(10 * gap, None);
     assert_eq!(r.stop, StopReason::InputDone);
+}
+
+/// `DCBZ [rs1]` (`HW_PERF_PLAN.md` §1).
+const fn dcbz(rs1: u32) -> u32 {
+    0x5F00_2000 | (rs1 << 4)
+}
+
+#[test]
+fn dcbz_zeroes_the_line_and_never_traps_misaligned() {
+    // EA in the middle of a line: the whole 32-byte line is zeroed, its
+    // neighbours are not, and MAL64 does not make it trap.
+    let mut cpu = stage1_cpu(&[dcbz(1), HALT], &[HALT], true);
+    cpu.regs[1] = 0x2013;
+    cpu.mal64 = true;
+    let ones = [0xFF_u8; 96];
+    assert!(cpu.debug_write(0x1FE0, &ones));
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.exc_entries, 0, "no exception");
+    for a in (0x1FE0..0x2000).step_by(8) {
+        assert_eq!(cpu.peek64(a), u64::MAX, "line before kept at {a:x}");
+    }
+    for a in (0x2000..0x2020).step_by(8) {
+        assert_eq!(cpu.peek64(a), 0, "zeroed at {a:x}");
+    }
+    for a in (0x2020..0x2040).step_by(8) {
+        assert_eq!(cpu.peek64(a), u64::MAX, "line after kept at {a:x}");
+    }
+    assert_eq!(cpu.zero_lines, 1);
+}
+
+#[test]
+fn dcbz_mmio_is_an_access_store_fault_and_other_encodings_are_illegal() {
+    // MMIO: ACCESS_STORE with the raw EA, in supervisor mode too.
+    let cpu = lr_sc_one(dcbz(1), &[(1, 0xF001_0004)], None);
+    assert_eq!(cpu.ecause, Cause::AccessStore as u8);
+    assert_eq!(cpu.eaddr, 0xF001_0004);
+    assert_eq!(cpu.zero_lines, 0);
+    // [13] with anything else set: A, [12] (with [13]), rd, another SIZE.
+    for word in [dcbz(1) | (1 << 20), dcbz(1) | (1 << 12), dcbz(1) | 3, (dcbz(1) & !(3 << 24)) | (2 << 24)] {
+        let cpu = lr_sc_one(word, &[(1, 0x2000)], None);
+        assert_eq!(cpu.ecause, Cause::Illegal as u8, "{word:08x}");
+    }
+}
+
+#[test]
+fn mal64_makes_misaligned_64_bit_accesses_trap() {
+    // MEMGET64 D, [B] (A = 1) at 0x2003: aligned down without MAL64,
+    // MISALIGNED_LOAD with the raw EA with it.  MEMSET64 likewise.
+    let load = 0x5B10_0310;
+    let store = 0x5F10_0510;
+    let mut cpu = lr_sc_one(load, &[(1, 0x2003)], None);
+    assert_eq!(cpu.exc_entries, 0);
+    cpu.debug_write(0x2000, &7_u64.to_le_bytes());
+    let mut cpu2 = stage1_cpu(&[load, HALT], &[HALT], false);
+    cpu2.regs[1] = 0x2003;
+    cpu2.mal64 = true;
+    assert_eq!(cpu2.step_one(true), None);
+    assert_eq!((cpu2.ecause, cpu2.eaddr), (Cause::MisalignedLoad as u8, 0x2003));
+    let mut cpu3 = stage1_cpu(&[store, HALT], &[HALT], false);
+    cpu3.regs[1] = 0x2005;
+    cpu3.regs[5] = 9;
+    cpu3.mal64 = true;
+    assert_eq!(cpu3.step_one(true), None);
+    assert_eq!((cpu3.ecause, cpu3.eaddr), (Cause::MisalignedStore as u8, 0x2005));
+    assert_eq!(cpu3.peek64(0x2000), 0, "nothing stored");
+    // STATUS[10] reads back after MTSR.
+    cpu.mal64 = false;
+    assert!(cpu.sr_write(super::system::sr::STATUS, 1 << 10));
+    assert!(cpu.mal64);
+    assert_eq!(cpu.sr_read(super::system::sr::STATUS).unwrap_or(0) & (1 << 10), 1 << 10);
+}
+
+#[test]
+fn perf_hw_registers() {
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    assert_eq!(cpu.mmio_read(0xF00F_0048) & (3 << 22), 3 << 22, "CPU_FEATURES[22..23]");
+    assert_eq!(cpu.mmio_read(0xF00F_0048) & (1 << 24), 0, "no ETH_RX_SLOTS");
+    assert_eq!(cpu.mmio_read(0xF005_0008), 0x0001_0000_2004_0002, "CACHE_INFO");
+    assert_eq!(cpu.mmio_read(0xF005_0018), 0x0000_4000_1004_0001, "ICACHE_INFO");
+    cpu.zero_lines = 5;
+    assert_eq!(cpu.mmio_read(0xF005_0070), 5);
+    cpu.mmio_write(0xF005_0000, 1);
+    assert_eq!(cpu.mmio_read(0xF005_0070), 0, "CACHE_CTRL[0] clears it");
 }

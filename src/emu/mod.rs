@@ -285,6 +285,11 @@ pub struct Cpu {
     mpu_en: bool,
     /// `STATUS.TE`: translation on.
     te: bool,
+    /// `STATUS[10]` MAL64 (`HW_PERF_PLAN.md` §4): misaligned 64-bit loads
+    /// and stores trap instead of using the aligned-down doubleword.
+    mal64: bool,
+    /// `CNT_ZERO_LINES`: DCBZ operations since the last `CACHE_CTRL` clear.
+    zero_lines: u64,
     /// The TLB.
     tlb: [TlbEntry; TLB_ENTRIES],
     /// `TLB_HI`.
@@ -375,6 +380,8 @@ impl Cpu {
             mpu: [MpuRegion::default(); MPU_REGIONS],
             mpu_en: false,
             te: false,
+            mal64: false,
+            zero_lines: 0,
             tlb: [TlbEntry::default(); TLB_ENTRIES],
             tlb_hi: 0,
             tlb_lo: 0,

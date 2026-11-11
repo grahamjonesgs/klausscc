@@ -91,6 +91,11 @@ const CPU_FEATURES_SD_NATIVE: u64 = 1 << 21;
 const STATUS_MPU_EN: u64 = 1 << 8;
 /// `STATUS[9]` TE (stage 3).
 const STATUS_TE: u64 = 1 << 9;
+/// `STATUS[10]` MAL64 (`HW_PERF_PLAN.md` §4).
+const STATUS_MAL64: u64 = 1 << 10;
+/// `CPU_FEATURES[22]` DCBZ and `[23]` STATUS.MAL64 (`HW_PERF_PLAN.md`).
+/// `[24]` (`ETH_RX_SLOTS`) stays clear: the emulator has no Ethernet.
+const CPU_FEATURES_PERF_HW: u64 = (1 << 22) | (1 << 23);
 /// `ECAUSE[8]` GUARD: an `ACCESS_*` that an MPU GUARD region denied.
 const ECAUSE_GUARD: u64 = 1 << 8;
 
@@ -303,6 +308,7 @@ impl Cpu {
                     | (u64::from(self.irq_disabled) << 1)
                     | if self.mpu_en { STATUS_MPU_EN } else { 0 }
                     | if self.te { STATUS_TE } else { 0 }
+                    | if self.mal64 { STATUS_MAL64 } else { 0 }
             }
             sr::EVEC => u64::from(self.evec),
             sr::ECAUSE => u64::from(self.ecause) | if self.ecause_guard { ECAUSE_GUARD } else { 0 },
@@ -349,6 +355,7 @@ impl Cpu {
             sr::STATUS => {
                 self.mpu_en = self.has_mpu && value & STATUS_MPU_EN != 0;
                 self.te = value & STATUS_TE != 0;
+                self.mal64 = value & STATUS_MAL64 != 0;
                 self.reservation = None;
             }
             sr::EVEC => self.evec = value as u32 & !3,
@@ -438,7 +445,7 @@ impl Cpu {
     pub(super) fn cpu_features(&self) -> u64 {
         let mpu = if self.has_mpu { CPU_FEATURES_MPU } else { 0 };
         let sd = if self.has_sd_native() { CPU_FEATURES_SD_NATIVE } else { 0 };
-        CPU_FEATURES_NO_MPU | mpu | sd
+        CPU_FEATURES_NO_MPU | CPU_FEATURES_PERF_HW | mpu | sd
     }
 
     /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`

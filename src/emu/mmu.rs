@@ -181,6 +181,16 @@ impl Mapped {
         }
     }
 
+    /// The access `off` bytes further on, in the same page (DCBZ's line).
+    pub(super) const fn offset(self, off: u32) -> Self {
+        let pa = self.pa.wrapping_add(off);
+        Self {
+            va: self.va.wrapping_add(off),
+            pa,
+            pa_next: (pa & !7).wrapping_add(8),
+        }
+    }
+
     /// The same access at `va & mask` (a 64-bit A = 1 access aligned down),
     /// which stays within the doubleword and so within the page.
     pub(super) const fn masked(self, mask: u32) -> Self {

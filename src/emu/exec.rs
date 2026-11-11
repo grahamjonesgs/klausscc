@@ -638,6 +638,10 @@ impl Cpu {
         if !(size_bytes == 4 && f.field(21, 2) == 0) && misaligned(ea, size_bytes) {
             return Err(Fault::Exception(Cause::MisalignedLoad, ea));
         }
+        // STATUS.MAL64: a misaligned 64-bit load traps (A = 0 or 1).
+        if size_bytes == 8 && self.mal64 && ea & 7 != 0 {
+            return Err(Fault::Exception(Cause::MisalignedLoad, ea));
+        }
         // EADDR is the raw EA, before the A=1 alignment (MMU_PLAN §4.1).
         let at = self.map_data(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, false)?;
         let at = at.masked(align_mask(size_bytes, f.bit(20)));
@@ -655,10 +659,17 @@ impl Cpu {
         if is_lr_sc(f) {
             return self.exec_sc(f);
         }
+        if is_dcbz_space(f) {
+            return self.exec_dcbz(f);
+        }
         mem_legal(f, true)?;
         let size_bytes = 1_usize << f.field(24, 2);
         let ea = self.ea(f);
         if misaligned(ea, size_bytes) {
+            return Err(Fault::Exception(Cause::MisalignedStore, ea));
+        }
+        // STATUS.MAL64: a misaligned 64-bit store traps (A = 0 or 1).
+        if size_bytes == 8 && self.mal64 && ea & 7 != 0 {
             return Err(Fault::Exception(Cause::MisalignedStore, ea));
         }
         let at = self.map_data(ea, if size_bytes == 8 { 1 } else { size_bytes as u32 }, true)?;
@@ -669,6 +680,32 @@ impl Cpu {
         } else {
             self.write_sub(at, data, size_bytes);
         }
+        Ok(Flow::Next)
+    }
+
+    /// `DCBZ [rs1]` (`HW_PERF_PLAN.md` §1, `0x5F00_2000 | rs1 << 4`): zero
+    /// the 32-byte line holding EA = rs1 (aligned down to `CACHE_INFO`'s
+    /// line size), checked as a store at EA (EADDR is the raw EA); MMIO is
+    /// `ACCESS_STORE` in either mode; never `MISALIGNED`, not even with
+    /// MAL64.  Any other encoding with `[13]` set is ILLEGAL.  The trace
+    /// shows the line's first doubleword as the write.
+    fn exec_dcbz(&mut self, f: Fields) -> Exec {
+        legal(f.field(24, 2) == 3 && !f.bit(23) && !f.bit(20) && f.field(14, 6) == 0 && !f.bit(12) && f.field(8, 4) == 0 && f.field(0, 4) == 0)?;
+        let ea = self.regs[f.rs1] as u32;
+        if is_mmio(ea) {
+            return Err(Fault::Exception(Cause::AccessStore, ea));
+        }
+        let at = self.map_data(ea, 1, true)?;
+        let line = at.masked(!(DCBZ_LINE - 1));
+        for dw in 0..DCBZ_LINE / 8 {
+            self.write64(line.offset(dw * 8), 0);
+        }
+        self.last_write = Some(super::MemWrite {
+            addr: at.va() & !(DCBZ_LINE - 1),
+            byte_enable: 0xFF,
+            data: 0,
+        });
+        self.zero_lines += 1;
         Ok(Flow::Next)
     }
 
@@ -1134,6 +1171,15 @@ impl Cpu {
 const fn is_lr_sc(f: Fields) -> bool {
     f.len == 1 && f.field(21, 2) == 0 && f.bit(12)
 }
+
+/// Whether `f` is in the DCBZ space: class 7, one word, MODE 00, `[13]`
+/// set and not LR/SC (`HW_PERF_PLAN.md` §1).
+const fn is_dcbz_space(f: Fields) -> bool {
+    f.len == 1 && f.field(21, 2) == 0 && f.bit(13) && !f.bit(12)
+}
+
+/// The D-cache line DCBZ zeroes (`CACHE_INFO[31:24]`).
+const DCBZ_LINE: u32 = 32;
 
 /// The LR/SC address checks (`MMU_PLAN.md` §5.1), in either mode: an
 /// address not naturally aligned (4 or 8, 64-bit too) is

@@ -9,6 +9,28 @@ const IRQ_DEV_SELECT: u32 = 0x00F;
 const PERF_DEV_SELECT: u32 = 0x00D;
 /// SD card controller device select (`addr[27:16]`).
 const SD_DEV_SELECT: u32 = 0x000;
+/// Cache controller device select (`addr[27:16]`; `MMIO_MAP.md`, "Cache controller").
+const CACHE_DEV_SELECT: u32 = 0x005;
+
+// Cache controller register offsets (`addr[15:0]`).  Only the read-only
+// geometry and the DCBZ count are modelled; the hit/miss counters read 0
+// and CACHE_CTRL writes (flush, invalidate, ICACHE_INV) do nothing, as the
+// emulator has no caches.
+/// `CACHE_INFO`: `[7:0]` ways, `[23:8]` sets, `[31:24]` line bytes,
+/// `[63:32]` total bytes: the D-cache, 2 ways x 1024 sets x 32 B = 64 KiB.
+const CACHE_INFO: u32 = 0x0008;
+/// The D-cache's `CACHE_INFO` value.
+const CACHE_INFO_VALUE: u64 = (64 << 10 << 32) | (32 << 24) | (1024 << 8) | 2;
+/// `ICACHE_INFO` (`HW_PERF_PLAN.md` §2), `CACHE_INFO`'s format: the 16 KiB
+/// direct-mapped I-cache, 1024 x 16 B.
+const ICACHE_INFO: u32 = 0x0018;
+/// The I-cache's `ICACHE_INFO` value.
+const ICACHE_INFO_VALUE: u64 = (16 << 10 << 32) | (16 << 24) | (1024 << 8) | 1;
+/// `CNT_ZERO_LINES` (`HW_PERF_PLAN.md` §1): DCBZ operations; `CACHE_CTRL[0]`
+/// clears it with the other counters.
+const CNT_ZERO_LINES: u32 = 0x0070;
+/// `CACHE_CTRL`: `[0]` clears the counters.
+const CACHE_CTRL: u32 = 0x0000;
 
 // Interrupt controller / timer register offsets (`addr[15:0]`).
 /// `INT_MASK`: per-source enables (4 bits).
@@ -219,6 +241,14 @@ impl Cpu {
                 let now = self.cycles;
                 return self.sd.as_mut().map_or(0, |sd| sd.read(addr & 0xFFFF, now));
             }
+            CACHE_DEV_SELECT => {
+                return match addr & 0xFFFF {
+                    CACHE_INFO => CACHE_INFO_VALUE,
+                    ICACHE_INFO => ICACHE_INFO_VALUE,
+                    CNT_ZERO_LINES => self.zero_lines,
+                    _ => 0,
+                };
+            }
             UART_DEV_SELECT => {}
             _ => return 0,
         }
@@ -254,6 +284,7 @@ impl Cpu {
             }
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
             IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
+            CACHE_DEV_SELECT if addr & 0xFFFF == CACHE_CTRL && data & 1 != 0 => self.zero_lines = 0,
             PERF_DEV_SELECT if addr & 0xFFFF == PERF_CTRL && data & 1 != 0 => {
                 self.perf_base = PerfBase {
                     cycles: self.cycles,
