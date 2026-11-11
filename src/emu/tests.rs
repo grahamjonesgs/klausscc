@@ -2138,15 +2138,15 @@ fn stage1_reset_state_and_cpu_features() {
     assert!(!cpu.has_mpu());
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x100D | (3 << 22),
-        "CPU_FEATURES: stages 1 and 3 and LR/SC, 16 entries, no MPU, DCBZ and MAL64"
+        0x200D | (3 << 22),
+        "CPU_FEATURES: stages 1 and 3 and LR/SC, 32 entries, no MPU, DCBZ and MAL64"
     );
     assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
     cpu.set_has_mpu(true);
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x10FF | (3 << 22),
-        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 16 entries, DCBZ and MAL64"
+        0x20FF | (3 << 22),
+        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 32 entries, DCBZ and MAL64"
     );
 }
 
@@ -3342,13 +3342,45 @@ fn tlb_reset_state_and_srs() {
     for (sr, value, back) in [
         (SR_TLB_HI, 0xFFFF_FFFF_u64, 0xFFFF_01FF_u64),
         (SR_TLB_LO, 0xFFFF_FFFF, 0x07FF_000F),
-        (SR_TLB_INDEX, 0xFFFF_FFFF, u64::from(super::mmu::TLB_INDEX_BITS)),
+        (SR_TLB_INDEX, 0xFFFF_FFFF, 0x8000_001F), // P and [4:0]: 32 entries
         (SR_ASID, 0x1FF, 0xFF),
         (SR_TLBVEC, 0x8000_0503, 0x8000_0500), // [1:0] read 0 (424e236)
     ] {
         assert!(cpu.sr_write(sr, value), "SR {sr:#x}");
         assert_eq!(cpu.sr_read(sr), Some(back), "SR {sr:#x}");
     }
+    // With 16 entries (--tlb-entries 16) TLB_INDEX keeps P and [3:0].
+    cpu.set_tlb_entries(16);
+    assert!(cpu.sr_write(SR_TLB_INDEX, 0xFFFF_FFFF));
+    assert_eq!(cpu.sr_read(SR_TLB_INDEX), Some(0x8000_000F));
+}
+
+#[test]
+fn tlb_entry_count_32_and_16() {
+    // 32 entries by default: index 16 is its own entry, and TLBP finds it.
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    assert_eq!(cpu.tlb_entry_count(), 32);
+    assert_eq!(cpu.tlb_entries().len(), 32);
+    for (index, vpn) in [(0_u64, 0x10_u64), (16, 0x11)] {
+        assert!(cpu.sr_write(SR_TLB_HI, vpn << 16));
+        assert!(cpu.sr_write(SR_TLB_LO, 0x0001_0007));
+        assert!(cpu.sr_write(SR_TLB_INDEX, index));
+        cpu.tlbwi();
+    }
+    assert!(cpu.tlb_entries()[0].valid() && cpu.tlb_entries()[16].valid());
+    assert!(cpu.sr_write(SR_TLB_HI, 0x11 << 16));
+    cpu.tlbp();
+    assert_eq!(cpu.sr_read(SR_TLB_INDEX), Some(16));
+    // 16 entries: index 16 wraps to entry 0, and only 16 entries exist.
+    cpu.set_tlb_entries(16);
+    assert_eq!(cpu.tlb_entries().len(), 16);
+    assert!(cpu.tlb_entries().iter().all(|e| !e.valid()), "a new count starts empty");
+    assert!(cpu.sr_write(SR_TLB_HI, 0x12 << 16));
+    assert!(cpu.sr_write(SR_TLB_LO, 0x0001_0007));
+    assert!(cpu.sr_write(SR_TLB_INDEX, 16));
+    cpu.tlbwi();
+    assert!(cpu.tlb_entries()[0].valid());
+    assert_eq!(cpu.mmio_read(0xF00F_0048) & 0xFF00, 0x1000, "CPU_FEATURES[15:8] = 16");
 }
 
 #[test]
@@ -3383,7 +3415,7 @@ fn tlb_kseg_is_direct_and_the_hole_faults() {
     // MMIO is identity in supervisor mode.
     let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
     step_with_b(&mut cpu, 0xF00F_0048);
-    assert_eq!(cpu.regs[3], 0x100D | (3 << 22), "CPU_FEATURES (no MPU)");
+    assert_eq!(cpu.regs[3], 0x200D | (3 << 22), "CPU_FEATURES (no MPU)");
 }
 
 #[test]

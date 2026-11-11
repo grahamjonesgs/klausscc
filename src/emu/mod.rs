@@ -86,7 +86,8 @@ pub use system::{Cause, SystemRegs};
 
 use crate::layout::is_mmio;
 use flags::Flags;
-use mmu::{Fetch, MPU_REGIONS, Mapped, TLB_ENTRIES};
+use mmu::{Fetch, MPU_REGIONS, Mapped, TLB_MAX};
+pub use mmu::TLB_ENTRIES_DEFAULT;
 use sd::SdController;
 use std::collections::VecDeque;
 
@@ -146,6 +147,9 @@ pub struct EmulateResult {
 pub struct Hardware {
     /// The stage 2 MPU (`--mpu`, [`Cpu::set_has_mpu`]).
     pub mpu: bool,
+    /// The TLB entry count (`--tlb-entries`, [`Cpu::set_tlb_entries`]);
+    /// `None` is [`TLB_ENTRIES_DEFAULT`].
+    pub tlb_entries: Option<u32>,
     /// The SD card in the slot (`--sd-image`).
     pub sd_card: Option<SdCard>,
     /// The native 4-bit SD controller (`--sd-native`): `SD_CTRL[18]`, the
@@ -291,7 +295,10 @@ pub struct Cpu {
     /// `CNT_ZERO_LINES`: DCBZ operations since the last `CACHE_CTRL` clear.
     zero_lines: u64,
     /// The TLB.
-    tlb: [TlbEntry; TLB_ENTRIES],
+    tlb: [TlbEntry; TLB_MAX],
+    /// The modelled entry count (`CPU_FEATURES[15:8]`): the first `tlb_n`
+    /// of `tlb` ([`Cpu::set_tlb_entries`]).
+    tlb_n: u32,
     /// `TLB_HI`.
     tlb_hi: u32,
     /// `TLB_LO`.
@@ -382,7 +389,8 @@ impl Cpu {
             te: false,
             mal64: false,
             zero_lines: 0,
-            tlb: [TlbEntry::default(); TLB_ENTRIES],
+            tlb: [TlbEntry::default(); TLB_MAX],
+            tlb_n: TLB_ENTRIES_DEFAULT,
             tlb_hi: 0,
             tlb_lo: 0,
             tlb_index: 0,
@@ -398,6 +406,7 @@ impl Cpu {
     /// `sd_native`, the SD window stays unmodelled (reads 0).
     pub fn install(&mut self, hw: Hardware) {
         self.set_has_mpu(hw.mpu);
+        self.set_tlb_entries(hw.tlb_entries.unwrap_or(TLB_ENTRIES_DEFAULT));
         self.sd = (hw.sd_card.is_some() || hw.sd_native).then(|| Box::new(SdController::new(hw.sd_card, hw.sd_native)));
     }
 

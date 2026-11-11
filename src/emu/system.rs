@@ -15,7 +15,7 @@
 //! can fault before their first side effect and return the cause; [`Cpu::raise`]
 //! then parks, debug-halts or enters the handler.
 
-use super::mmu::{MPU_REGIONS, TLB_ENTRIES, TLB_HI_BITS, TLB_INDEX_BITS, TLB_LO_BITS, XlateFault};
+use super::mmu::{MPU_REGIONS, TLB_HI_BITS, TLB_LO_BITS, XlateFault};
 use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, CTX_PREV_MODE_SHIFT, CYCLES_PER_INSTRUCTION, Cpu, StopReason};
 
 /// An exception cause: its `ECAUSE` value (`MMU_PLAN.md` §4.1).
@@ -76,11 +76,12 @@ impl Cause {
 
 /// `CPU_FEATURES` (MMIO `0xF00F_0048`, §6.3) without the MPU: bit 0, stage
 /// 1 (exceptions, user mode, SYSCALL, MFSR/MTSR, TP, CYCLE); bit 2, the
-/// stage 3 TLB with `[15:8]` = its entry count; bit 3, LR/SC.  `0x100D`,
-/// the Nexys A7 bitstream.
-const CPU_FEATURES_NO_MPU: u64 = ((TLB_ENTRIES as u64) << 8) | 0b1101;
+/// stage 3 TLB with `[15:8]` = its entry count (added by
+/// [`Cpu::cpu_features`]); bit 3, LR/SC.  `0x200D` with the Nexys A7
+/// bitstream's 32 entries (`0x100D` with 16).
+const CPU_FEATURES_NO_MPU: u64 = 0b1101;
 /// The `CPU_FEATURES` bits the stage 2 MPU adds: bit 1, with `[7:4]` = the
-/// region count - 1 (`0x10FF` in all).
+/// region count - 1 (`0x20FF` in all with 32 TLB entries).
 const CPU_FEATURES_MPU: u64 = (((MPU_REGIONS - 1) as u64) << 4) | 0b10;
 
 /// The `CPU_FEATURES` bit for the native SD controller (`--sd-native`,
@@ -380,7 +381,7 @@ impl Cpu {
             }
             sr::TLB_HI => self.tlb_hi = value as u32 & TLB_HI_BITS,
             sr::TLB_LO => self.tlb_lo = value as u32 & TLB_LO_BITS,
-            sr::TLB_INDEX => self.tlb_index = value as u32 & TLB_INDEX_BITS,
+            sr::TLB_INDEX => self.tlb_index = value as u32 & self.tlb_index_bits(),
             sr::ASID => {
                 self.asid = value as u8;
                 self.reservation = None;
@@ -425,7 +426,7 @@ impl Cpu {
 
     /// Give the CPU the stage 2 MPU (`--mpu`), or take it away (the
     /// default, as the Nexys A7 bitstream has none).  Without it
-    /// `CPU_FEATURES` reads `0x100D` (bit 1 and `[7:4]` clear), the
+    /// `CPU_FEATURES` reads `0x200D` (bit 1 and `[7:4]` clear), the
     /// `MPU_BASEn`/`MPU_LIMITn` SRs (0x10-0x2F) are ILLEGAL and `STATUS[8]`
     /// `MPU_EN` reads 0 and ignores writes, so nothing is ever checked.
     /// Set before running; taking the MPU away also clears `MPU_EN`.
@@ -440,12 +441,13 @@ impl Cpu {
         self.has_mpu
     }
 
-    /// `CPU_FEATURES` (MMIO `0xF00F_0048`): `0x100D`, or `0x10FF` with the MPU,
-    /// plus bit 21 with the native SD controller.
+    /// `CPU_FEATURES` (MMIO `0xF00F_0048`): `0x200D` (`0x100D` with 16 TLB
+    /// entries), or `0x20FF` with the MPU, plus bit 21 with the native SD
+    /// controller.
     pub(super) fn cpu_features(&self) -> u64 {
         let mpu = if self.has_mpu { CPU_FEATURES_MPU } else { 0 };
         let sd = if self.has_sd_native() { CPU_FEATURES_SD_NATIVE } else { 0 };
-        CPU_FEATURES_NO_MPU | CPU_FEATURES_PERF_HW | mpu | sd
+        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd
     }
 
     /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`

@@ -183,9 +183,13 @@ pub(crate) struct Cli {
     #[arg(long, value_name = "COUNT", default_value_t = DEFAULT_MAX_INSTRUCTIONS)]
     pub(crate) max_instructions: u64,
 
-    /// Give the emulator the MMU stage 2 MPU (16 regions; CPU_FEATURES reads 0x10FF). Without it the emulator matches the Nexys A7 bitstream, which has no MPU: CPU_FEATURES reads 0x100D, the MPU_BASEn/MPU_LIMITn system registers are illegal and STATUS bit 8 (MPU_EN) stays 0. For --emulate, --emulate-test and --gdbserver on the emulator
+    /// Give the emulator the MMU stage 2 MPU (16 regions; CPU_FEATURES reads 0x20FF). Without it the emulator matches the Nexys A7 bitstream, which has no MPU: CPU_FEATURES reads 0x200D, the MPU_BASEn/MPU_LIMITn system registers are illegal and STATUS bit 8 (MPU_EN) stays 0. For --emulate, --emulate-test and --gdbserver on the emulator
     #[arg(long, conflicts_with = "board")]
     pub(crate) mpu: bool,
+
+    /// The emulator's TLB entry count, CPU_FEATURES[15:8]: 32 (the default, the Nexys A7 bitstream since klaussCPU tlb32; CPU_FEATURES reads 0x200D, TLB_INDEX[4:0]) or 16 (the bitstreams before it: 0x100D, TLB_INDEX[3:0]). For --emulate and --gdbserver on the emulator (--emulate-test always has 32)
+    #[arg(long, value_name = "N", value_parser = clap::builder::TypedValueParser::map(clap::builder::PossibleValuesParser::new(["16", "32"]), |s: String| s.parse::<u32>().unwrap_or(32)), requires = "emu_host", conflicts_with = "board")]
+    pub(crate) tlb_entries: Option<u32>,
 
     /// Put an SD card in the emulator's slot holding this raw disk image (e.g. a FAT-partitioned image; a whole number of 512-byte blocks, at least 512 KiB). The card is SDHC (block addressed, CSD 2.0, capacity = the image rounded down to 512 KiB); writes go to the file. Without it the slot is empty and, unless --sd-native, the SD registers at 0xF000_0000 read 0 as before. For --emulate and --gdbserver on the emulator
     #[arg(long, value_name = "FILE", requires = "emu_host", conflicts_with = "board")]

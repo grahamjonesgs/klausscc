@@ -29,10 +29,14 @@ use crate::layout::is_mmio;
 
 /// The number of MPU regions (`CPU_FEATURES[7:4]` + 1, §10.1).
 pub(super) const MPU_REGIONS: usize = 16;
-/// The number of TLB entries (`CPU_FEATURES[15:8]`, §11.3): 16 on the
-/// Nexys A7 build (klaussCPU mmu daee899, parameter `TLB_N`).  A power of
-/// two; `TLB_INDEX` keeps only the bits that address an entry.
-pub(super) const TLB_ENTRIES: usize = 16;
+/// The most TLB entries the emulator models (`TLB_INDEX[4:0]`, §11.3).
+pub(super) const TLB_MAX: usize = 32;
+/// The number of TLB entries (`CPU_FEATURES[15:8]`, §11.3) by default: 32,
+/// the Nexys A7 build since klaussCPU `tlb32` (parameter `TLB_N`; 16 before,
+/// from mmu daee899).  `--tlb-entries 16` models the older bitstreams
+/// ([`Cpu::set_tlb_entries`]).  A power of two; `TLB_INDEX` keeps only the
+/// bits that address an entry.
+pub const TLB_ENTRIES_DEFAULT: u32 = 32;
 
 /// `MPU_BASEn[0]`: the region is enabled.
 const MPU_ENABLE: u32 = 1 << 0;
@@ -51,11 +55,6 @@ const TLB_INDEX_P: u32 = 1 << 31;
 pub(super) const TLB_HI_BITS: u32 = 0xFFFF_01FF;
 /// The bits `TLB_LO` has: PFN `[26:16]`, X `[3]`, W `[2]`, R `[1]`, V `[0]`.
 pub(super) const TLB_LO_BITS: u32 = 0x07FF_000F;
-/// The entry-index bits of `TLB_INDEX` (`[3:0]` with 16 entries; the
-/// higher index bits read 0 and are ignored on write).
-const TLB_INDEX_MASK: u32 = TLB_ENTRIES as u32 - 1;
-/// The bits `TLB_INDEX` has: P `[31]` and the entry index.
-pub(super) const TLB_INDEX_BITS: u32 = TLB_INDEX_P | TLB_INDEX_MASK;
 /// The page size is 64 KiB (§11.1): VPN = VA`[31:16]`.
 const PAGE_SHIFT: u32 = 16;
 /// The offset within a page.
@@ -391,7 +390,18 @@ impl Cpu {
     /// the lowest-numbered entry wins.
     fn tlb_lookup(&self, va: u32, asid: u8) -> Option<TlbEntry> {
         let vpn = va >> PAGE_SHIFT;
-        self.tlb.iter().copied().find(|e| e.matches(vpn, asid))
+        self.tlb_entries().iter().copied().find(|e| e.matches(vpn, asid))
+    }
+
+    /// The entry-index bits of `TLB_INDEX` (`[4:0]` with 32 entries, `[3:0]`
+    /// with 16; the higher index bits read 0 and are ignored on write).
+    pub(super) const fn tlb_index_mask(&self) -> u32 {
+        self.tlb_n - 1
+    }
+
+    /// The bits `TLB_INDEX` has: P `[31]` and the entry index.
+    pub(super) const fn tlb_index_bits(&self) -> u32 {
+        TLB_INDEX_P | self.tlb_index_mask()
     }
 
     /// A useg or kmap access through the TLB.
@@ -510,7 +520,7 @@ impl Cpu {
     /// `TLBWI`: entry[`TLB_INDEX` index] = {`TLB_HI`, `TLB_LO`}.  Clears the
     /// reservation (§11.3 side effects).
     pub(super) fn tlbwi(&mut self) {
-        self.tlb[(self.tlb_index & TLB_INDEX_MASK) as usize] = TlbEntry {
+        self.tlb[(self.tlb_index & self.tlb_index_mask()) as usize] = TlbEntry {
             hi: self.tlb_hi,
             lo: self.tlb_lo,
         };
@@ -519,7 +529,7 @@ impl Cpu {
 
     /// `TLBR`: {`TLB_HI`, `TLB_LO`} = entry[`TLB_INDEX` index].
     pub(super) fn tlbr(&mut self) {
-        let entry = self.tlb[(self.tlb_index & TLB_INDEX_MASK) as usize];
+        let entry = self.tlb[(self.tlb_index & self.tlb_index_mask()) as usize];
         self.tlb_hi = entry.hi;
         self.tlb_lo = entry.lo;
     }
@@ -529,7 +539,7 @@ impl Cpu {
     /// index bits alone (`MMU_PLAN.md` 12b3783).
     pub(super) fn tlbp(&mut self) {
         let vpn = self.tlb_hi >> PAGE_SHIFT;
-        match self.tlb.iter().position(|e| e.matches(vpn, self.tlb_hi as u8)) {
+        match self.tlb_entries().iter().position(|e| e.matches(vpn, self.tlb_hi as u8)) {
             Some(index) => self.tlb_index = index as u32,
             None => self.tlb_index |= TLB_INDEX_P,
         }
@@ -613,10 +623,30 @@ impl Cpu {
         &self.mpu
     }
 
-    /// The TLB entries, for a debugger.
+    /// The TLB entries (as many as `CPU_FEATURES[15:8]` says), for a
+    /// debugger.
     #[must_use]
-    pub const fn tlb_entries(&self) -> &[TlbEntry; TLB_ENTRIES] {
-        &self.tlb
+    pub fn tlb_entries(&self) -> &[TlbEntry] {
+        &self.tlb[..self.tlb_n as usize]
+    }
+
+    /// The number of TLB entries (`CPU_FEATURES[15:8]`).
+    #[must_use]
+    pub const fn tlb_entry_count(&self) -> u32 {
+        self.tlb_n
+    }
+
+    /// Model a TLB of `n` entries (16 or 32: `--tlb-entries`; the default is
+    /// [`TLB_ENTRIES_DEFAULT`]).  Every entry is invalidated and the
+    /// `TLB_INDEX` bits above the new index width are dropped.
+    ///
+    /// # Panics
+    /// If `n` is not a power of two between 2 and 32.
+    pub fn set_tlb_entries(&mut self, n: u32) {
+        assert!(n.is_power_of_two() && (2..=TLB_MAX as u32).contains(&n), "TLB entries: {n}");
+        self.tlb_n = n;
+        self.tlb = [TlbEntry::default(); TLB_MAX];
+        self.tlb_index &= self.tlb_index_bits();
     }
 
     /// Whether translation is on (`STATUS.TE`), so a debugger's addresses

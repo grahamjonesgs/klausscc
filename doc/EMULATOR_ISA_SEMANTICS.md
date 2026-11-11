@@ -212,10 +212,12 @@ read-only; `[8]` MPU_EN and `[9]` TE from stages 2 and 3), 1 `EVEC`
 `EADDR`, 4 `USP` (= `SP_ALT`), 5/6 `SCRATCH0/1`, 7 `TP`, 8 `CYCLE`
 (read-only), and the stage 2/3 registers 0x10-0x2F and 0x30-0x34 (next
 section). Any other SR number, and `MTSR` to `CYCLE`, is ILLEGAL.
-`CPU_FEATURES` at `0xF00F_0048` reads `0x100D`: stage 1, the TLB with
-16 entries, LR/SC, and no MPU, as on the Nexys A7 bitstream. With
-`--mpu` (`Cpu::set_has_mpu`) the emulator has the stage 2 MPU too and
-reads `0x10FF` (bit 1, and `[7:4]` = 15 for 16 regions).
+`CPU_FEATURES` at `0xF00F_0048` reads `0x200D`: stage 1, the TLB with
+32 entries, LR/SC, and no MPU, as on the Nexys A7 bitstream since
+klaussCPU `tlb32`. `--tlb-entries 16` (`Cpu::set_tlb_entries`) models the
+16-entry bitstreams before it (`0x100D`). With `--mpu`
+(`Cpu::set_has_mpu`) the emulator has the stage 2 MPU too and reads
+`0x20FF` (bit 1, and `[7:4]` = 15 for 16 regions).
 
 **CYCLE** is the emulator's modelled cycle count since reset: 2 cycles
 per retired instruction (`CYCLES_PER_INSTRUCTION`), 2 per exception
@@ -357,7 +359,7 @@ guard-safe vector rule is software's to keep).
 Any user access at or above `0x8000_0000` is ACCESS_*. Those faults are
 decided from the VA alone and do not load `TLB_HI`.
 
-**The TLB.** 16 entries, each `{VPN [15:0], ASID, G, PFN [10:0], V, R, W,
+**The TLB.** 32 entries (16 with `--tlb-entries 16`), each `{VPN [15:0], ASID, G, PFN [10:0], V, R, W,
 X}` in the `TLB_HI` / `TLB_LO` layout (`TLB_HI`: `[31:16]` VPN, `[8]` G,
 `[7:0]` ASID; `TLB_LO`: `[26:16]` PFN, `[3:0]` X W R V). Pages are 64
 KiB. An entry matches a VA when V is set, its VPN is VA`[31:16]`, and it
@@ -371,7 +373,7 @@ nonzero, else `EVEC`; every other cause enters `EVEC`. `TLBVEC[1:0]`
 read 0, as `EVEC`'s do. The points the emulator once marked as open
 were all confirmed in klaussCPU `mmu` 424e236 (MMU_PLAN §11.2–§11.3).
 
-`TLBWI` writes entry `TLB_INDEX[3:0]` (16 entries; `[4]` ignored, reads 0) from `TLB_HI`/`TLB_LO`, `TLBR`
+`TLBWI` writes entry `TLB_INDEX[4:0]` (32 entries; with 16, `[3:0]`, and `[4]` is ignored and reads 0) from `TLB_HI`/`TLB_LO`, `TLBR`
 reads it back, `TLBP` looks `TLB_HI` up (with its own ASID, G-aware) and
 sets `TLB_INDEX` to the index, or on a miss sets `TLB_INDEX[31]` and
 leaves `[4:0]` alone, and `TLBINV` clears every V. All four are

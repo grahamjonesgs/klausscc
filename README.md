@@ -19,7 +19,8 @@ One binary, `klausscc`, does everything needed to get a program onto the CPU:
   stage 3 (the 16-entry software-refilled TLB, the kseg/kmap address map,
   the double fault) and, with `--mpu`, stage 2 (the 16-region MPU). By
   default it has no MPU, as the Nexys A7 bitstream has none:
-  `CPU_FEATURES` reads `0x100D` (`0x10FF` with `--mpu`). `--sd-image
+  `CPU_FEATURES` reads `0x200D`, 32 TLB entries (`0x20FF` with `--mpu`;
+  `--tlb-entries 16` for the 16-entry bitstreams before klaussCPU `tlb32`). `--sd-image
   FILE` puts an SDHC card holding a raw disk image in the SD slot, for
   today's SPI-mode controller, and `--sd-native` adds the native 4-bit
   SD controller (`CPU_FEATURES` bit 21, the source 2 interrupt cascade).

@@ -326,6 +326,7 @@ fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, 
     };
     Ok(emu::Hardware {
         mpu: cli.mpu,
+        tlb_entries: cli.tlb_entries,
         sd_card,
         sd_native: cli.sd_native,
     })
