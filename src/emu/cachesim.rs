@@ -183,6 +183,8 @@ pub(super) struct CacheSim {
     write_misses: u64,
     full_line: u64,
     full_line_strict: u64,
+    /// Lines installed by DCBZ (no fetch, no miss counted).
+    zero_lines: u64,
 }
 
 const DLINE: u32 = 32;
@@ -220,6 +222,7 @@ impl CacheSim {
             write_misses: 0,
             full_line: 0,
             full_line_strict: 0,
+            zero_lines: 0,
         }))
     }
 
@@ -304,6 +307,21 @@ impl CacheSim {
         }
     }
 
+    /// DCBZ of the line at physical `pa`: installed (zeroed) without a
+    /// fetch, so the stores into it that follow hit.
+    pub(super) fn zero_line(&mut self, pa: u32) {
+        let line_addr = pa & !(DLINE - 1);
+        for c in &mut self.icaches32 {
+            c.d.access(line_addr);
+        }
+        let (a, m) = (self.dcache.accesses, self.dcache.misses);
+        let (_, way, _) = self.dcache.access(line_addr);
+        (self.dcache.accesses, self.dcache.misses) = (a, m);
+        let set = (u64::from(pa >> 5) % u64::from(self.dcache.sets)) as usize;
+        self.pending[set * self.dcache.ways + way] = None;
+        self.zero_lines += 1;
+    }
+
     pub(super) fn report(&self) {
         eprintln!("cachesim: I-cache misses (demand, no prefetch)");
         for c in &self.icaches {
@@ -328,6 +346,7 @@ impl CacheSim {
             "cachesim: {}: {} loads, {} stores, {} read misses, {} write misses",
             self.dcache.name, self.loads, self.stores, self.read_misses, self.write_misses
         );
+        eprintln!("cachesim: lines zeroed by DCBZ (no fetch): {}", self.zero_lines);
         eprintln!(
             "cachesim: write misses then written whole before a read or eviction: {} ({:.1}%), as a store run: {} ({:.1}%)",
             self.full_line,

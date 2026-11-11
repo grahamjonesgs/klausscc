@@ -697,6 +697,9 @@ impl Cpu {
         }
         let at = self.map_data(ea, 1, true)?;
         let line = at.masked(!(DCBZ_LINE - 1));
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.zero_line(line.pa());
+        }
         for dw in 0..DCBZ_LINE / 8 {
             self.write64(line.offset(dw * 8), 0);
         }
