@@ -4268,3 +4268,15 @@ fn perf_hw_registers() {
     cpu.mmio_write(0xF005_0000, 1);
     assert_eq!(cpu.mmio_read(0xF005_0070), 0, "CACHE_CTRL[0] clears it");
 }
+
+#[test]
+fn short_form_stores_with_displacement_bit_13_stay_legal() {
+    // MODE 01 (the short form) keeps [19:12] as its displacement: [13] set
+    // there is not DCBZ (HW_PERF_PLAN.md §1 correction).  MEMSET64-short
+    // F, [B + 2*8]: 0x5F20_0000 | imm8 << 12 | rd << 8 | rs1 << 4.
+    let word = 0x5F20_0000 | (2 << 12) | (5 << 8) | (1 << 4);
+    let cpu = lr_sc_one(word, &[(1, 0x2000), (5, 0x55)], None);
+    assert_eq!(cpu.exc_entries, 0, "{word:08x} is legal");
+    assert_eq!(cpu.peek64(0x2010), 0x55);
+    assert_eq!(cpu.zero_lines, 0);
+}
