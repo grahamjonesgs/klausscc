@@ -13,6 +13,15 @@
 //! that line (a store run, as `memset`, `memcpy` and `copy_page` make).
 //!
 //! The counts go to stderr when the run ends ([`CacheSim::report`]).
+//!
+//! Windowed like `KLAUSSCC_TLBSIM`: a `PERF_CTRL` clear zeroes the counts (the
+//! cache contents stay), and the `CNT_ZERO_LINES` read that ends perfstat's
+//! `/proc` read prints the window (`CACHESIM wN ...` lines: the board-shape
+//! [`ICacheD`] set, micro-ITLB variants, `ICACHE_INV` writes, D-cache
+//! counts including the I-cache fills).  The run's end prints only when no
+//! window was printed.  `KLAUSSCC_PROFILE=prefix` (which also enables this
+//! simulator) writes per-virtual-PC counts of each window to `prefix.N`:
+//! `pc instr icmiss ndiv div_steps div_cycles nmul`.
 
 /// One set-associative cache with LRU replacement.
 struct Cache {
@@ -158,6 +167,239 @@ impl ICache32 {
     }
 }
 
+
+/// The board's I-cache, as `pipeline_core.sv` has it, generalised: tag per
+/// line, valid bit per doubleword, LRU.  A demand miss on doubleword `d`
+/// fills `d` and, for an even `d` in a 16-byte line, the next one too
+/// (`ic_dv <= {1, m_next_valid}`; an odd fill is that doubleword alone), so
+/// the other doubleword of a line can miss separately.  `whole` fills the
+/// whole line (the 32-byte what-ifs: the D-cache line is fetched anyway).
+/// The next-line buffer (NLB) only looks up lines already in the I-cache and
+/// never fills (`PIPELINE_M9_FETCH_PREFETCH.md`); `nl_fill` is the other
+/// assumption (a miss also installs the whole next line), kept to compare.
+/// `PERF_IC_MISS` counts the demand fills issued, i.e. these misses.
+/// A CPU store to a cached line drops that line (the M7b snoop); `ICACHE_INV`
+/// drops everything.
+struct ICacheD {
+    name: String,
+    line_bits: u32,
+    sets: u32,
+    ways: usize,
+    /// `line | VALID` per way per set (0 = empty).
+    tags: Vec<u64>,
+    /// Valid doublewords per way per set.
+    valid: Vec<u8>,
+    stamp: Vec<u64>,
+    clock: u64,
+    whole: bool,
+    nl_fill: bool,
+    accesses: u64,
+    misses: u64,
+    snoop_kills: u64,
+}
+
+impl ICacheD {
+    fn new(size: u32, ways: usize, line: u32, whole: bool, nl_fill: bool) -> Self {
+        let sets = size / line / ways as u32;
+        let n = (sets as usize) * ways;
+        let mut name = format!("{}K {}-way {}B", size >> 10, ways, line);
+        if nl_fill {
+            name += " +NL-fill";
+        } else if whole {
+            name += " whole-line fill";
+        }
+        Self {
+            name,
+            line_bits: line.trailing_zeros(),
+            sets,
+            ways,
+            tags: vec![0; n],
+            valid: vec![0; n],
+            stamp: vec![0; n],
+            clock: 0,
+            whole,
+            nl_fill,
+            accesses: 0,
+            misses: 0,
+            snoop_kills: 0,
+        }
+    }
+
+    fn all_mask(&self) -> u8 {
+        ((1u32 << (1 << (self.line_bits - 3))) - 1) as u8
+    }
+
+    fn fill_mask(&self, dw: u32) -> u8 {
+        if self.whole || self.line_bits > 4 {
+            self.all_mask()
+        } else if dw & 1 == 0 {
+            3 << dw
+        } else {
+            1 << dw
+        }
+    }
+
+    /// The way holding `line` in `set`, or the victim (empty, else LRU).
+    fn way_of(&self, set: usize, tag: u64) -> (usize, bool) {
+        let base = set * self.ways;
+        let mut victim = 0;
+        let mut best = u64::MAX;
+        for w in 0..self.ways {
+            if self.tags[base + w] == tag {
+                return (base + w, true);
+            }
+            let key = if self.tags[base + w] == 0 { 0 } else { self.stamp[base + w] + 1 };
+            if key < best {
+                best = key;
+                victim = base + w;
+            }
+        }
+        (victim, false)
+    }
+
+    fn install(&mut self, line: u64, mask: u8) {
+        let set = (line % u64::from(self.sets)) as usize;
+        let tag = line | VALID;
+        self.clock += 1;
+        let (i, hit) = self.way_of(set, tag);
+        if !hit {
+            self.tags[i] = tag;
+            self.valid[i] = 0;
+        }
+        self.valid[i] |= mask;
+        self.stamp[i] = self.clock;
+    }
+
+    /// A demand lookup of the doubleword at `pa`; true when it missed.
+    fn access(&mut self, pa: u32) -> bool {
+        self.accesses += 1;
+        let line = u64::from(pa >> self.line_bits);
+        let dw = (pa >> 3) & ((1 << (self.line_bits - 3)) - 1);
+        let set = (line % u64::from(self.sets)) as usize;
+        let (i, hit) = self.way_of(set, line | VALID);
+        if hit {
+            self.clock += 1;
+            self.stamp[i] = self.clock;
+            if self.valid[i] >> dw & 1 != 0 {
+                return false;
+            }
+        }
+        self.misses += 1;
+        let mask = self.fill_mask(dw);
+        self.install(line, mask);
+        if self.nl_fill {
+            let m = self.all_mask();
+            self.install(line + 1, m);
+        }
+        true
+    }
+
+    /// A CPU store to `pa`: drop the line if cached.
+    fn snoop(&mut self, pa: u32) {
+        let line = u64::from(pa >> self.line_bits);
+        let set = (line % u64::from(self.sets)) as usize;
+        let (i, hit) = self.way_of(set, line | VALID);
+        if hit {
+            self.tags[i] = 0;
+            self.valid[i] = 0;
+            self.snoop_kills += 1;
+        }
+    }
+
+    fn flush(&mut self) {
+        self.tags.fill(0);
+        self.valid.fill(0);
+    }
+
+    fn clear(&mut self) {
+        self.accesses = 0;
+        self.misses = 0;
+        self.snoop_kills = 0;
+    }
+}
+
+/// An N-entry LRU micro-ITLB on (VPN, user mode) of the fetch.
+struct MicroItlb {
+    entries: usize,
+    /// Emptied by TLBWI too (the board's `tlb_discard`).
+    on_write: bool,
+    /// Most recently used first.
+    keys: Vec<(u16, bool)>,
+    misses: u64,
+}
+
+impl MicroItlb {
+    fn lookup(&mut self, key: (u16, bool)) {
+        if let Some(i) = self.keys.iter().position(|&k| k == key) {
+            if i != 0 {
+                self.keys.remove(i);
+                self.keys.insert(0, key);
+            }
+            return;
+        }
+        self.misses += 1;
+        self.keys.insert(0, key);
+        self.keys.truncate(self.entries);
+    }
+}
+
+/// Per-PC counts (`KLAUSSCC_PROFILE=prefix`).
+#[derive(Default, Clone, Copy)]
+struct Ent {
+    instr: u64,
+    /// Misses in the board-shape I-cache ([`ICacheD`] 0).
+    icmiss: u64,
+    ndiv: u64,
+    div_steps: u64,
+    div_cycles: u64,
+    nmul: u64,
+}
+
+/// Cycles a divide holds EX besides its steps: the issue cycle, the
+/// leading-zero skip (`MD_PREP`) and the finishing cycle (`pipeline_core.sv`
+/// `div_ph`).
+const DIV_SETUP: u64 = 3;
+
+#[derive(Default)]
+struct Hasher32(u64);
+impl std::hash::Hasher for Hasher32 {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, b: &[u8]) {
+        for &x in b {
+            self.0 = (self.0 ^ u64::from(x)).wrapping_mul(0x100_0000_01b3);
+        }
+    }
+    fn write_u32(&mut self, v: u32) {
+        self.0 = u64::from(v).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
+
+struct Profile {
+    prefix: String,
+    map: std::collections::HashMap<u32, Ent, std::hash::BuildHasherDefault<Hasher32>>,
+    pc: u32,
+}
+
+impl Profile {
+    fn dump(&self, window: u64) {
+        use std::io::Write;
+        let path = format!("{}.{}", self.prefix, window);
+        let Ok(f) = std::fs::File::create(&path) else {
+            eprintln!("cachesim: cannot write {path}");
+            return;
+        };
+        let mut w = std::io::BufWriter::new(f);
+        let mut v: Vec<_> = self.map.iter().collect();
+        v.sort_by_key(|(pc, _)| **pc);
+        let _ = writeln!(w, "# pc instr icmiss ndiv div_steps div_cycles nmul");
+        for (pc, e) in v {
+            let _ = writeln!(w, "{:08x} {} {} {} {} {} {}", pc, e.instr, e.icmiss, e.ndiv, e.div_steps, e.div_cycles, e.nmul);
+        }
+    }
+}
+
 /// A write-missed line being watched for a whole-line write.
 #[derive(Clone, Copy)]
 struct Pending {
@@ -172,6 +414,27 @@ struct Pending {
 pub(super) struct CacheSim {
     icaches: Vec<Cache>,
     icaches32: Vec<ICache32>,
+    /// The per-doubleword-valid I-caches; 0 is the board's.
+    icd: Vec<ICacheD>,
+    profile: Option<Profile>,
+    /// `ICACHE_INV` writes this window.
+    icache_inv: u64,
+    /// The 1-entry micro-ITLB (`pipeline_core.sv` `ut_*`): the fetch's
+    /// (VPN, user mode).  A lookup of any other page refills it; while the
+    /// refill runs `PERF_IC_MISS`'s condition holds (~3 cycles) without any
+    /// I-cache fill.  Emptied by TLBWI, TLBINV, ASID and STATUS writes
+    /// (`tlb_discard`).
+    uit: Vec<MicroItlb>,
+    /// Board-shape I-cache fills that missed / hit the D-cache (fills go
+    /// through it; the board counts the misses in `dc_read_misses`).
+    ifill_dmiss: u64,
+    ifill_dhit: u64,
+    /// TLBWI, TLBINV, MTSR ASID, MTSR STATUS this window.
+    uit_discards: [u64; 4],
+    window: u64,
+    /// A window has been printed since the last clear.
+    reported: bool,
+    ever_reported: bool,
     dcache: Cache,
     /// Per D-cache slot (set * ways + way): a pending write-missed line.
     pending: Vec<Option<Pending>>,
@@ -192,7 +455,10 @@ const DLINE: u32 = 32;
 impl CacheSim {
     /// The simulator if `KLAUSSCC_CACHESIM` is set.
     pub(super) fn from_env() -> Option<Box<Self>> {
-        std::env::var_os("KLAUSSCC_CACHESIM")?;
+        let profile = std::env::var("KLAUSSCC_PROFILE").ok().map(|prefix| Profile { prefix, map: Default::default(), pc: 0 });
+        if profile.is_none() {
+            std::env::var_os("KLAUSSCC_CACHESIM")?;
+        }
         let mut icaches = Vec::new();
         for &(size, ways, line, nl) in &[
             (8u32 << 10, 1usize, 16u32, false),
@@ -213,6 +479,35 @@ impl CacheSim {
         Some(Box::new(Self {
             icaches,
             icaches32: vec![ICache32::new(8 << 10), ICache32::new(16 << 10), ICache32::new(32 << 10)],
+            icd: [
+                (16u32 << 10, 1usize, 16u32, false, false),
+                (16 << 10, 1, 16, false, true),
+                (8 << 10, 1, 16, false, false),
+                (16 << 10, 2, 16, false, false),
+                (16 << 10, 4, 16, false, false),
+                (32 << 10, 1, 16, false, false),
+                (32 << 10, 2, 16, false, false),
+                (32 << 10, 4, 16, false, false),
+                (64 << 10, 2, 16, false, false),
+                (16 << 10, 1, 32, true, false),
+                (16 << 10, 2, 32, true, false),
+                (32 << 10, 2, 32, true, false),
+            ]
+            .iter()
+            .map(|&(sz, w, l, whole, nl)| ICacheD::new(sz, w, l, whole, nl))
+            .collect(),
+            profile,
+            icache_inv: 0,
+            uit: [(1usize, true), (2, true), (4, true), (8, true), (1, false), (2, false), (4, false)]
+                .iter()
+                .map(|&(entries, on_write)| MicroItlb { entries, on_write, keys: Vec::new(), misses: 0 })
+                .collect(),
+            ifill_dmiss: 0,
+            ifill_dhit: 0,
+            uit_discards: [0; 4],
+            window: 0,
+            reported: true,
+            ever_reported: false,
             dcache,
             pending: vec![None; slots],
             run_slot: None,
@@ -227,7 +522,39 @@ impl CacheSim {
     }
 
     /// An instruction fetch of `len` words at physical `pa`.
-    pub(super) fn fetch(&mut self, pa: u32, len: u32) {
+    pub(super) fn fetch(&mut self, pc: u32, um: bool, pa: u32, len: u32) {
+        let key = ((pc >> 16) as u16, um);
+        for u in &mut self.uit {
+            u.lookup(key);
+        }
+        let mut board_miss = false;
+        for d in (pa >> 3)..=((pa + 4 * len.max(1) - 1) >> 3) {
+            for (k, c) in self.icd.iter_mut().enumerate() {
+                let m = c.access(d << 3);
+                board_miss |= m && k == 0;
+            }
+        }
+        if board_miss {
+            // The fill goes through the D-cache (one 32-byte line).
+            let line_addr = pa & !(DLINE - 1);
+            let set = (u64::from(pa >> 5) % u64::from(self.dcache.sets)) as usize;
+            let (a, m) = (self.dcache.accesses, self.dcache.misses);
+            let (hit, way, _) = self.dcache.access(line_addr);
+            (self.dcache.accesses, self.dcache.misses) = (a, m);
+            if hit {
+                self.ifill_dhit += 1;
+            } else {
+                self.ifill_dmiss += 1;
+                self.pending[set * self.dcache.ways + way] = None;
+            }
+        }
+        if let Some(p) = self.profile.as_mut() {
+            p.pc = pc;
+            if board_miss {
+                p.map.entry(pc).or_default().icmiss += 1;
+            }
+        }
+        self.reported = false;
         for c in &mut self.icaches32 {
             let first = pa >> 4;
             let last = (pa + 4 * len.max(1) - 1) >> 4;
@@ -244,6 +571,141 @@ impl CacheSim {
                     c.prefetch((l + 1) << c.line_bits);
                 }
             }
+        }
+    }
+
+
+    /// The instruction fetched by the last [`CacheSim::fetch`] retired.
+    pub(super) fn retire(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.map.entry(p.pc).or_default().instr += 1;
+        }
+    }
+
+    /// A MUL (any form) executes.
+    pub(super) fn mul(&mut self) {
+        if let Some(p) = self.profile.as_mut() {
+            p.map.entry(p.pc).or_default().nmul += 1;
+        }
+    }
+
+    /// A DIV/MOD executes: `steps` = significant bits of the magnitude of
+    /// the dividend (leading zeros are skipped); a zero divisor takes one
+    /// cycle.
+    pub(super) fn div(&mut self, a: u64, b: u64, signed: bool) {
+        if let Some(p) = self.profile.as_mut() {
+            let e = p.map.entry(p.pc).or_default();
+            e.ndiv += 1;
+            if b == 0 {
+                e.div_cycles += 1;
+            } else {
+                let mag = if signed && (a as i64) < 0 { a.wrapping_neg() } else { a };
+                let steps = u64::from(64 - mag.leading_zeros());
+                e.div_steps += steps;
+                e.div_cycles += steps + DIV_SETUP;
+            }
+        }
+    }
+
+    /// A write to `CACHE_CTRL` with `ICACHE_INV` (bit 3): the core drops its
+    /// whole I-cache.
+    pub(super) fn icache_inv(&mut self) {
+        self.icache_inv += 1;
+        for c in &mut self.icd {
+            c.flush();
+        }
+    }
+
+    /// The micro-ITLB is emptied (`kind`: 0 TLBWI, 1 TLBINV, 2 ASID, 3 STATUS).
+    pub(super) fn uitlb_discard(&mut self, kind: usize) {
+        for u in &mut self.uit {
+            if kind != 0 || u.on_write {
+                u.keys.clear();
+            }
+        }
+        self.uit_discards[kind] += 1;
+    }
+
+    /// `PERF_CTRL` clear: zero the window's counts (the contents stay).
+    pub(super) fn clear(&mut self) {
+        for c in &mut self.icd {
+            c.clear();
+        }
+        for c in &mut self.icaches {
+            c.accesses = 0;
+            c.misses = 0;
+        }
+        for c in &mut self.icaches32 {
+            c.accesses = 0;
+            c.misses = 0;
+        }
+        self.icache_inv = 0;
+        for u in &mut self.uit {
+            u.misses = 0;
+        }
+        self.ifill_dmiss = 0;
+        self.ifill_dhit = 0;
+        self.uit_discards = [0; 4];
+        self.loads = 0;
+        self.stores = 0;
+        self.read_misses = 0;
+        self.write_misses = 0;
+        self.full_line = 0;
+        self.full_line_strict = 0;
+        self.zero_lines = 0;
+        if let Some(p) = self.profile.as_mut() {
+            p.map.clear();
+        }
+        self.reported = true;
+    }
+
+    /// Print the window (once per window; at the end of the run only when no
+    /// window was printed before) and dump the profile.
+    pub(super) fn report_window(&mut self, instr: u64, at_end: bool) {
+        if self.reported || (at_end && self.ever_reported) {
+            return;
+        }
+        self.reported = true;
+        self.ever_reported = true;
+        self.window += 1;
+        let w = self.window;
+        eprintln!("CACHESIM window {w}: {instr} instructions, {} ICACHE_INV writes", self.icache_inv);
+        eprintln!(
+            "CACHESIM w{w} uITLB discards: tlbwi {} tlbinv {} asid {} status {}",
+            self.uit_discards[0], self.uit_discards[1], self.uit_discards[2], self.uit_discards[3]
+        );
+        for u in &self.uit {
+            eprintln!(
+                "CACHESIM w{w} uITLB {} entries, {} misses {:>10} per1k {:.2}",
+                u.entries,
+                if u.on_write { "cleared by TLBWI," } else { "kept over TLBWI," },
+                u.misses,
+                1000.0 * u.misses as f64 / instr.max(1) as f64
+            );
+        }
+        eprintln!(
+            "CACHESIM w{w} board-shape I fills through the D-cache: {} miss, {} hit; D read misses incl. I fills {}",
+            self.ifill_dmiss,
+            self.ifill_dhit,
+            self.read_misses + self.ifill_dmiss
+        );
+        for (k, c) in self.icd.iter().enumerate() {
+            eprintln!(
+                "CACHESIM w{w} I {:<26} {}misses {:>10} accesses {:>11} per1k {:>8.2} snoop_kills {}",
+                c.name,
+                if k == 0 { "(board) " } else { "" },
+                c.misses,
+                c.accesses,
+                1000.0 * c.misses as f64 / instr.max(1) as f64,
+                c.snoop_kills
+            );
+        }
+        eprintln!(
+            "CACHESIM w{w} D 64K 2-way 32B: {} loads {} stores {} read_misses {} write_misses",
+            self.loads, self.stores, self.read_misses, self.write_misses
+        );
+        if let Some(p) = &self.profile {
+            p.dump(w);
         }
     }
 
@@ -265,6 +727,11 @@ impl CacheSim {
                 p.run = false;
             }
             self.run_slot = None;
+        }
+        if store {
+            for c in &mut self.icd {
+                c.snoop(pa);
+            }
         }
         for c in &mut self.icaches32 {
             c.d.access(line_addr);
@@ -365,5 +832,47 @@ fn byte_mask(pa: u32, n: u32) -> u32 {
         u32::MAX
     } else {
         ((1u32 << n) - 1) << off
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The board's fill rule: an even doubleword fills itself and the next;
+    /// an odd one only itself; the NLB never fills.
+    #[test]
+    fn board_icache_fills_per_doubleword() {
+        let mut c = ICacheD::new(16 << 10, 1, 16, false, false);
+        assert!(c.access(0x1000)); // dw0 misses, fills dw0+dw1
+        assert!(!c.access(0x1008));
+        assert!(!c.access(0x1000));
+        assert!(c.access(0x1018)); // odd dw of the next line: itself only
+        assert!(c.access(0x1010)); // ... so the even one still misses
+        assert!(!c.access(0x1018));
+        assert!(c.access(0x1000 + (16 << 10))); // conflict in a direct-mapped cache
+        assert!(c.access(0x1000));
+        c.snoop(0x1000);
+        assert!(c.access(0x1000)); // a store dropped the line
+        c.flush();
+        assert!(c.access(0x1000));
+    }
+
+    #[test]
+    fn two_way_keeps_both_conflicting_lines() {
+        let mut c = ICacheD::new(16 << 10, 2, 16, false, false);
+        assert!(c.access(0x1000));
+        assert!(c.access(0x1000 + (8 << 10)));
+        assert!(!c.access(0x1000));
+        assert!(!c.access(0x1000 + (8 << 10)));
+    }
+
+    #[test]
+    fn micro_itlb_is_lru() {
+        let mut u = MicroItlb { entries: 2, on_write: true, keys: Vec::new(), misses: 0 };
+        for k in [1u16, 2, 1, 2, 3, 1] {
+            u.lookup((k, false));
+        }
+        assert_eq!(u.misses, 4); // 1, 2 miss; 3 evicts 1; 1 misses
     }
 }

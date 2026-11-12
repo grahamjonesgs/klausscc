@@ -251,6 +251,9 @@ impl Cpu {
                         if let Some(sim) = self.tlbsim.get_mut() {
                             sim.report(instret, false);
                         }
+                        if let Some(sim) = self.cachesim.as_mut() {
+                            sim.report_window(instret, false);
+                        }
                         self.zero_lines
                     }
                     _ => 0,
@@ -291,9 +294,21 @@ impl Cpu {
             }
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
             IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
-            CACHE_DEV_SELECT if addr & 0xFFFF == CACHE_CTRL && data & 1 != 0 => self.zero_lines = 0,
+            CACHE_DEV_SELECT if addr & 0xFFFF == CACHE_CTRL && data & 0b1001 != 0 => {
+                if data & 1 != 0 {
+                    self.zero_lines = 0;
+                }
+                if data & 8 != 0
+                    && let Some(sim) = self.cachesim.as_mut()
+                {
+                    sim.icache_inv();
+                }
+            }
             PERF_DEV_SELECT if addr & 0xFFFF == PERF_CTRL && data & 1 != 0 => {
                 if let Some(sim) = self.tlbsim.get_mut() {
+                    sim.clear();
+                }
+                if let Some(sim) = self.cachesim.as_mut() {
                     sim.clear();
                 }
                 self.perf_base = PerfBase {

@@ -527,6 +527,9 @@ impl Cpu {
         if let Some(sim) = self.tlbsim.get_mut() {
             sim.tlbwi(self.tlb_hi, self.tlb_lo);
         }
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.uitlb_discard(0);
+        }
         self.tlb[(self.tlb_index & self.tlb_index_mask()) as usize] = TlbEntry {
             hi: self.tlb_hi,
             lo: self.tlb_lo,
@@ -559,6 +562,9 @@ impl Cpu {
     pub(super) fn tlbinv(&mut self) {
         if let Some(sim) = self.tlbsim.get_mut() {
             sim.tlbinv();
+        }
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.uitlb_discard(1);
         }
         for entry in &mut self.tlb {
             entry.lo &= !TLB_V;

@@ -958,6 +958,9 @@ impl Cpu {
             // 2-word MULV / MULUV; the low half, Z/S/V as MUL.  [22:20] and
             // rs2 are zero.
             legal(f.field(20, 3) == 0 && f.rs2 == 0)?;
+            if let Some(sim) = self.cachesim.as_mut() {
+                sim.mul();
+            }
             self.mul_low(f.rd, self.regs[f.rs1], ext(f.imm32, sgn), sgn, false);
             return Ok(Flow::Next);
         }
@@ -974,6 +977,13 @@ impl Cpu {
         let rd = f.rd;
         let a = self.regs[f.rs1];
         let b = if is_imm { ext(f.imm32, sgn) } else { self.regs[f.rs2] };
+        if let Some(sim) = self.cachesim.as_mut() {
+            match kind {
+                0 => sim.mul(),
+                1 | 2 => sim.div(a, b, sgn),
+                _ => {}
+            }
+        }
         match kind {
             0 if high => {
                 // MULH: the high half of the 128-bit product, signed or

@@ -358,6 +358,9 @@ impl Cpu {
                 self.te = value & STATUS_TE != 0;
                 self.mal64 = value & STATUS_MAL64 != 0;
                 self.reservation = None;
+                if let Some(sim) = self.cachesim.as_mut() {
+                    sim.uitlb_discard(3);
+                }
             }
             sr::EVEC => self.evec = value as u32 & !3,
             // Spec (confirmed in MMU_PLAN 424e236): §6.1 makes ECAUSE RW with GUARD in [8]; MTSR writes
@@ -385,6 +388,9 @@ impl Cpu {
             sr::ASID => {
                 self.asid = value as u8;
                 self.reservation = None;
+                if let Some(sim) = self.cachesim.as_mut() {
+                    sim.uitlb_discard(2);
+                }
             }
             sr::TLBVEC => self.tlbvec = value as u32 & !3,
             _ => return false,

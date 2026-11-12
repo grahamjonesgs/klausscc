@@ -612,7 +612,7 @@ impl Cpu {
         if self.cachesim.is_some() {
             let pa = self.translate(pc, mmu::Kind::Fetch).unwrap_or(pc);
             if let Some(sim) = self.cachesim.as_mut() {
-                sim.fetch(pa, (word >> 30).max(1));
+                sim.fetch(pc, self.um, pa, (word >> 30).max(1));
             }
         }
         if !self.execute(words) {
@@ -624,6 +624,9 @@ impl Cpu {
             return None;
         }
         self.instret += 1;
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.retire();
+        }
         self.tick(CYCLES_PER_INSTRUCTION);
         Some((pc, word))
     }
@@ -654,7 +657,8 @@ impl Cpu {
                 }
             }
         }
-        if let Some(sim) = &self.cachesim {
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.report_window(self.instret - self.perf_base.instret, true);
             sim.report();
         }
         if let Some(sim) = self.tlbsim.get_mut() {
