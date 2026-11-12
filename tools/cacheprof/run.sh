@@ -7,7 +7,8 @@
 # console); analyze.py $W/run.err prints the tables (LINUX_PLAN.md "TLB
 # size and refill").  KLAUSSCC_ARGS e.g. "--tlb-entries 16".
 set -euo pipefail
-HERE=/home/graham/Documents/src/klausscpu-runtime/linux/userland/tests/tlb/model
+SRC=${KLAUSSCPU_SRC:-$(cd "$(dirname "$0")/../../.." && pwd)}
+HERE=$SRC/klausscpu-runtime/linux/userland/tests/tlb/model
 RT=$(cd "$HERE/../../../../.." && pwd)
 W=${TLBSIM_OUT:-$HOME/.cache/cacheprof/run}
 BR=$RT/linux-ws/br-output-dyn/target

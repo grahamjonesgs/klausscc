@@ -1,16 +1,29 @@
 #!/usr/bin/env python3
 """Symbolize a KLAUSSCC_PROFILE window file and print the top functions.
-usage: symb.py prof.N python|sqlite [topn]"""
+usage: symb.py prof.N python|sqlite|sshd [topn]"""
 import bisect, subprocess, sys, collections
 
-LLVM = "/home/graham/Documents/src/klausscpu-llvm/build/bin"
-BR = "/home/graham/Documents/src/klausscpu-runtime/linux-ws/br-output-dyn"
-WS = "/home/graham/Documents/src/klausscpu-runtime/linux-ws"
-VMLINUX = "/home/graham/.cache/cacheprof/run/build/vmlinux"
+import os
+# The checkouts sit side by side (klausscc, klausscpu-llvm, klausscpu-runtime);
+# KLAUSSCPU_SRC overrides their parent.  CACHEPROF_VMLINUX: the run's kernel.
+SRC = os.environ.get("KLAUSSCPU_SRC", os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
+LLVM = os.path.join(SRC, "klausscpu-llvm/build/bin")
+WS = os.path.join(SRC, "klausscpu-runtime/linux-ws")
+BR = os.path.join(WS, "br-output-dyn")
+VMLINUX = os.environ.get("CACHEPROF_VMLINUX", os.path.expanduser("~/.cache/cacheprof/run/build/vmlinux"))
 
 # (name, base, end, file)  vaddr = pc - base
 COMMON = [("ld-musl/libc", 0x2aab0000, 0x2ab90000, WS + "/dyn/musl/lib/libc.so")]
 MAPS = {
+    # sshd started normally (the kernel maps the PIE at 0x55550000 and the
+    # libraries follow libc; "ld-musl --list" maps the program itself first,
+    # so its addresses are shifted)
+    "sshd": COMMON + [
+        ("libssl", 0x2ab90000, 0x2aca0000, BR + "/build/libopenssl-3.6.2/libssl.so.3"),
+        ("libcrypto", 0x2aca0000, 0x2b0e0000, BR + "/build/libopenssl-3.6.2/libcrypto.so.3"),
+        ("libz", 0x2b0e0000, 0x2b120000, BR + "/build/libzlib-1.3.2/libz.so.1.3.2"),
+        ("sshd exe", 0x55550000, 0x55600000, BR + "/build/openssh-10.2p1/sshd"),
+    ],
     "python": COMMON + [
         ("libpython3.14", 0x2ab90000, 0x2b0a0000, BR + "/build/python3-3.14.5/libpython3.14.so.1.0"),
         ("python3.14 exe", 0x55550000, 0x55590000, BR + "/build/python3-3.14.5/python"),
