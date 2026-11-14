@@ -263,6 +263,7 @@ impl Cpu {
                 eaddr,
                 guard: false,
                 tlb: false,
+                restart: false,
             },
             word,
             next,
@@ -278,6 +279,10 @@ impl Cpu {
     /// whatever `TLBVEC` holds, and a park writes neither `ECAUSE`, `EADDR`
     /// nor `TLB_HI`.  A double fault in the entry stops the CPU instead
     /// ([`Cpu::enter`]), with nothing written either.
+    ///
+    /// A `fault` with `restart` set is no exception but a successful walk of
+    /// the hardware TLB walker ([`Cpu::translate_walk`]): the instruction
+    /// restarts (nothing happens here; the PC stays on it).
     // Spec (confirmed in MMU_PLAN 424e236): §4.4 parks on EVEC = 0 for every cause; §11.3 does not say
     // whether a TLB miss with TLBVEC != 0 and EVEC = 0 parks or enters
     // TLBVEC.  This parks (the literal §4.4 reading).
@@ -285,7 +290,25 @@ impl Cpu {
     // park (EVEC = 0) or a double fault loads it is not said.  Neither does
     // here, as neither writes ECAUSE/EADDR.
     pub(super) fn raise_fault(&mut self, fault: XlateFault, word: u32, next: u32) -> bool {
-        let XlateFault { cause, eaddr, guard, tlb } = fault;
+        let XlateFault {
+            cause,
+            eaddr,
+            guard,
+            tlb,
+            restart,
+        } = fault;
+        if restart {
+            // A successful hardware TLB walk (§11.8): no exception.  As in
+            // the RTL (the walk ran in the entry sequencer, which then
+            // refetches the instruction at its PC), the instruction restarts
+            // from its fetch: the PC stays on it, nothing of it was done
+            // (each instruction translates all its accesses before its first
+            // side effect), and the next step is an instruction boundary, so
+            // a ready interrupt is taken there with the frame PC = this
+            // instruction.  It retires nothing; the walk took its cycles.
+            self.walk_restarts += 1;
+            return false;
+        }
         let debug_halt = self.debugger_attached && !self.exc_pass && cause.debug_halts();
         if debug_halt || self.evec == 0 {
             self.stop = Some(match cause {

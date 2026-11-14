@@ -281,6 +281,13 @@ pub struct Cpu {
     /// Exceptions entered since reset (they retire no instruction, but
     /// count against a run's instruction cap).
     exc_entries: u64,
+    /// Instruction restarts after a successful hardware TLB walk since reset
+    /// ([`Cpu::raise_fault`]): they retire nothing and enter nothing, but
+    /// count against a run's instruction cap, so an instruction that can
+    /// never complete still ends the run (a 2-entry TLB and an instruction
+    /// touching three or four pages evicts its own pages forever, as the
+    /// RTL would).
+    walk_restarts: u64,
     /// The exception the CPU last stopped on instead of entering a handler.
     parked: Option<(Cause, u32)>,
     // ---- MMU stages 2 and 3 (`mmu`) ----
@@ -402,6 +409,7 @@ impl Cpu {
             debugger_attached: false,
             exc_pass: false,
             exc_entries: 0,
+            walk_restarts: 0,
             parked: None,
             has_mpu: false,
             mpu: [MpuRegion::default(); MPU_REGIONS],
@@ -585,8 +593,10 @@ impl Cpu {
     /// its own), or wake from / finish a `WAIT`, or retire one instruction,
     /// returning its `(pc, word)` for the trace.  An illegal word stops the
     /// machine without retiring, and an instruction that raises an
-    /// exception retires nothing either (`MMU_PLAN.md` §7.2).  With
-    /// `allow_irq` false (a
+    /// exception retires nothing either (`MMU_PLAN.md` §7.2), nor does one
+    /// whose fetch or access the hardware TLB walker refilled: that step
+    /// ends with the PC still on it, to run it again from its fetch at the
+    /// next step (`MMU_PLAN.md` §11.8).  With `allow_irq` false (a
     /// debugger single-step) no interrupt is taken, and a `WAIT` completes as
     /// if woken, leaving the interrupt pending for the next continue.
     fn step_inner(&mut self, allow_irq: bool) -> Option<(u32, u32)> {
@@ -621,8 +631,9 @@ impl Cpu {
         let (words, fetch_pa) = match self.fetch(pc) {
             Fetch::Words(words, pa) => (words, pa),
             Fetch::Fault(fault, word) => {
-                // A fetch fault (MMU stage 1 §3.6, the MPU, the TLB):
-                // nothing of the instruction runs.
+                // A fetch fault (MMU stage 1 §3.6, the MPU, the TLB), or a
+                // walk of one of its words (a restart): nothing of the
+                // instruction runs.
                 self.raise_fault(fault, word, pc);
                 return None;
             }
@@ -640,7 +651,8 @@ impl Cpu {
             // the RTL gives it no trace line (`pipeline_core.sv` WB park,
             // kinds 2 and 5) and `PERF_INSTR` counts only retirements
             // (`KlaussCPU.sv` :2342-2343).  An exception taken to `EVEC`
-            // retires nothing either (`MMU_PLAN.md` §7.2).
+            // retires nothing either (`MMU_PLAN.md` §7.2), and neither does
+            // an instruction the TLB walker restarts (§11.8).
             return None;
         }
         self.instret += 1;
@@ -654,8 +666,10 @@ impl Cpu {
     // ---- main execute loop ---------------------------------------------------
 
     /// Run until HALT / TRAP / cap / fault. Returns the result + trace (if any).
-    /// The cap counts retired instructions and exceptions entered, so a
-    /// handler that faults on its own first instruction still ends.
+    /// The cap counts retired instructions, exceptions entered and
+    /// instruction restarts after a hardware TLB walk, so a handler that
+    /// faults on its own first instruction, or an instruction whose walks
+    /// evict its own pages forever (a 2-entry TLB), still ends.
     ///
     /// When `trace` is `Some`, one line per retired instruction is written to the
     /// sink in the `doc/EMULATOR_ISA_SEMANTICS.md` "Trace format" layout.  The trace is
@@ -664,8 +678,8 @@ impl Cpu {
     /// broken pipe on stdout) stops the trace; the run carries on without it.
     pub fn run(&mut self, max_instructions: u64, mut trace: Option<&mut dyn std::io::Write>) -> EmulateResult {
         let mut count: u64 = 0;
-        let entries_before = self.exc_entries;
-        while self.stop.is_none() && count + (self.exc_entries - entries_before) < max_instructions {
+        let others_before = self.exc_entries + self.walk_restarts;
+        while self.stop.is_none() && count + (self.exc_entries + self.walk_restarts - others_before) < max_instructions {
             if let Some((pc, word)) = self.step_inner(true) {
                 count += 1;
                 self.pump_uart_script();

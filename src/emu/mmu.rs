@@ -25,12 +25,17 @@
 //! The hardware TLB walker (`MMU_PLAN.md` §11.8, spec v1, [`Cpu::tlb_walk`])
 //! sits on the miss path: with `TLB_WALK.EN` and `TE` set, a useg access
 //! with no matching entry reads the two-level page table at `TLB_PTB` and,
-//! when it finds a present, valid PTE, writes entry `RR` and retries the
-//! access in place, with no exception.  Otherwise the miss is the
+//! when it finds a present, valid PTE, writes entry `RR` and restarts the
+//! whole instruction, with no exception, as the RTL does (klaussCPU
+//! `tlbwalk` de0694d: the walk runs in the exception entry sequencer and
+//! refetches the faulting instruction).  Otherwise the miss is the
 //! `TLB_MISS_*` exception as before.  The data accesses ([`Cpu::map_data`])
 //! and the fetch ([`Cpu::fetch`]) translate through [`Cpu::translate_walk`],
-//! so each access is walked and retried where it misses, and an access the
-//! instruction already translated is not translated again.
+//! which turns a successful walk into an [`XlateFault`] with `restart` set;
+//! [`Cpu::raise_fault`] ends the step there, the PC on the instruction and
+//! nothing of it done (every instruction translates all its accesses before
+//! its first side effect), and the next step fetches it again and
+//! translates every access again.
 
 use super::Cpu;
 use super::StopReason;
@@ -147,6 +152,10 @@ pub(super) struct XlateFault {
     pub(super) guard: bool,
     /// A TLB miss or a TLB permission fault, which load `TLB_HI` (§11.3).
     pub(super) tlb: bool,
+    /// Not an exception: the hardware TLB walker refilled the TLB for this
+    /// miss ([`Cpu::translate_walk`]), so the instruction restarts from its
+    /// fetch ([`Cpu::raise_fault`] ends the step with nothing of it done).
+    pub(super) restart: bool,
 }
 
 impl XlateFault {
@@ -157,6 +166,7 @@ impl XlateFault {
             eaddr: va,
             guard: false,
             tlb: false,
+            restart: false,
         }
     }
 }
@@ -232,7 +242,8 @@ pub(super) enum Fetch {
     /// Word 0 and the immediate words (0 past the instruction's length),
     /// and word 0's physical address.
     Words([u32; 3], u32),
-    /// A fetch fault, with word 0 when it was fetched (else 0), for a park.
+    /// A fetch fault, with word 0 when it was fetched (else 0), for a park;
+    /// or (`restart` set) a successful walk of one of its words.
     Fault(XlateFault, u32),
     /// Word 0's physical address is outside RAM.
     OutOfRange,
@@ -437,6 +448,7 @@ impl Cpu {
             eaddr: va,
             guard: false,
             tlb: true,
+            restart: false,
         };
         let found = self.tlb_lookup(va, self.asid);
         if let Some(sim) = self.tlbsim.borrow_mut().as_mut() {
@@ -450,21 +462,25 @@ impl Cpu {
     }
 
     /// [`Cpu::translate`], with the hardware TLB walker on a miss: when
-    /// [`Cpu::tlb_walk`] refills the TLB for the missing VA, the access is
-    /// translated again (and now hits, or takes the new entry's permission
-    /// fault).  This is the translation every instruction's own accesses
-    /// use; a successful walk is invisible apart from the new entry, `RR`,
-    /// `TLB_WCNT` and the side effects of a TLB write.
+    /// [`Cpu::tlb_walk`] refills the TLB for the missing VA, the result is
+    /// the miss with `restart` set, which the instruction returns as it
+    /// would a fault, before any side effect, and [`Cpu::raise_fault`]
+    /// turns into a restart of the whole instruction (the RTL refetches it:
+    /// its fetch and every access are translated again, and may miss and
+    /// walk again).  This is the translation every instruction's own
+    /// accesses use; a successful walk is invisible apart from the new
+    /// entry, `RR`, `TLB_WCNT`, the side effects of a TLB write and the
+    /// restart.
     pub(super) fn translate_walk(&mut self, va: u32, kind: Kind) -> Result<u32, XlateFault> {
-        match self.translate(va, kind) {
-            Err(fault) if self.tlb_walk(fault) => self.translate(va, kind),
-            result => result,
-        }
+        self.translate(va, kind).map_err(|fault| XlateFault {
+            restart: self.tlb_walk(fault),
+            ..fault
+        })
     }
 
     /// The hardware TLB walker (`MMU_PLAN.md` §11.8, spec v1) for an access
-    /// that faulted with `fault`: whether it refilled the TLB, so the access
-    /// is to be retried in place with no exception.  It walks only a TLB
+    /// that faulted with `fault`: whether it refilled the TLB, so the
+    /// instruction is to be restarted with no exception.  It walks only a TLB
     /// miss (`TLB_MISS_*`, never an `ACCESS_*`) on a useg VA (`EADDR`,
     /// `[31]` = 0) with the walker present, `TLB_WALK.EN` = 1 and `TE` = 1:
     ///
@@ -573,8 +589,9 @@ impl Cpu {
     /// before stage 1.  Words past the end of RAM read 0, and word 0 there
     /// is [`Fetch::OutOfRange`], except that with `MPU_EN` or `TE` an MMIO
     /// word 0 fetches as 0 (ILLEGAL).  A TLB miss on a word goes to the
-    /// walker first ([`Cpu::translate_walk`]); the words before it are not
-    /// translated again.
+    /// walker first ([`Cpu::translate_walk`]); a successful walk is a
+    /// [`Fetch::Fault`] with `restart` set, and the next step fetches every
+    /// word again.
     pub(super) fn fetch(&mut self, pc: u32) -> Fetch {
         if self.um && pc & 3 != 0 {
             let word = self.translate(pc, Kind::Fetch).map_or(0, |pa| self.read32(pa));
@@ -584,6 +601,7 @@ impl Cpu {
                     eaddr: pc,
                     guard: false,
                     tlb: false,
+                    restart: false,
                 },
                 word,
             );

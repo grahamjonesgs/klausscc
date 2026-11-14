@@ -4398,6 +4398,15 @@ fn assert_no_exception(cpu: &Cpu, user: bool, what: &str) {
     assert_eq!(cpu.um, user, "{what}: same mode");
 }
 
+/// Assert the step just taken was a successful walk's restart of the
+/// instruction at `pc` (the RTL refetches it): the PC is still on it,
+/// nothing retired and there is no trace line (`step_inner` returned
+/// `None`), no exception.
+fn assert_restarted(cpu: &Cpu, pc: u32, instret: u64, what: &str) {
+    assert_eq!((cpu.pc, cpu.instret), (pc, instret), "{what}: restarted, nothing retired");
+    assert_eq!((cpu.exc_entries, cpu.stop), (0, None), "{what}: no exception");
+}
+
 #[test]
 fn tlb_walker_srs_reset_and_masks() {
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
@@ -4492,7 +4501,7 @@ fn tlb_walker_cpu_features_bit_25_and_no_tlb_walker() {
 }
 
 #[test]
-fn tlb_walker_refills_a_load_and_a_store_in_place() {
+fn tlb_walker_refills_a_load_and_a_store_and_restarts_them() {
     for (word, user) in [(LOAD64, true), (STORE64, true), (LOAD64, false), (STORE64, false)] {
         let what = format!("{word:08x} user {user}");
         let mut cpu = walker_cpu(&[word, HALT], &[HALT], user);
@@ -4502,14 +4511,28 @@ fn tlb_walker_refills_a_load_and_a_store_in_place() {
         set_sentinels(&mut cpu);
         cpu.reservation = Some(0x123);
         cpu.regs[3] = 0xD1D1;
-        let (pc, instret) = (cpu.pc, cpu.instret);
+        let (pc, instret, cycles) = (cpu.pc, cpu.instret, cpu.cycles);
+        // The walk refills the TLB and the instruction restarts: nothing of
+        // it is done (no load, no store), and the walk took its cycles.
         step_with_b(&mut cpu, U_DATA + 0x18);
+        assert_no_exception(&cpu, user, &what);
+        assert_restarted(&cpu, pc, instret, &what);
+        assert_eq!(
+            (cpu.regs[3], cpu.peek64(DATA_FRAME + 0x18), cpu.last_write),
+            (0xD1D1, 0x5A5A, None),
+            "{what}: nothing of the aborted attempt"
+        );
+        assert_eq!(cpu.cycles, cycles + CYCLES_PER_INSTRUCTION, "{what}: the walk's cycles");
+        assert_eq!(rr_wcnt(&cpu), (3, 1), "{what}: walked");
+        // The next step runs it from its fetch, and it hits.
+        assert_eq!(cpu.step_one(true), None, "{what}");
         assert_no_exception(&cpu, user, &what);
         assert_eq!(
             (cpu.pc, cpu.instret),
             (pc + 4, instret + 1),
             "{what}: the instruction ran and retired once"
         );
+        assert_eq!(cpu.cycles, cycles + 2 * CYCLES_PER_INSTRUCTION, "{what}: and its own cycles");
         if word == LOAD64 {
             assert_eq!(cpu.regs[3], 0x5A5A, "{what}: loaded");
         } else {
@@ -4540,6 +4563,8 @@ fn tlb_walker_refills_a_load_and_a_store_in_place() {
     pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
     set_sentinels(&mut cpu);
     step_with_b(&mut cpu, U_DATA);
+    assert_restarted(&cpu, KSEG + CODE_BASE, 0, "EVEC 0");
+    assert_eq!(cpu.step_one(true), None);
     assert_no_exception(&cpu, false, "EVEC 0");
     assert_eq!(cpu.step_one(true), Some(StopReason::Halt));
 }
@@ -4556,6 +4581,8 @@ fn tlb_walker_refills_a_fetch_and_the_second_page_of_a_straddling_fetch() {
     assert!(cpu.debug_write(0x4_0040, &bytes));
     set_sentinels(&mut cpu);
     step_with_b(&mut cpu, 0x0006_0040);
+    assert_eq!(cpu.step_one(true), None);
+    assert_restarted(&cpu, 0x0006_0040, 1, "fetch");
     assert_eq!(cpu.step_one(true), None);
     assert_no_exception(&cpu, true, "fetch");
     assert_eq!((cpu.regs[0], cpu.pc, cpu.instret), (0x1234, 0x0006_0048, 2));
@@ -4577,6 +4604,9 @@ fn tlb_walker_refills_a_fetch_and_the_second_page_of_a_straddling_fetch() {
     pt_map(&mut cpu, 0x0008_0000, pte(0x5_0000, TLB_V | TLB_R | TLB_X));
     cpu.pc = 0x0007_FFFC;
     set_sentinels(&mut cpu);
+    assert_eq!(cpu.step_one(true), None);
+    assert_restarted(&cpu, 0x0007_FFFC, 0, "straddling fetch");
+    assert_eq!(cpu.regs[0], 0, "straddling fetch: no register written");
     assert_eq!(cpu.step_one(true), None);
     assert_no_exception(&cpu, true, "straddling fetch");
     assert_eq!((cpu.regs[0], cpu.pc), (0x00C0_FFEE, 0x0008_0004));
@@ -4603,6 +4633,8 @@ fn tlb_walker_rr_increments_and_wraps_and_wcnt_counts() {
     for (k, &va) in pages.iter().enumerate() {
         cpu.pc = KSEG + CODE_BASE;
         step_with_b(&mut cpu, va);
+        assert_eq!(cpu.pc, KSEG + CODE_BASE, "page {k}: restarted");
+        assert_eq!(cpu.step_one(true), None);
         assert_eq!(cpu.pc, KSEG + CODE_BASE + 4, "page {k}");
         let written = (30 + k) % 32;
         assert_eq!(cpu.tlb[written].vpn(), va >> 16, "page {k} went to entry {written}");
@@ -4756,13 +4788,15 @@ fn tlb_walker_fallbacks_are_todays_exception() {
 
 #[test]
 fn tlb_walker_entries_behave_like_tlbwi_ones() {
-    // A PTE without W: the walk refills, then the retried store takes the
+    // A PTE without W: the walk refills, then the restarted store takes the
     // entry's permission fault (ACCESS_STORE, TLB_HI loaded).
     let mut cpu = walker_cpu(&[STORE64, HALT], &[HALT], true);
     cpu.asid = 3;
     let t = pte(DATA_FRAME, TLB_V | TLB_R) | PTE_SOFT;
     pt_map(&mut cpu, U_DATA, t);
     step_with_b(&mut cpu, U_DATA + 0x10);
+    assert_restarted(&cpu, U_CODE + CODE_BASE, 0, "a store without W");
+    assert_eq!(cpu.step_one(true), None);
     assert_entered_te(&cpu, K_HANDLER, Cause::AccessStore, U_DATA + 0x10, U_CODE + CODE_BASE, true);
     assert_eq!((cpu.tlb_hi, rr_wcnt(&cpu)), (U_DATA | 3, (3, 1)));
     // The entry is what TLBWI writes with TLB_HI = {VPN, ASID} and TLB_LO
@@ -4779,6 +4813,8 @@ fn tlb_walker_entries_behave_like_tlbwi_ones() {
     pt_map(&mut cpu, 0x0006_0000, pte(0x4_0000, TLB_V | TLB_R));
     step_with_b(&mut cpu, 0x0006_0000);
     assert_eq!(cpu.step_one(true), None);
+    assert_restarted(&cpu, 0x0006_0000, 1, "a fetch without X");
+    assert_eq!(cpu.step_one(true), None);
     assert_entered_te(&cpu, K_HANDLER, Cause::AccessFetch, 0x0006_0000, 0x0006_0000, true);
     assert_eq!(rr_wcnt(&cpu), (3, 1));
     // TLBP finds a walked entry, and TLBINV drops it.
@@ -4786,6 +4822,7 @@ fn tlb_walker_entries_behave_like_tlbwi_ones() {
     cpu.asid = 3;
     pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
     step_with_b(&mut cpu, U_DATA);
+    assert_eq!(cpu.step_one(true), None, "the LOAD64 runs again and hits");
     cpu.tlb_hi = U_DATA | 3;
     assert_eq!(cpu.step_one(true), None);
     assert_eq!(cpu.tlb_index, 2);
@@ -4804,38 +4841,56 @@ fn tlb_walker_takes_the_asid_sr() {
     pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R) | (1 << 8));
     step_with_b(&mut cpu, U_DATA);
     assert_eq!(cpu.tlb[2].hi, U_DATA | 7);
-    assert_eq!(cpu.step_one(true), None);
-    assert_eq!(cpu.step_one(true), None);
+    // The LOAD64 again (a hit), the MTSR, the second LOAD64's walk and its
+    // run.
+    for _ in 0..4 {
+        assert_eq!(cpu.step_one(true), None);
+    }
     assert_eq!(cpu.tlb[3].hi, U_DATA | 8);
     assert_eq!(rr_wcnt(&cpu), (4, 2));
     assert_eq!(cpu.step_one(true), Some(StopReason::Halt));
 }
 
 #[test]
-fn tlb_walker_walks_each_access_of_a_two_access_instruction_in_place() {
+fn tlb_walker_restarts_a_two_access_instruction_after_each_walk() {
     // LEAVERET with R15 = 0x0004_FFF8: R15 from page 4, the return address
-    // from page 5; both pages are walked, the second without translating
-    // the first again.
+    // from page 5.  The first attempt walks page 4 and restarts; the second
+    // finds page 4, walks page 5 and restarts; the third runs.  Neither
+    // aborted attempt changes R15, SP or the PC.
     let mut cpu = walker_cpu(&[LEAVERET, HALT], &[HALT], false);
     pt_map(&mut cpu, 0x0004_0000, pte(0x4_0000, TLB_V | TLB_R));
     pt_map(&mut cpu, 0x0005_0000, pte(0x5_0000, TLB_V | TLB_R));
     assert!(cpu.debug_write(0x4_FFF8, &0xF00D_u64.to_le_bytes()));
     assert!(cpu.debug_write(0x5_0000, &u64::from(KSEG + CODE_BASE + 4).to_le_bytes()));
     cpu.regs[15] = 0x0004_FFF8;
+    let sp = cpu.sp;
     set_sentinels(&mut cpu);
+    for (k, after) in [(3, 1), (4, 2)].into_iter().enumerate() {
+        let what = format!("LEAVERET attempt {k}");
+        assert_eq!(cpu.step_one(true), None, "{what}");
+        assert_restarted(&cpu, KSEG + CODE_BASE, 0, &what);
+        assert_eq!((cpu.regs[15], cpu.sp), (0x0004_FFF8, sp), "{what}: nothing written");
+        assert_eq!(rr_wcnt(&cpu), after, "{what}");
+    }
     assert_eq!(cpu.step_one(true), None);
     assert_no_exception(&cpu, false, "LEAVERET");
-    assert_eq!((cpu.pc, cpu.regs[15], cpu.sp), (KSEG + CODE_BASE + 4, 0xF00D, 0x0005_0008));
+    assert_eq!(
+        (cpu.pc, cpu.regs[15], cpu.sp, cpu.instret),
+        (KSEG + CODE_BASE + 4, 0xF00D, 0x0005_0008, 1)
+    );
     assert_eq!((cpu.tlb[2].vpn(), cpu.tlb[3].vpn()), (4, 5));
     assert_eq!(rr_wcnt(&cpu), (4, 2));
 }
 
 #[test]
-fn tlb_walker_retries_only_the_word_that_missed() {
-    // Two entries: page 7 (word 0 of a SETR at 0x0007_FFFC) in entry 0 and
-    // RR = 0, so the walk of page 8 (word 1) evicts page 7's entry.  Word 0
-    // was already fetched and is not translated again: one walk, and the
-    // instruction runs, although the page table maps page 7 too.
+fn tlb_walker_evicting_the_instructions_other_page_walks_it_again() {
+    // Two entries, and RR at the entry holding the instruction's other
+    // page.  The walk evicts it, so the restart misses on it and walks it
+    // again: RR and WCNT end one higher than a walk retried in place would
+    // leave them, and then the instruction runs.
+    //
+    // A SETR at 0x0007_FFFC: word 0 on page 7 (entry 0, RR = 0), word 1 on
+    // page 8.
     let mut cpu = walker_cpu(&[HALT], &[HALT], true);
     cpu.set_tlb_entries(2);
     tlb_map(&mut cpu, 0, 0x0007_0000, 0, TLB_V | TLB_X, None);
@@ -4845,10 +4900,192 @@ fn tlb_walker_retries_only_the_word_that_missed() {
     assert!(cpu.debug_write(0xFFFC, &setr(0, 5)[0].to_le_bytes()));
     assert!(cpu.debug_write(0x5_0000, &0x00C0_FFEE_u32.to_le_bytes()));
     cpu.pc = 0x0007_FFFC;
+    // Word 1 misses: page 8 goes to entry 0, evicting page 7.
     assert_eq!(cpu.step_one(true), None);
-    assert_eq!((cpu.regs[0], cpu.pc, cpu.exc_entries), (0x00C0_FFEE, 0x0008_0004, 0));
-    assert_eq!(cpu.tlb[0].vpn(), 8, "page 7's entry was replaced");
-    assert_eq!(rr_wcnt(&cpu), (1, 1), "one walk");
+    assert_restarted(&cpu, 0x0007_FFFC, 0, "word 1's walk");
+    assert_eq!((cpu.tlb[0].vpn(), rr_wcnt(&cpu)), (8, (1, 1)));
+    // Word 0 misses now: page 7 is walked into entry 1.
+    assert_eq!(cpu.step_one(true), None);
+    assert_restarted(&cpu, 0x0007_FFFC, 0, "word 0's walk");
+    assert_eq!((cpu.tlb[1].vpn(), rr_wcnt(&cpu)), (7, (0, 2)));
+    // Both hit.
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.regs[0], cpu.pc, cpu.exc_entries, cpu.instret), (0x00C0_FFEE, 0x0008_0004, 0, 1));
+    assert_eq!(rr_wcnt(&cpu), (0, 2), "one higher than in place");
+    // The first doubleword of LEAVERET (R15 = 0x0004_FFF8) and of a
+    // spanning MEMGET32 (B = 0x0004_FFFE) on page 4, in entry 1 with RR =
+    // 1; the second on page 5.  Supervisor code (kseg: no fetch through
+    // the TLB).
+    for (word, b) in [(LEAVERET, 0), (LOAD32, 0x0004_FFFE)] {
+        let what = format!("{word:08x}");
+        let mut cpu = walker_cpu(&[word, HALT], &[HALT], false);
+        cpu.set_tlb_entries(2);
+        tlb_map(&mut cpu, 1, 0x0004_0000, 0x4_0000, TLB_V | TLB_R, None);
+        assert!(cpu.sr_write(SR_TLB_WALK, 1 | (1 << 8)));
+        pt_map(&mut cpu, 0x0004_0000, pte(0x4_0000, TLB_V | TLB_R));
+        pt_map(&mut cpu, 0x0005_0000, pte(0x5_0000, TLB_V | TLB_R));
+        assert!(cpu.debug_write(0x4_FFF8, &0xBBAA_0000_0000_F00D_u64.to_le_bytes()));
+        // The return address, whose low half-word is the MEMGET32's top half.
+        let ra = KSEG + CODE_BASE + 4 + 0x100;
+        assert!(cpu.debug_write(0x5_0000, &u64::from(ra).to_le_bytes()));
+        cpu.regs[15] = 0x0004_FFF8;
+        cpu.regs[1] = b;
+        // The second doubleword misses: page 5 goes to entry 1, evicting
+        // page 4.
+        assert_eq!(cpu.step_one(true), None, "{what}");
+        assert_restarted(&cpu, KSEG + CODE_BASE, 0, &what);
+        assert_eq!((cpu.tlb[1].vpn(), rr_wcnt(&cpu)), (5, (0, 1)), "{what}");
+        // The first misses now: page 4 is walked into entry 0.
+        assert_eq!(cpu.step_one(true), None, "{what}");
+        assert_restarted(&cpu, KSEG + CODE_BASE, 0, &what);
+        assert_eq!((cpu.tlb[0].vpn(), rr_wcnt(&cpu)), (4, (1, 2)), "{what}");
+        assert_eq!((cpu.regs[3], cpu.regs[15]), (0, 0x0004_FFF8), "{what}: nothing written yet");
+        // Both hit.
+        assert_eq!(cpu.step_one(true), None, "{what}");
+        assert_eq!((cpu.exc_entries, cpu.instret, rr_wcnt(&cpu)), (0, 1, (1, 2)), "{what}");
+        if word == LEAVERET {
+            assert_eq!((cpu.pc, cpu.regs[15]), (ra, 0xBBAA_0000_0000_F00D));
+        } else {
+            assert_eq!((cpu.pc, cpu.regs[3]), (KSEG + CODE_BASE + 4, u64::from(((ra & 0xFFFF) << 16) | 0xBBAA)));
+        }
+    }
+}
+
+#[test]
+fn tlb_walker_evicting_a_tlbwi_only_page_is_a_tlb_miss() {
+    // As tlb_walker_evicting_the_instructions_other_page_walks_it_again, but
+    // the evicted page has no PTE (only software's TLBWI mapped it): the
+    // restart misses on it, the walk falls back, and that is the TLB_MISS
+    // exception for it, with the frame PC = the instruction.
+    let mut cpu = walker_cpu(&[HALT], &[HALT], true);
+    cpu.asid = 2;
+    cpu.set_tlb_entries(2);
+    tlb_map(&mut cpu, 0, 0x0007_0000, 0, TLB_V | TLB_X, None);
+    assert!(cpu.sr_write(SR_TLB_WALK, 1));
+    pt_map(&mut cpu, 0x0008_0000, pte(0x5_0000, TLB_V | TLB_X));
+    assert!(cpu.debug_write(0xFFFC, &setr(0, 5)[0].to_le_bytes()));
+    cpu.pc = 0x0007_FFFC;
+    assert_eq!(cpu.step_one(true), None);
+    assert_restarted(&cpu, 0x0007_FFFC, 0, "word 1's walk");
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissFetch, 0x0007_FFFC, 0x0007_FFFC, true);
+    assert_eq!((cpu.tlb_hi, rr_wcnt(&cpu), cpu.regs[0]), (0x0007_0002, (1, 1), 0));
+    // LEAVERET's first doubleword on a TLBWI-only page 4 (entry 1, RR = 1):
+    // TLB_MISS_LOAD at R15.
+    let mut cpu = walker_cpu(&[LEAVERET, HALT], &[HALT], false);
+    cpu.set_tlb_entries(2);
+    tlb_map(&mut cpu, 1, 0x0004_0000, 0x4_0000, TLB_V | TLB_R, None);
+    assert!(cpu.sr_write(SR_TLB_WALK, 1 | (1 << 8)));
+    pt_map(&mut cpu, 0x0005_0000, pte(0x5_0000, TLB_V | TLB_R));
+    cpu.regs[15] = 0x0004_FFF8;
+    assert_eq!(cpu.step_one(true), None);
+    assert_restarted(&cpu, KSEG + CODE_BASE, 0, "LEAVERET");
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissLoad, 0x0004_FFF8, KSEG + CODE_BASE, false);
+    assert_eq!((cpu.tlb[1].vpn(), rr_wcnt(&cpu), cpu.regs[15]), (5, (0, 1), 0x0004_FFF8));
+}
+
+#[test]
+fn tlb_walker_takes_a_ready_interrupt_at_the_restart_boundary() {
+    // The timer comes due during the walk (period 1, the walk's 2 cycles):
+    // the restart is an instruction boundary, so the interrupt is taken
+    // there with the frame PC = the LOAD64, which then runs after IRET
+    // (a hit: no second walk).
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[IRET], true);
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    assert!(cpu.debug_write(DATA_FRAME, &0x4242_u64.to_le_bytes()));
+    cpu.int_vec[0] = K_HANDLER;
+    cpu.int_mask = 1;
+    cpu.timer_period = 1;
+    step_with_b(&mut cpu, U_DATA);
+    assert_restarted(&cpu, U_CODE + CODE_BASE, 0, "LOAD64");
+    assert!(cpu.timer_pending, "due during the walk");
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(
+        (cpu.pc, cpu.um, cpu.instret, cpu.regs[3]),
+        (K_HANDLER, false, 0, 0),
+        "the interrupt entry"
+    );
+    let frame = cpu.peek64(KERNEL_SP - 8);
+    assert_eq!((frame as u32, (frame >> 44) & 1), (U_CODE + CODE_BASE, 1), "frame PC = the LOAD64");
+    cpu.timer_period = 1_000_000;
+    assert_eq!(cpu.step_one(true), None); // IRET
+    assert_eq!((cpu.pc, cpu.um), (U_CODE + CODE_BASE, true));
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.pc, cpu.regs[3], cpu.instret), (U_CODE + CODE_BASE + 4, 0x4242, 2));
+    assert_eq!(rr_wcnt(&cpu), (3, 1), "one walk");
+}
+
+#[test]
+fn tlb_walker_single_step_halts_again_at_the_same_pc() {
+    // A debugger single-step (gdbserver `s`: step_one(false)) of an
+    // instruction the walker restarts ends at the same PC with nothing
+    // retired; the next one runs it.  A pending interrupt is not taken by
+    // either.
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[HALT], true);
+    cpu.set_debugger_attached(true);
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    assert!(cpu.debug_write(DATA_FRAME, &0x4242_u64.to_le_bytes()));
+    cpu.int_vec[0] = K_HANDLER;
+    cpu.int_mask = 1;
+    cpu.timer_pending = true;
+    cpu.timer_period = 1_000_000;
+    cpu.regs[1] = u64::from(U_DATA);
+    assert_eq!(cpu.step_one(false), None);
+    assert_restarted(&cpu, U_CODE + CODE_BASE, 0, "single step");
+    assert_eq!((cpu.debug_regs().pc, cpu.regs[3], rr_wcnt(&cpu)), (U_CODE + CODE_BASE, 0, (3, 1)));
+    assert_eq!(cpu.step_one(false), None);
+    assert_eq!((cpu.debug_regs().pc, cpu.regs[3], cpu.instret), (U_CODE + CODE_BASE + 4, 0x4242, 1));
+    assert!(cpu.timer_pending && cpu.um, "no interrupt taken");
+    assert_eq!(rr_wcnt(&cpu), (3, 1));
+}
+
+#[test]
+fn tlb_walker_counts_the_instruction_once_when_it_retires() {
+    // LOAD64 (walked, restarted), LOAD64 (a hit), HALT: three retirements,
+    // three trace lines, PERF_INSTR 3; the walk is no instruction but takes
+    // its modelled cycles.
+    let mut cpu = walker_cpu(&[LOAD64, LOAD64, HALT], &[HALT], false);
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    cpu.regs[1] = u64::from(U_DATA);
+    let mut trace = Vec::new();
+    let r = cpu.run(100, Some(&mut trace));
+    assert_eq!(r.stop, StopReason::Halt);
+    assert_eq!((r.instructions, cpu.instret, cpu.walk_restarts), (3, 3, 1));
+    assert_eq!(String::from_utf8(trace).unwrap().lines().count(), 3, "one trace line each");
+    assert_eq!(cpu.mmio_read(0xF00D_0010), 3, "PERF_INSTR");
+    assert_eq!(cpu.mmio_read(0xF00D_0008), 4 * CYCLES_PER_INSTRUCTION, "PERF_CYCLES: three and the walk");
+    assert_eq!(rr_wcnt(&cpu), (3, 1));
+}
+
+#[test]
+fn tlb_walker_an_instruction_evicting_its_own_pages_ends_at_the_cap() {
+    // With 2 entries a user LEAVERET touching three pages (its code page 1,
+    // 4 and 5) never completes: each walk evicts a page the restart needs
+    // (the RTL would livelock too).  The run's cap counts the restarts, so
+    // it ends.  With 4 entries the same instruction completes after three
+    // walks.
+    let setup = |entries: u32| {
+        let mut cpu = walker_cpu(&[LEAVERET, HALT], &[HALT], true);
+        cpu.set_tlb_entries(entries);
+        assert!(cpu.sr_write(SR_TLB_WALK, 1));
+        pt_map(&mut cpu, U_CODE, pte(0, TLB_V | TLB_R | TLB_X));
+        pt_map(&mut cpu, 0x0004_0000, pte(0x4_0000, TLB_V | TLB_R));
+        pt_map(&mut cpu, 0x0005_0000, pte(0x5_0000, TLB_V | TLB_R));
+        assert!(cpu.debug_write(0x5_0000, &u64::from(U_CODE + CODE_BASE + 4).to_le_bytes()));
+        cpu.regs[15] = 0x0004_FFF8;
+        cpu
+    };
+    let mut cpu = setup(2);
+    let r = cpu.run(100, None);
+    assert_eq!((r.stop, r.instructions), (StopReason::InstructionCap, 0));
+    assert_eq!((cpu.walk_restarts, cpu.tlb_wcnt, cpu.exc_entries), (100, 100, 0));
+    assert_eq!((cpu.pc, cpu.regs[15]), (U_CODE + CODE_BASE, 0x0004_FFF8), "never ran");
+    let mut cpu = setup(4);
+    for _ in 0..4 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert_eq!((cpu.pc, cpu.instret, cpu.tlb_wcnt, cpu.exc_entries), (U_CODE + CODE_BASE + 4, 1, 3, 0));
 }
 
 #[test]

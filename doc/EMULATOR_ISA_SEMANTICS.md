@@ -299,8 +299,9 @@ reservation stays as it was. Ordinary stores, and the debugger's memory writes, 
 touch it.
 
 A run's instruction cap (`--max-instructions`) counts exception entries
-as well as retired instructions, so a handler that faults on its own
-first instruction still ends.
+and TLB walker restarts (below) as well as retired instructions, so a
+handler that faults on its own first instruction, or an instruction whose
+walks keep evicting its own pages, still ends.
 
 ## MMU stages 2 and 3
 
@@ -402,12 +403,29 @@ D`[26:13]`·(8 KiB) + VA`[25:16]`·8; if T`[4]` (PRESENT) and T`[0]` (V)
 are set, entry `RR` = {VPN = VA`[31:16]`, G = 0, the `ASID` SR, PFN =
 T`[26:16]`, X/W/R/V = T`[3:0]`} (what `TLBWI` writes from `TLB_HI` = {VPN,
 ASID} and `TLB_LO` = T), `RR` += 1 mod the entry count, `TLB_WCNT` += 1,
-and the access is translated again where it missed, with no exception:
-`TLB_HI`, `TLB_LO`, `TLB_INDEX`, `ECAUSE`, `EADDR` are untouched, nothing
-is entered, and the debugger sees nothing. The accesses the instruction
-translated before the missing one are not translated again (word 0 of a
-fetch whose word 1 missed, the first doubleword of a two-access
-instruction). As with `TLBWI`, the LR/SC reservation is cleared. In
+and the whole instruction restarts, with no exception, as the RTL does
+(klaussCPU `tlbwalk` de0694d: the walk runs in the exception entry
+sequencer, which then refetches the instruction at its PC): `TLB_HI`,
+`TLB_LO`, `TLB_INDEX`, `ECAUSE`, `EADDR` are untouched and nothing is
+entered. The aborted attempt has no effect: no register, flag, SP or
+memory is written (every instruction translates all its accesses before
+its first side effect), it retires nothing and has no trace line, and
+`PERF_INSTR` counts the instruction once, when it retires. The PC stays
+on it; the next step fetches it again and translates every access again,
+so an access may miss and walk again. In particular, when `RR` points at
+the entry holding the instruction's other page (word 0 of a fetch whose
+word 1 missed, the first doubleword of a two-access instruction such as
+`LEAVERET` or a spanning `MEMGET32`), the walk evicts it, the restart
+misses on it and walks it again (`RR` and `TLB_WCNT` one higher than a
+walk retried in place would leave them), or, when only a `TLBWI` mapped
+it (no PTE), takes the TLB_MISS exception for it. With 2 entries an
+instruction touching three or four pages can evict its own pages forever
+(on the RTL too: the minimum is 2 entries); the run's instruction cap
+counts restarts, so such a run ends at the cap. The restart is an
+instruction boundary: a ready interrupt is taken there, with the frame
+PC = the instruction, and a debugger single-step (which takes no
+interrupt) stops there, at the same PC, with nothing retired. As with
+`TLBWI`, the LR/SC reservation is cleared. In
 every other case (EN = 0, a kmap VA, D`[0]` = 0, T without PRESENT or V,
 a pgd or PTE doubleword outside RAM) the miss is the TLB_MISS exception
 exactly as without the walker, with `RR` and `TLB_WCNT` unchanged. An
@@ -416,8 +434,9 @@ walked entry's R/W/X are checked as any entry's. The two reads are plain
 physical RAM reads: no watchpoint sees them; with `KLAUSSCC_CACHESIM`
 they are D-cache loads, and the walker's refills and fallbacks are
 counted apart from the TLB refill vector entries. A walk (either way)
-costs `CYCLES_PER_INSTRUCTION` modelled cycles; no performance counter
-counts it but `TLB_WCNT`.
+costs `CYCLES_PER_INSTRUCTION` modelled cycles, and the restarted
+instruction its own cycles when it retires; no performance counter
+counts the walk but `TLB_WCNT`.
 
 **Priority.** For one access: MISALIGNED > ACCESS (the address map,
 MMIO) > TLB_MISS > ACCESS (TLB permission), within the §4.1 order (an
