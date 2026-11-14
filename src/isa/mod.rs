@@ -29,9 +29,10 @@ pub(crate) fn reg_index(name: &str) -> Option<u32> {
 }
 
 /// The system-register names with a fixed number (`MFSR`/`MTSR`,
-/// `MMU_PLAN.md` §6.1, §10.1, §11.3): stage 1's 0-8 and stage 3's TLB
-/// registers 0x30-0x34.  The MPU's 0x10-0x2F are numbered ([`sr_name`]).
-const SR_FIXED: [(u32, &str); 14] = [
+/// `MMU_PLAN.md` §6.1, §10.1, §11.3, §11.8): stage 1's 0-8, stage 3's TLB
+/// registers 0x30-0x34 and the TLB walker's 0x35-0x37.  The MPU's
+/// 0x10-0x2F are numbered ([`sr_name`]).
+const SR_FIXED: [(u32, &str); 17] = [
     (0x00, "STATUS"),
     (0x01, "EVEC"),
     (0x02, "ECAUSE"),
@@ -46,6 +47,9 @@ const SR_FIXED: [(u32, &str); 14] = [
     (0x32, "TLB_INDEX"),
     (0x33, "ASID"),
     (0x34, "TLBVEC"),
+    (0x35, "TLB_PTB"),
+    (0x36, "TLB_WALK"),
+    (0x37, "TLB_WCNT"),
 ];
 
 /// The first MPU system register, `MPU_BASE0` (`MMU_PLAN.md` §10.1):
@@ -66,7 +70,8 @@ pub(crate) fn sr_name(n: u32) -> Option<String> {
 
 /// The SR number a `MFSR`/`MTSR` operand names: an SR name in any case
 /// (`STATUS` ... `CYCLE`, `MPU_BASE0` ... `MPU_BASE15`, `MPU_LIMIT0` ...
-/// `MPU_LIMIT15`, `TLB_HI`, `TLB_LO`, `TLB_INDEX`, `ASID`, `TLBVEC`), or a
+/// `MPU_LIMIT15`, `TLB_HI`, `TLB_LO`, `TLB_INDEX`, `ASID`, `TLBVEC`,
+/// `TLB_PTB`, `TLB_WALK`, `TLB_WCNT`), or a
 /// literal 0..=255 (the 8-bit field; a number with no SR behind it
 /// assembles, and is an illegal instruction when it runs).
 pub(crate) fn sr_index(token: &str) -> Option<u32> {

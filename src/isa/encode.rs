@@ -811,7 +811,10 @@ mod tests {
             ("MFSR D tlb_index", "6C432300"),   // 0x32
             ("MTSR asid B", "6C633010"),        // 0x33
             ("MTSR TLBVEC B", "6C634010"),      // 0x34
-            ("MTSR 0x35 B", "6C635010"),        // no SR there: still a number
+            ("MTSR tlb_ptb B", "6C635010"),     // 0x35, the TLB walker
+            ("MTSR TLB_WALK B", "6C636010"),    // 0x36
+            ("MFSR D tlb_wcnt", "6C437300"),    // 0x37
+            ("MTSR 0x38 B", "6C638010"),        // no SR there: still a number
         ];
         for (src, want) in cases {
             assert_eq!(hex(src), want, "{src}");
@@ -829,7 +832,9 @@ mod tests {
         assert_eq!(disassembler.word(0x6C62_F010).unwrap().0, "MTSR MPU_LIMIT15 B");
         assert_eq!(disassembler.word(0x6C63_4010).unwrap().0, "MTSR TLBVEC B");
         assert_eq!(disassembler.word(0x6C43_2300).unwrap().0, "MFSR D TLB_INDEX");
-        assert_eq!(disassembler.word(0x6C43_5300).unwrap().0, "MFSR D 53");
+        assert_eq!(disassembler.word(0x6C43_5300).unwrap().0, "MFSR D TLB_PTB");
+        assert_eq!(disassembler.word(0x6C63_6010).unwrap().0, "MTSR TLB_WALK B");
+        assert_eq!(disassembler.word(0x6C43_8300).unwrap().0, "MFSR D 56");
         assert_eq!(disassembler.word(0x6C40_F300).unwrap().0, "MFSR D 15");
         for n in 0..=255 {
             if let Some(name) = super::super::sr_name(n) {
