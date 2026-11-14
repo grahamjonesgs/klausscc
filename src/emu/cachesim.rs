@@ -508,6 +508,107 @@ impl Ras {
     }
 }
 
+/// Bucket labels of [`Hist`].
+const BUCKETS: [&str; 10] = ["0", "1", "2", "3", "4-7", "8-15", "16-31", "32-63", "64-127", "128+"];
+
+/// A histogram of distances in the [`BUCKETS`].
+#[derive(Clone, Copy, Default)]
+struct Hist([u64; 10]);
+
+impl Hist {
+    fn bucket(d: u64) -> usize {
+        match d {
+            0..=3 => d as usize,
+            4..=7 => 4,
+            8..=15 => 5,
+            16..=31 => 6,
+            32..=63 => 7,
+            64..=127 => 8,
+            _ => 9,
+        }
+    }
+
+    fn add(&mut self, d: u64) {
+        self.0[Self::bucket(d)] += 1;
+    }
+
+    fn total(&self) -> u64 {
+        self.0.iter().sum()
+    }
+
+    /// `n=T 0:c/cum% 1:c/cum% ...`
+    fn line(&self) -> String {
+        let t = self.total();
+        let mut s = format!("n={t}");
+        let mut cum = 0;
+        for (b, &c) in BUCKETS.iter().zip(&self.0) {
+            cum += c;
+            s += &format!(" {b}:{c}/{:.1}%", 100.0 * cum as f64 / t.max(1) as f64);
+        }
+        s
+    }
+}
+
+/// L1 miss events (D fills, I fills that miss the D-cache, D writebacks) and
+/// the distance between consecutive ones, in retired instructions (index 0)
+/// and modelled cycles (index 1).
+#[derive(Default)]
+struct MissDist {
+    /// (instructions, cycles) of the last D fill / of any event.
+    last_d: Option<(u64, u64)>,
+    last_any: Option<(u64, u64)>,
+    /// A fill at `.0` saw `.1` as the previous event of any kind: its own
+    /// writeback (same instant) measures from that, so a fill's victim
+    /// writeback is not "close" to the fill that caused it.
+    wb_ref: Option<((u64, u64), Option<(u64, u64)>)>,
+    /// Counts: D fills, I fills, writebacks.
+    n: [u64; 3],
+    /// D fill to previous D fill.
+    d_d: [Hist; 2],
+    /// D fill to previous event of any kind.
+    d_any: [Hist; 2],
+    /// Any event to previous event of any kind.
+    any_any: [Hist; 2],
+    /// Writeback to previous event of any kind (before its own fill).
+    wb_any: [Hist; 2],
+}
+
+impl MissDist {
+    /// An event of `kind` (0 D fill, 1 I fill, 2 writeback) at `now`.
+    fn event(&mut self, kind: usize, now: (u64, u64)) {
+        self.n[kind] += 1;
+        fn dist(now: (u64, u64), prev: Option<(u64, u64)>, h: &mut [Hist; 2]) {
+            if let Some(p) = prev {
+                h[0].add(now.0 - p.0);
+                h[1].add(now.1 - p.1);
+            }
+        }
+        let prev_any = match self.wb_ref {
+            Some((at, r)) if kind == 2 && at == now => r,
+            _ => self.last_any,
+        };
+        if kind == 0 {
+            dist(now, self.last_d, &mut self.d_d);
+            dist(now, prev_any, &mut self.d_any);
+        }
+        if kind == 2 {
+            dist(now, prev_any, &mut self.wb_any);
+        }
+        dist(now, prev_any, &mut self.any_any);
+        if kind != 2 {
+            self.wb_ref = Some((now, self.last_any));
+        }
+        if kind == 0 {
+            self.last_d = Some(now);
+        }
+        self.last_any = Some(now);
+    }
+
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
 /// A write-missed line being watched for a whole-line write.
 #[derive(Clone, Copy)]
 struct Pending {
@@ -559,6 +660,9 @@ pub(super) struct CacheSim {
     /// TLBWI, TLBINV, MTSR ASID, MTSR STATUS, walker refills this window.
     uit_discards: [u64; 5],
     window: u64,
+    /// (instructions retired, modelled cycles) as of the current fetch.
+    now: (u64, u64),
+    dist: MissDist,
     /// A window has been printed since the last clear.
     reported: bool,
     ever_reported: bool,
@@ -652,6 +756,8 @@ impl CacheSim {
             ifill_dhit: 0,
             uit_discards: [0; 5],
             window: 0,
+            now: (0, 0),
+            dist: MissDist::default(),
             reported: true,
             ever_reported: false,
             dcache,
@@ -674,6 +780,7 @@ impl CacheSim {
             && self.ddirty[slot]
         {
             let addr = ((tag & !VALID) as u32) << 5;
+            self.dist.event(2, self.now);
             for l in &mut self.l2 {
                 l.access(addr, 2);
             }
@@ -713,7 +820,8 @@ impl CacheSim {
     }
 
     /// An instruction fetch of `len` words at physical `pa`.
-    pub(super) fn fetch(&mut self, pc: u32, um: bool, pa: u32, len: u32) {
+    pub(super) fn fetch(&mut self, pc: u32, um: bool, pa: u32, len: u32, now: (u64, u64)) {
+        self.now = now;
         let key = ((pc >> 16) as u16, um);
         for u in &mut self.uit {
             u.lookup(key);
@@ -738,6 +846,7 @@ impl CacheSim {
                 self.ifill_dmiss += 1;
                 let slot = set * self.dcache.ways + way;
                 self.pending[slot] = None;
+                self.dist.event(1, self.now);
                 self.evict(slot, evicted);
                 for l in &mut self.l2 {
                     l.access(line_addr, 0);
@@ -880,6 +989,7 @@ impl CacheSim {
         self.full_line = 0;
         self.full_line_strict = 0;
         self.zero_lines = 0;
+        self.dist.clear();
         if let Some(p) = self.profile.as_mut() {
             p.map.clear();
         }
@@ -958,6 +1068,21 @@ impl CacheSim {
                 eprintln!("{line}");
             }
         }
+        let d = &self.dist;
+        eprintln!(
+            "CACHESIM w{w} MISSDIST events: D fills {} ({:.2} per1k), I fills (missing the D-cache) {} ({:.2} per1k), D writebacks {} ({:.2} per1k)",
+            d.n[0], per1k(d.n[0]), d.n[1], per1k(d.n[1]), d.n[2], per1k(d.n[2])
+        );
+        for (u, unit) in ["instr", "cycles"].iter().enumerate() {
+            for (name, h) in [
+                ("D fill -> prev D fill", &d.d_d),
+                ("D fill -> prev any event", &d.d_any),
+                ("any event -> prev any event", &d.any_any),
+                ("writeback -> prev any event (before its own fill)", &d.wb_any),
+            ] {
+                eprintln!("CACHESIM w{w} MISSDIST {unit} [{name}]: {}", h[u].line());
+            }
+        }
         eprintln!("CACHESIM w{w} TLB refill vector entries {}", self.tlb_entries);
         eprintln!(
             "CACHESIM w{w} TLB walker refills {} fallbacks {}",
@@ -1002,6 +1127,7 @@ impl CacheSim {
             self.pending[slot] = None;
         }
         if !hit {
+            self.dist.event(0, self.now);
             self.evict(slot, evicted);
             for l in &mut self.l2 {
                 l.access(line_addr, 1);
@@ -1161,6 +1287,23 @@ mod tests {
         l.access(0x40, 0);
         l.access(0x80, 1); // evicts the dirty 0x00
         assert_eq!((l.misses, l.hits, l.dirty_evicts), ([1, 1, 1], [0, 0, 0], 1));
+    }
+
+    #[test]
+    fn miss_distance_buckets() {
+        let b = Hist::bucket;
+        assert_eq!([b(0), b(1), b(2), b(3), b(4), b(7), b(8), b(15), b(16)], [0, 1, 2, 3, 4, 4, 5, 5, 6]);
+        assert_eq!([b(31), b(32), b(63), b(64), b(127), b(128), b(u64::MAX)], [6, 7, 7, 8, 8, 9, 9]);
+        let mut m = MissDist::default();
+        m.event(0, (10, 20));
+        m.event(2, (10, 20)); // its own fill's writeback: nothing before the fill
+        m.event(1, (12, 24));
+        m.event(0, (20, 40));
+        assert_eq!(m.n, [2, 1, 1]);
+        assert_eq!(m.d_d[0].0[5], 1); // 20 - 10
+        assert_eq!(m.d_any[0].0[5], 1); // 20 - 12 = 8
+        assert_eq!(m.wb_any[0].total(), 0);
+        assert_eq!(m.any_any[0].total(), 2);
     }
 
     #[test]
