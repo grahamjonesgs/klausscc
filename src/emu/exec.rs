@@ -802,6 +802,9 @@ impl Cpu {
             // Push the (zero-extended) return address = the fall-through PC.
             let slot = self.map_push()?;
             self.push(slot, u64::from(f.next));
+            if let Some(sim) = self.cachesim.as_mut() {
+                sim.call(f.next);
+            }
         }
         Ok(Flow::Jump(target))
     }
@@ -862,6 +865,9 @@ impl Cpu {
                 self.regs[15] = self.read64(first);
                 let ra = self.read64(second);
                 self.sp = fp.wrapping_add(16);
+                if let Some(sim) = self.cachesim.as_mut() {
+                    sim.ret(ra as u32);
+                }
                 return Ok(Flow::Jump(ra as u32));
             }
             _ => return self.exec_stack_v2(f, op),
@@ -909,7 +915,11 @@ impl Cpu {
             // RET — restore PC from [31:0] of the popped slot.
             6 => {
                 let slot = self.map_pop()?;
-                return Ok(Flow::Jump(self.pop(slot) as u32));
+                let target = self.pop(slot) as u32;
+                if let Some(sim) = self.cachesim.as_mut() {
+                    sim.ret(target);
+                }
+                return Ok(Flow::Jump(target));
             }
             _ => {
                 let slot = self.map_pop()?;
@@ -980,7 +990,7 @@ impl Cpu {
         if let Some(sim) = self.cachesim.as_mut() {
             match kind {
                 0 => sim.mul(),
-                1 | 2 => sim.div(a, b, sgn),
+                kind @ (1 | 2) => sim.div(a, b, sgn, kind == 2),
                 _ => {}
             }
         }

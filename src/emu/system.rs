@@ -292,6 +292,12 @@ impl Cpu {
             self.tlb_hi = (eaddr & 0xFFFF_0000) | u32::from(self.asid);
         }
         self.irq_disabled = true;
+        if cause.tlb_miss()
+            && self.tlbvec != 0
+            && let Some(sim) = self.cachesim.as_mut()
+        {
+            sim.tlb_enter();
+        }
         self.pc = if cause.tlb_miss() && self.tlbvec != 0 { self.tlbvec } else { self.evec };
         self.exc_entries += 1;
         // The entry is not free on the board either; this keeps modelled

@@ -353,6 +353,10 @@ struct Ent {
     div_steps: u64,
     div_cycles: u64,
     nmul: u64,
+    /// D-cache misses (loads and stores) at this PC.
+    dmiss: u64,
+    /// Board-shape I fills at this PC that also missed the D-cache.
+    ifdmiss: u64,
 }
 
 /// Cycles a divide holds EX besides its steps: the issue cycle, the
@@ -393,9 +397,113 @@ impl Profile {
         let mut w = std::io::BufWriter::new(f);
         let mut v: Vec<_> = self.map.iter().collect();
         v.sort_by_key(|(pc, _)| **pc);
-        let _ = writeln!(w, "# pc instr icmiss ndiv div_steps div_cycles nmul");
+        let _ = writeln!(w, "# pc instr icmiss ndiv div_steps div_cycles nmul dmiss ifdmiss");
         for (pc, e) in v {
-            let _ = writeln!(w, "{:08x} {} {} {} {} {} {}", pc, e.instr, e.icmiss, e.ndiv, e.div_steps, e.div_cycles, e.nmul);
+            let _ = writeln!(w, "{:08x} {} {} {} {} {} {} {} {}", pc, e.instr, e.icmiss, e.ndiv, e.div_steps, e.div_cycles, e.nmul, e.dmiss, e.ifdmiss);
+        }
+    }
+}
+
+/// A unified L2 behind both L1s: LRU, write-allocate, write-back.  Fed by
+/// the L1 line fills (I through the D-cache, so only those that miss it) and
+/// the D-cache's dirty evictions.
+struct L2 {
+    name: String,
+    line_bits: u32,
+    sets: u32,
+    ways: usize,
+    tags: Vec<u64>,
+    dirty: Vec<bool>,
+    stamp: Vec<u64>,
+    clock: u64,
+    /// By kind: 0 I fill, 1 D fill, 2 writeback.
+    hits: [u64; 3],
+    misses: [u64; 3],
+    dirty_evicts: u64,
+}
+
+impl L2 {
+    fn new(size: u32, ways: usize, line: u32) -> Self {
+        let sets = size / line / ways as u32;
+        let n = sets as usize * ways;
+        Self {
+            name: format!("L2 {}K {}-way {}B", size >> 10, ways, line),
+            line_bits: line.trailing_zeros(),
+            sets,
+            ways,
+            tags: vec![0; n],
+            dirty: vec![false; n],
+            stamp: vec![0; n],
+            clock: 0,
+            hits: [0; 3],
+            misses: [0; 3],
+            dirty_evicts: 0,
+        }
+    }
+
+    fn access(&mut self, pa: u32, kind: usize) {
+        let line = u64::from(pa >> self.line_bits);
+        let set = (line % u64::from(self.sets)) as usize;
+        let tag = line | VALID;
+        let base = set * self.ways;
+        self.clock += 1;
+        let mut victim = base;
+        let mut best = u64::MAX;
+        for i in base..base + self.ways {
+            if self.tags[i] == tag {
+                self.hits[kind] += 1;
+                self.stamp[i] = self.clock;
+                self.dirty[i] |= kind == 2;
+                return;
+            }
+            let key = if self.tags[i] == 0 { 0 } else { self.stamp[i] + 1 };
+            if key < best {
+                best = key;
+                victim = i;
+            }
+        }
+        self.misses[kind] += 1;
+        if self.tags[victim] != 0 && self.dirty[victim] {
+            self.dirty_evicts += 1;
+        }
+        self.tags[victim] = tag;
+        self.dirty[victim] = kind == 2;
+        self.stamp[victim] = self.clock;
+    }
+
+    fn clear(&mut self) {
+        self.hits = [0; 3];
+        self.misses = [0; 3];
+        self.dirty_evicts = 0;
+    }
+}
+
+/// A return-address stack of `depth` entries, circular: a push over a full
+/// stack overwrites the oldest.
+struct Ras {
+    depth: usize,
+    stack: Vec<u32>,
+    top: usize,
+    count: usize,
+    mispredicts: u64,
+}
+
+impl Ras {
+    fn push(&mut self, ra: u32) {
+        self.stack[self.top] = ra;
+        self.top = (self.top + 1) % self.depth;
+        self.count = (self.count + 1).min(self.depth);
+    }
+
+    fn pop(&mut self, target: u32) {
+        if self.count == 0 {
+            self.mispredicts += 1;
+            return;
+        }
+        self.top = (self.top + self.depth - 1) % self.depth;
+        self.count -= 1;
+        if self.stack[self.top] != target {
+            self.mispredicts += 1;
         }
     }
 }
@@ -417,6 +525,20 @@ pub(super) struct CacheSim {
     /// The per-doubleword-valid I-caches; 0 is the board's.
     icd: Vec<ICacheD>,
     profile: Option<Profile>,
+    l2: Vec<L2>,
+    /// Per D-cache slot: the line is dirty.
+    ddirty: Vec<bool>,
+    ras: Vec<Ras>,
+    calls: u64,
+    rets: u64,
+    /// Entries to the TLB-refill vector this window.
+    tlb_entries: u64,
+    /// DIV / MOD (index 0 / 1): counts, divisor-zero counts and histograms
+    /// of steps (64 - clz|dividend|) and qwidth by value 0..=64.
+    div_n: [u64; 2],
+    div_zero: [u64; 2],
+    div_steps_hist: [[u64; 65]; 2],
+    div_qw_hist: [[u64; 65]; 2],
     /// `ICACHE_INV` writes this window.
     icache_inv: u64,
     /// The 1-entry micro-ITLB (`pipeline_core.sv` `ut_*`): the fetch's
@@ -492,11 +614,28 @@ impl CacheSim {
                 (16 << 10, 1, 32, true, false),
                 (16 << 10, 2, 32, true, false),
                 (32 << 10, 2, 32, true, false),
+                (64 << 10, 1, 16, false, false),
+                (32 << 10, 1, 32, true, false),
+                (64 << 10, 1, 32, true, false),
+                (64 << 10, 2, 32, true, false),
             ]
             .iter()
             .map(|&(sz, w, l, whole, nl)| ICacheD::new(sz, w, l, whole, nl))
             .collect(),
             profile,
+            l2: [(64u32, 32u32), (128, 32), (192, 32), (64, 64), (128, 64), (192, 64)]
+                .iter()
+                .map(|&(kb, line)| L2::new(kb << 10, 4, line))
+                .collect(),
+            ddirty: vec![false; slots],
+            ras: [4usize, 8, 16].iter().map(|&d| Ras { depth: d, stack: vec![0; d], top: 0, count: 0, mispredicts: 0 }).collect(),
+            calls: 0,
+            rets: 0,
+            tlb_entries: 0,
+            div_n: [0; 2],
+            div_zero: [0; 2],
+            div_steps_hist: [[0; 65]; 2],
+            div_qw_hist: [[0; 65]; 2],
             icache_inv: 0,
             uit: [(1usize, true), (2, true), (4, true), (8, true), (1, false), (2, false), (4, false)]
                 .iter()
@@ -521,6 +660,41 @@ impl CacheSim {
         }))
     }
 
+    /// A D-cache victim leaves `slot`: a dirty one is written back into the L2;
+    /// the slot's new line starts clean.
+    fn evict(&mut self, slot: usize, evicted: Option<u64>) {
+        if let Some(tag) = evicted
+            && self.ddirty[slot]
+        {
+            let addr = ((tag & !VALID) as u32) << 5;
+            for l in &mut self.l2 {
+                l.access(addr, 2);
+            }
+        }
+        self.ddirty[slot] = false;
+    }
+
+    /// A taken CALL pushes its return address.
+    pub(super) fn call(&mut self, ra: u32) {
+        self.calls += 1;
+        for r in &mut self.ras {
+            r.push(ra);
+        }
+    }
+
+    /// A RET or LEAVERET to `target`.
+    pub(super) fn ret(&mut self, target: u32) {
+        self.rets += 1;
+        for r in &mut self.ras {
+            r.pop(target);
+        }
+    }
+
+    /// An exception entered the TLB-refill vector.
+    pub(super) fn tlb_enter(&mut self) {
+        self.tlb_entries += 1;
+    }
+
     /// An instruction fetch of `len` words at physical `pa`.
     pub(super) fn fetch(&mut self, pc: u32, um: bool, pa: u32, len: u32) {
         let key = ((pc >> 16) as u16, um);
@@ -539,13 +713,21 @@ impl CacheSim {
             let line_addr = pa & !(DLINE - 1);
             let set = (u64::from(pa >> 5) % u64::from(self.dcache.sets)) as usize;
             let (a, m) = (self.dcache.accesses, self.dcache.misses);
-            let (hit, way, _) = self.dcache.access(line_addr);
+            let (hit, way, evicted) = self.dcache.access(line_addr);
             (self.dcache.accesses, self.dcache.misses) = (a, m);
             if hit {
                 self.ifill_dhit += 1;
             } else {
                 self.ifill_dmiss += 1;
-                self.pending[set * self.dcache.ways + way] = None;
+                let slot = set * self.dcache.ways + way;
+                self.pending[slot] = None;
+                self.evict(slot, evicted);
+                for l in &mut self.l2 {
+                    l.access(line_addr, 0);
+                }
+                if let Some(p) = self.profile.as_mut() {
+                    p.map.entry(pc).or_default().ifdmiss += 1;
+                }
             }
         }
         if let Some(p) = self.profile.as_mut() {
@@ -592,7 +774,19 @@ impl CacheSim {
     /// A DIV/MOD executes: `steps` = significant bits of the magnitude of
     /// the dividend (leading zeros are skipped); a zero divisor takes one
     /// cycle.
-    pub(super) fn div(&mut self, a: u64, b: u64, signed: bool) {
+    pub(super) fn div(&mut self, a: u64, b: u64, signed: bool, is_mod: bool) {
+        let k = usize::from(is_mod);
+        self.div_n[k] += 1;
+        if b == 0 {
+            self.div_zero[k] += 1;
+        } else {
+            let mag = |x: u64| if signed && (x as i64) < 0 { x.wrapping_neg() } else { x };
+            let (ma, mb) = (mag(a), mag(b));
+            let steps = 64 - ma.leading_zeros();
+            let qw = (mb.leading_zeros() + 1).saturating_sub(ma.leading_zeros());
+            self.div_steps_hist[k][steps as usize] += 1;
+            self.div_qw_hist[k][qw as usize] += 1;
+        }
         if let Some(p) = self.profile.as_mut() {
             let e = p.map.entry(p.pc).or_default();
             e.ndiv += 1;
@@ -639,6 +833,19 @@ impl CacheSim {
             c.accesses = 0;
             c.misses = 0;
         }
+        for l in &mut self.l2 {
+            l.clear();
+        }
+        for r in &mut self.ras {
+            r.mispredicts = 0;
+        }
+        self.calls = 0;
+        self.rets = 0;
+        self.tlb_entries = 0;
+        self.div_n = [0; 2];
+        self.div_zero = [0; 2];
+        self.div_steps_hist = [[0; 65]; 2];
+        self.div_qw_hist = [[0; 65]; 2];
         self.icache_inv = 0;
         for u in &mut self.uit {
             u.misses = 0;
@@ -704,6 +911,34 @@ impl CacheSim {
             "CACHESIM w{w} D 64K 2-way 32B: {} loads {} stores {} read_misses {} write_misses",
             self.loads, self.stores, self.read_misses, self.write_misses
         );
+        let per1k = |n: u64| 1000.0 * n as f64 / instr.max(1) as f64;
+        for l in &self.l2 {
+            let (h, m) = (l.hits, l.misses);
+            eprintln!(
+                "CACHESIM w{w} {:<17} I hit {} miss {} | D hit {} miss {} | WB hit {} miss {} | dirty_evicts {} | misses per1k: I {:.2} D {:.2} WB {:.2} all {:.2}",
+                l.name, h[0], m[0], h[1], m[1], h[2], m[2], l.dirty_evicts,
+                per1k(m[0]), per1k(m[1]), per1k(m[2]), per1k(m[0] + m[1] + m[2])
+            );
+        }
+        for r in &self.ras {
+            eprintln!(
+                "CACHESIM w{w} RAS depth {:>2}: calls {} rets {} mispredicts {} per1k {:.2}",
+                r.depth, self.calls, self.rets, r.mispredicts, per1k(r.mispredicts)
+            );
+        }
+        for (k, name) in ["DIV", "MOD"].iter().enumerate() {
+            eprintln!("CACHESIM w{w} {name}: {} ops, {} by zero", self.div_n[k], self.div_zero[k]);
+            for (what, h) in [("steps", &self.div_steps_hist[k]), ("qwidth", &self.div_qw_hist[k])] {
+                let mut line = format!("CACHESIM w{w} {name} {what} hist:");
+                for (v, &n) in h.iter().enumerate() {
+                    if n != 0 {
+                        line += &format!(" {v}:{n}");
+                    }
+                }
+                eprintln!("{line}");
+            }
+        }
+        eprintln!("CACHESIM w{w} TLB refill vector entries {}", self.tlb_entries);
         if let Some(p) = &self.profile {
             p.dump(w);
         }
@@ -741,6 +976,18 @@ impl CacheSim {
         if evicted.is_some() || !hit {
             // Whatever was pending in this slot is gone: it needed its fill.
             self.pending[slot] = None;
+        }
+        if !hit {
+            self.evict(slot, evicted);
+            for l in &mut self.l2 {
+                l.access(line_addr, 1);
+            }
+            if let Some(p) = self.profile.as_mut() {
+                p.map.entry(p.pc).or_default().dmiss += 1;
+            }
+        }
+        if store {
+            self.ddirty[slot] = true;
         }
         if hit {
             if let Some(p) = self.pending[slot].as_mut() {
@@ -782,10 +1029,13 @@ impl CacheSim {
             c.d.access(line_addr);
         }
         let (a, m) = (self.dcache.accesses, self.dcache.misses);
-        let (_, way, _) = self.dcache.access(line_addr);
+        let (_, way, evicted) = self.dcache.access(line_addr);
         (self.dcache.accesses, self.dcache.misses) = (a, m);
         let set = (u64::from(pa >> 5) % u64::from(self.dcache.sets)) as usize;
-        self.pending[set * self.dcache.ways + way] = None;
+        let slot = set * self.dcache.ways + way;
+        self.pending[slot] = None;
+        self.evict(slot, evicted);
+        self.ddirty[slot] = true;
         self.zero_lines += 1;
     }
 
@@ -865,6 +1115,28 @@ mod tests {
         assert!(c.access(0x1000 + (8 << 10)));
         assert!(!c.access(0x1000));
         assert!(!c.access(0x1000 + (8 << 10)));
+    }
+
+    #[test]
+    fn ras_is_circular() {
+        let mut r = Ras { depth: 2, stack: vec![0; 2], top: 0, count: 0, mispredicts: 0 };
+        for ra in [1, 2, 3] {
+            r.push(ra);
+        }
+        r.pop(3);
+        r.pop(2);
+        assert_eq!(r.mispredicts, 0);
+        r.pop(1); // overwritten by 3
+        assert_eq!(r.mispredicts, 1);
+    }
+
+    #[test]
+    fn l2_writeback_allocates_and_evicts_dirty() {
+        let mut l = L2::new(128, 2, 32); // 2 sets of 2 ways
+        l.access(0x00, 2);
+        l.access(0x40, 0);
+        l.access(0x80, 1); // evicts the dirty 0x00
+        assert_eq!((l.misses, l.hits, l.dirty_evicts), ([1, 1, 1], [0, 0, 0], 1));
     }
 
     #[test]
