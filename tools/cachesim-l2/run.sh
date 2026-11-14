@@ -49,7 +49,9 @@ file /w/deflate.i $W/in/deflate.i 0644 0 0
 file /w/cxx.ii $W/in/cxx.ii 0644 0 0
 L
 } > initramfs.list
+# The 64 MB binary does not fit rootfs' tmpfs (limited to half of the RAM): ramfs is not.
 (cd $RT && INITRAMFS_PROFILE=minish INITRAMFS_EXTRA="$W/in/initramfs.list" linux/build.sh defconfig &&
+  linux-ws/linux/scripts/config --file $LINUX_BUILD/.config --set-str CMDLINE "console=hvc0 rdinit=/init rootfstype=ramfs" &&
   INITRAMFS_PROFILE=minish INITRAMFS_EXTRA="$W/in/initramfs.list" linux/build.sh vmlinux) > $W/kernel.log 2>&1 || { tail -30 $W/kernel.log; exit 2; }
 cmd() {
   case $1 in
