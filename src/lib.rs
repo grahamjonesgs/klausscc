@@ -304,7 +304,8 @@ fn run_assemble(
     Ok(())
 }
 
-/// The emulated machine's optional hardware: `--mpu`, and the SD card
+/// The emulated machine's optional hardware: `--mpu`, `--tlb-entries`,
+/// `--no-tlb-walker`, and the SD card
 /// (`--sd-image`, opened read-write) and controller (`--sd-native`).
 fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, Error> {
     let sd_card = match cli.sd_image.as_deref() {
@@ -327,6 +328,7 @@ fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, 
     Ok(emu::Hardware {
         mpu: cli.mpu,
         tlb_entries: cli.tlb_entries,
+        no_tlb_walker: cli.no_tlb_walker,
         sd_card,
         sd_native: cli.sd_native,
     })

@@ -210,14 +210,18 @@ registers `MFSR`/`MTSR` reach: 0 `STATUS` (`[0]` UM, `[1]` DI, both
 read-only; `[8]` MPU_EN and `[9]` TE from stages 2 and 3), 1 `EVEC`
 (`[1:0]` read 0), 2 `ECAUSE` (the cause in `[7:0]`, GUARD in `[8]`), 3
 `EADDR`, 4 `USP` (= `SP_ALT`), 5/6 `SCRATCH0/1`, 7 `TP`, 8 `CYCLE`
-(read-only), and the stage 2/3 registers 0x10-0x2F and 0x30-0x34 (next
-section). Any other SR number, and `MTSR` to `CYCLE`, is ILLEGAL.
+(read-only), and the stage 2/3 registers 0x10-0x2F, 0x30-0x34 and the
+TLB walker's 0x35-0x37 (next section). Any other SR number, and `MTSR` to
+`CYCLE`, is ILLEGAL.
 `CPU_FEATURES` at `0xF00F_0048` reads `0x200D`: stage 1, the TLB with
 32 entries, LR/SC, and no MPU, as on the Nexys A7 bitstream since
 klaussCPU `tlb32`. `--tlb-entries 16` (`Cpu::set_tlb_entries`) models the
 16-entry bitstreams before it (`0x100D`). With `--mpu`
 (`Cpu::set_has_mpu`) the emulator has the stage 2 MPU too and reads
-`0x20FF` (bit 1, and `[7:4]` = 15 for 16 regions).
+`0x20FF` (bit 1, and `[7:4]` = 15 for 16 regions). Bits 22-23 (DCBZ,
+MAL64) are set, and bit 25, the hardware TLB walker, as on the release
+bitstream; `--no-tlb-walker` (`Cpu::set_has_tlb_walker`) clears it and
+makes SRs 0x35-0x37 ILLEGAL.
 
 **CYCLE** is the emulator's modelled cycle count since reset: 2 cycles
 per retired instruction (`CYCLES_PER_INSTRUCTION`), 2 per exception
@@ -382,6 +386,38 @@ ASID` and `MTSR STATUS` clear the LR/SC reservation (every such `MTSR`,
 even one that rewrites the same value). The spec also has them discard
 the fetch side's virtual copies (the fetch window, the NLB and the
 BTIC); the emulator keeps none, so that has no effect here.
+
+**The TLB walker** (klaussCPU `MMU_PLAN.md` §11.8, spec v1; not with
+`--no-tlb-walker`). SRs, supervisor only, all 0 at reset: 0x35 `TLB_PTB`
+(`[26:3]` the PA of the useg pgd; other bits ignored, read 0), 0x36
+`TLB_WALK` (`[0]` EN, `[12:8]` RR, the entry the next walker refill
+writes: the entry index bits, as in `TLB_INDEX`, so `[11:8]` with 16
+entries; `MTSR` writes both), 0x37 `TLB_WCNT` (48 bits: successful
+walker refills). With EN and TE set, a useg access (VA`[31]` = 0) with no
+matching entry walks before it is a TLB_MISS: VA is what `EADDR` would
+be (the data VA, the PC, or the next page's start for an instruction
+whose later word misses). D = the doubleword at PA `TLB_PTB` +
+VA`[30:26]`·8; if D`[0]` is set, T = the doubleword at PA
+D`[26:13]`·(8 KiB) + VA`[25:16]`·8; if T`[4]` (PRESENT) and T`[0]` (V)
+are set, entry `RR` = {VPN = VA`[31:16]`, G = 0, the `ASID` SR, PFN =
+T`[26:16]`, X/W/R/V = T`[3:0]`} (what `TLBWI` writes from `TLB_HI` = {VPN,
+ASID} and `TLB_LO` = T), `RR` += 1 mod the entry count, `TLB_WCNT` += 1,
+and the access is translated again where it missed, with no exception:
+`TLB_HI`, `TLB_LO`, `TLB_INDEX`, `ECAUSE`, `EADDR` are untouched, nothing
+is entered, and the debugger sees nothing. The accesses the instruction
+translated before the missing one are not translated again (word 0 of a
+fetch whose word 1 missed, the first doubleword of a two-access
+instruction). As with `TLBWI`, the LR/SC reservation is cleared. In
+every other case (EN = 0, a kmap VA, D`[0]` = 0, T without PRESENT or V,
+a pgd or PTE doubleword outside RAM) the miss is the TLB_MISS exception
+exactly as without the walker, with `RR` and `TLB_WCNT` unchanged. An
+ACCESS fault (a matching entry without the permission) never walks; a
+walked entry's R/W/X are checked as any entry's. The two reads are plain
+physical RAM reads: no watchpoint sees them; with `KLAUSSCC_CACHESIM`
+they are D-cache loads, and the walker's refills and fallbacks are
+counted apart from the TLB refill vector entries. A walk (either way)
+costs `CYCLES_PER_INSTRUCTION` modelled cycles; no performance counter
+counts it but `TLB_WCNT`.
 
 **Priority.** For one access: MISALIGNED > ACCESS (the address map,
 MMIO) > TLB_MISS > ACCESS (TLB permission), within the §4.1 order (an

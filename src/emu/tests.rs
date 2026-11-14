@@ -2138,15 +2138,15 @@ fn stage1_reset_state_and_cpu_features() {
     assert!(!cpu.has_mpu());
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x200D | (3 << 22),
-        "CPU_FEATURES: stages 1 and 3 and LR/SC, 32 entries, no MPU, DCBZ and MAL64"
+        0x200D | (3 << 22) | (1 << 25),
+        "CPU_FEATURES: stages 1 and 3 and LR/SC, 32 entries, no MPU, DCBZ and MAL64, the TLB walker"
     );
     assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
     cpu.set_has_mpu(true);
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x20FF | (3 << 22),
-        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 32 entries, DCBZ and MAL64"
+        0x20FF | (3 << 22) | (1 << 25),
+        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 32 entries, DCBZ and MAL64, the TLB walker"
     );
 }
 
@@ -2286,6 +2286,9 @@ fn stage1_user_mode_sr_allow_list() {
         0x32,
         0x33,
         0x34,
+        0x35,
+        0x36,
+        0x37,
     ] {
         for word in [mfsr(3, sr), mtsr(sr, 1)] {
             // With the MPU, so that its SRs (0x10-0x2F) exist.
@@ -2305,7 +2308,7 @@ fn stage1_user_mode_sr_allow_list() {
         mfsr(3, 9),
         mtsr(9, 1),
         mfsr(3, 0x0F),
-        mtsr(0x35, 1),
+        mtsr(0x38, 1),
         mfsr(3, 0xFF),
         mtsr(SR_CYCLE, 1),
         mfsr(3, SR_TP) | 1,
@@ -2958,8 +2961,8 @@ fn mpu_sr_layout_and_status_bits() {
 fn no_mpu_by_default_its_srs_are_illegal() {
     // Without the MPU (the default, as on the Nexys A7), MFSR/MTSR of
     // MPU_BASE0 (0x10) and MPU_LIMIT15 (0x2F) are ILLEGAL in either mode,
-    // exactly as an SR number with nothing behind it (0x0F, 0x35).
-    for sr in [0x0F, 0x10, 0x2F, 0x35] {
+    // exactly as an SR number with nothing behind it (0x0F, 0x38).
+    for sr in [0x0F, 0x10, 0x2F, 0x38] {
         for word in [mfsr(3, sr), mtsr(sr, 1)] {
             for user in [false, true] {
                 let mut cpu = stage1_cpu(&[word], &[HALT], user);
@@ -3415,7 +3418,7 @@ fn tlb_kseg_is_direct_and_the_hole_faults() {
     // MMIO is identity in supervisor mode.
     let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
     step_with_b(&mut cpu, 0xF00F_0048);
-    assert_eq!(cpu.regs[3], 0x200D | (3 << 22), "CPU_FEATURES (no MPU)");
+    assert_eq!(cpu.regs[3], 0x200D | (3 << 22) | (1 << 25), "CPU_FEATURES (no MPU)");
 }
 
 #[test]
@@ -4331,4 +4334,697 @@ fn trace_store_address_is_physical_under_translation() {
         assert_eq!(cpu.exc_entries, 0, "{word:08x}: no exception");
         assert_eq!(cpu.last_write.map(|w| w.addr), Some(pa), "{word:08x}: PA in the trace");
     }
+}
+
+// ---- The hardware TLB walker (klaussCPU MMU_PLAN.md §11.8, spec v1) --------
+
+const SR_TLB_PTB: u32 = 0x35;
+const SR_TLB_WALK: u32 = 0x36;
+const SR_TLB_WCNT: u32 = 0x37;
+/// The test page table: the pgd at PA [`PGD`], and the PTE page of pgd
+/// index i (8 KiB, 1024 PTEs) at [`PTE_PAGES`] + i * 0x2000.
+const PGD: u32 = 0x8_0000;
+const PTE_PAGES: u32 = 0x8_2000;
+/// A PTE's `[4]` PRESENT.
+const PTE_PRESENT: u64 = 1 << 4;
+/// Software bits a PTE may carry that the walker must not copy: `[15:5]`
+/// (bit 8 among them, where `TLB_HI` has G) and `[63:27]`.
+const PTE_SOFT: u64 = 0xFFFF_FFFF_F800_FFE0;
+
+/// A PTE for the frame of `pa` with X/W/R/V `bits` and PRESENT.
+fn pte(pa: u32, bits: u32) -> u64 {
+    u64::from(pa & 0x07FF_0000) | PTE_PRESENT | u64::from(bits)
+}
+
+/// Put `pte` in the test page table for the page of useg `va` (the pgd
+/// entry pointing at its PTE page, `[0]` set).
+fn pt_map(cpu: &mut Cpu, va: u32, pte: u64) {
+    let i = (va >> 26) & 0x1F;
+    let page = PTE_PAGES + i * 0x2000;
+    assert!(cpu.debug_write(PGD + i * 8, &u64::from(page | 1).to_le_bytes()));
+    assert!(cpu.debug_write(page + ((va >> 16) & 0x3FF) * 8, &pte.to_le_bytes()));
+}
+
+/// A [`te_cpu`] with the walker on: `TLB_PTB` = [`PGD`], EN, and RR = 2
+/// (past the two entries `te_cpu` maps).
+fn walker_cpu(code: &[u32], handler: &[u32], user: bool) -> Cpu {
+    let mut cpu = te_cpu(code, handler, user);
+    assert!(cpu.sr_write(SR_TLB_PTB, u64::from(PGD)));
+    assert!(cpu.sr_write(SR_TLB_WALK, 1 | (2 << 8)));
+    cpu
+}
+
+/// `TLB_WALK` RR and `TLB_WCNT`, as MFSR reads them.
+fn rr_wcnt(cpu: &Cpu) -> (u64, u64) {
+    (cpu.sr_read(SR_TLB_WALK).unwrap() >> 8, cpu.sr_read(SR_TLB_WCNT).unwrap())
+}
+
+/// Values in the SRs a successful walk must leave alone.
+const SENTINELS: (u32, u32, u32, u8, u32) = (0x1111_0011, 0x0222_0003, 0x8000_0009, 0x55, 0xDEAD_BEEF);
+
+fn set_sentinels(cpu: &mut Cpu) {
+    (cpu.tlb_hi, cpu.tlb_lo, cpu.tlb_index, cpu.ecause, cpu.eaddr) = SENTINELS;
+}
+
+/// Assert a walk left `TLB_HI`, `TLB_LO`, `TLB_INDEX`, `ECAUSE`, `EADDR`
+/// alone, entered no exception and stayed in the mode it was in.
+fn assert_no_exception(cpu: &Cpu, user: bool, what: &str) {
+    assert_eq!(
+        (cpu.tlb_hi, cpu.tlb_lo, cpu.tlb_index, cpu.ecause, cpu.eaddr),
+        SENTINELS,
+        "{what}: SRs untouched"
+    );
+    assert_eq!((cpu.exc_entries, cpu.parked, cpu.stop), (0, None, None), "{what}: no exception");
+    assert_eq!(cpu.um, user, "{what}: same mode");
+}
+
+#[test]
+fn tlb_walker_srs_reset_and_masks() {
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    assert!(cpu.has_tlb_walker(), "the walker by default, as on the release bitstream");
+    for sr in [SR_TLB_PTB, SR_TLB_WALK, SR_TLB_WCNT] {
+        assert_eq!(cpu.sr_read(sr), Some(0), "SR {sr:#x} resets to 0");
+    }
+    // The SRs keep only their bits: PTB [26:3], WALK EN [0] and RR [12:8]
+    // (5 bits with 32 entries), WCNT 48 bits.
+    for (sr, value, back) in [
+        (SR_TLB_PTB, u64::MAX, 0x07FF_FFF8_u64),
+        (SR_TLB_PTB, 0x0123_4567, 0x0123_4560),
+        (SR_TLB_WALK, u64::MAX, 0x1F01),
+        (SR_TLB_WALK, 0x0000_0E00, 0x0E00),
+        (SR_TLB_WALK, 0x0000_00FF, 0x0001),
+        (SR_TLB_WCNT, u64::MAX, 0xFFFF_FFFF_FFFF),
+        (SR_TLB_WCNT, 0x1_0000_0000_0005, 0x5),
+    ] {
+        assert!(cpu.sr_write(sr, value), "SR {sr:#x}");
+        assert_eq!(cpu.sr_read(sr), Some(back), "SR {sr:#x} <- {value:#x}");
+    }
+    // MFSR / MTSR in supervisor mode reach them (PRIVILEGED in user mode:
+    // stage1_user_mode_sr_allow_list).
+    let code = [
+        mtsr(SR_TLB_PTB, 1),
+        mtsr(SR_TLB_WALK, 2),
+        mtsr(SR_TLB_WCNT, 1),
+        mfsr(3, SR_TLB_PTB),
+        mfsr(4, SR_TLB_WALK),
+        mfsr(5, SR_TLB_WCNT),
+        HALT,
+    ];
+    let mut cpu = stage1_cpu(&code, &[HALT], false);
+    cpu.regs[1] = 0xFFFF_1234_5678_9ABF;
+    cpu.regs[2] = 0x1A01;
+    for _ in 0..6 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert_eq!((cpu.regs[3], cpu.regs[4], cpu.regs[5]), (0x0678_9AB8, 0x1A01, 0x1234_5678_9ABF));
+    // With 16 entries RR is [11:8]; changing the count drops the bit above.
+    cpu.set_tlb_entries(16);
+    assert_eq!(cpu.sr_read(SR_TLB_WALK), Some(0x0A01));
+    assert!(cpu.sr_write(SR_TLB_WALK, 0x1F00));
+    assert_eq!(cpu.sr_read(SR_TLB_WALK), Some(0x0F00));
+    // The debugger's view.
+    let s = cpu.system_regs();
+    assert_eq!((s.tlb_ptb, s.tlb_walk, s.tlb_wcnt), (0x0678_9AB8, 0x0F00, 0x1234_5678_9ABF));
+}
+
+#[test]
+fn tlb_walker_cpu_features_bit_25_and_no_tlb_walker() {
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    assert_eq!(cpu.mmio_read(0xF00F_0048) & (1 << 25), 1 << 25, "CPU_FEATURES[25]: the walker");
+    cpu.set_has_tlb_walker(false);
+    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22), "--no-tlb-walker: bit 25 clear");
+    // Hardware { no_tlb_walker } (--no-tlb-walker) does the same.
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.install(Hardware {
+        no_tlb_walker: true,
+        ..Hardware::default()
+    });
+    assert!(!cpu.has_tlb_walker());
+    assert_eq!(cpu.mmio_read(0xF00F_0048) & (1 << 25), 0);
+    cpu.install(Hardware::default());
+    assert!(cpu.has_tlb_walker());
+    // Without it the three SRs are ILLEGAL in either mode, as an SR with
+    // nothing behind it is (no_mpu_by_default_its_srs_are_illegal).
+    for sr in [SR_TLB_PTB, SR_TLB_WALK, SR_TLB_WCNT] {
+        for word in [mfsr(3, sr), mtsr(sr, 1)] {
+            for user in [false, true] {
+                let mut cpu = stage1_cpu(&[word], &[HALT], user);
+                cpu.set_has_tlb_walker(false);
+                cpu.regs[1] = 0x101;
+                assert_eq!(cpu.step_one(true), None, "{word:08x}");
+                assert_entered(&cpu, Cause::Illegal, word, CODE_BASE, user);
+                assert_eq!(cpu.regs[3], 0, "{word:08x}: nothing read");
+                assert_eq!((cpu.tlb_ptb, cpu.tlb_walk_en, cpu.tlb_walk_rr, cpu.tlb_wcnt), (0, false, 0, 0));
+            }
+        }
+        let mut cpu = stage1_cpu(&[HALT], &[HALT], false);
+        cpu.set_has_tlb_walker(false);
+        assert_eq!(cpu.sr_read(sr), None);
+        assert!(!cpu.sr_write(sr, 1));
+    }
+    // Taking the walker away clears EN, so a miss is the exception.
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[HALT], true);
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    cpu.set_has_tlb_walker(false);
+    step_with_b(&mut cpu, U_DATA);
+    assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissLoad, U_DATA, U_CODE + CODE_BASE, true);
+    assert_eq!(cpu.tlb_wcnt, 0);
+}
+
+#[test]
+fn tlb_walker_refills_a_load_and_a_store_in_place() {
+    for (word, user) in [(LOAD64, true), (STORE64, true), (LOAD64, false), (STORE64, false)] {
+        let what = format!("{word:08x} user {user}");
+        let mut cpu = walker_cpu(&[word, HALT], &[HALT], user);
+        cpu.asid = 4;
+        pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R | TLB_W) | PTE_SOFT);
+        assert!(cpu.debug_write(DATA_FRAME + 0x18, &0x5A5A_u64.to_le_bytes()));
+        set_sentinels(&mut cpu);
+        cpu.reservation = Some(0x123);
+        cpu.regs[3] = 0xD1D1;
+        let (pc, instret) = (cpu.pc, cpu.instret);
+        step_with_b(&mut cpu, U_DATA + 0x18);
+        assert_no_exception(&cpu, user, &what);
+        assert_eq!(
+            (cpu.pc, cpu.instret),
+            (pc + 4, instret + 1),
+            "{what}: the instruction ran and retired once"
+        );
+        if word == LOAD64 {
+            assert_eq!(cpu.regs[3], 0x5A5A, "{what}: loaded");
+        } else {
+            assert_eq!(cpu.peek64(DATA_FRAME + 0x18), 0xD1D1, "{what}: stored");
+        }
+        // Entry RR = 2 = {VPN, G = 0, ASID 4} / {PFN, X/W/R/V}; RR and WCNT
+        // count on; the reservation is cleared, as by TLBWI.
+        assert_eq!(
+            cpu.tlb[2],
+            TlbEntry {
+                hi: U_DATA | 4,
+                lo: DATA_FRAME | TLB_V | TLB_R | TLB_W
+            },
+            "{what}"
+        );
+        assert_eq!(rr_wcnt(&cpu), (3, 1), "{what}");
+        assert_eq!(cpu.reservation, None, "{what}");
+        // The page now hits: no more walks.
+        cpu.pc = pc;
+        step_with_b(&mut cpu, U_DATA + 0x20);
+        assert_eq!((cpu.pc, rr_wcnt(&cpu)), (pc + 4, (3, 1)), "{what}: a hit");
+    }
+    // With EVEC = 0 (parks) and a debugger attached the walk is the same:
+    // nothing stops.
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[HALT], false);
+    cpu.evec = 0;
+    cpu.set_debugger_attached(true);
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    set_sentinels(&mut cpu);
+    step_with_b(&mut cpu, U_DATA);
+    assert_no_exception(&cpu, false, "EVEC 0");
+    assert_eq!(cpu.step_one(true), Some(StopReason::Halt));
+}
+
+#[test]
+fn tlb_walker_refills_a_fetch_and_the_second_page_of_a_straddling_fetch() {
+    // JMPR to an unmapped code page: the jump retires, then the fetch there
+    // is walked (VA = the PC) and the SETR at the target runs.
+    let mut cpu = walker_cpu(&[JMPR_B, HALT], &[HALT], true);
+    cpu.asid = 6;
+    pt_map(&mut cpu, 0x0006_0000, pte(0x4_0000, TLB_V | TLB_X));
+    let target = [setr(0, 0x1234).as_slice(), &[HALT]].concat();
+    let bytes: Vec<u8> = target.iter().flat_map(|w| w.to_le_bytes()).collect();
+    assert!(cpu.debug_write(0x4_0040, &bytes));
+    set_sentinels(&mut cpu);
+    step_with_b(&mut cpu, 0x0006_0040);
+    assert_eq!(cpu.step_one(true), None);
+    assert_no_exception(&cpu, true, "fetch");
+    assert_eq!((cpu.regs[0], cpu.pc, cpu.instret), (0x1234, 0x0006_0048, 2));
+    assert_eq!(
+        cpu.tlb[2],
+        TlbEntry {
+            hi: 0x0006_0006,
+            lo: 0x4_0000 | TLB_V | TLB_X
+        }
+    );
+    assert_eq!(rr_wcnt(&cpu), (3, 1));
+    // SETR A at 0x0007_FFFC: word 0 on page 7 (an entry, frame 0), word 1
+    // on page 8, which the walker maps (frame 5): the walk's VA is the
+    // next page's start, as EADDR's would be.
+    let mut cpu = walker_cpu(&[HALT], &[HALT], true);
+    tlb_map(&mut cpu, 5, 0x0007_0000, 0, TLB_V | TLB_X, None);
+    assert!(cpu.debug_write(0xFFFC, &setr(0, 5)[0].to_le_bytes()));
+    assert!(cpu.debug_write(0x5_0000, &0x00C0_FFEE_u32.to_le_bytes()));
+    pt_map(&mut cpu, 0x0008_0000, pte(0x5_0000, TLB_V | TLB_R | TLB_X));
+    cpu.pc = 0x0007_FFFC;
+    set_sentinels(&mut cpu);
+    assert_eq!(cpu.step_one(true), None);
+    assert_no_exception(&cpu, true, "straddling fetch");
+    assert_eq!((cpu.regs[0], cpu.pc), (0x00C0_FFEE, 0x0008_0004));
+    assert_eq!(
+        cpu.tlb[2],
+        TlbEntry {
+            hi: 0x0008_0000,
+            lo: 0x5_0000 | TLB_V | TLB_R | TLB_X
+        }
+    );
+    assert_eq!(rr_wcnt(&cpu), (3, 1));
+}
+
+#[test]
+fn tlb_walker_rr_increments_and_wraps_and_wcnt_counts() {
+    // Supervisor code in kseg, so overwriting entries 0-1 is harmless; one
+    // LOAD64 per page of 0x0010_0000.. (frame 3 for all of them).
+    let pages: Vec<u32> = (0..34).map(|k| 0x0010_0000 + (k << 16)).collect();
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[HALT], false);
+    for &va in &pages {
+        pt_map(&mut cpu, va, pte(DATA_FRAME, TLB_V | TLB_R));
+    }
+    assert!(cpu.sr_write(SR_TLB_WALK, 1 | (30 << 8)));
+    for (k, &va) in pages.iter().enumerate() {
+        cpu.pc = KSEG + CODE_BASE;
+        step_with_b(&mut cpu, va);
+        assert_eq!(cpu.pc, KSEG + CODE_BASE + 4, "page {k}");
+        let written = (30 + k) % 32;
+        assert_eq!(cpu.tlb[written].vpn(), va >> 16, "page {k} went to entry {written}");
+        assert_eq!(rr_wcnt(&cpu), (((written + 1) % 32) as u64, k as u64 + 1), "page {k}");
+    }
+    assert_eq!(cpu.sr_read(SR_TLB_WALK), Some(1), "EN kept, RR wrapped to (30 + 34) % 32 = 0");
+    // 16 entries: RR = 15 wraps to 0.
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[HALT], false);
+    cpu.set_tlb_entries(16);
+    assert!(cpu.sr_write(SR_TLB_WALK, 1 | (15 << 8)));
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    step_with_b(&mut cpu, U_DATA);
+    assert_eq!(cpu.tlb[15].vpn(), U_DATA >> 16);
+    assert_eq!(rr_wcnt(&cpu), (0, 1));
+    // Software may read RR and write it back; WCNT is 48 bits and wraps.
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[HALT], false);
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    assert!(cpu.sr_write(SR_TLB_WCNT, (1 << 48) - 1));
+    assert!(cpu.sr_write(SR_TLB_WALK, 1 | (7 << 8)));
+    step_with_b(&mut cpu, U_DATA);
+    assert_eq!(cpu.tlb[7].vpn(), U_DATA >> 16);
+    assert_eq!(rr_wcnt(&cpu), (8, 0));
+}
+
+/// Run the one-instruction program `word` with B = `b` twice, from the same
+/// set-up: on a walker CPU and on one without the walker (today's
+/// hardware), and assert the walker CPU fell back to exactly the same
+/// exception, with RR and `TLB_WCNT` unchanged.  Returns the walker CPU.
+fn assert_falls_back(word: u32, user: bool, b: u32, setup: &dyn Fn(&mut Cpu)) -> Cpu {
+    let run = |walker: bool| {
+        let mut cpu = walker_cpu(&[word, HALT], &[HALT], user);
+        cpu.asid = 9;
+        cpu.regs[3] = 0x77;
+        setup(&mut cpu);
+        if !walker {
+            cpu.set_has_tlb_walker(false);
+        }
+        cpu.regs[1] = u64::from(b);
+        let stop = cpu.step_one(true);
+        // Everything an exception (or its absence) shows, but CYCLE: a walk
+        // that falls back still took its modelled time.
+        let state = format!(
+            "{stop:?} pc {:x} sp {:x} sp_alt {:x} um {} di {} ecause {} {} eaddr {:x} tlb_hi {:x} tlb_lo {:x} index {:x} \
+             tlb {:?} regs {:?} frame {:x} parked {:?} reservation {:?} retired {} entries {}",
+            cpu.pc,
+            cpu.sp,
+            cpu.sp_alt,
+            cpu.um,
+            cpu.irq_disabled,
+            cpu.ecause,
+            cpu.ecause_guard,
+            cpu.eaddr,
+            cpu.tlb_hi,
+            cpu.tlb_lo,
+            cpu.tlb_index,
+            cpu.tlb_entries(),
+            cpu.regs,
+            cpu.peek64(KERNEL_SP - 8),
+            cpu.parked,
+            cpu.reservation,
+            cpu.instret,
+            cpu.exc_entries,
+        );
+        (cpu, state)
+    };
+    let (cpu, with) = run(true);
+    let (_, without) = run(false);
+    assert_eq!(with, without, "{word:08x} B 0x{b:08X}: the walker falls back to today's exception");
+    if cpu.has_tlb_walker() {
+        assert_eq!(rr_wcnt(&cpu), (2, 0), "{word:08x} B 0x{b:08X}: RR and WCNT unchanged");
+    }
+    cpu
+}
+
+/// A fallback case: why, the instruction, user mode, B, the set-up.
+type FallbackCase<'a> = (&'a str, u32, bool, u32, &'a dyn Fn(&mut Cpu));
+
+#[test]
+fn tlb_walker_fallbacks_are_todays_exception() {
+    let ok = pte(DATA_FRAME, TLB_V | TLB_R | TLB_W | TLB_X);
+    let present_pgd = |cpu: &mut Cpu| pt_map(cpu, U_DATA, ok);
+    let cases: [FallbackCase<'_>; 12] = [
+        ("EN = 0", LOAD64, true, U_DATA, &|cpu: &mut Cpu| {
+            present_pgd(cpu);
+            assert!(cpu.sr_write(SR_TLB_WALK, 2 << 8));
+        }),
+        ("pgd entry [0] = 0", LOAD64, true, U_DATA + 8, &|cpu: &mut Cpu| {
+            present_pgd(cpu);
+            assert!(cpu.debug_write(PGD, &u64::from(PTE_PAGES).to_le_bytes()));
+        }),
+        ("PTE PRESENT = 0", STORE64, true, U_DATA, &|cpu: &mut Cpu| {
+            pt_map(cpu, U_DATA, ok & !PTE_PRESENT);
+        }),
+        ("PTE V = 0", LOAD64, true, U_DATA, &|cpu: &mut Cpu| pt_map(cpu, U_DATA, ok & !1)),
+        ("PTE V = 0, store", STORE64, false, U_DATA + 0x10, &|cpu: &mut Cpu| {
+            pt_map(cpu, U_DATA, ok & !1);
+        }),
+        ("no PTE at all", LOAD64, true, U_DATA, &|_: &mut Cpu| {}),
+        ("TLB_PTB outside RAM", LOAD64, true, U_DATA, &|cpu: &mut Cpu| {
+            present_pgd(cpu);
+            assert!(cpu.sr_write(SR_TLB_PTB, 0x0400_0000));
+        }),
+        ("the PTE page outside RAM", LOAD64, true, U_DATA, &|cpu: &mut Cpu| {
+            present_pgd(cpu);
+            assert!(cpu.debug_write(PGD, &0x0400_0001_u64.to_le_bytes()));
+        }),
+        ("a fetch, PTE V = 0", JMPR_B, true, U_DATA, &|cpu: &mut Cpu| pt_map(cpu, U_DATA, ok & !1)),
+        ("TLBVEC", LOAD64, true, U_DATA, &|cpu: &mut Cpu| {
+            pt_map(cpu, U_DATA, ok & !PTE_PRESENT);
+            cpu.tlbvec = K_HANDLER + 0x40;
+        }),
+        ("EVEC = 0 parks", LOAD64, true, U_DATA, &|cpu: &mut Cpu| {
+            pt_map(cpu, U_DATA, ok & !1);
+            cpu.evec = 0;
+        }),
+        // kmap (VA[31] = 1) never walks, even with a PTE where VA[30:26]
+        // and VA[25:16] would find one.
+        ("kmap", LOAD64, false, 0xC000_0010, &|cpu: &mut Cpu| {
+            pt_map(cpu, 0xC000_0010 & 0x7FFF_FFFF, ok);
+        }),
+    ];
+    for (why, word, user, b, setup) in cases {
+        let cpu = assert_falls_back(word, user, b, setup);
+        if why == "a fetch, PTE V = 0" {
+            // The JMPR retired; the fetch at the target is what falls back.
+            let mut cpu = cpu;
+            assert_eq!(cpu.step_one(true), None);
+            assert_entered_te(&cpu, K_HANDLER, Cause::TlbMissFetch, U_DATA, U_DATA, true);
+            assert_eq!((cpu.tlb_hi, rr_wcnt(&cpu)), (U_DATA | 9, (2, 0)), "{why}");
+            continue;
+        }
+        let vector = if why == "TLBVEC" { K_HANDLER + 0x40 } else { K_HANDLER };
+        let frame_pc = if user { U_CODE + CODE_BASE } else { KSEG + CODE_BASE };
+        let cause = if word == STORE64 { Cause::TlbMissStore } else { Cause::TlbMissLoad };
+        if why == "EVEC = 0 parks" {
+            assert_eq!(cpu.parked_exception(), Some((cause, b)), "{why}");
+            continue;
+        }
+        assert_entered_te(&cpu, vector, cause, b, frame_pc, user);
+        assert_eq!(cpu.tlb_hi, (b & 0xFFFF_0000) | 9, "{why}: TLB_HI loaded");
+    }
+    // TE = 0: nothing is translated, so nothing walks.
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[HALT], false);
+    cpu.te = false;
+    cpu.pc = CODE_BASE;
+    pt_map(&mut cpu, U_DATA, ok);
+    assert!(cpu.debug_write(U_DATA, &0x99_u64.to_le_bytes()));
+    step_with_b(&mut cpu, U_DATA);
+    assert_eq!((cpu.regs[3], cpu.pc, rr_wcnt(&cpu)), (0x99, CODE_BASE + 4, (2, 0)), "TE = 0: physical");
+}
+
+#[test]
+fn tlb_walker_entries_behave_like_tlbwi_ones() {
+    // A PTE without W: the walk refills, then the retried store takes the
+    // entry's permission fault (ACCESS_STORE, TLB_HI loaded).
+    let mut cpu = walker_cpu(&[STORE64, HALT], &[HALT], true);
+    cpu.asid = 3;
+    let t = pte(DATA_FRAME, TLB_V | TLB_R) | PTE_SOFT;
+    pt_map(&mut cpu, U_DATA, t);
+    step_with_b(&mut cpu, U_DATA + 0x10);
+    assert_entered_te(&cpu, K_HANDLER, Cause::AccessStore, U_DATA + 0x10, U_CODE + CODE_BASE, true);
+    assert_eq!((cpu.tlb_hi, rr_wcnt(&cpu)), (U_DATA | 3, (3, 1)));
+    // The entry is what TLBWI writes with TLB_HI = {VPN, ASID} and TLB_LO
+    // = the PTE.
+    let mut twin = te_cpu(&[HALT], &[HALT], false);
+    assert!(twin.sr_write(SR_TLB_HI, u64::from(U_DATA | 3)));
+    assert!(twin.sr_write(SR_TLB_LO, t));
+    assert!(twin.sr_write(SR_TLB_INDEX, 2));
+    twin.tlbwi();
+    assert_eq!(cpu.tlb[2], twin.tlb[2]);
+    assert!(!cpu.tlb[2].global(), "PTE bit 8 is not G");
+    // A page without X: the walked fetch is ACCESS_FETCH.
+    let mut cpu = walker_cpu(&[JMPR_B, HALT], &[HALT], true);
+    pt_map(&mut cpu, 0x0006_0000, pte(0x4_0000, TLB_V | TLB_R));
+    step_with_b(&mut cpu, 0x0006_0000);
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered_te(&cpu, K_HANDLER, Cause::AccessFetch, 0x0006_0000, 0x0006_0000, true);
+    assert_eq!(rr_wcnt(&cpu), (3, 1));
+    // TLBP finds a walked entry, and TLBINV drops it.
+    let mut cpu = walker_cpu(&[LOAD64, TLBP, TLBINV, HALT], &[HALT], false);
+    cpu.asid = 3;
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    step_with_b(&mut cpu, U_DATA);
+    cpu.tlb_hi = U_DATA | 3;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.tlb_index, 2);
+    assert_eq!(cpu.step_one(true), None);
+    assert!(!cpu.tlb[2].valid());
+}
+
+#[test]
+fn tlb_walker_takes_the_asid_sr() {
+    // ASID 7, then (MTSR ASID) 8: the same page walks again into the next
+    // entry, as a non-global entry of ASID 7 does not match in ASID 8.
+    let code = [LOAD64, mtsr(SR_ASID, 2), LOAD64, HALT];
+    let mut cpu = walker_cpu(&code, &[HALT], false);
+    cpu.asid = 7;
+    cpu.regs[2] = 8;
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R) | (1 << 8));
+    step_with_b(&mut cpu, U_DATA);
+    assert_eq!(cpu.tlb[2].hi, U_DATA | 7);
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!(cpu.tlb[3].hi, U_DATA | 8);
+    assert_eq!(rr_wcnt(&cpu), (4, 2));
+    assert_eq!(cpu.step_one(true), Some(StopReason::Halt));
+}
+
+#[test]
+fn tlb_walker_walks_each_access_of_a_two_access_instruction_in_place() {
+    // LEAVERET with R15 = 0x0004_FFF8: R15 from page 4, the return address
+    // from page 5; both pages are walked, the second without translating
+    // the first again.
+    let mut cpu = walker_cpu(&[LEAVERET, HALT], &[HALT], false);
+    pt_map(&mut cpu, 0x0004_0000, pte(0x4_0000, TLB_V | TLB_R));
+    pt_map(&mut cpu, 0x0005_0000, pte(0x5_0000, TLB_V | TLB_R));
+    assert!(cpu.debug_write(0x4_FFF8, &0xF00D_u64.to_le_bytes()));
+    assert!(cpu.debug_write(0x5_0000, &u64::from(KSEG + CODE_BASE + 4).to_le_bytes()));
+    cpu.regs[15] = 0x0004_FFF8;
+    set_sentinels(&mut cpu);
+    assert_eq!(cpu.step_one(true), None);
+    assert_no_exception(&cpu, false, "LEAVERET");
+    assert_eq!((cpu.pc, cpu.regs[15], cpu.sp), (KSEG + CODE_BASE + 4, 0xF00D, 0x0005_0008));
+    assert_eq!((cpu.tlb[2].vpn(), cpu.tlb[3].vpn()), (4, 5));
+    assert_eq!(rr_wcnt(&cpu), (4, 2));
+}
+
+#[test]
+fn tlb_walker_retries_only_the_word_that_missed() {
+    // Two entries: page 7 (word 0 of a SETR at 0x0007_FFFC) in entry 0 and
+    // RR = 0, so the walk of page 8 (word 1) evicts page 7's entry.  Word 0
+    // was already fetched and is not translated again: one walk, and the
+    // instruction runs, although the page table maps page 7 too.
+    let mut cpu = walker_cpu(&[HALT], &[HALT], true);
+    cpu.set_tlb_entries(2);
+    tlb_map(&mut cpu, 0, 0x0007_0000, 0, TLB_V | TLB_X, None);
+    assert!(cpu.sr_write(SR_TLB_WALK, 1));
+    pt_map(&mut cpu, 0x0007_0000, pte(0, TLB_V | TLB_X));
+    pt_map(&mut cpu, 0x0008_0000, pte(0x5_0000, TLB_V | TLB_X));
+    assert!(cpu.debug_write(0xFFFC, &setr(0, 5)[0].to_le_bytes()));
+    assert!(cpu.debug_write(0x5_0000, &0x00C0_FFEE_u32.to_le_bytes()));
+    cpu.pc = 0x0007_FFFC;
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.regs[0], cpu.pc, cpu.exc_entries), (0x00C0_FFEE, 0x0008_0004, 0));
+    assert_eq!(cpu.tlb[0].vpn(), 8, "page 7's entry was replaced");
+    assert_eq!(rr_wcnt(&cpu), (1, 1), "one walk");
+}
+
+#[test]
+fn tlb_walker_page_table_reads_are_not_watched() {
+    // The walker's two reads are not the instruction's accesses: a
+    // watchpoint on the pgd entry or the PTE does not fire; one on the data
+    // does.
+    let mut cpu = walker_cpu(&[LOAD64, HALT], &[HALT], true);
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    for addr in [PGD, PTE_PAGES + 5 * 8] {
+        cpu.add_watch(Watch {
+            addr,
+            len: 8,
+            kind: WatchKind::Access,
+        });
+    }
+    step_with_b(&mut cpu, U_DATA);
+    assert_eq!(cpu.take_watch_hit(), None);
+    assert_eq!(rr_wcnt(&cpu), (3, 1));
+    cpu.add_watch(Watch {
+        addr: DATA_FRAME,
+        len: 8,
+        kind: WatchKind::Read,
+    });
+    cpu.pc = U_CODE + CODE_BASE;
+    step_with_b(&mut cpu, U_DATA);
+    assert_eq!(cpu.take_watch_hit().map(|h| h.addr), Some(DATA_FRAME));
+}
+
+/// [`REFILL_KLA`]'s user program with the hardware TLB walker instead of a
+/// software refill handler: a pgd at PA `0x2_0000` whose entry 0 points at
+/// the PTE page at PA `0x2_2000` (PTEs with PRESENT, indexed by VA`[25:16]`,
+/// the same pages and frames).  `TLBVEC` counts its entries at PA
+/// `0x2_0800` and gives up; the `EVEC` handler is the dirty-bit flow
+/// (counted at `0x2_0808`) and halts on the SYSCALL.
+const WALK_KLA: &str = "
+_start
+// The pgd entry and the PTEs (TE is still off: physical addresses).
+SETR B 0x20000
+SETR C 0x00022001          // pgd[0]: the PTE page, [0] set
+MEMSET64 C B
+SETR B 0x22000
+SETR C 0x0000001B          // VPN 0x40, user code: frame 0, PRESENT X R V
+STIDX64 C B 0x200
+SETR C 0x00030017          // VPN 0x41: frame 3, PRESENT W R V
+STIDX64 C B 0x208
+SETR C 0x00040017          // VPN 0x42: frame 4
+STIDX64 C B 0x210
+SETR C 0x00050013          // VPN 0x43: frame 5, read-only for now
+STIDX64 C B 0x218
+SETR C 0x00060017          // VPN 0x50: the user stack, frame 6
+STIDX64 C B 0x280
+// The walker: TLB_PTB = the pgd, EN, RR = 0.
+SETR B 0x20000
+MTSR TLB_PTB B
+SETR B 1
+MTSR TLB_WALK B
+// The vectors, at their kseg aliases.
+SETR B REFILL:
+ORV B 0x80000000
+MTSR TLBVEC B
+SETR B HANDLER:
+ORV B 0x80000000
+MTSR evec B
+// Map this page (global, identity) so the fetches after TE = 1 work, then
+// turn translation on and jump to the kseg alias.
+SETR A 0x00000100
+MTSR TLB_HI A
+SETR A 0x0000000B
+MTSR TLB_LO A
+SETR A 31
+MTSR TLB_INDEX A
+TLBWI
+SETR B KMAIN:
+ORV B 0x80000000
+SETR A 0x200
+MTSR STATUS A
+JMPR B
+KMAIN:
+GETSP A                    // the kernel stack moves to kseg too
+ORV A 0x80000000
+SETSP A
+SETR A 0                   // drop the boot entry
+MTSR TLB_LO A
+TLBWI
+SETR A 1
+MTSR ASID A
+SETR A 0x00510000          // the user SP: top of page 0x50
+MTSR USP A
+SETR A USER:               // enter user mode at USER's VA
+ORV A 0x00400000
+SETR64 C 0x100000000000    // frame PM = user
+ORR A A C
+PUSH A
+IRET
+
+// TLBVEC: the walker found no PTE, which this test never expects.
+REFILL:
+SETR A 0x80020800
+MEMGET64 B A
+ADDV B 1
+MEMSET64 B A
+TRAP
+
+// Other exceptions (EVEC).
+HANDLER:
+PUSH A
+PUSH B
+MFSR A ECAUSE
+BEQI A 4 DONE:             // SYSCALL: the user program is finished
+BNEV A 8 FATAL:            // only ACCESS_STORE is handled
+MFSR A TLB_HI              // the dirty bit: set W in the PTE and the entry
+SHRV A 16
+ANDV A 0x3FF
+SHLV A 3
+SETR B 0x80022000
+ADDR A A B
+MEMGET64 B A
+ORV B 4
+MEMSET64 B A
+MTSR TLB_LO B
+TLBP
+TLBWI
+SETR A 0x80020808
+MEMGET64 B A
+ADDV B 1
+MEMSET64 B A
+POP B
+POP A
+IRET
+DONE:
+HALT
+FATAL:
+TRAP
+";
+
+#[test]
+fn tlb_walker_runs_a_user_program_across_pages() {
+    // The user program of REFILL_KLA (USER: to the end), unchanged.
+    let user = &REFILL_KLA[REFILL_KLA.find("\n// The user program").expect("the user program")..];
+    let (image, entry) = assemble_kla(&format!("{WALK_KLA}{user}"));
+    let mut cpu = Cpu::with_mem_size(&image, entry, TEST_MEM);
+    assert!(cpu.debug_write(0x4_FFFE, &[0xAA, 0xBB]));
+    assert!(cpu.debug_write(0x5_0000, &[0xCC, 0xDD]));
+    let r = cpu.run(10_000, None);
+    assert_eq!(
+        r.stop,
+        StopReason::Halt,
+        "pc 0x{:08X} ECAUSE {} EADDR 0x{:08X}",
+        cpu.pc,
+        cpu.ecause,
+        cpu.eaddr
+    );
+    assert_eq!(cpu.ecause, Cause::Syscall as u8);
+    // The walker refilled what the software handler did (the code page,
+    // 0x41, 0x42, 0x43 for the MEMGET32's second doubleword, the stack);
+    // TLBVEC was never entered; one dirty-bit fault.
+    assert_eq!(cpu.sr_read(SR_TLB_WCNT), Some(5));
+    assert_eq!(cpu.sr_read(SR_TLB_WALK), Some(1 | (5 << 8)));
+    assert_eq!((cpu.peek64(0x2_0800), cpu.peek64(0x2_0808)), (0, 1));
+    assert_eq!(cpu.exc_entries, 2, "the dirty-bit fault and the SYSCALL");
+    assert_eq!(cpu.peek64(0x2_2218), 0x0005_0017, "the PTE is now writable");
+    assert_eq!(cpu.peek64(0x3_0000), 0x11);
+    assert_eq!(cpu.peek64(0x4_0008), 0x22);
+    assert_eq!(cpu.peek64(0x5_0000) & 0xFF, 0x33);
+    assert_eq!(cpu.regs[2], 0xDDCC_BBAA, "C: the MEMGET32 across the pages");
+    assert_eq!(cpu.regs[3], 0x34, "D: the stack page and CALLREL/RET");
+    assert_eq!(cpu.regs[4], 0x11, "E: page 0x41 read back");
+    let vpns: Vec<u32> = cpu.tlb_entries()[..5].iter().map(|e| e.vpn()).collect();
+    assert_eq!(vpns, [0x40, 0x41, 0x42, 0x43, 0x50]);
+    assert!(cpu.tlb_entries()[..5].iter().all(|e| e.valid() && !e.global() && e.asid() == 1));
+    // Without the walker the same image stops at its first MTSR TLB_PTB
+    // (ILLEGAL, EVEC still 0: a park).
+    let mut cpu = Cpu::with_mem_size(&image, entry, TEST_MEM);
+    cpu.set_has_tlb_walker(false);
+    let r = cpu.run(10_000, None);
+    assert!(matches!(r.stop, StopReason::InvalidOpcode(_)), "{:?}", r.stop);
+    assert_eq!(cpu.parked_exception().map(|(c, _)| c), Some(Cause::Illegal));
 }

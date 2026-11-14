@@ -15,7 +15,7 @@
 //! can fault before their first side effect and return the cause; [`Cpu::raise`]
 //! then parks, debug-halts or enters the handler.
 
-use super::mmu::{MPU_REGIONS, TLB_HI_BITS, TLB_LO_BITS, XlateFault};
+use super::mmu::{MPU_REGIONS, TLB_HI_BITS, TLB_LO_BITS, TLB_PTB_BITS, TLB_WALK_EN, TLB_WALK_RR_SHIFT, TLB_WCNT_MASK, XlateFault};
 use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, CTX_PREV_MODE_SHIFT, CYCLES_PER_INSTRUCTION, Cpu, StopReason};
 
 /// An exception cause: its `ECAUSE` value (`MMU_PLAN.md` §4.1).
@@ -68,8 +68,9 @@ impl Cause {
         matches!(self, Self::Illegal | Self::Trap | Self::MisalignedLoad | Self::MisalignedStore)
     }
 
-    /// A TLB miss, which vectors to `TLBVEC` when that is nonzero (§11.3).
-    const fn tlb_miss(self) -> bool {
+    /// A TLB miss, which vectors to `TLBVEC` when that is nonzero (§11.3),
+    /// and which the hardware TLB walker may serve instead (§11.8).
+    pub(super) const fn tlb_miss(self) -> bool {
         matches!(self, Self::TlbMissLoad | Self::TlbMissStore | Self::TlbMissFetch)
     }
 }
@@ -87,6 +88,11 @@ const CPU_FEATURES_MPU: u64 = (((MPU_REGIONS - 1) as u64) << 4) | 0b10;
 /// The `CPU_FEATURES` bit for the native SD controller (`--sd-native`,
 /// `SD_NATIVE_PLAN.md` §4.1): bit 21.  The release bitstream has none.
 const CPU_FEATURES_SD_NATIVE: u64 = 1 << 21;
+
+/// The `CPU_FEATURES` bit for the hardware TLB walker (`MMU_PLAN.md`
+/// §11.8): bit 25.  The release bitstream has it (`--no-tlb-walker` models
+/// the ones before).
+const CPU_FEATURES_TLB_WALKER: u64 = 1 << 25;
 
 /// `STATUS[8]` `MPU_EN` (stage 2).
 const STATUS_MPU_EN: u64 = 1 << 8;
@@ -135,6 +141,12 @@ pub(super) mod sr {
     pub(in super::super) const ASID: u32 = 0x33;
     /// `TLBVEC`: the TLB-miss vector, 0 = `EVEC`.
     pub(in super::super) const TLBVEC: u32 = 0x34;
+    /// `TLB_PTB` (the walker, §11.8): `[26:3]` the useg pgd's PA.
+    pub(in super::super) const TLB_PTB: u32 = 0x35;
+    /// `TLB_WALK`: `[0]` EN, `[12:8]` RR (the entry index bits).
+    pub(in super::super) const TLB_WALK: u32 = 0x36;
+    /// `TLB_WCNT`: walker refills, 48 bits.
+    pub(in super::super) const TLB_WCNT: u32 = 0x37;
 }
 
 /// Whether user mode may read SR `n` with `MFSR` (§6.1: STATUS, TP, CYCLE).
@@ -188,6 +200,12 @@ pub struct SystemRegs {
     pub asid: u8,
     /// `TLBVEC`.
     pub tlbvec: u32,
+    /// `TLB_PTB` (0 without the walker).
+    pub tlb_ptb: u32,
+    /// `TLB_WALK`: EN `[0]`, RR `[12:8]` (0 without the walker).
+    pub tlb_walk: u32,
+    /// `TLB_WCNT` (0 without the walker).
+    pub tlb_wcnt: u64,
 }
 
 impl Cpu {
@@ -342,6 +360,11 @@ impl Cpu {
             sr::TLB_INDEX => u64::from(self.tlb_index),
             sr::ASID => u64::from(self.asid),
             sr::TLBVEC => u64::from(self.tlbvec),
+            // Without the walker its SRs do not exist (ILLEGAL), as on the
+            // bitstreams before it.
+            sr::TLB_PTB if self.has_tlb_walker => u64::from(self.tlb_ptb),
+            sr::TLB_WALK if self.has_tlb_walker => self.tlb_walk_sr(),
+            sr::TLB_WCNT if self.has_tlb_walker => self.tlb_wcnt,
             _ => return None,
         })
     }
@@ -399,6 +422,14 @@ impl Cpu {
                 }
             }
             sr::TLBVEC => self.tlbvec = value as u32 & !3,
+            sr::TLB_PTB if self.has_tlb_walker => self.tlb_ptb = value as u32 & TLB_PTB_BITS,
+            // EN and RR together; RR keeps the entry index bits, as
+            // TLB_INDEX does (§11.3).
+            sr::TLB_WALK if self.has_tlb_walker => {
+                self.tlb_walk_en = value & TLB_WALK_EN != 0;
+                self.tlb_walk_rr = (value >> TLB_WALK_RR_SHIFT) as u32 & self.tlb_index_mask();
+            }
+            sr::TLB_WCNT if self.has_tlb_walker => self.tlb_wcnt = value & TLB_WCNT_MASK,
             _ => return false,
         }
         true
@@ -425,7 +456,15 @@ impl Cpu {
             tlb_index: self.tlb_index,
             asid: self.asid,
             tlbvec: self.tlbvec,
+            tlb_ptb: if self.has_tlb_walker { self.tlb_ptb } else { 0 },
+            tlb_walk: if self.has_tlb_walker { self.tlb_walk_sr() as u32 } else { 0 },
+            tlb_wcnt: if self.has_tlb_walker { self.tlb_wcnt } else { 0 },
         }
+    }
+
+    /// `TLB_WALK`: EN `[0]`, RR `[12:8]`.
+    fn tlb_walk_sr(&self) -> u64 {
+        u64::from(self.tlb_walk_en) | u64::from(self.tlb_walk_rr << TLB_WALK_RR_SHIFT)
     }
 
     /// Set the mode bits and the inactive SP from a debugger (the board's
@@ -453,13 +492,31 @@ impl Cpu {
         self.has_mpu
     }
 
+    /// Give the CPU the hardware TLB walker (`MMU_PLAN.md` §11.8; the
+    /// default, as the release bitstream has it), or take it away
+    /// (`--no-tlb-walker`, the bitstreams before it): then `CPU_FEATURES[25]`
+    /// reads 0, `TLB_PTB`, `TLB_WALK` and `TLB_WCNT` (0x35-0x37) are ILLEGAL
+    /// and every TLB miss is the exception.  Taking it away clears EN.
+    pub const fn set_has_tlb_walker(&mut self, present: bool) {
+        self.has_tlb_walker = present;
+        self.tlb_walk_en &= present;
+    }
+
+    /// Whether this CPU has the hardware TLB walker
+    /// ([`Cpu::set_has_tlb_walker`]).
+    #[must_use]
+    pub const fn has_tlb_walker(&self) -> bool {
+        self.has_tlb_walker
+    }
+
     /// `CPU_FEATURES` (MMIO `0xF00F_0048`): `0x200D` (`0x100D` with 16 TLB
-    /// entries), or `0x20FF` with the MPU, plus bit 21 with the native SD
-    /// controller.
+    /// entries), or `0x20FF` with the MPU, plus bits 22-23 (DCBZ, MAL64),
+    /// bit 21 with the native SD controller and bit 25 with the TLB walker.
     pub(super) fn cpu_features(&self) -> u64 {
         let mpu = if self.has_mpu { CPU_FEATURES_MPU } else { 0 };
         let sd = if self.has_sd_native() { CPU_FEATURES_SD_NATIVE } else { 0 };
-        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd
+        let walker = if self.has_tlb_walker { CPU_FEATURES_TLB_WALKER } else { 0 };
+        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd | walker
     }
 
     /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`

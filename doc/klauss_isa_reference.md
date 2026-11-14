@@ -1113,6 +1113,11 @@ A TLB entry maps one 64 KiB page: `TLB_HI` holds the page (address bits 31:16) i
 | `TLB_INDEX` | 0x32 | entry 0–31 in bits 4:0; bit 31 = the last `TLBP` found nothing |
 | `ASID` | 0x33 | current address-space ID (8 bits) |
 | `TLBVEC` | 0x34 | TLB-miss handler address; 0 = use `EVEC` |
+| `TLB_PTB` | 0x35 | the hardware walker's page directory: physical address, 8-byte aligned |
+| `TLB_WALK` | 0x36 | bit 0 = walker on; bits 12:8 = the entry the next walker refill writes |
+| `TLB_WCNT` | 0x37 | walker refills so far (48 bits) |
+
+**The hardware TLB walker** (`CPU_FEATURES` bit 25; the emulator has it unless run with `--no-tlb-walker`) refills the TLB without an exception. With `TLB_WALK` bit 0 and translation on, a miss on an address below `0x8000_0000` reads the doubleword at `TLB_PTB` + (address bits 30:26) × 8; if its bit 0 is set, bits 26:13 locate a page of 1024 entries, and the entry at (address bits 25:16) × 8 there is used when its bit 4 (present) and bit 0 (V) are set: it goes into TLB entry `TLB_WALK[12:8]` as `TLBWI` would put it (the current `ASID`, not global; physical page and X W R V from the entry's bits 26:16 and 3:0), that index and `TLB_WCNT` count up, and the access simply goes ahead. Otherwise the miss goes to `TLBVEC` as before, with `TLB_HI` loaded.
 
 `TLBWI`, `TLBINV` and writes to `ASID` and `STATUS` also cancel an `LR` reservation. While translation is on, the vectors, the refill handler, its page tables and every kernel stack must be in the `0x8000_0000` window: an exception pushes its frame there without translation, and with the stack elsewhere the CPU stops with a double fault. Setting bit 9 takes effect at the very next instruction, so code still running at its physical address needs a TLB entry for its own page first:
 

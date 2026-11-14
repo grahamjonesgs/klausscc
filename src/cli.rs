@@ -191,6 +191,10 @@ pub(crate) struct Cli {
     #[arg(long, value_name = "N", value_parser = clap::builder::TypedValueParser::map(clap::builder::PossibleValuesParser::new(["16", "32"]), |s: String| s.parse::<u32>().unwrap_or(32)), requires = "emu_host", conflicts_with = "board")]
     pub(crate) tlb_entries: Option<u32>,
 
+    /// Model a bitstream without the hardware TLB walker (klaussCPU MMU_PLAN.md §11.8): CPU_FEATURES bit 25 reads 0, the TLB_PTB, TLB_WALK and TLB_WCNT system registers (0x35-0x37) are illegal and every TLB miss is the TLB_MISS exception. Without it the emulator has the walker, as the release bitstream does. For --emulate and --gdbserver on the emulator (--emulate-test always has the walker)
+    #[arg(long, requires = "emu_host", conflicts_with = "board")]
+    pub(crate) no_tlb_walker: bool,
+
     /// Put an SD card in the emulator's slot holding this raw disk image (e.g. a FAT-partitioned image; a whole number of 512-byte blocks, at least 512 KiB). The card is SDHC (block addressed, CSD 2.0, capacity = the image rounded down to 512 KiB); writes go to the file. Without it the slot is empty and, unless --sd-native, the SD registers at 0xF000_0000 read 0 as before. For --emulate and --gdbserver on the emulator
     #[arg(long, value_name = "FILE", requires = "emu_host", conflicts_with = "board")]
     pub(crate) sd_image: Option<PathBuf>,
@@ -534,6 +538,8 @@ mod tests {
             &["-i", "prog.elf", "--emulate", "--mpu", "--max-instructions", "100"],
             &["--emulate-test", "tests", "--mpu"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--mpu"],
+            &["-i", "prog.elf", "--emulate", "--no-tlb-walker"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--no-tlb-walker", "--tlb-entries", "16"],
             &["-i", "prog.elf", "--emulate", "--sd-image", "sd.img"],
             &["-i", "prog.kla", "--emulate", "--sd-image", "sd.img", "--sd-native"],
             &["-i", "prog.elf", "--emulate", "--sd-native"],
@@ -628,6 +634,8 @@ mod tests {
             &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--mpu"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--sd-image", "sd.img"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--sd-native"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--no-tlb-walker"],
+            &["-i", "prog.elf", "-s", "COM3", "--no-tlb-walker"],
             // The SD card is the emulator's.
             &["-i", "prog.elf", "--sd-image", "sd.img"],
             &["-i", "prog.elf", "-s", "COM3", "--sd-native"],
@@ -754,6 +762,8 @@ mod tests {
         assert!(!cli.mpu, "no MPU by default, as on the Nexys A7");
 
         assert!(parse(&["-i", "prog.elf", "--emulate", "--mpu"]).unwrap().mpu);
+        assert!(!cli.no_tlb_walker, "the TLB walker by default, as on the release bitstream");
+        assert!(parse(&["-i", "prog.elf", "--emulate", "--no-tlb-walker"]).unwrap().no_tlb_walker);
         assert_eq!(cli.sd_image, None, "no SD card by default");
         assert!(!cli.sd_native, "no native SD controller by default, as on the release bitstream");
         let cli = parse(&["-i", "prog.elf", "--emulate", "--sd-image", "card.img", "--sd-native"]).unwrap();

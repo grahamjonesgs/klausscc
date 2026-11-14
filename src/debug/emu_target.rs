@@ -314,6 +314,17 @@ impl EmuTarget {
                     s.asid,
                     s.tlbvec
                 );
+                // The walker's SRs only on a CPU with it (not --no-tlb-walker).
+                if self.cpu.has_tlb_walker() {
+                    outputln!(
+                        out,
+                        "TLB_PTB 0x{:08X}   TLB_WALK EN {} RR {}   TLB_WCNT {}",
+                        s.tlb_ptb,
+                        s.tlb_walk & 1,
+                        s.tlb_walk >> 8,
+                        s.tlb_wcnt
+                    );
+                }
                 if let Some((cause, addr)) = self.cpu.parked_exception() {
                     outputln!(out, "last stop on an exception: {cause:?} (ECAUSE {}) at 0x{addr:08X}", cause as u8);
                 }
@@ -814,11 +825,21 @@ mod tests {
         target.monitor("sr", &mut out);
         target.monitor("mpu", &mut out);
         assert!(out.contains("mode supervisor   DI 0   TE 0   SP_ALT"), "{out}");
+        assert!(
+            out.contains("TLB_PTB 0x00000000   TLB_WALK EN 0 RR 0   TLB_WCNT 0"),
+            "the walker by default: {out}"
+        );
         assert!(!out.contains("MPU_EN"), "{out}");
         assert!(
             out.contains("no MPU (as on the Nexys A7; klausscc --mpu gives the emulator one)"),
             "{out}"
         );
+        // --no-tlb-walker: no walker SRs either.
+        let mut no_walker = target_with(0);
+        no_walker.cpu.set_has_tlb_walker(false);
+        let mut out = String::new();
+        no_walker.monitor("sr", &mut out);
+        assert!(!out.contains("TLB_PTB"), "--no-tlb-walker: {out}");
     }
 
     #[test]

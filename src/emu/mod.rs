@@ -143,7 +143,7 @@ pub struct EmulateResult {
 
 /// The optional hardware of an emulated machine.  The default is the
 /// Nexys A7 release bitstream with no SD card: no MPU, no native SD
-/// controller.
+/// controller, 32 TLB entries and the hardware TLB walker.
 #[derive(Debug, Default)]
 pub struct Hardware {
     /// The stage 2 MPU (`--mpu`, [`Cpu::set_has_mpu`]).
@@ -151,6 +151,10 @@ pub struct Hardware {
     /// The TLB entry count (`--tlb-entries`, [`Cpu::set_tlb_entries`]);
     /// `None` is [`TLB_ENTRIES_DEFAULT`].
     pub tlb_entries: Option<u32>,
+    /// No hardware TLB walker (`--no-tlb-walker`, [`Cpu::set_has_tlb_walker`]):
+    /// the bitstreams before it.  The default has one, as the release
+    /// bitstream does.
+    pub no_tlb_walker: bool,
     /// The SD card in the slot (`--sd-image`).
     pub sd_card: Option<SdCard>,
     /// The native 4-bit SD controller (`--sd-native`): `SD_CTRL[18]`, the
@@ -310,6 +314,19 @@ pub struct Cpu {
     asid: u8,
     /// `TLBVEC`: the TLB-miss vector; 0 = use `EVEC`.
     tlbvec: u32,
+    /// This CPU has the hardware TLB walker (`CPU_FEATURES[25]`,
+    /// [`Cpu::set_has_tlb_walker`]); the release bitstream does.  Without
+    /// it `TLB_PTB`, `TLB_WALK` and `TLB_WCNT` are ILLEGAL.
+    has_tlb_walker: bool,
+    /// `TLB_PTB` `[26:3]`: the physical address of the current useg pgd.
+    tlb_ptb: u32,
+    /// `TLB_WALK[0]` EN: a useg TLB miss under `TE` = 1 walks.
+    tlb_walk_en: bool,
+    /// `TLB_WALK[12:8]` RR: the entry the next walker refill writes (only
+    /// the bits that address an entry).
+    tlb_walk_rr: u32,
+    /// `TLB_WCNT`: successful walker refills, 48 bits.
+    tlb_wcnt: u64,
     /// Cache what-if counts (`KLAUSSCC_CACHESIM`, [`cachesim`]).
     cachesim: Option<Box<cachesim::CacheSim>>,
     /// TLB what-if counts (`KLAUSSCC_TLBSIM`, [`tlbsim`]).
@@ -399,6 +416,11 @@ impl Cpu {
             tlb_index: 0,
             asid: 0,
             tlbvec: 0,
+            has_tlb_walker: true,
+            tlb_ptb: 0,
+            tlb_walk_en: false,
+            tlb_walk_rr: 0,
+            tlb_wcnt: 0,
             cachesim: cachesim::CacheSim::from_env(),
             tlbsim: std::cell::RefCell::new(tlbsim::TlbSim::from_env()),
             sd: None,
@@ -411,6 +433,7 @@ impl Cpu {
     pub fn install(&mut self, hw: Hardware) {
         self.set_has_mpu(hw.mpu);
         self.set_tlb_entries(hw.tlb_entries.unwrap_or(TLB_ENTRIES_DEFAULT));
+        self.set_has_tlb_walker(!hw.no_tlb_walker);
         self.sd = (hw.sd_card.is_some() || hw.sd_native).then(|| Box::new(SdController::new(hw.sd_card, hw.sd_native)));
     }
 
@@ -595,8 +618,8 @@ impl Cpu {
         }
         let pc = self.pc;
         self.last_write = None;
-        let words = match self.fetch(pc) {
-            Fetch::Words(words) => words,
+        let (words, fetch_pa) = match self.fetch(pc) {
+            Fetch::Words(words, pa) => (words, pa),
             Fetch::Fault(fault, word) => {
                 // A fetch fault (MMU stage 1 §3.6, the MPU, the TLB):
                 // nothing of the instruction runs.
@@ -609,11 +632,8 @@ impl Cpu {
             }
         };
         let word = words[0];
-        if self.cachesim.is_some() {
-            let pa = self.translate(pc, mmu::Kind::Fetch).unwrap_or(pc);
-            if let Some(sim) = self.cachesim.as_mut() {
-                sim.fetch(pc, self.um, pa, (word >> 30).max(1));
-            }
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.fetch(pc, self.um, fetch_pa, (word >> 30).max(1));
         }
         if !self.execute(words) {
             // An illegal word or a misaligned access parks without retiring:

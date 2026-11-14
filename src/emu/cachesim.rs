@@ -531,8 +531,13 @@ pub(super) struct CacheSim {
     ras: Vec<Ras>,
     calls: u64,
     rets: u64,
-    /// Entries to the TLB-refill vector this window.
+    /// Entries to the TLB-refill vector this window (the software
+    /// handler's refills and page faults).
     tlb_entries: u64,
+    /// Hardware TLB walker refills / walks that fell back to the exception,
+    /// this window.
+    walker_refills: u64,
+    walker_fallbacks: u64,
     /// DIV / MOD (index 0 / 1): counts, divisor-zero counts and histograms
     /// of steps (64 - clz|dividend|) and qwidth by value 0..=64.
     div_n: [u64; 2],
@@ -551,8 +556,8 @@ pub(super) struct CacheSim {
     /// through it; the board counts the misses in `dc_read_misses`).
     ifill_dmiss: u64,
     ifill_dhit: u64,
-    /// TLBWI, TLBINV, MTSR ASID, MTSR STATUS this window.
-    uit_discards: [u64; 4],
+    /// TLBWI, TLBINV, MTSR ASID, MTSR STATUS, walker refills this window.
+    uit_discards: [u64; 5],
     window: u64,
     /// A window has been printed since the last clear.
     reported: bool,
@@ -632,6 +637,8 @@ impl CacheSim {
             calls: 0,
             rets: 0,
             tlb_entries: 0,
+            walker_refills: 0,
+            walker_fallbacks: 0,
             div_n: [0; 2],
             div_zero: [0; 2],
             div_steps_hist: [[0; 65]; 2],
@@ -643,7 +650,7 @@ impl CacheSim {
                 .collect(),
             ifill_dmiss: 0,
             ifill_dhit: 0,
-            uit_discards: [0; 4],
+            uit_discards: [0; 5],
             window: 0,
             reported: true,
             ever_reported: false,
@@ -693,6 +700,16 @@ impl CacheSim {
     /// An exception entered the TLB-refill vector.
     pub(super) fn tlb_enter(&mut self) {
         self.tlb_entries += 1;
+    }
+
+    /// The hardware TLB walker refilled the TLB, or fell back to the
+    /// exception (its page-table reads are [`CacheSim::data`] loads).
+    pub(super) fn tlb_walk(&mut self, refilled: bool) {
+        if refilled {
+            self.walker_refills += 1;
+        } else {
+            self.walker_fallbacks += 1;
+        }
     }
 
     /// An instruction fetch of `len` words at physical `pa`.
@@ -810,10 +827,11 @@ impl CacheSim {
         }
     }
 
-    /// The micro-ITLB is emptied (`kind`: 0 TLBWI, 1 TLBINV, 2 ASID, 3 STATUS).
+    /// The micro-ITLB is emptied (`kind`: 0 TLBWI, 1 TLBINV, 2 ASID, 3
+    /// STATUS, 4 a walker refill, which is a TLB write as TLBWI's is).
     pub(super) fn uitlb_discard(&mut self, kind: usize) {
         for u in &mut self.uit {
-            if kind != 0 || u.on_write {
+            if !matches!(kind, 0 | 4) || u.on_write {
                 u.keys.clear();
             }
         }
@@ -842,6 +860,8 @@ impl CacheSim {
         self.calls = 0;
         self.rets = 0;
         self.tlb_entries = 0;
+        self.walker_refills = 0;
+        self.walker_fallbacks = 0;
         self.div_n = [0; 2];
         self.div_zero = [0; 2];
         self.div_steps_hist = [[0; 65]; 2];
@@ -852,7 +872,7 @@ impl CacheSim {
         }
         self.ifill_dmiss = 0;
         self.ifill_dhit = 0;
-        self.uit_discards = [0; 4];
+        self.uit_discards = [0; 5];
         self.loads = 0;
         self.stores = 0;
         self.read_misses = 0;
@@ -878,8 +898,8 @@ impl CacheSim {
         let w = self.window;
         eprintln!("CACHESIM window {w}: {instr} instructions, {} ICACHE_INV writes", self.icache_inv);
         eprintln!(
-            "CACHESIM w{w} uITLB discards: tlbwi {} tlbinv {} asid {} status {}",
-            self.uit_discards[0], self.uit_discards[1], self.uit_discards[2], self.uit_discards[3]
+            "CACHESIM w{w} uITLB discards: tlbwi {} tlbinv {} asid {} status {} walker {}",
+            self.uit_discards[0], self.uit_discards[1], self.uit_discards[2], self.uit_discards[3], self.uit_discards[4]
         );
         for u in &self.uit {
             eprintln!(
@@ -939,6 +959,10 @@ impl CacheSim {
             }
         }
         eprintln!("CACHESIM w{w} TLB refill vector entries {}", self.tlb_entries);
+        eprintln!(
+            "CACHESIM w{w} TLB walker refills {} fallbacks {}",
+            self.walker_refills, self.walker_fallbacks
+        );
         if let Some(p) = &self.profile {
             p.dump(w);
         }

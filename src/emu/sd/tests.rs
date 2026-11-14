@@ -51,6 +51,7 @@ fn cpu(card: bool, native: bool) -> Cpu {
     cpu.install(Hardware {
         mpu: false,
         tlb_entries: None,
+        no_tlb_walker: false,
         sd_card: card.then(|| SdCard::from_bytes(image()).unwrap()),
         sd_native: native,
     });
@@ -265,7 +266,7 @@ fn no_card_reads_zero_as_before() {
         wr(&mut cpu, offset, u64::MAX);
         assert_eq!(rd(&mut cpu, offset), 0, "offset 0x{offset:03X}");
     }
-    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (3 << 22));
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (3 << 22) | (1 << 25));
     cpu.mmio_write(INT2_EN, 3);
     assert_eq!(cpu.mmio_read(INT2_EN), 0);
     assert_eq!(cpu.mmio_read(INT2_PENDING), 0);
@@ -287,7 +288,7 @@ fn spi_controller_without_native_matches_release_bitstream() {
         wr(&mut cpu, offset, 0x1234);
         assert_eq!(rd(&mut cpu, offset), 0, "offset 0x{offset:03X}");
     }
-    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (3 << 22));
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (3 << 22) | (1 << 25));
     cpu.mmio_write(INT2_EN, 3);
     assert_eq!(cpu.mmio_read(INT2_EN), 0);
     // SD_BUF is plain RAM, byte-addressable like RAM.
@@ -556,7 +557,7 @@ fn pop(cpu: &mut Cpu, n: usize) -> Vec<u8> {
 /// Power-cycle into SD mode and identify the card, as `SD_NATIVE_PLAN` §4.1
 /// and the Linux mmc core do, ending selected in tran with a 4-bit bus.
 fn native_init(cpu: &mut Cpu) {
-    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (1 << 21) | (3 << 22));
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (1 << 21) | (3 << 22) | (1 << 25));
     assert_eq!(rd(cpu, SDM_CAPS), 0x0008_0101);
     wr(cpu, SD_CTRL, CLK_IDENT | CTRL_SD_MODE);
     wr(cpu, SD_CTRL, CLK_IDENT | CTRL_SD_MODE | CTRL_PWR_ON);

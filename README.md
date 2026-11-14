@@ -16,11 +16,14 @@ One binary, `klausscc`, does everything needed to get a program onto the CPU:
 - **Emulator**: a golden-model ISA emulator that runs a program and prints
   its UART output, optionally with a per-instruction trace. It models MMU
   stage 1 (user mode, precise exceptions, the system registers, LR/SC),
-  stage 3 (the 16-entry software-refilled TLB, the kseg/kmap address map,
-  the double fault) and, with `--mpu`, stage 2 (the 16-region MPU). By
-  default it has no MPU, as the Nexys A7 bitstream has none:
-  `CPU_FEATURES` reads `0x200D`, 32 TLB entries (`0x20FF` with `--mpu`;
-  `--tlb-entries 16` for the 16-entry bitstreams before klaussCPU `tlb32`). `--sd-image
+  stage 3 (the software-refilled TLB, the kseg/kmap address map, the
+  double fault, and the hardware TLB walker of MMU_PLAN §11.8) and, with
+  `--mpu`, stage 2 (the 16-region MPU). By default it has no MPU, as the
+  Nexys A7 bitstream has none: `CPU_FEATURES[15:0]` reads `0x200D`, 32 TLB
+  entries (`0x20FF` with `--mpu`; `--tlb-entries 16` for the 16-entry
+  bitstreams before klaussCPU `tlb32`), and it has the TLB walker
+  (`CPU_FEATURES` bit 25; `--no-tlb-walker` for the bitstreams without
+  it). `--sd-image
   FILE` puts an SDHC card holding a raw disk image in the SD slot, for
   today's SPI-mode controller, and `--sd-native` adds the native 4-bit
   SD controller (`CPU_FEATURES` bit 21, the source 2 interrupt cascade).

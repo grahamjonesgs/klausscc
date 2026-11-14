@@ -767,7 +767,7 @@ The SR operand is a name, in any case, or a number 0–255:
 | 7 | `TP` | read and write, user mode too | 64-bit thread pointer |
 | 8 | `CYCLE` | read (user mode too) | 64-bit core-cycle counter; `MTSR` to it is illegal |
 
-Stage 2 and 3 add SRs 0x10–0x2F and 0x30–0x34 (§3.17). Any other number
+Stage 2 and 3 add SRs 0x10–0x2F and 0x30–0x37 (§3.17). Any other number
 assembles but is an illegal instruction when it runs. The listing shows
 the name of every SR that has one and the number of any other. Examples: `MFSR D
 ECAUSE` = `0x6C40_2300` (`mfsr r3, ecause`), `MTSR EVEC B` =
@@ -815,6 +815,9 @@ by the `.kla` convention here (any case is accepted).
 | `0x32` | `TLB_INDEX` | `[4:0]` entry index, `[31]` P = the last TLBP found no match |
 | `0x33` | `ASID` | `[7:0]` current address-space ID |
 | `0x34` | `TLBVEC` | the vector for TLB_MISS_* exceptions; 0 = use `EVEC` |
+| `0x35` | `TLB_PTB` | the TLB walker (MMU_PLAN §11.8, `CPU_FEATURES[25]`): `[26:3]` the useg pgd's physical address |
+| `0x36` | `TLB_WALK` | `[0]` EN, `[12:8]` RR: the entry the next walker refill writes |
+| `0x37` | `TLB_WCNT` | 48-bit count of walker refills |
 
 `STATUS` gains `[8]` MPU_EN and `[9]` TE (translation on), and `ECAUSE`
 gains `[8]` GUARD (the ACCESS_* fault was a denial by an MPU GUARD

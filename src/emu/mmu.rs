@@ -20,7 +20,17 @@
 //! (PA = VA - `0x8000_0000`), MMIO identity, and the rest a fault.  The
 //! emulator has no caches, fetch window, NLB or BTIC, so what the spec says
 //! about discarding the fetch side's virtual copies on a TLB change has
-//! nothing to act on here.
+//! nothing to act on here (beyond the `KLAUSSCC_CACHESIM` micro-ITLB model).
+//!
+//! The hardware TLB walker (`MMU_PLAN.md` §11.8, spec v1, [`Cpu::tlb_walk`])
+//! sits on the miss path: with `TLB_WALK.EN` and `TE` set, a useg access
+//! with no matching entry reads the two-level page table at `TLB_PTB` and,
+//! when it finds a present, valid PTE, writes entry `RR` and retries the
+//! access in place, with no exception.  Otherwise the miss is the
+//! `TLB_MISS_*` exception as before.  The data accesses ([`Cpu::map_data`])
+//! and the fetch ([`Cpu::fetch`]) translate through [`Cpu::translate_walk`],
+//! so each access is walked and retried where it misses, and an access the
+//! instruction already translated is not translated again.
 
 use super::Cpu;
 use super::StopReason;
@@ -55,6 +65,21 @@ const TLB_INDEX_P: u32 = 1 << 31;
 pub(super) const TLB_HI_BITS: u32 = 0xFFFF_01FF;
 /// The bits `TLB_LO` has: PFN `[26:16]`, X `[3]`, W `[2]`, R `[1]`, V `[0]`.
 pub(super) const TLB_LO_BITS: u32 = 0x07FF_000F;
+/// `TLB_PTB` `[26:3]`: the pgd's physical address (§11.8).
+pub(super) const TLB_PTB_BITS: u32 = 0x07FF_FFF8;
+/// `TLB_WALK[0]` EN.
+pub(super) const TLB_WALK_EN: u64 = 1 << 0;
+/// `TLB_WALK[12:8]` RR: where it starts.
+pub(super) const TLB_WALK_RR_SHIFT: u32 = 8;
+/// `TLB_WCNT` is a 48-bit count.
+pub(super) const TLB_WCNT_MASK: u64 = (1 << 48) - 1;
+/// A pgd entry's `[0]`: it points at a PTE page.
+const PGD_VALID: u64 = 1 << 0;
+/// A pgd entry's `[26:13]`: the PTE page's physical address (8 KiB, 1024
+/// PTEs).
+const PGD_PTE_PAGE: u64 = 0x07FF_E000;
+/// A PTE's `[4]` PRESENT.
+const PTE_PRESENT: u64 = 1 << 4;
 /// The page size is 64 KiB (§11.1): VPN = VA`[31:16]`.
 const PAGE_SHIFT: u32 = 16;
 /// The offset within a page.
@@ -204,8 +229,9 @@ impl Mapped {
 /// An instruction's fetch: its words, or why it cannot run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Fetch {
-    /// Word 0 and the immediate words (0 past the instruction's length).
-    Words([u32; 3]),
+    /// Word 0 and the immediate words (0 past the instruction's length),
+    /// and word 0's physical address.
+    Words([u32; 3], u32),
     /// A fetch fault, with word 0 when it was fetched (else 0), for a park.
     Fault(XlateFault, u32),
     /// Word 0's physical address is outside RAM.
@@ -423,6 +449,98 @@ impl Cpu {
         Ok((entry.pfn() << PAGE_SHIFT) | (va & PAGE_OFFSET))
     }
 
+    /// [`Cpu::translate`], with the hardware TLB walker on a miss: when
+    /// [`Cpu::tlb_walk`] refills the TLB for the missing VA, the access is
+    /// translated again (and now hits, or takes the new entry's permission
+    /// fault).  This is the translation every instruction's own accesses
+    /// use; a successful walk is invisible apart from the new entry, `RR`,
+    /// `TLB_WCNT` and the side effects of a TLB write.
+    pub(super) fn translate_walk(&mut self, va: u32, kind: Kind) -> Result<u32, XlateFault> {
+        match self.translate(va, kind) {
+            Err(fault) if self.tlb_walk(fault) => self.translate(va, kind),
+            result => result,
+        }
+    }
+
+    /// The hardware TLB walker (`MMU_PLAN.md` §11.8, spec v1) for an access
+    /// that faulted with `fault`: whether it refilled the TLB, so the access
+    /// is to be retried in place with no exception.  It walks only a TLB
+    /// miss (`TLB_MISS_*`, never an `ACCESS_*`) on a useg VA (`EADDR`,
+    /// `[31]` = 0) with the walker present, `TLB_WALK.EN` = 1 and `TE` = 1:
+    ///
+    /// 1. D = the doubleword at PA `TLB_PTB` + VA`[30:26]` * 8; D`[0]` = 0
+    ///    falls back;
+    /// 2. T = the doubleword at PA D`[26:13]` + VA`[25:16]` * 8; T`[4]`
+    ///    PRESENT = 0 or T`[0]` V = 0 falls back;
+    /// 3. entry[`RR`] = {VPN = VA`[31:16]`, G = 0, the `ASID` SR, PFN =
+    ///    T`[26:16]`, X/W/R/V = T`[3:0]`}, as `TLBWI` with `TLB_HI` = {VPN,
+    ///    ASID} and `TLB_LO` = T would write it; `RR` += 1 (mod the entry
+    ///    count), `TLB_WCNT` += 1.  `TLB_HI`, `TLB_LO`, `TLB_INDEX`,
+    ///    `ECAUSE` and `EADDR` are untouched; the reservation is cleared and
+    ///    the fetch side's copies discarded, as by `TLBWI`.
+    ///
+    /// Falling back (false) changes nothing: the caller raises the miss as
+    /// before, with `RR` and `TLB_WCNT` as they were.  The reads are
+    /// physical RAM reads, with no watchpoint check (they are not the
+    /// instruction's accesses); one outside RAM falls back.  With
+    /// `KLAUSSCC_CACHESIM` each read is a D-cache load.
+    // klausscc choices (spec v1 is silent): a pgd or PTE doubleword outside
+    // the emulated RAM falls back (no read happens, nothing changes); a walk,
+    // whether it refills or falls back, costs CYCLES_PER_INSTRUCTION modelled
+    // cycles (about two D-cache hits), and nothing else counts it but
+    // TLB_WCNT (the emulator has no TLB perf counter).
+    pub(super) fn tlb_walk(&mut self, fault: XlateFault) -> bool {
+        let va = fault.eaddr;
+        if !(self.has_tlb_walker && self.tlb_walk_en && self.te && fault.cause.tlb_miss() && va < KSEG) {
+            return false;
+        }
+        self.tick(super::CYCLES_PER_INSTRUCTION);
+        let refilled = self.tlb_walk_tables(va);
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.tlb_walk(refilled);
+        }
+        refilled
+    }
+
+    /// Steps 1-3 of [`Cpu::tlb_walk`] for the useg `va`.
+    fn tlb_walk_tables(&mut self, va: u32) -> bool {
+        let pgd_at = self.tlb_ptb + ((va >> 26) & 0x1F) * 8;
+        let Some(d) = self.walk_read(pgd_at) else { return false };
+        if d & PGD_VALID == 0 {
+            return false;
+        }
+        let pte_at = (d & PGD_PTE_PAGE) as u32 + ((va >> PAGE_SHIFT) & 0x3FF) * 8;
+        let Some(t) = self.walk_read(pte_at) else { return false };
+        if t & PTE_PRESENT == 0 || t & u64::from(TLB_V) == 0 {
+            return false;
+        }
+        let entry = TlbEntry {
+            hi: (va & !PAGE_OFFSET) | u32::from(self.asid),
+            lo: t as u32 & TLB_LO_BITS,
+        };
+        if let Some(sim) = self.tlbsim.get_mut() {
+            sim.tlbwi(entry.hi, entry.lo);
+        }
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.uitlb_discard(4);
+        }
+        self.tlb[(self.tlb_walk_rr & self.tlb_index_mask()) as usize] = entry;
+        self.tlb_walk_rr = (self.tlb_walk_rr + 1) & self.tlb_index_mask();
+        self.tlb_wcnt = (self.tlb_wcnt + 1) & TLB_WCNT_MASK;
+        self.reservation = None;
+        true
+    }
+
+    /// One of the walker's page-table reads: the doubleword at the
+    /// (8-byte aligned) physical address `pa`, or `None` outside RAM.
+    fn walk_read(&mut self, pa: u32) -> Option<u64> {
+        let d = self.bytes(pa).map(u64::from_le_bytes)?;
+        if let Some(sim) = self.cachesim.as_mut() {
+            sim.data(pa, 8, false);
+        }
+        Some(d)
+    }
+
     /// Check and translate a data access of `len` bytes at the effective
     /// address `ea` (as computed, before any A = 1 alignment, so it is the
     /// `EADDR`).  An access that runs into the next doubleword (only a
@@ -434,15 +552,15 @@ impl Cpu {
     // is reported, whatever its cause, even if the second's ranks higher in
     // the §11.3 order (e.g. a TLB miss on the first and an address-map
     // ACCESS on the second): "report the lowest faulting byte".
-    pub(super) fn map_data(&self, ea: u32, len: u32, store: bool) -> Result<Mapped, XlateFault> {
+    pub(super) fn map_data(&mut self, ea: u32, len: u32, store: bool) -> Result<Mapped, XlateFault> {
         let kind = if store { Kind::Store } else { Kind::Load };
-        let pa = self.translate(ea, kind)?;
+        let pa = self.translate_walk(ea, kind)?;
         let next = (ea & !7).wrapping_add(8);
         let last = ea.wrapping_add(len - 1);
         let pa_next = if last & !7 == ea & !7 {
             (pa & !7).wrapping_add(8)
         } else {
-            self.translate(next, kind)?
+            self.translate_walk(next, kind)?
         };
         Ok(Mapped { va: ea, pa, pa_next })
     }
@@ -454,8 +572,10 @@ impl Cpu {
     /// `MISALIGNED_FETCH` first; supervisor mode ignores those bits, as
     /// before stage 1.  Words past the end of RAM read 0, and word 0 there
     /// is [`Fetch::OutOfRange`], except that with `MPU_EN` or `TE` an MMIO
-    /// word 0 fetches as 0 (ILLEGAL).
-    pub(super) fn fetch(&self, pc: u32) -> Fetch {
+    /// word 0 fetches as 0 (ILLEGAL).  A TLB miss on a word goes to the
+    /// walker first ([`Cpu::translate_walk`]); the words before it are not
+    /// translated again.
+    pub(super) fn fetch(&mut self, pc: u32) -> Fetch {
         if self.um && pc & 3 != 0 {
             let word = self.translate(pc, Kind::Fetch).map_or(0, |pa| self.read32(pa));
             return Fetch::Fault(
@@ -468,7 +588,7 @@ impl Cpu {
                 word,
             );
         }
-        let pa = match self.translate(pc, Kind::Fetch) {
+        let pa = match self.translate_walk(pc, Kind::Fetch) {
             Ok(pa) => pa,
             Err(fault) => return Fetch::Fault(fault, 0),
         };
@@ -477,7 +597,7 @@ impl Cpu {
         // device: the zero word is LEN 00, ILLEGAL.  With both off it is
         // outside RAM, as before stage 1.
         if (self.mpu_en || self.te) && is_mmio(pa) {
-            return Fetch::Words([0; 3]);
+            return Fetch::Words([0; 3], pa);
         }
         if (pa as usize) + 4 > self.mem.len() {
             return Fetch::OutOfRange;
@@ -486,12 +606,12 @@ impl Cpu {
         // LEN 00 (illegal) is one word.
         let len = (words[0] >> 30).max(1) as usize;
         for (k, slot) in words.iter_mut().enumerate().take(len).skip(1) {
-            match self.translate(pc.wrapping_add(4 * k as u32), Kind::Fetch) {
+            match self.translate_walk(pc.wrapping_add(4 * k as u32), Kind::Fetch) {
                 Ok(pa) => *slot = self.read32(pa),
                 Err(fault) => return Fetch::Fault(fault, words[0]),
             }
         }
-        Fetch::Words(words)
+        Fetch::Words(words, pa)
     }
 
     /// Where an interrupt or exception entry pushes its frame for the
@@ -669,6 +789,7 @@ impl Cpu {
             sim.set_real_entries(n);
         }
         self.tlb_index &= self.tlb_index_bits();
+        self.tlb_walk_rr &= self.tlb_index_mask();
     }
 
     /// Whether translation is on (`STATUS.TE`), so a debugger's addresses

@@ -222,12 +222,12 @@ impl Cpu {
     }
 
     /// Check and translate the doubleword a push writes, at SP - 8.
-    fn map_push(&self) -> Result<Mapped, XlateFault> {
+    fn map_push(&mut self) -> Result<Mapped, XlateFault> {
         self.map_data(self.sp.wrapping_sub(8), 1, true)
     }
 
     /// Check and translate the doubleword a pop reads, at SP.
-    fn map_pop(&self) -> Result<Mapped, XlateFault> {
+    fn map_pop(&mut self) -> Result<Mapped, XlateFault> {
         self.map_data(self.sp, 1, false)
     }
 
