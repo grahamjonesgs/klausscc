@@ -18,7 +18,9 @@
 //! cache contents stay), and the `CNT_ZERO_LINES` read that ends perfstat's
 //! `/proc` read prints the window (`CACHESIM wN ...` lines: the board-shape
 //! [`ICacheD`] set, micro-ITLB variants, `ICACHE_INV` writes, D-cache
-//! counts including the I-cache fills).  The run's end prints only when no
+//! counts including the I-cache fills; `ICNLB` lines: the board's fetch
+//! front end with its next-line buffer, [`Nlb`], around ten I-cache shapes,
+//! as the RTL has it and with a prefetch that fills).  The run's end prints only when no
 //! window was printed.  `KLAUSSCC_PROFILE=prefix` (which also enables this
 //! simulator) writes per-virtual-PC counts of each window to `prefix.N`:
 //! `pc instr icmiss ndiv div_steps div_cycles nmul`.
@@ -196,6 +198,8 @@ struct ICacheD {
     accesses: u64,
     misses: u64,
     snoop_kills: u64,
+    /// The slot and evicted line of the last demand fill ([`ICacheD::install`]).
+    last_fill: (usize, Option<u64>),
 }
 
 impl ICacheD {
@@ -222,6 +226,7 @@ impl ICacheD {
             accesses: 0,
             misses: 0,
             snoop_kills: 0,
+            last_fill: (0, None),
         }
     }
 
@@ -257,17 +262,46 @@ impl ICacheD {
         (victim, false)
     }
 
-    fn install(&mut self, line: u64, mask: u8) {
+    /// Install `mask` of `line`; returns its slot and the other line it
+    /// evicted, if any.
+    fn install(&mut self, line: u64, mask: u8) -> (usize, Option<u64>) {
         let set = (line % u64::from(self.sets)) as usize;
         let tag = line | VALID;
         self.clock += 1;
         let (i, hit) = self.way_of(set, tag);
+        let mut evicted = None;
         if !hit {
+            if self.tags[i] != 0 {
+                evicted = Some(self.tags[i] & !VALID);
+            }
             self.tags[i] = tag;
             self.valid[i] = 0;
         }
         self.valid[i] |= mask;
         self.stamp[i] = self.clock;
+        (i, evicted)
+    }
+
+    /// The slot holding `line`, if cached.
+    fn slot_of(&self, line: u64) -> Option<usize> {
+        let set = (line % u64::from(self.sets)) as usize;
+        match self.way_of(set, line | VALID) {
+            (i, true) => Some(i),
+            _ => None,
+        }
+    }
+
+    /// The valid doublewords of `line` (0 if not cached).
+    fn mask_of(&self, line: u64) -> u8 {
+        self.slot_of(line).map_or(0, |i| self.valid[i])
+    }
+
+    /// Make `line` most recently used, if cached.
+    fn touch(&mut self, line: u64) {
+        if let Some(i) = self.slot_of(line) {
+            self.clock += 1;
+            self.stamp[i] = self.clock;
+        }
     }
 
     /// A demand lookup of the doubleword at `pa`; true when it missed.
@@ -286,7 +320,7 @@ impl ICacheD {
         }
         self.misses += 1;
         let mask = self.fill_mask(dw);
-        self.install(line, mask);
+        self.last_fill = self.install(line, mask);
         if self.nl_fill {
             let m = self.all_mask();
             self.install(line + 1, m);
@@ -294,8 +328,8 @@ impl ICacheD {
         true
     }
 
-    /// A CPU store to `pa`: drop the line if cached.
-    fn snoop(&mut self, pa: u32) {
+    /// A CPU store to `pa`: drop the line if cached; returns its slot.
+    fn snoop(&mut self, pa: u32) -> Option<usize> {
         let line = u64::from(pa >> self.line_bits);
         let set = (line % u64::from(self.sets)) as usize;
         let (i, hit) = self.way_of(set, line | VALID);
@@ -303,7 +337,9 @@ impl ICacheD {
             self.tags[i] = 0;
             self.valid[i] = 0;
             self.snoop_kills += 1;
+            return Some(i);
         }
+        None
     }
 
     fn flush(&mut self) {
@@ -315,6 +351,223 @@ impl ICacheD {
         self.accesses = 0;
         self.misses = 0;
         self.snoop_kills = 0;
+    }
+}
+
+/// One next-line-buffer entry: a copy of an I-cache line.
+#[derive(Clone, Copy, Default)]
+struct NlbEnt {
+    valid: bool,
+    line: u64,
+    /// Its valid doublewords (copied from the I-cache line).
+    mask: u8,
+    /// It served a fetch since it was captured.
+    used: bool,
+}
+
+/// The board's fetch front end around an [`ICacheD`], at line granularity
+/// (`pipeline_core.sv` M9 NLB, `EN_NLB2`): a fetch window holding the line
+/// last entered, a 2-entry next-line buffer (NLB) and the 1-entry
+/// micro-ITLB.  A fetch outside the window is served by an NLB entry
+/// holding its doubleword, else by a demand lookup of the I-cache (a miss
+/// fills, by the [`ICacheD`] rule).  After each line entry the prefetch
+/// engine looks up `want` (the next line) and, when that is captured,
+/// `want + 1`, into the entry not holding either; a lookup of a line the
+/// I-cache does not hold is abandoned (no fill: the shared port is never
+/// touched), as is one outside the micro-ITLB's page (`pf_tag_match` needs
+/// `r_look_hit`).  Only demand lookups refill the micro-ITLB.  A TLB write
+/// / ASID / STATUS change (`tlb_discard`) empties the NLB, the window and
+/// the micro-ITLB; `ICACHE_INV` the NLB and the window; a store drops an
+/// NLB entry of its line.  Not modelled: timing (the RTL may retry a lookup
+/// or not reach `want + 1` in time), the BTIC (a BTIC-hit redirect needs no
+/// demand lookup), wrong-path fetch.
+///
+/// `fill` is a what-if: a prefetch lookup that misses the I-cache fills
+/// the line from memory (whole line, into the I-cache and the NLB).
+/// `pf_useful` counts such lines a fetch later used, `pf_unused` those
+/// evicted or dropped before any fetch used them (the rest are still
+/// pending at the window's end).  Untimed: a useful prefetch may still
+/// arrive after the fetch that wants it.
+struct Nlb {
+    c: ICacheD,
+    fill: bool,
+    ent: [NlbEnt; 2],
+    /// The window's line and its valid doublewords.
+    cur: Option<u64>,
+    win: u8,
+    /// The micro-ITLB's (VPN, user mode).
+    ut: Option<(u16, bool)>,
+    /// Per I-cache slot: holds a prefetch fill no fetch has used yet.
+    pf_slot: Vec<bool>,
+    /// Demand lookups, NLB hits, prefetch lookups, NLB captures, captures
+    /// dropped unused, prefetch fills, prefetch fills unused, micro-ITLB
+    /// misses on demand lookups.
+    lookups: u64,
+    served: u64,
+    pf_looks: u64,
+    pf_capt: u64,
+    capt_unused: u64,
+    pf_fills: u64,
+    pf_unused: u64,
+    /// Prefetch fills a fetch later used (NLB hit or demand hit).
+    pf_useful: u64,
+    ut_misses: u64,
+}
+
+impl Nlb {
+    fn new(size: u32, ways: usize, line: u32, fill: bool) -> Self {
+        let c = ICacheD::new(size, ways, line, line > 16, false);
+        let n = c.tags.len();
+        Self {
+            c,
+            fill,
+            ent: [NlbEnt::default(); 2],
+            cur: None,
+            win: 0,
+            ut: None,
+            pf_slot: vec![false; n],
+            lookups: 0,
+            served: 0,
+            pf_looks: 0,
+            pf_capt: 0,
+            capt_unused: 0,
+            pf_fills: 0,
+            pf_unused: 0,
+            pf_useful: 0,
+            ut_misses: 0,
+        }
+    }
+
+    fn name(&self) -> String {
+        format!(
+            "{}K {}-way {}B{}",
+            (self.c.sets as usize * self.c.ways * (1 << self.c.line_bits)) >> 10,
+            self.c.ways,
+            1 << self.c.line_bits,
+            if self.fill { " pf-fill" } else { "" }
+        )
+    }
+
+    /// A fetch of the doubleword at physical `pa`, virtual page `key`.
+    fn fetch(&mut self, pa: u32, key: (u16, bool)) {
+        let lb = self.c.line_bits;
+        let line = u64::from(pa >> lb);
+        let dw = (pa >> 3) & ((1 << (lb - 3)) - 1);
+        if self.cur == Some(line) && self.win >> dw & 1 != 0 {
+            return;
+        }
+        if let Some(e) = self.ent.iter_mut().find(|e| e.valid && e.line == line && e.mask >> dw & 1 != 0) {
+            self.served += 1;
+            e.used = true;
+            self.win = e.mask;
+            if let Some(i) = self.c.slot_of(line) {
+                self.pf_useful += u64::from(std::mem::take(&mut self.pf_slot[i]));
+            }
+            self.c.touch(line);
+        } else {
+            self.lookups += 1;
+            if self.ut != Some(key) {
+                self.ut_misses += 1;
+                self.ut = Some(key);
+            }
+            if self.c.access(pa) {
+                let (i, evicted) = self.c.last_fill;
+                if self.pf_slot[i] && evicted.is_some() {
+                    self.pf_unused += 1;
+                }
+                self.pf_slot[i] = false;
+            } else if let Some(i) = self.c.slot_of(line) {
+                self.pf_useful += u64::from(std::mem::take(&mut self.pf_slot[i]));
+            }
+            self.win = self.c.mask_of(line);
+        }
+        self.cur = Some(line);
+        self.prefetch(line, key);
+    }
+
+    /// The prefetch engine after the window entered `line`.
+    fn prefetch(&mut self, line: u64, key: (u16, bool)) {
+        let lb = self.c.line_bits;
+        let page = |l: u64| (l << lb) >> 16;
+        for t in [line + 1, line + 2] {
+            if self.ent.iter().any(|e| e.valid && e.line == t) {
+                continue;
+            }
+            self.pf_looks += 1;
+            if self.ut != Some(key) || page(t) != page(line) {
+                return;
+            }
+            let mut mask = self.c.mask_of(t);
+            if mask == 0 {
+                if !self.fill {
+                    return;
+                }
+                self.pf_fills += 1;
+                let all = self.c.all_mask();
+                let (i, evicted) = self.c.install(t, all);
+                if self.pf_slot[i] && evicted.is_some() {
+                    self.pf_unused += 1;
+                }
+                self.pf_slot[i] = true;
+                mask = all;
+            }
+            // Into the entry that does not hold a line still ahead of the
+            // window (`nlb0_has_want || nlb0_has_wp1` picks entry 1).
+            let e0 = self.ent[0];
+            let k = usize::from(e0.valid && (e0.line == line + 1 || e0.line == line + 2));
+            if self.ent[k].valid && !self.ent[k].used {
+                self.capt_unused += 1;
+            }
+            self.ent[k] = NlbEnt { valid: true, line: t, mask, used: false };
+            self.pf_capt += 1;
+        }
+    }
+
+    /// A CPU store to `pa`.
+    fn snoop(&mut self, pa: u32) {
+        let line = u64::from(pa >> self.c.line_bits);
+        for e in &mut self.ent {
+            if e.valid && e.line == line {
+                e.valid = false;
+            }
+        }
+        if let Some(i) = self.c.snoop(pa)
+            && std::mem::take(&mut self.pf_slot[i])
+        {
+            self.pf_unused += 1;
+        }
+    }
+
+    /// `tlb_discard`: the NLB, the window and the micro-ITLB are emptied.
+    fn discard(&mut self) {
+        self.ent = [NlbEnt::default(); 2];
+        self.cur = None;
+        self.ut = None;
+    }
+
+    /// `ICACHE_INV`.
+    fn flush(&mut self) {
+        self.c.flush();
+        self.ent = [NlbEnt::default(); 2];
+        self.cur = None;
+        for p in &mut self.pf_slot {
+            if std::mem::take(p) {
+                self.pf_unused += 1;
+            }
+        }
+    }
+
+    fn clear(&mut self) {
+        self.c.clear();
+        self.lookups = 0;
+        self.served = 0;
+        self.pf_looks = 0;
+        self.pf_capt = 0;
+        self.capt_unused = 0;
+        self.pf_fills = 0;
+        self.pf_unused = 0;
+        self.pf_useful = 0;
+        self.ut_misses = 0;
     }
 }
 
@@ -625,6 +878,9 @@ pub(super) struct CacheSim {
     icaches32: Vec<ICache32>,
     /// The per-doubleword-valid I-caches; 0 is the board's.
     icd: Vec<ICacheD>,
+    /// The board's front end ([`Nlb`]) around I-cache shapes; 0 is the
+    /// board's.
+    nlb: Vec<Nlb>,
     profile: Option<Profile>,
     l2: Vec<L2>,
     /// Per D-cache slot: the line is dirty.
@@ -731,6 +987,16 @@ impl CacheSim {
             .iter()
             .map(|&(sz, w, l, whole, nl)| ICacheD::new(sz, w, l, whole, nl))
             .collect(),
+            nlb: [false, true]
+                .iter()
+                .flat_map(|&fill| {
+                    [16u32, 32].iter().flat_map(move |&line| {
+                        [(16u32 << 10, 1usize), (32 << 10, 1), (64 << 10, 1), (32 << 10, 2), (64 << 10, 2)]
+                            .iter()
+                            .map(move |&(sz, w)| Nlb::new(sz, w, line, fill))
+                    })
+                })
+                .collect(),
             profile,
             l2: [(64u32, 32u32), (128, 32), (192, 32), (64, 64), (128, 64), (192, 64)]
                 .iter()
@@ -828,6 +1094,10 @@ impl CacheSim {
         }
         let mut board_miss = false;
         for d in (pa >> 3)..=((pa + 4 * len.max(1) - 1) >> 3) {
+            let va = pc.wrapping_add((d << 3).wrapping_sub(pa & !7));
+            for n in &mut self.nlb {
+                n.fetch(d << 3, ((va >> 16) as u16, um));
+            }
             for (k, c) in self.icd.iter_mut().enumerate() {
                 let m = c.access(d << 3);
                 board_miss |= m && k == 0;
@@ -934,6 +1204,9 @@ impl CacheSim {
         for c in &mut self.icd {
             c.flush();
         }
+        for n in &mut self.nlb {
+            n.flush();
+        }
     }
 
     /// The micro-ITLB is emptied (`kind`: 0 TLBWI, 1 TLBINV, 2 ASID, 3
@@ -945,12 +1218,20 @@ impl CacheSim {
             }
         }
         self.uit_discards[kind] += 1;
+        // All five are the RTL's `tlb_discard` (TLBWI, TLBINV, MTSR ASID /
+        // STATUS, a walker refill `wk_fin`).
+        for n in &mut self.nlb {
+            n.discard();
+        }
     }
 
     /// `PERF_CTRL` clear: zero the window's counts (the contents stay).
     pub(super) fn clear(&mut self) {
         for c in &mut self.icd {
             c.clear();
+        }
+        for n in &mut self.nlb {
+            n.clear();
         }
         for c in &mut self.icaches {
             c.accesses = 0;
@@ -1037,6 +1318,28 @@ impl CacheSim {
                 c.snoop_kills
             );
         }
+        for (k, n) in self.nlb.iter().enumerate() {
+            let fills = n.c.misses + n.pf_fills;
+            eprintln!(
+                "CACHESIM w{w} ICNLB {:<20} {}demand_misses {} per1k {:.2} lookups {} nlb_hits {} pf_lookups {} nlb_capt {} nlb_unused {} pf_fills {} pf_useful {} pf_unused {} fills {} bytes {} uitlb_misses {} perf_ic_miss_est {}",
+                n.name(),
+                if k == 0 { "(board) " } else { "" },
+                n.c.misses,
+                1000.0 * n.c.misses as f64 / instr.max(1) as f64,
+                n.lookups,
+                n.served,
+                n.pf_looks,
+                n.pf_capt,
+                n.capt_unused,
+                n.pf_fills,
+                n.pf_useful,
+                n.pf_unused,
+                fills,
+                fills << n.c.line_bits,
+                n.ut_misses,
+                n.c.misses + 3 * n.ut_misses
+            );
+        }
         eprintln!(
             "CACHESIM w{w} D 64K 2-way 32B: {} loads {} stores {} read_misses {} write_misses",
             self.loads, self.stores, self.read_misses, self.write_misses
@@ -1115,6 +1418,9 @@ impl CacheSim {
         if store {
             for c in &mut self.icd {
                 c.snoop(pa);
+            }
+            for n in &mut self.nlb {
+                n.snoop(pa);
             }
         }
         for c in &mut self.icaches32 {
@@ -1256,6 +1562,66 @@ mod tests {
         assert!(c.access(0x1000)); // a store dropped the line
         c.flush();
         assert!(c.access(0x1000));
+    }
+
+    /// The NLB serves a sequential line cross only from a line the I-cache
+    /// already holds; a cold run takes a demand miss per line and its
+    /// prefetches are abandoned; the prefetch stays in the micro-ITLB's page.
+    #[test]
+    fn nlb_prefetch_never_fills() {
+        let k = (0u16, false);
+        let mut n = Nlb::new(16 << 10, 1, 16, false);
+        let run = |n: &mut Nlb, from: u32, lines: u32| {
+            for a in (from..from + 16 * lines).step_by(8) {
+                n.fetch(a, ((a >> 16) as u16, false));
+            }
+        };
+        run(&mut n, 0x1000, 4); // cold
+        assert_eq!((n.c.misses, n.lookups, n.served, n.pf_capt, n.pf_fills), (4, 4, 0, 0, 0));
+        assert_eq!(n.ut_misses, 1);
+        n.fetch(0x1000, k); // a branch back: demand lookup, hit
+        assert_eq!((n.lookups, n.c.misses), (5, 4));
+        // ... and the prefetch captured lines 1 and 2 (3 later): NLB hits
+        run(&mut n, 0x1000, 4);
+        assert_eq!((n.c.misses, n.lookups, n.served), (4, 5, 3));
+        assert_eq!(n.pf_capt, 3);
+        // the line after 0x1030 is not cached: its lookup was abandoned
+        n.fetch(0x1040, k);
+        assert_eq!((n.c.misses, n.lookups), (5, 6));
+        // an odd-doubleword entry fills itself only; the NLB copy of the line
+        // has the same hole, so the even doubleword misses later
+        let mut n = Nlb::new(16 << 10, 1, 16, false);
+        n.fetch(0x2008, k);
+        n.fetch(0x2000, k);
+        assert_eq!(n.c.misses, 2);
+        // a prefetch never crosses into the next 64 KiB page
+        let mut n = Nlb::new(16 << 10, 1, 16, false);
+        run(&mut n, 0xffe0, 4);
+        assert_eq!(n.ut_misses, 2);
+        run(&mut n, 0xffe0, 4);
+        // 0xfff0 and 0x10010 from the NLB; 0x10000 by a lookup that also
+        // refills the micro-ITLB
+        assert_eq!((n.c.misses, n.served, n.ut_misses), (4, 2, 4));
+        n.discard(); // a TLB write empties the NLB, the window, the micro-ITLB
+        n.fetch(0xffe8, k);
+        assert_eq!((n.ut_misses, n.lookups), (5, 7));
+    }
+
+    /// The what-if prefetch fills the next two lines from memory and counts
+    /// the ones no fetch used.
+    #[test]
+    fn nlb_prefetch_fill_what_if() {
+        let k = (0u16, false);
+        let mut n = Nlb::new(16 << 10, 1, 16, true);
+        for a in (0x1000..0x1040).step_by(8) {
+            n.fetch(a, k);
+        }
+        // line 0 misses; 1..3 come from the NLB; 4 and 5 were prefetched
+        assert_eq!((n.c.misses, n.served, n.pf_fills, n.pf_useful), (1, 3, 5, 3));
+        n.snoop(0x1050); // a store drops the unused line 5
+        assert_eq!(n.pf_unused, 1);
+        n.fetch(0x1000 + (16 << 10) + 0x40, k); // evicts the unused line 4
+        assert_eq!((n.c.misses, n.pf_unused, n.capt_unused), (2, 2, 1)); // its NLB entry too
     }
 
     #[test]
