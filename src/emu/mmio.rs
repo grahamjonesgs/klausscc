@@ -1,7 +1,8 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
 //! the performance counters, and the decode for the SD controller (`sd`).
 
-use super::{CYCLES_PER_MS, Cpu, PerfBase, StopReason};
+use super::sd::DmaBus;
+use super::{CYCLES_PER_MS, Cpu, PerfBase, StopReason, coherence};
 
 /// Interrupt controller / timer device select (`addr[27:16]`).
 const IRQ_DEV_SELECT: u32 = 0x00F;
@@ -29,8 +30,58 @@ const ICACHE_INFO_VALUE: u64 = (16 << 10 << 32) | (16 << 24) | (1024 << 8) | 1;
 /// `CNT_ZERO_LINES` (`HW_PERF_PLAN.md` §1): DCBZ operations; `CACHE_CTRL[0]`
 /// clears it with the other counters.
 const CNT_ZERO_LINES: u32 = 0x0070;
-/// `CACHE_CTRL`: `[0]` clears the counters.
+/// `CACHE_CTRL`: `[0]` clears the counters, `[1]` FLUSH, `[2]` INVALIDATE,
+/// `[3]` `ICACHE_INV`, `[4]` `RANGE_CLEAN` and `[5]` `RANGE_INV`
+/// (`--dcache-range-ops`).
 const CACHE_CTRL: u32 = 0x0000;
+/// `CACHE_STATUS`: `[0]` `MNT_BUSY`, a maintenance walk pending or running.
+const CACHE_STATUS: u32 = 0x0010;
+/// `CACHE_OP_ADDR` (`--dcache-range-ops`): a range op's physical start;
+/// `[4:0]` ignored.
+const CACHE_OP_ADDR: u32 = 0x0030;
+/// `CACHE_OP_LEN` (`--dcache-range-ops`): a range op's length in bytes.
+const CACHE_OP_LEN: u32 = 0x0038;
+/// `CACHE_CTRL` bits.
+const CTRL_CLEAR: u64 = 1;
+const CTRL_FLUSH: u64 = 1 << 1;
+const CTRL_INVALIDATE: u64 = 1 << 2;
+const CTRL_ICACHE_INV: u64 = 1 << 3;
+const CTRL_RANGE_CLEAN: u64 = 1 << 4;
+const CTRL_RANGE_INV: u64 = 1 << 5;
+/// Cycles a whole-cache walk keeps `MNT_BUSY` up: 1024 sets x 2 ways
+/// ("a few thousand cycles"; more with dirty lines on the board).
+const WALK_FULL_CYCLES: u64 = 2048;
+/// A range walk: cycles per line it touches, and its fixed cost.
+const WALK_RANGE_CYCLES_PER_LINE: u64 = 2;
+const WALK_RANGE_CYCLES: u64 = 16;
+
+/// The cache controller's maintenance state.  The emulator has no data
+/// cache, so a walk changes no data; but `MNT_BUSY` reads 1 for as long as
+/// the walk would take, and the `--sd-dma` coherence checker sees each one.
+#[derive(Debug, Default)]
+pub(super) struct CacheCtl {
+    /// The range ops are modelled (`--dcache-range-ops`).
+    pub(super) range_ops: bool,
+    /// `CACHE_OP_ADDR`.
+    op_addr: u64,
+    /// `CACHE_OP_LEN`.
+    op_len: u64,
+    /// `MNT_BUSY` until this cycle; a walk asked for during one queues
+    /// behind it.
+    busy_until: u64,
+}
+
+impl CacheCtl {
+    /// Start a walk of `cycles` at cycle `now`, after any in flight.
+    fn walk(&mut self, now: u64, cycles: u64) {
+        self.busy_until = self.busy_until.max(now) + cycles;
+    }
+
+    /// `MNT_BUSY` at cycle `now`.
+    pub(super) const fn busy(&self, now: u64) -> bool {
+        now < self.busy_until
+    }
+}
 
 // Interrupt controller / timer register offsets (`addr[15:0]`).
 /// `INT_MASK`: per-source enables (4 bits).
@@ -243,6 +294,9 @@ impl Cpu {
             }
             CACHE_DEV_SELECT => {
                 return match addr & 0xFFFF {
+                    CACHE_STATUS => u64::from(self.cache_ctl.busy(self.cycles)),
+                    CACHE_OP_ADDR if self.cache_ctl.range_ops => self.cache_ctl.op_addr,
+                    CACHE_OP_LEN if self.cache_ctl.range_ops => self.cache_ctl.op_len,
                     CACHE_INFO => CACHE_INFO_VALUE,
                     ICACHE_INFO => ICACHE_INFO_VALUE,
                     CNT_ZERO_LINES => {
@@ -289,21 +343,12 @@ impl Cpu {
             SD_DEV_SELECT => {
                 let now = self.cycles;
                 if let Some(sd) = self.sd.as_mut() {
-                    sd.write(addr & 0xFFFF, data, bytes, now);
+                    sd.write(addr & 0xFFFF, data, bytes, now, self.coherence.as_deref_mut());
                 }
             }
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
             IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
-            CACHE_DEV_SELECT if addr & 0xFFFF == CACHE_CTRL && data & 0b1001 != 0 => {
-                if data & 1 != 0 {
-                    self.zero_lines = 0;
-                }
-                if data & 8 != 0
-                    && let Some(sim) = self.cachesim.as_mut()
-                {
-                    sim.icache_inv();
-                }
-            }
+            CACHE_DEV_SELECT => self.cache_mmio_write(addr & 0xFFFF, data),
             PERF_DEV_SELECT if addr & 0xFFFF == PERF_CTRL && data & 1 != 0 => {
                 if let Some(sim) = self.tlbsim.get_mut() {
                     sim.clear();
@@ -315,6 +360,61 @@ impl Cpu {
                     cycles: self.cycles,
                     instret: self.instret,
                 };
+            }
+            _ => {}
+        }
+    }
+
+    // ---- cache controller (0xF005_0000) ---------------------------------------
+
+    /// Write a cache-controller register.
+    fn cache_mmio_write(&mut self, offset: u32, data: u64) {
+        let now = self.cycles;
+        let ctl = &mut self.cache_ctl;
+        match offset {
+            CACHE_OP_ADDR | CACHE_OP_LEN if ctl.range_ops => {
+                if ctl.busy(now)
+                    && let Some(coh) = self.coherence.as_deref_mut()
+                {
+                    coh.op_regs_while_busy(if offset == CACHE_OP_ADDR { "CACHE_OP_ADDR" } else { "CACHE_OP_LEN" });
+                }
+                if offset == CACHE_OP_ADDR {
+                    ctl.op_addr = data;
+                } else {
+                    ctl.op_len = data;
+                }
+            }
+            CACHE_CTRL => {
+                if data & CTRL_CLEAR != 0 {
+                    self.zero_lines = 0;
+                }
+                if data & CTRL_ICACHE_INV != 0
+                    && let Some(sim) = self.cachesim.as_mut()
+                {
+                    sim.icache_inv();
+                }
+                if data & (CTRL_FLUSH | CTRL_INVALIDATE) != 0 {
+                    ctl.walk(now, WALK_FULL_CYCLES);
+                    if let Some(coh) = self.coherence.as_deref_mut() {
+                        if data & CTRL_INVALIDATE != 0 {
+                            coh.invalidate_all();
+                        } else {
+                            coh.flush_all();
+                        }
+                    }
+                }
+                let clean = data & CTRL_RANGE_CLEAN != 0;
+                let inv = data & CTRL_RANGE_INV != 0;
+                if ctl.range_ops && (clean || inv) && ctl.op_len != 0 {
+                    // Bits [4:0] of the address are ignored: the walk covers
+                    // the lines [ADDR & !31, (ADDR & !31) + LEN) touches.
+                    let start = ctl.op_addr & !(coherence::LINE - 1);
+                    let lines = ctl.op_len.div_ceil(coherence::LINE);
+                    ctl.walk(now, WALK_RANGE_CYCLES + lines.saturating_mul(WALK_RANGE_CYCLES_PER_LINE));
+                    if let Some(coh) = self.coherence.as_deref_mut() {
+                        coh.range(start, ctl.op_len, clean, inv);
+                    }
+                }
             }
             _ => {}
         }
@@ -360,6 +460,16 @@ impl Cpu {
     /// pending bit when the count passes `TIMER_PERIOD` and restarts from 0.
     pub(super) fn tick(&mut self, cycles: u64) {
         self.cycles += cycles;
+        if let Some(sd) = self.sd.as_deref_mut()
+            && sd.dma_next_event().is_some_and(|at| at <= self.cycles)
+        {
+            let mut bus = DmaBus {
+                mem: &mut self.mem,
+                coherence: self.coherence.as_deref_mut(),
+                walk_busy: self.cache_ctl.busy(self.cycles),
+            };
+            sd.dma_advance(self.cycles, &mut bus);
+        }
         let count = u64::from(self.timer_count) + cycles;
         if count > u64::from(self.timer_period) {
             self.timer_count = 0;

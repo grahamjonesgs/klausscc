@@ -26,7 +26,8 @@ RTL.
 | `src/emu/flags.rs` | the `Z S C V` register and its saved layouts (GETF, interrupt frame, trace, debugger nibble) |
 | `src/emu/mmio.rs` | UART, interrupt controller / timer, performance counters, `CPU_FEATURES` |
 | `src/emu/system.rs` | MMU stage 1: user mode, exception entry, the system registers, the LR/SC reservation |
-| `src/emu/sd/` | the SD controller at `0xF000_0000` (SPI mode, and the native controller with `--sd-native`) and the emulated card (`--sd-image`) |
+| `src/emu/sd/` | the SD controller at `0xF000_0000` (SPI mode, and the native controller with `--sd-native` and its DMA engine with `--sd-dma`) and the emulated card (`--sd-image`) |
+| `src/emu/coherence.rs` | the `--sd-dma` DMA coherence checker |
 | `src/emu/mmu.rs` | MMU stages 2 and 3: the MPU, the TLB, the address map, and `translate`, which every memory access an instruction makes goes through |
 | `src/emu/debug.rs` | the debugger's view: registers, memory, watchpoints, stop reasons |
 | `src/emu/trace.rs` | the per-instruction trace line |
@@ -567,6 +568,54 @@ unchanged, a response with a CRC, end-bit or index error is held as
 received, a
 48-bit response leaves `SDM_RESP1` = 0 and `SDM_RESP0[63:38]` = 0;
 response types 5-7 act as 0; `SDM_ARG` keeps 32 bits.
+
+### SD DMA (`--sd-dma`)
+
+`--sd-dma` (needs `--sd-native`) adds the DMA engine of the klaussCPU SD
+DMA spec v1, which no bitstream has yet: `SDM_DMA_ADDR` (`+0x150`, 64-bit,
+`[2:0]` read 0), `SDM_CFG[1]` `DMA_EN`, `SDM_STATUS[5]` `DMA_BUSY` (live)
+and `[27]` `DMA_ERR` (sticky, W1C, in `ERR_ANY` and `SDM_IRQ_EN[27]`), and
+`SDM_CAPS[10]`. Without it those read 0 as on today's bitstream. A data
+command written while `DMA_EN` = 1 moves its blocks between the card and
+DDR at `SDM_DMA_ADDR`, which advances as the bytes move; `SDM_DATA` reads
+0 and ignores stores, and `FIFO_THRESH` reads 0. Unlike PIO, the data
+phase takes modelled time: each block takes its bits on the bus (1 or 4
+per SD clock, `SD_CTRL[15:0]`) plus start bit, CRC16, end bit and a gap
+(a write also its CRC status and a short busy), the first one after the
+command and response, so the interrupt arrives later and a CPU in
+`WAIT` sleeps to it. A read stores each good block as it completes
+(`DATA_DONE` with the last one in DDR); a write fetches blocks into the
+FIFO ahead of the card while it has room (`DMA_BUSY` drops after the last
+fetch; `DATA_DONE` when the card has programmed the last block). Blocks
+move as their FIFO words: a block of 4 mod 8 bytes takes `ceil(size / 8)`
+doublewords of DDR, its last one with `[63:32]` = 0 on a read. A block
+that would touch a byte outside DDR sets `DMA_ERR` and ends the data phase
+(nothing of that block moves). `DMA_EN` = 0 or `SDM_FIFO[31]` during a DMA
+stops the engine (`DMA_BUSY` reads 1 for 200 more cycles) and the phase
+goes on as PIO until CMD12; a card error ends the phase as without DMA.
+Writing `SDM_DMA_ADDR` while `DMA_BUSY` is ignored and reported.
+
+With `--sd-dma` the emulator also checks DMA coherence, since it has no
+D-cache: per 32-byte line it tracks CPU stores not yet cleaned (by
+`CACHE_CTRL` FLUSH or INVALIDATE or a range clean) and DMA writes not yet
+invalidated. A DMA reading or overwriting a line the CPU dirtied, a CPU
+access to a line a DMA wrote, a range invalidate without clean dropping a
+dirty line, a DMA reading memory while `CACHE_STATUS.MNT_BUSY`, and a
+range-op register written while `MNT_BUSY` are each reported on stderr
+(`klausscc dma: coherence: ...`, the first 16) and counted in the run's
+summary (`SD DMA: ... DMA coherence problems: N`).
+
+### Cache maintenance
+
+`CACHE_CTRL` (`0xF005_0000`) FLUSH `[1]` and INVALIDATE `[2]` change no
+data (there is no D-cache) but keep `CACHE_STATUS[0]` `MNT_BUSY` up for
+2048 cycles, a walk asked for during one queuing behind it.
+`--dcache-range-ops` adds the range ops (spec v1, no bitstream yet;
+`CPU_FEATURES[27]`): `CACHE_OP_ADDR` (`0x30`; `[4:0]` ignored, so the walk
+covers the lines `[ADDR & ~31, (ADDR & ~31) + LEN)` touches),
+`CACHE_OP_LEN` (`0x38`, 0 = no-op), `CACHE_CTRL[4]` `RANGE_CLEAN` and
+`[5]` `RANGE_INV` (both = clean + invalidate), whose walk keeps
+`MNT_BUSY` up 16 + 2 cycles per line. It is independent of `--sd-dma`.
 
 ### Fault injection
 

@@ -207,6 +207,14 @@ pub(crate) struct Cli {
     #[arg(long, requires = "emu_host", conflicts_with = "board")]
     pub(crate) sd_native: bool,
 
+    /// With --sd-native: the native SD controller's DMA engine (klaussCPU SD DMA spec v1, not yet in a bitstream): SDM_DMA_ADDR (0xF000_0150), SDM_CFG[1] DMA_EN, SDM_STATUS[5] DMA_BUSY and [27] DMA_ERR, SDM_CAPS[10]. A data command with DMA_EN moves its blocks between the card and DDR at the card's pace (the IRQ comes when the last block is done). Also checks DMA coherence as if the D-cache were there (CPU-written lines a DMA reads without a clean, DMA-written lines the CPU reads without an invalidate, a DMA started while CACHE_STATUS.MNT_BUSY): problems go to stderr and the run's summary. Without it --sd-native models today's bitstream
+    #[arg(long, requires = "sd_native")]
+    pub(crate) sd_dma: bool,
+
+    /// Give the emulator the D-cache range clean/invalidate ops (klaussCPU spec v1, not yet in a bitstream): CACHE_OP_ADDR (0xF005_0030), CACHE_OP_LEN (0xF005_0038), CACHE_CTRL[4] RANGE_CLEAN and [5] RANGE_INV, and CPU_FEATURES bit 27. The emulator has no D-cache, so they change no data, but CACHE_STATUS.MNT_BUSY reads 1 for as long as the walk would take and --sd-dma's coherence checker sees them. For --emulate and --gdbserver on the emulator
+    #[arg(long, requires = "emu_host", conflicts_with = "board")]
+    pub(crate) dcache_range_ops: bool,
+
     /// Type the bytes of this file into the UART receiver like keyboard input, for scripted sessions with programs that read the console. With --emulate: one byte at a time whenever the receive FIFO has room (with a short gap between bytes). With -m (serial monitor): sent to the board line by line, one byte every 3 ms, instead of forwarding the keyboard (no raw mode; Ctrl+C still ends the run). Needs --emulate or -m
     #[arg(long, value_name = "FILE", requires = "uart_host", conflicts_with = "gdbserver")]
     pub(crate) uart_in: Option<PathBuf>,

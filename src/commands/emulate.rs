@@ -103,6 +103,9 @@ fn emulate_and_report(
     if let Some(faults) = &result.sd_faults {
         msg_list.info(faults.clone());
     }
+    if let Some(dma) = &result.sd_dma {
+        msg_list.info(dma.clone());
+    }
 
     msg_list.print_summary();
     println!(

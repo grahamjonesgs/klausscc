@@ -331,6 +331,8 @@ fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, 
         no_tlb_walker: cli.no_tlb_walker,
         sd_card,
         sd_native: cli.sd_native,
+        sd_dma: cli.sd_dma,
+        dcache_range_ops: cli.dcache_range_ops,
     })
 }
 
