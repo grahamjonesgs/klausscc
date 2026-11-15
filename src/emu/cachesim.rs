@@ -24,6 +24,11 @@
 //! window was printed.  `KLAUSSCC_PROFILE=prefix` (which also enables this
 //! simulator) writes per-virtual-PC counts of each window to `prefix.N`:
 //! `pc instr icmiss ndiv div_steps div_cycles nmul`.
+//!
+//! `KLAUSSCC_L2T` adds the timed L2 model ([`l2t`]: `L2T` lines in each
+//! window); `KLAUSSCC_L2T=only` runs it without the untimed what-ifs.
+
+mod l2t;
 
 /// One set-associative cache with LRU replacement.
 struct Cache {
@@ -448,14 +453,16 @@ impl Nlb {
         )
     }
 
-    /// A fetch of the doubleword at physical `pa`, virtual page `key`.
-    fn fetch(&mut self, pa: u32, key: (u16, bool)) {
+    /// A fetch of the doubleword at physical `pa`, virtual page `key`;
+    /// true when it took a demand miss (an I-cache fill).
+    fn fetch(&mut self, pa: u32, key: (u16, bool)) -> bool {
         let lb = self.c.line_bits;
         let line = u64::from(pa >> lb);
         let dw = (pa >> 3) & ((1 << (lb - 3)) - 1);
         if self.cur == Some(line) && self.win >> dw & 1 != 0 {
-            return;
+            return false;
         }
+        let mut missed = false;
         if let Some(e) = self.ent.iter_mut().find(|e| e.valid && e.line == line && e.mask >> dw & 1 != 0) {
             self.served += 1;
             e.used = true;
@@ -471,6 +478,7 @@ impl Nlb {
                 self.ut = Some(key);
             }
             if self.c.access(pa) {
+                missed = true;
                 let (i, evicted) = self.c.last_fill;
                 if self.pf_slot[i] && evicted.is_some() {
                     self.pf_unused += 1;
@@ -483,6 +491,7 @@ impl Nlb {
         }
         self.cur = Some(line);
         self.prefetch(line, key);
+        missed
     }
 
     /// The prefetch engine after the window entered `line`.
@@ -923,6 +932,8 @@ pub(super) struct CacheSim {
     reported: bool,
     ever_reported: bool,
     dcache: Cache,
+    /// The timed L2 model (`KLAUSSCC_L2T`, [`l2t`]).
+    l2t: Option<Box<l2t::Timed>>,
     /// Per D-cache slot (set * ways + way): a pending write-missed line.
     pending: Vec<Option<Pending>>,
     /// The slot of the most recent write miss still in a store run.
@@ -943,9 +954,13 @@ impl CacheSim {
     /// The simulator if `KLAUSSCC_CACHESIM` is set.
     pub(super) fn from_env() -> Option<Box<Self>> {
         let profile = std::env::var("KLAUSSCC_PROFILE").ok().map(|prefix| Profile { prefix, map: Default::default(), pc: 0 });
-        if profile.is_none() {
+        let l2t = l2t::Timed::from_env();
+        if profile.is_none() && l2t.is_none() {
             std::env::var_os("KLAUSSCC_CACHESIM")?;
         }
+        // `KLAUSSCC_L2T=only`: the timed L2 model without the untimed
+        // I-cache / L2 what-ifs (much faster).
+        let others = std::env::var("KLAUSSCC_L2T").map_or(true, |v| v != "only");
         let mut icaches = Vec::new();
         for &(size, ways, line, nl) in &[
             (8u32 << 10, 1usize, 16u32, false),
@@ -961,9 +976,12 @@ impl CacheSim {
             c.next_line = nl;
             icaches.push(c);
         }
+        if !others {
+            icaches.clear();
+        }
         let dcache = Cache::new("D 64K 2-way 32B", 64 << 10, 2, DLINE);
         let slots = (dcache.sets as usize) * dcache.ways;
-        Some(Box::new(Self {
+        let mut sim = Box::new(Self {
             icaches,
             icaches32: vec![ICache32::new(8 << 10), ICache32::new(16 << 10), ICache32::new(32 << 10)],
             icd: [
@@ -1036,7 +1054,15 @@ impl CacheSim {
             full_line: 0,
             full_line_strict: 0,
             zero_lines: 0,
-        }))
+            l2t,
+        });
+        if !others {
+            sim.icaches32.clear();
+            sim.icd.clear();
+            sim.nlb.clear();
+            sim.l2.clear();
+        }
+        Some(sim)
     }
 
     /// A D-cache victim leaves `slot`: a dirty one is written back into the L2;
@@ -1088,6 +1114,9 @@ impl CacheSim {
     /// An instruction fetch of `len` words at physical `pa`.
     pub(super) fn fetch(&mut self, pc: u32, um: bool, pa: u32, len: u32, now: (u64, u64)) {
         self.now = now;
+        if let Some(t) = self.l2t.as_mut() {
+            t.fetch(pc, um, pa, len);
+        }
         let key = ((pc >> 16) as u16, um);
         for u in &mut self.uit {
             u.lookup(key);
@@ -1155,6 +1184,9 @@ impl CacheSim {
 
     /// The instruction fetched by the last [`CacheSim::fetch`] retired.
     pub(super) fn retire(&mut self) {
+        if let Some(t) = self.l2t.as_mut() {
+            t.retire();
+        }
         if let Some(p) = self.profile.as_mut() {
             p.map.entry(p.pc).or_default().instr += 1;
         }
@@ -1201,6 +1233,9 @@ impl CacheSim {
     /// whole I-cache.
     pub(super) fn icache_inv(&mut self) {
         self.icache_inv += 1;
+        if let Some(t) = self.l2t.as_mut() {
+            t.icache_inv();
+        }
         for c in &mut self.icd {
             c.flush();
         }
@@ -1223,10 +1258,16 @@ impl CacheSim {
         for n in &mut self.nlb {
             n.discard();
         }
+        if let Some(t) = self.l2t.as_mut() {
+            t.discard();
+        }
     }
 
     /// `PERF_CTRL` clear: zero the window's counts (the contents stay).
     pub(super) fn clear(&mut self) {
+        if let Some(t) = self.l2t.as_mut() {
+            t.clear();
+        }
         for c in &mut self.icd {
             c.clear();
         }
@@ -1386,6 +1427,9 @@ impl CacheSim {
                 eprintln!("CACHESIM w{w} MISSDIST {unit} [{name}]: {}", h[u].line());
             }
         }
+        if let Some(t) = &self.l2t {
+            t.report(w);
+        }
         eprintln!("CACHESIM w{w} TLB refill vector entries {}", self.tlb_entries);
         eprintln!(
             "CACHESIM w{w} TLB walker refills {} fallbacks {}",
@@ -1398,6 +1442,9 @@ impl CacheSim {
 
     /// A data access of `n` bytes at physical `pa` (RAM only).
     pub(super) fn data(&mut self, pa: u32, n: u32, store: bool) {
+        if let Some(t) = self.l2t.as_mut() {
+            t.data(pa, store);
+        }
         let line_addr = pa & !(DLINE - 1);
         let line = u64::from(pa >> 5);
         let set = (line % u64::from(self.dcache.sets)) as usize;
@@ -1480,6 +1527,9 @@ impl CacheSim {
     /// DCBZ of the line at physical `pa`: installed (zeroed) without a
     /// fetch, so the stores into it that follow hit.
     pub(super) fn zero_line(&mut self, pa: u32) {
+        if let Some(t) = self.l2t.as_mut() {
+            t.zero_line(pa);
+        }
         let line_addr = pa & !(DLINE - 1);
         for c in &mut self.icaches32 {
             c.d.access(line_addr);
