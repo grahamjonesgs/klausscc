@@ -452,7 +452,7 @@ impl Cpu {
         };
         let found = self.tlb_lookup(va, self.asid);
         if let Some(sim) = self.tlbsim.borrow_mut().as_mut() {
-            sim.access(va, self.asid, kind, found.is_none(), self.instret);
+            sim.access(va, self.asid, self.um, kind, found.is_none(), self.instret);
         }
         let entry = found.ok_or_else(|| fault(kind.tlb_miss()))?;
         if entry.lo & kind.permission() == 0 {

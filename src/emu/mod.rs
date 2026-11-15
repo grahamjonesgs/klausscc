@@ -646,6 +646,12 @@ impl Cpu {
         if let Some(sim) = self.cachesim.as_mut() {
             sim.fetch(pc, self.um, fetch_pa, (word >> 30).max(1), (self.instret, self.cycles));
         }
+        if self.te
+            && let Some(sim) = self.tlbsim.get_mut()
+        {
+            sim.fetched(pc, self.um);
+        }
+        let fetch_um = self.um;
         if !self.execute(words) {
             // An illegal word or a misaligned access parks without retiring:
             // the RTL gives it no trace line (`pipeline_core.sv` WB park,
@@ -658,6 +664,9 @@ impl Cpu {
         self.instret += 1;
         if let Some(sim) = self.cachesim.as_mut() {
             sim.retire();
+        }
+        if let Some(sim) = self.tlbsim.get_mut() {
+            sim.retired(pc, fetch_um && self.te, self.instret);
         }
         self.tick(CYCLES_PER_INSTRUCTION);
         Some((pc, word))

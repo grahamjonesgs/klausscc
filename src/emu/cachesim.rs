@@ -23,7 +23,13 @@
 //! as the RTL has it and with a prefetch that fills).  The run's end prints only when no
 //! window was printed.  `KLAUSSCC_PROFILE=prefix` (which also enables this
 //! simulator) writes per-virtual-PC counts of each window to `prefix.N`:
-//! `pc instr icmiss ndiv div_steps div_cycles nmul`.
+//! `pc instr icmiss ndiv div_steps div_cycles nmul dmiss ifdmiss first`
+//! (`first`: the instruction count when the PC first ran in the window),
+//! and the window's taken calls to `prefix.N.calls`: `site target count`
+//! (the CALL's PC and the callee's, virtual), for a call-graph link order
+//! (lld `--call-graph-ordering-file`).  `KLAUSSCC_CACHESIM=profile` keeps
+//! only what the profile needs (no I-cache or L2 what-ifs, so `icmiss` is
+//! 0; much faster).
 //!
 //! `KLAUSSCC_L2T` adds the timed L2 model ([`l2t`]: `L2T` lines in each
 //! window); `KLAUSSCC_L2T=only` runs it without the untimed what-ifs.
@@ -619,6 +625,8 @@ struct Ent {
     dmiss: u64,
     /// Board-shape I fills at this PC that also missed the D-cache.
     ifdmiss: u64,
+    /// 1 + the instruction count when it first ran in the window (0: not yet).
+    first: u64,
 }
 
 /// Cycles a divide holds EX besides its steps: the issue cycle, the
@@ -646,6 +654,8 @@ struct Profile {
     prefix: String,
     map: std::collections::HashMap<u32, Ent, std::hash::BuildHasherDefault<Hasher32>>,
     pc: u32,
+    /// Taken calls: (the CALL's PC, the target) -> count.
+    calls: std::collections::HashMap<(u32, u32), u64>,
 }
 
 impl Profile {
@@ -659,9 +669,35 @@ impl Profile {
         let mut w = std::io::BufWriter::new(f);
         let mut v: Vec<_> = self.map.iter().collect();
         v.sort_by_key(|(pc, _)| **pc);
-        let _ = writeln!(w, "# pc instr icmiss ndiv div_steps div_cycles nmul dmiss ifdmiss");
+        let _ = writeln!(w, "# pc instr icmiss ndiv div_steps div_cycles nmul dmiss ifdmiss first");
         for (pc, e) in v {
-            let _ = writeln!(w, "{:08x} {} {} {} {} {} {} {} {}", pc, e.instr, e.icmiss, e.ndiv, e.div_steps, e.div_cycles, e.nmul, e.dmiss, e.ifdmiss);
+            let _ = writeln!(
+                w,
+                "{:08x} {} {} {} {} {} {} {} {} {}",
+                pc,
+                e.instr,
+                e.icmiss,
+                e.ndiv,
+                e.div_steps,
+                e.div_cycles,
+                e.nmul,
+                e.dmiss,
+                e.ifdmiss,
+                e.first.saturating_sub(1)
+            );
+        }
+        drop(w);
+        let path = format!("{}.{}.calls", self.prefix, window);
+        let Ok(f) = std::fs::File::create(&path) else {
+            eprintln!("cachesim: cannot write {path}");
+            return;
+        };
+        let mut w = std::io::BufWriter::new(f);
+        let mut c: Vec<_> = self.calls.iter().collect();
+        c.sort_unstable();
+        let _ = writeln!(w, "# site target count");
+        for ((site, target), n) in c {
+            let _ = writeln!(w, "{site:08x} {target:08x} {n}");
         }
     }
 }
@@ -953,14 +989,20 @@ const DLINE: u32 = 32;
 impl CacheSim {
     /// The simulator if `KLAUSSCC_CACHESIM` is set.
     pub(super) fn from_env() -> Option<Box<Self>> {
-        let profile = std::env::var("KLAUSSCC_PROFILE").ok().map(|prefix| Profile { prefix, map: Default::default(), pc: 0 });
+        let profile = std::env::var("KLAUSSCC_PROFILE").ok().map(|prefix| Profile {
+            prefix,
+            map: Default::default(),
+            pc: 0,
+            calls: Default::default(),
+        });
         let l2t = l2t::Timed::from_env();
         if profile.is_none() && l2t.is_none() {
             std::env::var_os("KLAUSSCC_CACHESIM")?;
         }
         // `KLAUSSCC_L2T=only`: the timed L2 model without the untimed
         // I-cache / L2 what-ifs (much faster).
-        let others = std::env::var("KLAUSSCC_L2T").map_or(true, |v| v != "only");
+        let others = std::env::var("KLAUSSCC_L2T").map_or(true, |v| v != "only")
+            && std::env::var("KLAUSSCC_CACHESIM").map_or(true, |v| v != "profile");
         let mut icaches = Vec::new();
         for &(size, ways, line, nl) in &[
             (8u32 << 10, 1usize, 16u32, false),
@@ -1080,9 +1122,12 @@ impl CacheSim {
         self.ddirty[slot] = false;
     }
 
-    /// A taken CALL pushes its return address.
-    pub(super) fn call(&mut self, ra: u32) {
+    /// A taken CALL at `pc` to `target` pushes its return address `ra`.
+    pub(super) fn call(&mut self, pc: u32, target: u32, ra: u32) {
         self.calls += 1;
+        if let Some(p) = self.profile.as_mut() {
+            *p.calls.entry((pc, target)).or_default() += 1;
+        }
         for r in &mut self.ras {
             r.push(ra);
         }
@@ -1188,7 +1233,11 @@ impl CacheSim {
             t.retire();
         }
         if let Some(p) = self.profile.as_mut() {
-            p.map.entry(p.pc).or_default().instr += 1;
+            let e = p.map.entry(p.pc).or_default();
+            e.instr += 1;
+            if e.first == 0 {
+                e.first = self.now.0 + 1;
+            }
         }
     }
 
@@ -1314,6 +1363,7 @@ impl CacheSim {
         self.dist.clear();
         if let Some(p) = self.profile.as_mut() {
             p.map.clear();
+            p.calls.clear();
         }
         self.reported = true;
     }

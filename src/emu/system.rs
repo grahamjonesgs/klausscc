@@ -413,6 +413,9 @@ impl Cpu {
                 if let Some(sim) = self.cachesim.as_mut() {
                     sim.uitlb_discard(3);
                 }
+                if let Some(sim) = self.tlbsim.get_mut() {
+                    sim.discard_all();
+                }
             }
             sr::EVEC => self.evec = value as u32 & !3,
             // Spec (confirmed in MMU_PLAN 424e236): §6.1 makes ECAUSE RW with GUARD in [8]; MTSR writes
@@ -442,6 +445,9 @@ impl Cpu {
                 self.reservation = None;
                 if let Some(sim) = self.cachesim.as_mut() {
                     sim.uitlb_discard(2);
+                }
+                if let Some(sim) = self.tlbsim.get_mut() {
+                    sim.discard_all();
                 }
             }
             sr::TLBVEC => self.tlbvec = value as u32 & !3,

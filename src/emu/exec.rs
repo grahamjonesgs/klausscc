@@ -803,7 +803,7 @@ impl Cpu {
             let slot = self.map_push()?;
             self.push(slot, u64::from(f.next));
             if let Some(sim) = self.cachesim.as_mut() {
-                sim.call(f.next);
+                sim.call(self.pc, target, f.next);
             }
         }
         Ok(Flow::Jump(target))
