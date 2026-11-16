@@ -381,9 +381,12 @@ struct DmaStats {
     /// clear): a driver that does this waits for a completion that never
     /// comes.
     ignored: u64,
-    /// DMA reads started with words left in the FIFO, which then reach DDR
-    /// ahead of the card's data.
+    /// DMA data commands started with words left in the FIFO, which then
+    /// reach DDR (a read) or the card (a write) ahead of the right data.
     unreset: u64,
+    /// DMA writes whose response failed after the engine fetched blocks
+    /// into the FIFO.
+    resp_err_fetches: u64,
 }
 
 /// The DMA master's view of DDR: the RAM, the coherence checker and the
@@ -483,7 +486,10 @@ impl SdController {
                 let _ = write!(line, ", {} data commands ignored while DMA_BUSY", s.ignored);
             }
             if s.unreset != 0 {
-                let _ = write!(line, ", {} DMA reads started with words in the FIFO", s.unreset);
+                let _ = write!(line, ", {} DMA data commands started with words in the FIFO", s.unreset);
+            }
+            if s.resp_err_fetches != 0 {
+                let _ = write!(line, ", {} DMA writes fetched blocks before a failed response", s.resp_err_fetches);
             }
             line
         })
@@ -1104,12 +1110,20 @@ impl SdController {
                     self.dma_stats.errors += 1;
                     return;
                 }
-                if cmd & CMD_WRITE == 0 && !self.fifo.is_empty() {
-                    // The engine moves whatever is at the FIFO's head.
+                if !self.fifo.is_empty() {
+                    // A read's engine moves whatever is at the FIFO's head
+                    // to DDR; a write's card side sends it to the card
+                    // (e.g. the block a write fetched before its response
+                    // failed).
                     self.dma_stats.unreset += 1;
                     if self.dma_stats.unreset <= DMA_NOTES_REPORTED {
+                        let (verb, whose) = if cmd & CMD_WRITE == 0 {
+                            ("read", "DDR ahead of the card's")
+                        } else {
+                            ("write", "the card ahead of the buffer's")
+                        };
                         eprintln!(
-                            "klausscc sd: DMA read CMD{index} started with {} words in the FIFO: they reach DDR ahead of the card's data (reset the FIFO first)",
+                            "klausscc sd: DMA {verb} CMD{index} started with {} words in the FIFO: they reach {whose} data (reset the FIFO first)",
                             self.fifo.len()
                         );
                     }
@@ -1169,8 +1183,31 @@ impl SdController {
                 }
                 self.phase = Some(phase);
                 self.pump();
-            } else if let Some(card) = self.card.as_mut() {
-                card.abandon_single();
+            } else {
+                if dma && cmd & CMD_WRITE != 0 {
+                    // A DMA write's engine starts fetching at command
+                    // accept, before the response: when the response
+                    // fails, DMA_BUSY is up and the FIFO holds what it
+                    // fetched by then (DDR is only read), from the block in
+                    // progress up to 4 KiB depending on the SD clock and
+                    // DDR; modelled at the most, as many blocks as the
+                    // count and the FIFO's room allow.  A read's moves
+                    // nothing.  The driver resets the FIFO before it
+                    // retries (SD_NATIVE_PLAN §8.4).
+                    self.engine = Some(Engine {
+                        write: true,
+                        words: block_words(self.blk_size()),
+                        count: (self.blk >> 16) as u16,
+                        blocks: 0,
+                        on: true,
+                        stalled: false,
+                        fail: fault == Some(FaultKind::DmaErr),
+                    });
+                    self.dma_stats.resp_err_fetches += 1;
+                }
+                if let Some(card) = self.card.as_mut() {
+                    card.abandon_single();
+                }
             }
         }
         self.status |= ST_CMD_DONE | errors;

@@ -2462,12 +2462,16 @@ fn dma_read_moves_whatever_is_in_the_fifo() {
     assert_eq!(status(&mut cpu) & ST_DMA_BUSY, 0);
     assert_eq!(rd(&mut cpu, SDM_FIFO), 8, "the block's tail");
     assert_eq!(pop(&mut cpu, 8), pattern(9)[448..]);
-    assert!(cpu.sd_dma_summary().unwrap().contains(", 1 DMA reads started with words in the FIFO"));
+    assert!(
+        cpu.sd_dma_summary()
+            .unwrap()
+            .contains(", 1 DMA data commands started with words in the FIFO")
+    );
     // With the FIFO reset first (as the kernel does): the block alone.
     dma_cmd(&mut cpu, 17, 9, 1, 512, BUF, false);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     assert_eq!(ram(&cpu, BUF, BLOCK), pattern(9));
-    assert!(cpu.sd_dma_summary().unwrap().contains(", 1 DMA reads started"));
+    assert!(cpu.sd_dma_summary().unwrap().contains(", 1 DMA data commands started"));
 }
 
 #[test]
@@ -2770,4 +2774,88 @@ fn dma_completion_wakes_a_waiting_program() {
     let result = cpu.run(1000, None);
     assert!(matches!(result.stop, crate::emu::StopReason::WaitForever(_)), "{:?}", result.stop);
     assert_ne!(status(&mut cpu) & ST_DATA_DONE, 0);
+}
+
+#[test]
+fn dma_write_response_error_leaves_a_block_in_the_fifo() {
+    // A DMA write's engine fetches from DDR at command accept: when the
+    // response then fails, what it fetched stays in the FIFO (modelled at
+    // the most: the count, or the FIFO's room), the engine ends, and DDR
+    // is only read.  A read's moves nothing.
+    // The driver resets the FIFO before it retries; one that doesn't sends
+    // the stale block to the card first (SD_NATIVE_PLAN §8.4).
+    let mut cpu = cpu_dma(false);
+    native_init(&mut cpu);
+    let data: Vec<u8> = (0..2 * BLOCK).map(|i| (i as u8).wrapping_mul(13) ^ 0x5A).collect();
+    fill(&mut cpu, BUF, &data);
+    fill(&mut cpu, BUF + 0x4000, &[0xEE; BLOCK]);
+    inject(&mut cpu, &["cmdto:24@1"]);
+    let setup = |cpu: &mut Cpu, addr: u64| {
+        wr(cpu, SDM_FIFO, FIFO_RESET);
+        wr(cpu, SDM_BLK, (1 << 16) | 512);
+        wr(cpu, SDM_DMA_ADDR, addr);
+        wr(cpu, SDM_CFG, CFG_4BIT | CFG_DMA_EN);
+    };
+    // A write: CMD_TIMEOUT, then DMA_BUSY drops with its block in the FIFO.
+    setup(&mut cpu, BUF);
+    let st = sdm(&mut cpu, 24, 50, R1, CMD_DATA | CMD_WRITE);
+    assert_ne!(st & ST_CMD_TIMEOUT, 0);
+    assert_eq!(st & ST_DATA_BUSY, 0, "no data phase");
+    until(&mut cpu, 100_000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 64, "the block");
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 512);
+    assert_eq!(status(&mut cpu) & (ST_DATA_DONE | ST_DATA_BUSY | ST_DMA_ERR), 0);
+    // Three blocks (CMD25): all three; open-ended: the FIFO's eight.
+    for (blocks, words) in [(3, 192), (0, 512)] {
+        inject(&mut cpu, &["cmdto:25@1"]);
+        wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+        wr(&mut cpu, SDM_BLK, (blocks << 16) | 512);
+        wr(&mut cpu, SDM_DMA_ADDR, BUF);
+        wr(&mut cpu, SDM_CFG, CFG_4BIT | CFG_DMA_EN);
+        assert_ne!(sdm(&mut cpu, 25, 50, R1, CMD_DATA | CMD_WRITE) & ST_CMD_TIMEOUT, 0);
+        until(&mut cpu, 100_000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+        assert_eq!(rd(&mut cpu, SDM_FIFO), words);
+        assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 8 * words);
+    }
+    inject(&mut cpu, &["cmdto:17@1", "cmdto:24@1"]);
+    // A read: nothing moves.
+    setup(&mut cpu, BUF + 0x2_0000);
+    let st = sdm(&mut cpu, 17, 50, R1, CMD_DATA);
+    assert_ne!(st & ST_CMD_TIMEOUT, 0);
+    tick(&mut cpu);
+    assert_eq!(status(&mut cpu) & ST_DMA_BUSY, 0);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 0);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 0x2_0000);
+    // Retried after a FIFO reset: the card gets the buffer.
+    setup(&mut cpu, BUF);
+    let st = sdm(&mut cpu, 24, 50, R1, CMD_DATA | CMD_WRITE);
+    assert_ne!(st & ST_CMD_TIMEOUT, 0, "the second injected timeout");
+    until(&mut cpu, 100_000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    dma_cmd(&mut cpu, 24, 50, 1, 512, BUF, true);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(card_bytes(&cpu)[50 * BLOCK..51 * BLOCK], data[..BLOCK]);
+    // Retried without one: the stale block goes to the card first.
+    let st = {
+        wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+        wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
+        wr(&mut cpu, SDM_DMA_ADDR, BUF + 0x4000);
+        wr(&mut cpu, SDM_CFG, CFG_4BIT | CFG_DMA_EN);
+        inject(&mut cpu, &["cmdto:24@1"]);
+        sdm(&mut cpu, 24, 51, R1, CMD_DATA | CMD_WRITE)
+    };
+    assert_ne!(st & ST_CMD_TIMEOUT, 0);
+    until(&mut cpu, 100_000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
+    wr(&mut cpu, SDM_DMA_ADDR, BUF + 512);
+    sdm_ok(&mut cpu, 24, 51, R1, CMD_DATA | CMD_WRITE);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(
+        card_bytes(&cpu)[51 * BLOCK..52 * BLOCK],
+        [0xEE; BLOCK][..],
+        "the failed attempt's block, not the buffer"
+    );
+    let summary = cpu.sd_dma_summary().unwrap();
+    assert!(summary.contains("1 DMA data commands started with words in the FIFO"), "{summary}");
+    assert!(summary.contains("5 DMA writes fetched blocks before a failed response"), "{summary}");
+    assert_eq!(problems(&cpu), 0);
 }
