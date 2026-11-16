@@ -17,7 +17,9 @@
 #                preprocessed compiles hello{,-O0}, deflate{,-O0},
 #                bzcompress, bzdecompress, cxx{,-O0} (the board's C++
 #                hello), eh (libc++ tests/cxx/eh.cpp, -std=c++23),
-#                stdlib-O0 (tests/cxx/stdlib.cpp); drv (the driver on
+#                stdlib-O0 (tests/cxx/stdlib.cpp: too big for the guest's
+#                128 MiB, it thrashes the page cache), terminate
+#                (tests/cxx/terminate.cpp, -std=c++23); drv (the driver on
 #                hello.c with the sysroot's headers); link (clang hello.o
 #                -o hello: the driver and ld.lld).  -O2 unless named.
 #   WARMUP       unmeasured runs first (default 1)
@@ -67,6 +69,7 @@ if [ ! -f $W/in/done ]; then
   CT=$RT/linux/userland/tests/cxx
   "$B/clang++" --target=$T --sysroot=$RT/linux-ws/dyn/sysroot -std=c++23 -I$CT -E $CT/eh.cpp -o eh.ii
   "$B/clang++" --target=$T --sysroot=$RT/linux-ws/dyn/sysroot -std=c++23 -I$CT -E $CT/stdlib.cpp -o stdlib.ii
+  "$B/clang++" --target=$T --sysroot=$RT/linux-ws/dyn/sysroot -std=c++23 -I$CT -E $CT/terminate.cpp -o terminate.ii
   "$B/clang" --target=$T --sysroot=$RT/linux-ws/sysroot -static -O2 "$RT/linux/userland/perfstat.c" -o perfstat
   "$B/clang" --target=$T --sysroot=$RT/linux-ws/sysroot -static -O2 "$HERE/../cachesim-ic/mntdata.c" -o mntdata
   cat > initramfs.list <<L
@@ -85,6 +88,7 @@ file /w/bzdecompress.i $W/in/bzdecompress.i 0644 0 0
 file /w/cxx.ii $W/in/cxx.ii 0644 0 0
 file /w/eh.ii $W/in/eh.ii 0644 0 0
 file /w/stdlib.ii $W/in/stdlib.ii 0644 0 0
+file /w/terminate.ii $W/in/terminate.ii 0644 0 0
 L
   [ -d $LINUX_BUILD ] || [ ! -d $RT/linux-ws/build-cachesim-ic ] || cp -a $RT/linux-ws/build-cachesim-ic $LINUX_BUILD
   (cd $RT && INITRAMFS_PROFILE=minish INITRAMFS_EXTRA="$W/in/initramfs.list" linux/build.sh defconfig &&
@@ -113,6 +117,7 @@ cmd() {
   cxx-O0) echo "$C++ --target=$T -O0 -c /w/cxx.ii -o /tmp/o.o" ;;
   eh) echo "$C++ --target=$T -std=c++23 -O2 -c /w/eh.ii -o /tmp/o.o" ;;
   stdlib-O0) echo "$C++ --target=$T -std=c++23 -O0 -c /w/stdlib.ii -o /tmp/o.o" ;;
+  terminate) echo "$C++ --target=$T -std=c++23 -O2 -c /w/terminate.ii -o /tmp/o.o" ;;
   drv) echo "$C -O2 -c /w/hello.c -o /tmp/h.o" ;;
   link) echo "$C /tmp/h.o -o /tmp/hello" ;;
   *) echo "unknown workload $1" >&2; exit 1 ;;

@@ -6,7 +6,7 @@ FA32 RR TLB, uITLB 4, the user text pages)."""
 import sys, re, os
 W = os.environ.get('W', os.path.expanduser('~/.cache/tlbord'))
 NAMES = ['hello', 'hello-O0', 'deflate', 'deflate-O0', 'bzcompress', 'bzdecompress', 'cxx', 'cxx-O0',
-         'eh', 'stdlib-O0', 'drv', 'link']
+         'eh', 'stdlib-O0', 'terminate', 'drv', 'link']
 def parse(tag, n):
     d = {'cfg': {}}
     try:
