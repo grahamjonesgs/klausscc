@@ -89,6 +89,10 @@ const CPU_FEATURES_MPU: u64 = (((MPU_REGIONS - 1) as u64) << 4) | 0b10;
 /// `SD_NATIVE_PLAN.md` §4.1): bit 21.  The release bitstream has none.
 const CPU_FEATURES_SD_NATIVE: u64 = 1 << 21;
 
+/// The `CPU_FEATURES` bit for the D-cache range clean/invalidate ops
+/// (`--dcache-range-ops`): bit 27.
+const CPU_FEATURES_DCACHE_RANGE: u64 = 1 << 27;
+
 /// The `CPU_FEATURES` bit for the hardware TLB walker (`MMU_PLAN.md`
 /// §11.8): bit 25.  The release bitstream has it (`--no-tlb-walker` models
 /// the ones before).
@@ -545,7 +549,8 @@ impl Cpu {
         let mpu = if self.has_mpu { CPU_FEATURES_MPU } else { 0 };
         let sd = if self.has_sd_native() { CPU_FEATURES_SD_NATIVE } else { 0 };
         let walker = if self.has_tlb_walker { CPU_FEATURES_TLB_WALKER } else { 0 };
-        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd | walker
+        let range = if self.cache_ctl.range_ops { CPU_FEATURES_DCACHE_RANGE } else { 0 };
+        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd | walker | range
     }
 
     /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`

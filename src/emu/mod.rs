@@ -67,6 +67,7 @@
 //! instruction makes goes through.
 
 mod cachesim;
+mod coherence;
 mod tlbsim;
 mod debug;
 mod exec;
@@ -139,12 +140,16 @@ pub struct EmulateResult {
     pub sd_error: Option<String>,
     /// The faults `--sd-fault` injected, if any were asked for.
     pub sd_faults: Option<String>,
+    /// With `--sd-dma`: what the DMA engine did and the coherence
+    /// checker's count.
+    pub sd_dma: Option<String>,
 }
 
 /// The optional hardware of an emulated machine.  The default is the
 /// Nexys A7 release bitstream with no SD card: no MPU, no native SD
 /// controller, 32 TLB entries and the hardware TLB walker.
 #[derive(Debug, Default)]
+#[expect(clippy::struct_excessive_bools, reason = "one per optional unit, as the CLI flags")]
 pub struct Hardware {
     /// The stage 2 MPU (`--mpu`, [`Cpu::set_has_mpu`]).
     pub mpu: bool,
@@ -160,6 +165,14 @@ pub struct Hardware {
     /// The native 4-bit SD controller (`--sd-native`): `SD_CTRL[18]`, the
     /// `SDM_*` registers, the source 2 cascade and `CPU_FEATURES[21]`.
     pub sd_native: bool,
+    /// The native controller's DMA engine (`--sd-dma`, with `sd_native`):
+    /// `SDM_DMA_ADDR`, `SDM_CFG.DMA_EN`, `DMA_BUSY`, `DMA_ERR`,
+    /// `SDM_CAPS[10]`, and the DMA coherence checker.
+    pub sd_dma: bool,
+    /// The cache range clean/invalidate ops (`--dcache-range-ops`):
+    /// `CACHE_OP_ADDR`, `CACHE_OP_LEN`, `CACHE_CTRL[6:4]` and
+    /// `CPU_FEATURES[27]`.
+    pub dcache_range_ops: bool,
 }
 
 /// A memory write, as the trace annotates it.
@@ -342,6 +355,11 @@ pub struct Cpu {
     /// The SD controller, if it is modelled (`--sd-image`, `--sd-native`);
     /// without it the SD window reads 0, as it always has.
     sd: Option<Box<SdController>>,
+    /// The cache controller's maintenance state (`CACHE_STATUS`, the range
+    /// ops).
+    cache_ctl: mmio::CacheCtl,
+    /// The DMA coherence checker (`--sd-dma`).
+    coherence: Option<Box<coherence::Coherence>>,
 }
 
 impl Cpu {
@@ -432,6 +450,8 @@ impl Cpu {
             cachesim: cachesim::CacheSim::from_env(),
             tlbsim: std::cell::RefCell::new(tlbsim::TlbSim::from_env()),
             sd: None,
+            cache_ctl: mmio::CacheCtl::default(),
+            coherence: None,
         }
     }
 
@@ -442,7 +462,22 @@ impl Cpu {
         self.set_has_mpu(hw.mpu);
         self.set_tlb_entries(hw.tlb_entries.unwrap_or(TLB_ENTRIES_DEFAULT));
         self.set_has_tlb_walker(!hw.no_tlb_walker);
-        self.sd = (hw.sd_card.is_some() || hw.sd_native).then(|| Box::new(SdController::new(hw.sd_card, hw.sd_native)));
+        let dma = hw.sd_native && hw.sd_dma;
+        self.sd = (hw.sd_card.is_some() || hw.sd_native).then(|| {
+            let mut sd = SdController::new(hw.sd_card, hw.sd_native, dma);
+            sd.set_ddr_size(self.mem.len() as u64);
+            Box::new(sd)
+        });
+        self.cache_ctl.range_ops = hw.dcache_range_ops;
+        self.coherence = dma.then(|| Box::new(coherence::Coherence::new(self.mem.len())));
+    }
+
+    /// With `--sd-dma`: the DMA engine's counts and the coherence checker's.
+    #[must_use]
+    pub fn sd_dma_summary(&self) -> Option<String> {
+        let sd = self.sd.as_ref()?.dma_summary()?;
+        let problems = self.coherence.as_ref().map_or(0, |c| c.problems());
+        Some(format!("{sd}; DMA coherence problems: {problems}"))
     }
 
     /// The native SD controller is modelled (`--sd-native`).
@@ -609,11 +644,23 @@ impl Cpu {
                 return None;
             }
             if self.irq_ready().is_none() {
-                if !self.timer_can_fire() {
-                    self.stop = Some(StopReason::WaitForever(self.pc));
-                    return None;
+                // Sleep to the next event: the timer, or an SD DMA block.
+                let dma_at = self.sd.as_ref().and_then(|sd| sd.dma_next_event());
+                let timer_at = self
+                    .timer_can_fire()
+                    .then(|| self.cycles + u64::from(self.timer_period.saturating_sub(self.timer_count)) + 1);
+                match (dma_at, timer_at) {
+                    (None, None) => {
+                        self.stop = Some(StopReason::WaitForever(self.pc));
+                        return None;
+                    }
+                    (Some(dma), timer) if timer.is_none_or(|t| dma < t) => {
+                        self.tick(dma.saturating_sub(self.cycles).max(1));
+                        // Still asleep after a block that raised nothing.
+                        self.irq_ready()?;
+                    }
+                    _ => self.skip_to_timer_expiry(),
                 }
-                self.skip_to_timer_expiry();
             }
         }
         if allow_irq && let Some(src) = self.irq_ready() {
@@ -643,6 +690,9 @@ impl Cpu {
             }
         };
         let word = words[0];
+        if let Some(coh) = self.coherence.as_deref_mut() {
+            coh.cpu_fetch(fetch_pa, 4 * (word >> 30).max(1));
+        }
         if let Some(sim) = self.cachesim.as_mut() {
             sim.fetch(pc, self.um, fetch_pa, (word >> 30).max(1), (self.instret, self.cycles));
         }
@@ -715,6 +765,7 @@ impl Cpu {
             tx_busy_writes: std::mem::take(&mut self.tx_busy_writes),
             sd_error: self.take_sd_error(),
             sd_faults: self.sd_fault_summary(),
+            sd_dma: self.sd_dma_summary(),
         }
     }
 }

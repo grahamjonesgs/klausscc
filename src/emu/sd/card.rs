@@ -470,6 +470,14 @@ impl SdCard {
         self.faults = Faults::new(specs);
     }
 
+    /// The controller starts a data command `index` by DMA: the
+    /// `--sd-fault` DMA kind to inject into it, if one hits (the engine's
+    /// faults live with the card's so that one `--sd-fault` list counts
+    /// them all).
+    pub(super) fn dma_fault(&mut self, index: u8) -> Option<FaultKind> {
+        self.faults.check(Event::DmaCommand(index))
+    }
+
     /// The faults injected so far, or `None` without `--sd-fault`.
     #[must_use]
     pub fn fault_summary(&self) -> Option<String> {

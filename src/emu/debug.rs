@@ -95,6 +95,11 @@ pub struct DebugRegs {
 impl Cpu {
     /// Record the first watchpoint the current instruction's data access hits.
     pub(super) fn note_access(&mut self, addr: u32, n: u32, access: Access) {
+        if let Some(coh) = self.coherence.as_deref_mut()
+            && !super::is_mmio(addr)
+        {
+            coh.cpu_access(addr, n, access == Access::Store);
+        }
         if let Some(sim) = self.cachesim.as_mut()
             && !super::is_mmio(addr)
         {
