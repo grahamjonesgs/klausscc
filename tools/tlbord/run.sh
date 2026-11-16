@@ -34,6 +34,9 @@
 #   cdsx.py DIR/cg-all.txt <nm of BIN> DIR/funcs-hot.txt ORDER
 #   relink.sh BIN2 -Wl,--symbol-ordering-file=ORDER -Wl,--no-warn-symbol-ordering
 #   report.py A|B TAG...   the tables
+# The body is one compound command, read whole before it runs: editing this
+# file while a run is in progress cannot change what that run does.
+{
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 RT=${RT:-/home/graham/Documents/src/klausscpu-runtime}
@@ -137,3 +140,5 @@ for n in $NAMES; do
 done
 wait
 rm -f $O/sd.img
+exit
+}
