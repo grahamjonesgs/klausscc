@@ -1588,16 +1588,20 @@ fn dma_multi_block_read() {
     assert_eq!(cpu.mmio_read(INT2_PENDING), 0);
     // SDM_DATA is not used: it reads 0 and pops nothing.
     assert_eq!(rd(&mut cpu, SDM_DATA), 0);
-    // Block by block: SDM_DMA_ADDR advances with the bytes moved, the
+    // Block by block: SDM_DMA_ADDR advances as a block's bursts land in
+    // DDR, a little after BLKDONE counts it (it lags while DMA_BUSY), the
     // FIFO stays empty, and DATA_DONE (and the interrupt) only comes when
     // the last byte is in DDR.
     let mut seen = 0;
+    let mut lagged = false;
     until(&mut cpu, 10_000_000, |cpu| {
         let done = status(cpu) & ST_DATA_DONE != 0;
         let blocks = rd(cpu, SDM_BLKDONE);
-        assert_eq!(rd(cpu, SDM_DMA_ADDR), BUF + blocks * 512);
+        let landed = (rd(cpu, SDM_DMA_ADDR) - BUF) / 512;
+        assert!(landed == blocks || landed + 1 == blocks, "{landed} of {blocks}");
+        lagged |= landed < blocks;
         assert_eq!(rd(cpu, SDM_FIFO), 0);
-        let n = blocks as usize;
+        let n = landed as usize;
         assert_eq!(ram(cpu, BUF, n * BLOCK), (20..20 + n).flat_map(pattern).collect::<Vec<_>>());
         assert_eq!(ram(cpu, BUF + n as u64 * 512, BLOCK), vec![0xEE; BLOCK], "nothing past the progress");
         assert_eq!(cpu.mmio_read(INT2_PENDING) == 2, done, "the interrupt is DATA_DONE");
@@ -1608,6 +1612,7 @@ fn dma_multi_block_read() {
         done
     });
     assert_eq!(seen, 10);
+    assert!(lagged, "a block counted and not yet in DDR");
     let st = status(&mut cpu);
     assert_eq!(st & (ST_DATA_BUSY | ST_DMA_BUSY | ST_DATA_DONE | ST_ERR_ANY), ST_DATA_DONE);
     assert_eq!(ram(&cpu, BUF, 10 * BLOCK), (20..30).flat_map(pattern).collect::<Vec<_>>());
@@ -1735,10 +1740,11 @@ fn dma_abort_by_dma_en_and_fifo_reset() {
     dma_cmd(&mut cpu, 18, 0, 16, 512, BUF, false);
     until(&mut cpu, 10_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 3);
     wr(&mut cpu, SDM_CFG, CFG_4BIT);
-    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 3 * 512);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 2 * 512, "lags while DMA_BUSY");
     assert_ne!(status(&mut cpu) & ST_DMA_BUSY, 0, "the burst in flight completes");
     let drained = until(&mut cpu, 1000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
     assert!(drained <= 300, "{drained}");
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 3 * 512, "final once DMA_BUSY dropped");
     pass(&mut cpu, 200_000);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 3 * 512);
     assert_eq!(ram(&cpu, BUF, 3 * BLOCK), (0..3).flat_map(pattern).collect::<Vec<_>>());
@@ -2218,7 +2224,7 @@ fn dma_coherence_checker() {
         cpu.mmio_write(CACHE_CTRL_REG, 0b10);
     }
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
-    assert_eq!(problems(&cpu), 8, "DMA write while MNT_BUSY");
+    assert_eq!(problems(&cpu), 9, "DMA writes (the first block's landing, the second) while MNT_BUSY");
     sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
     // Range ops issued after the DMA cover it; a whole FLUSH cleans all.
     cpu.mmio_write(CACHE_CTRL_REG, 0b100);
@@ -2228,7 +2234,16 @@ fn dma_coherence_checker() {
     until(&mut cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
     dma_cmd(&mut cpu, 24, 1, 1, 512, BUF, true);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
-    assert_eq!(problems(&cpu), 8);
+    assert_eq!(problems(&cpu), 9);
+    // A driver that invalidates (unmaps) before DMA_BUSY drops: the burst
+    // in flight lands after its invalidate, and the CPU's read is caught.
+    dma_cmd(&mut cpu, 17, 9, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 1);
+    assert_ne!(status(&mut cpu) & ST_DMA_BUSY, 0);
+    range(&mut cpu, BUF, 512, inv);
+    until(&mut cpu, 1000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    cpu_load(&mut cpu, BUF + 480);
+    assert_eq!(problems(&cpu), 10, "invalidated before DMA_BUSY dropped");
 }
 
 #[test]
@@ -2290,6 +2305,15 @@ fn dma_icache_coherence() {
     dma_cmd(&mut cpu, 24, 1, 1, 512, BUF + 0x4000, true);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     assert_eq!(problems(&cpu), 2, "and the line was cleaned");
+    // I-cache fills come through the D-cache: a DMA'd line with the
+    // I-cache dropped but no D-cache invalidate is still a problem.
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF + 0x8000, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b1000);
+    fetch(&mut cpu, BUF + 0x8000);
+    assert_eq!(problems(&cpu), 3, "fetch of a line stale on the D side");
+    fetch(&mut cpu, BUF + 0x8004);
+    assert_eq!(problems(&cpu), 3, "once per line");
 }
 
 #[test]

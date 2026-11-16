@@ -589,9 +589,11 @@ and a gap (a write also its CRC status and a short busy), the first one
 after the command and response, so the interrupt arrives later and a CPU
 in `WAIT` sleeps to it. A read stores each block into DDR once its CRC
 passed (a bad block never reaches DDR; `BLKDONE` counts good blocks
-received), and `DATA_DONE` and the drop of `DMA_BUSY` come when the last
-block's bursts are in DDR (44 cycles of DDR latency plus a cycle per
-32-byte burst). A write fetches blocks into the FIFO ahead of the card
+received). A block's bursts land in DDR 44 cycles of DDR latency plus a
+cycle per 32-byte burst after the card finished it (an abort lets them
+land); `SDM_DMA_ADDR` advances as they land, so while `DMA_BUSY` it may
+lag `BLKDONE` by a block, and `DATA_DONE` and the drop of `DMA_BUSY` come
+when the last block is in DDR. A write fetches blocks into the FIFO ahead of the card
 while it has room (never past size x count; open-ended at most the FIFO's
 4 KiB ahead), and `DMA_BUSY` drops with `DATA_DONE` when the card has
 programmed the last block. Blocks move as their FIFO words.
@@ -615,7 +617,8 @@ invalidated in the D-cache, and DMA writes not yet invalidated in the
 I-cache (`ICACHE_INV`, `RANGE_IINV`; a CPU store to the line also counts,
 as the I-cache snoops CPU stores). A DMA reading or overwriting a line the
 CPU dirtied, a CPU load or store of a line a DMA wrote, the CPU executing
-from a line a DMA wrote, a range invalidate without clean dropping a dirty
+from a line a DMA wrote without an I-cache invalidate or (I-cache fills
+come through the D-cache) a D-cache invalidate since, a range invalidate without clean dropping a dirty
 line, and a DMA reading or writing memory while a D-cache walk over its
 lines (whole-cache, or an overlapping range) is pending are
 each reported on stderr (`klausscc dma: coherence: ...`, the first 16) and

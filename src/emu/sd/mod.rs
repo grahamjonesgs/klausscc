@@ -312,6 +312,13 @@ pub(super) struct SdController {
     dma_addr: u64,
     /// `DMA_BUSY` stays up until this cycle after an abort.
     dma_drain_until: u64,
+    /// A read block on its way to DDR: the cycle its last burst lands, and
+    /// its bytes, for `SDM_DMA_ADDR`.  Until then DDR has the old bytes
+    /// and `SDM_DMA_ADDR` lags (it advances as the bursts land), so a
+    /// driver that reads it, or unmaps the buffer, before `DMA_BUSY`
+    /// drops sees a short count or gets a DMA write after its invalidate
+    /// (which the coherence checker reports at the CPU's next access).
+    dma_store: Option<(u64, Vec<u8>)>,
     /// `--sd-fault dmahang` / `dmastuck`: the engine is wedged, `DMA_BUSY`
     /// reads 1 until `SD_MODE` is cleared (hang) or for good (stuck).
     dma_wedged: Option<FaultKind>,
@@ -409,6 +416,7 @@ impl SdController {
             dma: native && dma,
             dma_addr: 0,
             dma_drain_until: 0,
+            dma_store: None,
             dma_wedged: None,
             ddr_size: u64::MAX,
             dma_stats: DmaStats::default(),
@@ -676,7 +684,7 @@ impl SdController {
     /// write too: spec v1.1 item 7), the drain after an abort or a
     /// `DMA_ERR`, or a wedged engine.
     fn dma_busy(&self, now: u64) -> bool {
-        self.dma_running() || now < self.dma_drain_until || self.dma_wedged.is_some()
+        self.dma_running() || now < self.dma_drain_until || self.dma_store.is_some() || self.dma_wedged.is_some()
     }
 
     /// `DMA_EN` = 0 or a FIFO reset during a DMA: the engine stops (after
@@ -719,14 +727,33 @@ impl SdController {
     /// for a write (at once), the card side's next block, or a read's
     /// `DATA_DONE`.  A stalled engine has none.
     pub(super) fn dma_next_event(&self) -> Option<u64> {
-        let phase = self.phase.filter(|p| p.dma && !p.stalled)?;
-        if let Some(at) = phase.done_at {
-            return Some(at);
+        let store = self.dma_store.as_ref().map(|&(at, _)| at);
+        let phase = self.phase.filter(|p| p.dma && !p.stalled).map(|phase| {
+            if let Some(at) = phase.done_at {
+                at
+            } else if phase.write && self.dma_fetch_wanted(&phase) {
+                0
+            } else {
+                phase.block_at
+            }
+        });
+        match (store, phase) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
         }
-        if phase.write && self.dma_fetch_wanted(&phase) {
-            return Some(0);
+    }
+
+    /// Land the read block on its way to DDR if its time (`now`) has come,
+    /// or at once with `None`; `SDM_DMA_ADDR` advances past it.  (It was
+    /// checked against DDR's end when it was received; the burst in flight
+    /// completes even after an abort.)
+    fn dma_land(&mut self, now: Option<u64>, bus: &mut DmaBus<'_>) {
+        if self.dma_store.as_ref().is_some_and(|&(at, _)| now.is_none_or(|now| at <= now))
+            && let Some((_, bytes)) = self.dma_store.take()
+        {
+            bus.write(self.dma_addr, &bytes);
+            self.dma_addr += bytes.len() as u64;
         }
-        Some(phase.block_at)
     }
 
     /// A DMA write has blocks left to fetch and the FIFO has room for one.
@@ -736,7 +763,9 @@ impl SdController {
 
     /// Run the DMA engine up to cycle `now`.
     pub(super) fn dma_advance(&mut self, now: u64, bus: &mut DmaBus<'_>) {
+        self.dma_land(Some(now), bus);
         while let Some(mut phase) = self.phase.filter(|p| p.dma && !p.stalled) {
+            self.dma_land(Some(now), bus);
             if let Some(at) = phase.done_at {
                 if at <= now {
                     self.status |= ST_DATA_DONE;
@@ -793,14 +822,16 @@ impl SdController {
                         // bad one never does), and only if all of it fits
                         // in DDR: else DMA_ERR, and the block stays in the
                         // FIFO, where the card side goes on (item 5).
+                        // Its bursts land in DDR dma_store_cycles later.
                         let bytes: Vec<u8> = block_to_words(&block).flat_map(u64::to_le_bytes).collect();
-                        if phase.fail || !self.dma_in_ddr(self.dma_addr, bytes.len() as u64) || !bus.write(self.dma_addr, &bytes) {
+                        self.dma_land(None, bus);
+                        if phase.fail || !self.dma_in_ddr(self.dma_addr, bytes.len() as u64) {
                             self.fifo.extend(block_to_words(&block));
                             self.blkdone = self.blkdone.wrapping_add(1);
                             self.dma_error(now);
                             return;
                         }
-                        self.dma_addr += bytes.len() as u64;
+                        self.dma_store = Some((phase.block_at + Self::dma_store_cycles(words), bytes));
                         self.blkdone = self.blkdone.wrapping_add(1);
                         self.dma_stats.read_blocks += 1;
                     }

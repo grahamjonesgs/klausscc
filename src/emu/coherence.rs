@@ -17,7 +17,8 @@
 //! - **istale**: a DMA wrote the line since the last I-cache invalidate that
 //!   covered it (`ICACHE_INV`, or a `RANGE_IINV`), and no CPU store has
 //!   touched it since (the I-cache snoops CPU stores, not DMA).  Executing
-//!   from it could run an old cached copy of the code.
+//!   from it could run an old cached copy of the code; so could executing a
+//!   line still **stale**, since I-cache fills come through the D-cache.
 //!
 //! A walk's effect counts when the walk completes (`MNT_BUSY` drops), not
 //! when `CACHE_CTRL` is written, and a clean covers only the CPU stores
@@ -178,8 +179,10 @@ impl Coherence {
     }
 
     /// The CPU fetches `n` bytes of instructions at physical `addr` (RAM).
+    /// I-cache fills come through the D-cache, so a line a DMA wrote must
+    /// have been invalidated on both sides.
     pub(super) fn cpu_fetch(&mut self, addr: u32, n: u32) {
-        if self.istale.count == 0 {
+        if self.istale.count == 0 && self.stale.count == 0 {
             return;
         }
         for line in self.span(u64::from(addr), u64::from(n.max(1))) {
@@ -187,6 +190,13 @@ impl Coherence {
                 self.istale.set(line, false);
                 self.report(&format!(
                     "CPU executes line 0x{:08X}, which a DMA wrote, without an I-cache invalidate since (it could run a stale cached copy)",
+                    line as u64 * LINE
+                ));
+            }
+            if self.stale.get(line) {
+                self.stale.set(line, false);
+                self.report(&format!(
+                    "CPU executes line 0x{:08X}, which a DMA wrote, without a D-cache invalidate since (the I-cache fill could take a stale D-cache copy)",
                     line as u64 * LINE
                 ));
             }
