@@ -18,7 +18,7 @@ for t in "${toks[@]}"; do
   -Xlinker) skip=1 ;;   # only --dependency-file follows it
   -o) args+=(-o "$OUT"); skip=1 ;;
   -Wl,-rpath,*) ;;
-  *) args+=("$t") ;;
+  *) args+=("${t//\"/}") ;;   # -fprofile-instr-use="file" (PGO builds) keeps literal quotes
   esac
 done
 "${args[@]}" "$@"

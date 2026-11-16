@@ -22,6 +22,9 @@ def func(pc):
             # a thunk to a local function names its section: .text.<sym>+0x0
             if n.startswith('.text.') and n.endswith('+0x0'):
                 n = n[len('.text.'):-len('+0x0')]
+                # PGO sections: .text.hot.<sym>, .text.unlikely.<sym>, ...
+                for pre in ('hot.', 'unlikely.', 'startup.', 'split.'):
+                    if n.startswith(pre): n = n[len(pre):]; break
         return n
     return None
 instr = collections.Counter(); first = {}

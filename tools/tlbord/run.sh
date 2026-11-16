@@ -22,6 +22,10 @@
 #                (tests/cxx/terminate.cpp, -std=c++23); drv (the driver on
 #                hello.c with the sysroot's headers); link (clang hello.o
 #                -o hello: the driver and ld.lld).  -O2 unless named.
+#   HASH=1       after the measured run print OBJHASH (two 64-bit hashes and the
+#                size) of the object /tmp/o.o in the .out file: object identity
+#                between binaries (objhash.c; host reference: the same source
+#                built natively, run on an object from the host clang)
 #   WARMUP       unmeasured runs first (default 1)
 #   TOOLCHAIN    the layout to copy (default runtime linux-ws/toolchain-stage)
 #   KLAUSSCC, W (default ~/.cache/tlbord), LINUX_BUILD (default
@@ -36,6 +40,19 @@
 #   cdsx.py DIR/cg-all.txt <nm of BIN> DIR/funcs-hot.txt ORDER
 #   relink.sh BIN2 -Wl,--symbol-ordering-file=ORDER -Wl,--no-warn-symbol-ordering
 #   report.py A|B TAG...   the tables
+# For a PGO and/or ThinLTO build (runtime linux/toolchain/build-native-llvm.sh
+# NATIVE_PROFDATA=default NATIVE_LTO=Thin) the same flow, with the order taken
+# from that binary itself: the old order's names and call graph no longer fit.
+# Build it WITHOUT NATIVE_ORDER, then PROFILE=1 LLVM=<its unstripped bin/llvm>
+# NAMES="hello hello-O0 deflate deflate-O0 bzcompress cxx cxx-O0 eh drv link"
+# (the ten training workloads of build-native-llvm.sh; not bzdecompress or
+# terminate, the held-out ones), symbolize.py (it maps the thunk sections
+# .text.hot.<sym> and .text.unlikely.<sym> PGO makes back to <sym>), gen-orders,
+# relink.sh (NATIVE_BUILD=<its build dir>; it drops the quotes of
+# -fprofile-instr-use="..."; a ThinLTO relink takes ~2.5 min), cdsx.py,
+# relink.sh again, then gzip the order to linux/toolchain/clang-order.txt.gz and
+# build with NATIVE_ORDER=1.  Measure with HASH=1 (no PROFILE) on the four
+# workloads deflate cxx bzdecompress terminate.
 # The body is one compound command, read whole before it runs: editing this
 # file while a run is in progress cannot change what that run does.
 {
@@ -100,6 +117,10 @@ TOOLCHAIN=${TOOLCHAIN:-$RT/linux-ws/toolchain-stage}
 rm -rf $O/sd; mkdir -p $O/sd
 cp -a $TOOLCHAIN/. $O/sd/
 rm -f $O/sd/bin/llvm; cp "$LLVM" $O/sd/bin/llvm; "$B/llvm-strip" --strip-all $O/sd/bin/llvm
+if [ -n "${HASH:-}" ]; then
+  [ -f $W/in/objhash ] || "$B/clang" --target=$T --sysroot=$RT/linux-ws/sysroot -static -O2 "$HERE/objhash.c" -o $W/in/objhash
+  cp $W/in/objhash $O/sd/bin/objhash
+fi
 ls -l $O/sd/bin/llvm
 rm -f $O/sd.img
 mke2fs -q -t ext4 -d $O/sd -L tlbord $O/sd.img 256M
@@ -130,6 +151,7 @@ for n in $NAMES; do
     [ $n != link ] || cmd drv
     for _ in $(seq ${WARMUP:-1}); do cmd $n; done
     echo "/bin/perfstat $(cmd $n)"
+    [ -z "${HASH:-}" ] || echo "/data/bin/objhash /tmp/o.o"
     echo "echo TO-DONE-$n"
   } > $O/$n.in
   cp $O/sd.img $O/sd-$n.img
