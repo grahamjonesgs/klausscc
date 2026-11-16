@@ -358,6 +358,37 @@ impl ICacheD {
         self.valid.fill(0);
     }
 
+    /// `RANGE_IINV`: drop the lines of `[pa, pa + len)`, calling `dropped`
+    /// with the slot of each.
+    fn drop_range(&mut self, pa: u64, len: u64, mut dropped: impl FnMut(usize)) {
+        if len == 0 {
+            return;
+        }
+        let (first, last) = (pa >> self.line_bits, (pa + len - 1) >> self.line_bits);
+        let lines = (last - first).saturating_add(1);
+        let slots = self.tags.len();
+        if lines >= u64::from(self.sets) * self.ways as u64 {
+            // Covers the cache: every slot whose line is in the range (a
+            // range this long is an ICACHE_INV in the RTL anyway).
+            for i in 0..slots {
+                let line = self.tags[i] & !VALID;
+                if self.tags[i] != 0 && (first..=last).contains(&line) {
+                    self.tags[i] = 0;
+                    self.valid[i] = 0;
+                    dropped(i);
+                }
+            }
+            return;
+        }
+        for line in first..=last {
+            if let Some(i) = self.slot_of(line) {
+                self.tags[i] = 0;
+                self.valid[i] = 0;
+                dropped(i);
+            }
+        }
+    }
+
     fn clear(&mut self) {
         self.accesses = 0;
         self.misses = 0;
@@ -570,6 +601,19 @@ impl Nlb {
                 self.pf_unused += 1;
             }
         }
+    }
+
+    /// `RANGE_IINV`: the I-cache drops the range's lines; the NLB and the
+    /// window are emptied whole, as the core empties them (and its BTIC).
+    pub(super) fn range_inv(&mut self, pa: u64, len: u64) {
+        let (slots, unused) = (&mut self.pf_slot, &mut self.pf_unused);
+        self.c.drop_range(pa, len, |i| {
+            if std::mem::take(&mut slots[i]) {
+                *unused += 1;
+            }
+        });
+        self.ent = [NlbEnt::default(); 2];
+        self.cur = None;
     }
 
     fn clear(&mut self) {
@@ -1293,6 +1337,22 @@ impl CacheSim {
         }
     }
 
+    /// A write to `CACHE_CTRL` with `RANGE_IINV` (bit 6) over `[pa, pa +
+    /// len)`: the I-cache drops those lines; every other fetch-side copy
+    /// (the NLB, the window) is emptied whole, as for `ICACHE_INV`.
+    pub(super) fn icache_range_inv(&mut self, pa: u64, len: u64) {
+        self.icache_inv += 1;
+        if let Some(t) = self.l2t.as_mut() {
+            t.icache_range_inv(pa, len);
+        }
+        for c in &mut self.icd {
+            c.drop_range(pa, len, |_| {});
+        }
+        for n in &mut self.nlb {
+            n.range_inv(pa, len);
+        }
+    }
+
     /// The micro-ITLB is emptied (`kind`: 0 TLBWI, 1 TLBINV, 2 ASID, 3
     /// STATUS, 4 a walker refill, which is a TLB write as TLBWI's is).
     pub(super) fn uitlb_discard(&mut self, kind: usize) {
@@ -1662,6 +1722,25 @@ mod tests {
         assert!(c.access(0x1000)); // a store dropped the line
         c.flush();
         assert!(c.access(0x1000));
+    }
+
+    /// `RANGE_IINV` drops only the range's lines from the I-cache (the NLB
+    /// and window empty whole, in [`Nlb::range_inv`]).
+    #[test]
+    fn icache_range_inv_drops_only_the_range() {
+        let mut c = ICacheD::new(16 << 10, 2, 16, false, false);
+        for pa in (0x1000..0x1100).step_by(16) {
+            c.access(pa);
+            c.access(pa + 8);
+        }
+        let mut dropped = 0;
+        c.drop_range(0x1040, 0x21, |_| dropped += 1);
+        assert_eq!(dropped, 3, "lines 0x1040, 0x1050, 0x1060");
+        assert!(!c.access(0x1030) && !c.access(0x1070), "neighbours kept");
+        assert!(c.access(0x1040) && c.access(0x1060));
+        // A range as long as the cache: every line of it, none other.
+        c.drop_range(0x1080, 1 << 20, |_| {});
+        assert!(!c.access(0x1000) && c.access(0x1080) && c.access(0x10F0));
     }
 
     /// The NLB serves a sequential line cross only from a line the I-cache

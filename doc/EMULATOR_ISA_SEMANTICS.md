@@ -572,31 +572,43 @@ response types 5-7 act as 0; `SDM_ARG` keeps 32 bits.
 ### SD DMA (`--sd-dma`)
 
 `--sd-dma` (needs `--sd-native`) adds the DMA engine of the klaussCPU SD
-DMA spec v1.2, which no bitstream has yet: `SDM_DMA_ADDR` (`+0x150`,
-64-bit, `[2:0]` read 0), `SDM_CFG[16]` `DMA_EN` (`[1]` and `[7:4]` are the
-high-speed edge and phase, reserved here), `SDM_STATUS[5]` `DMA_BUSY`
-(live) and `[27]` `DMA_ERR` (sticky, W1C, in `ERR_ANY` and
-`SDM_IRQ_EN[27]`), and `SDM_CAPS[10]`. Without it those read 0 as on
-today's bitstream. `DMA_EN` is sampled when `SDM_CMD` is written: a data
-command written while it is 1 moves its blocks between the card and DDR at
-`SDM_DMA_ADDR`, which advances as the bytes move (and is always the first
-byte not transferred). During such a phase `SDM_DATA` loads read 0,
-stores are dropped and set `FIFO_ERR`, `FIFO_THRESH` reads 0, and writes
-to `SDM_DMA_ADDR` are ignored (it reads back the live address). Unlike
-PIO, the data phase takes modelled time: each block takes its bits on the
-bus (1 or 4 per SD clock, `SD_CTRL[15:0]`) plus start bit, CRC16, end bit
-and a gap (a write also its CRC status and a short busy), the first one
-after the command and response, so the interrupt arrives later and a CPU
-in `WAIT` sleeps to it. A read stores each block into DDR once its CRC
-passed (a bad block never reaches DDR; `BLKDONE` counts good blocks
-received). A block's bursts land in DDR 44 cycles of DDR latency plus a
-cycle per 32-byte burst after the card finished it (an abort lets them
-land); `SDM_DMA_ADDR` advances as they land, so while `DMA_BUSY` it may
-lag `BLKDONE` by a block, and `DATA_DONE` and the drop of `DMA_BUSY` come
-when the last block is in DDR. A write fetches blocks into the FIFO ahead of the card
+DMA spec v1.2, modelled on its RTL (branch `sddma`, `SD_NATIVE_PLAN.md`
+§8): `SDM_DMA_ADDR` (`+0x150`, 64-bit, `[2:0]` read 0), `SDM_CFG[16]`
+`DMA_EN` (`[1]` and `[7:4]` are the high-speed edge and phase, reserved
+here), `SDM_STATUS[5]` `DMA_BUSY` (live) and `[27]` `DMA_ERR` (sticky,
+W1C, in `ERR_ANY` and `SDM_IRQ_EN[27]`), and `SDM_CAPS[10]` (`SDM_CAPS` =
+`0x0008_0501`). Without it those read 0 as on today's bitstream.
+`DMA_EN` is sampled when `SDM_CMD` is written: a data command written while
+it is 1 moves its blocks between the card and DDR at `SDM_DMA_ADDR`
+through the FIFO, and `SDM_DMA_ADDR` advances as they move (it is always
+the first byte not transferred). Unlike PIO, the data phase takes modelled
+time: each block takes its bits on the bus (1 or 4 per SD clock,
+`SD_CTRL[15:0]`) plus start bit, CRC16, end bit and a gap (a write also its
+CRC status and a short busy), the first one after the command and
+response, so the interrupt arrives later and a CPU in `WAIT` sleeps to it.
+
+The card side of a read puts each block in the FIFO once its CRC passed (a
+bad block never gets there; `BLKDONE` counts good blocks received), and the
+engine moves blocks from the FIFO's head to DDR one at a time, each landing
+44 cycles of DDR latency plus a cycle per 32 bytes after it started. The
+FIFO must be empty when the command is written: words left in it reach DDR
+ahead of the card's data (the emulator notes this on stderr and counts it,
+`N DMA reads started with words in the FIFO`). A counted read's
+`DATA_DONE` (and the end of `DATA_BUSY`) comes when the engine has moved
+its last block. A write fetches blocks into the FIFO ahead of the card
 while it has room (never past size x count; open-ended at most the FIFO's
 4 KiB ahead), and `DMA_BUSY` drops with `DATA_DONE` when the card has
-programmed the last block. Blocks move as their FIFO words.
+programmed the last block.
+
+`DMA_BUSY` is the engine's phase or a block still on its way to DDR (or a
+wedged engine, below); 0 means every DMA write is in DDR and none will be
+issued. While it is 1, `SDM_DATA` loads read 0 and pop nothing, stores are
+dropped and set `FIFO_ERR`, `FIFO_THRESH` reads 0, writes to `SDM_DMA_ADDR`
+are ignored (it reads back the live address), and a data command is
+ignored entirely, also with `DATA_BUSY` clear (after a CMD12 or an abort):
+the emulator says so on stderr and counts it (`N data commands ignored
+while DMA_BUSY`), since a driver doing it waits for a completion that never
+comes.
 
 `DMA_ERR`: a block size not a multiple of 8, or a counted transfer
 (`SDM_BLK` count != 0) whose `[ADDR, ADDR + size x count)` passes the end
@@ -604,45 +616,67 @@ of DDR, is refused when `SDM_CMD` is written: `DMA_ERR`, no card command
 (no `CMD_DONE`), nothing moves. An open-ended DMA checks each block before
 it moves; on failure the DMA ends (nothing of that block reaches DDR; a
 read block stays in the FIFO) but the card's data phase goes on through
-the FIFO until it is full or CMD12. `DMA_EN` = 0 or `SDM_FIFO[31]` during
-a DMA stops the engine (`DMA_BUSY` reads 1 for 200 more cycles) and the
-phase goes on as PIO until CMD12. A CMD12 during a DMA ends the phase
-(`DMA_BUSY` drops 44 cycles later); so does clearing `SD_MODE`, which
-resets the native engine. A card error ends the phase as without DMA.
+the FIFO until it is full or CMD12. Ends and aborts: `DMA_EN` = 0, or
+clearing `SD_MODE`, lets the block on its way to DDR land and stops the
+engine (`DMA_BUSY` drops then); blocks the card side committed that the
+engine had not started stay in the FIFO for PIO, and the card side goes on
+as PIO (clearing `SD_MODE` abandons it instead); a counted read whose card
+side was done gets `DATA_DONE` at once. `SDM_FIFO[31]` stops the engine
+after the 16-byte DDR transaction in flight (the rest of the block is
+dropped; `SDM_DMA_ADDR` says how far it got). A CMD12 or a card error ends
+the card side at once; a read's engine first moves the whole blocks still
+in the FIFO, a write's stops.
 
 With `--sd-dma` the emulator also checks DMA coherence, since it has no
-caches: per 32-byte line it tracks CPU stores not yet cleaned (by
-`CACHE_CTRL` FLUSH or INVALIDATE or a range clean), DMA writes not yet
+caches: per 32-byte line it tracks CPU stores not yet cleaned (by any walk
+that writes dirty lines back: FLUSH, INVALIDATE, `RANGE_CLEAN` or
+`RANGE_INV`), DMA writes since the line's last clean, DMA writes not yet
 invalidated in the D-cache, and DMA writes not yet invalidated in the
 I-cache (`ICACHE_INV`, `RANGE_IINV`; a CPU store to the line also counts,
 as the I-cache snoops CPU stores). A DMA reading or overwriting a line the
-CPU dirtied, a CPU load or store of a line a DMA wrote, the CPU executing
-from a line a DMA wrote without an I-cache invalidate or (I-cache fills
-come through the D-cache) a D-cache invalidate since, a range invalidate without clean dropping a dirty
-line, and a DMA reading or writing memory while a D-cache walk over its
-lines (whole-cache, or an overlapping range) is pending are
-each reported on stderr (`klausscc dma: coherence: ...`, the first 16) and
+CPU dirtied, a walk writing a dirty line back over data a DMA wrote since
+the line's last clean (the device's data is lost), a CPU load or store of a
+line a DMA wrote, the CPU executing from a line a DMA wrote without an
+I-cache invalidate or (I-cache fills come through the D-cache) a D-cache
+invalidate since, and a DMA reading or writing memory while a D-cache walk
+over its lines (whole-cache, or an overlapping range) is pending are each
+reported on stderr (`klausscc dma: coherence: ...`, the first 16) and
 counted in the run's summary (`SD DMA: ... DMA coherence problems: N`). A
-walk's effect counts when it completes, and covers only the CPU stores
-before its `CACHE_CTRL` write.
+D-cache walk's effect counts when it completes, and covers only the CPU
+stores before its `CACHE_CTRL` write; an I-cache one counts at once.
 
 ### Cache maintenance
 
 `CACHE_CTRL` (`0xF005_0000`) FLUSH `[1]` and INVALIDATE `[2]` change no
 data (there are no caches) but keep `CACHE_STATUS[0]` `MNT_BUSY` up for
-2048 cycles plus 10 per dirty line (dirty as the `--sd-dma` checker sees
-it, at most 2048 lines; 0 without it), a walk asked for during one queuing
-behind it. `ICACHE_INV` `[3]` is a 64-cycle sweep, done at once.
-`--dcache-range-ops` adds the range ops (spec v1.2, no bitstream yet;
-`CPU_FEATURES[27]`): `CACHE_OP_ADDR` (`0x30`; `[4:0]` read 0),
-`CACHE_OP_LEN` (`0x38`, `[31:0]`, 0 = no-op), `CACHE_CTRL[4]`
-`RANGE_CLEAN`, `[5]` `RANGE_INV` (both = clean + invalidate) and `[6]`
-`RANGE_IINV` (the same lines dropped from the I-cache), whose walks cover
-ceil(LEN / 32) lines from `ADDR` and keep `MNT_BUSY` up 8 + 2 cycles per
-line (+ 10 per dirty line). An op takes `ADDR` and `LEN` when it is
-accepted, so one queued behind a walk keeps the values of its `CACHE_CTRL`
-write. FLUSH or INVALIDATE with range bits runs the whole-cache op only;
-`ICACHE_INV` with range bits does both. It is independent of `--sd-dma`.
+the walk's time, 4,097 cycles plus 3 per dirty line (dirty as the
+`--sd-dma` checker sees it, at most 2048 lines; 0 without it; one walk: the
+RTL's double walk is being fixed). `ICACHE_INV` `[3]` is a 64-cycle sweep,
+coherent at once and not in `MNT_BUSY`. `--dcache-range-ops` adds the
+range ops (spec v1.2, branch `sddma`; `CPU_FEATURES[27]`): `CACHE_OP_ADDR`
+(`0x30`, a 32-bit register: the upper half of a store is dropped; `[4:0]`
+read 0), `CACHE_OP_LEN` (`0x38`, `[31:0]`, 0 = no-op), `CACHE_CTRL[4]`
+`RANGE_CLEAN` (write the range's dirty lines back), `[5]` `RANGE_INV`
+(write them back, then drop the range's lines; with `[4]` the same) and
+`[6]` `RANGE_IINV` (drop the range's lines from the I-cache), over
+ceil(LEN / 32) lines from `ADDR`. A D-cache range walk keeps `MNT_BUSY` up
+1 + 2 cycles a set for min(n, 1024) sets, + 6 for a set with a dirty line
+of the range (+ 3 for a second). `RANGE_IINV` is coherent at once and
+keeps `MNT_BUSY` up min(n, 64) cycles (64 if it meets a sweep running or
+covers the 2048-line I-cache, when it sweeps everything; the cache
+simulator drops the range's lines and empties the next-line buffer whole).
+An op takes `ADDR` and `LEN` when it is accepted. The queue is the RTL's:
+one D-cache walk runs, and one whole-cache request or one range op waits; a
+range op that finds a range op or a whole-cache walk waiting, or that
+covers more than 2048 lines, becomes a whole-cache walk (an INVALIDATE if
+either op invalidates), and a whole-cache request absorbs a waiting range
+op the same way (the summary counts conversions: `N range ops made
+whole-cache walks`). FLUSH or INVALIDATE with `[5:4]` runs the whole-cache
+op only; `RANGE_IINV` with them, or `ICACHE_INV` with `[5:4]`, does both.
+It is independent of `--sd-dma`. `CPU_FEATURES` with these options gains
+`[21]` (`--sd-native`) and `[27]` only: `0x0AE0_200D` with all three, the
+sddma bitstream's `0x0FF0_200D` less the TRNG, `ETH_RX_SLOTS` and L2 bits,
+as without them.
 
 ### Fault injection
 

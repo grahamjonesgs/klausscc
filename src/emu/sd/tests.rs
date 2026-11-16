@@ -1542,8 +1542,14 @@ fn dma_registers_and_caps() {
     assert_eq!(cpu.mmio_read(CACHE_OP_LEN_REG), 0);
     assert!(cpu.sd_dma_summary().is_none());
 
-    // With it: SDM_CAPS[10], the version still 1.
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x02E0_200D, "--sd-native");
+    // With it: SDM_CAPS[10], the version still 1.  CPU_FEATURES with
+    // --sd-native --sd-dma --dcache-range-ops: the sddma bitstream's
+    // 0x0FF0_200D less [20] TRNG, [24] ETH_RX_SLOTS and [26] L2, which
+    // the emulator does not model (as without these options).
+    assert_eq!(cpu_dma(true).mmio_read(CPU_FEATURES), 0x0AE0_200D);
     let mut cpu = cpu_dma(false);
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x02E0_200D, "--sd-dma alone adds no CPU_FEATURES bit");
     assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0008_0501);
     assert_eq!(rd(&mut cpu, SDM_CAPS) & 0xFF, 1);
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & (1 << 27), 0, "the range ops are a separate option");
@@ -1735,8 +1741,8 @@ fn dma_abort_by_dma_en_and_fifo_reset() {
     let rca = u32::from(RCA) << 16;
     fill(&mut cpu, BUF, &[0xEE; 16 * BLOCK]);
     // A read of 16 blocks, aborted by DMA_EN = 0 after three: the address
-    // holds the next one, DMA_BUSY drops within a few hundred cycles, and
-    // nothing more reaches DDR.
+    // holds the next one, DMA_BUSY drops once the block in progress has
+    // landed, and nothing more reaches DDR.
     dma_cmd(&mut cpu, 18, 0, 16, 512, BUF, false);
     until(&mut cpu, 10_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 3);
     wr(&mut cpu, SDM_CFG, CFG_4BIT);
@@ -1756,14 +1762,23 @@ fn dma_abort_by_dma_en_and_fifo_reset() {
     assert_eq!(status(&mut cpu) & (ST_DATA_BUSY | ST_DMA_BUSY | ST_ERR_ANY), 0);
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
 
-    // A read aborted by SDM_FIFO[31].
+    // A read aborted by SDM_FIFO[31] while its second block is on its way
+    // to DDR: the engine stops after the 16-byte transaction in flight, so
+    // part of the block lands (SDM_DMA_ADDR says how much) and no more.
+    fill(&mut cpu, BUF, &[0xEE; 16 * BLOCK]);
     dma_cmd(&mut cpu, 18, 0, 16, 512, BUF, false);
     until(&mut cpu, 10_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 2);
     wr(&mut cpu, SDM_FIFO, FIFO_RESET);
     assert_ne!(status(&mut cpu) & ST_DMA_BUSY, 0);
     until(&mut cpu, 1000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
     pass(&mut cpu, 100_000);
-    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 2 * 512);
+    let moved = rd(&mut cpu, SDM_DMA_ADDR) - BUF - 512;
+    assert!(moved > 0 && moved < 512 && moved.is_multiple_of(16), "{moved}");
+    assert_eq!(
+        ram(&cpu, BUF, 512 + moved as usize),
+        [pattern(0), pattern(1)[..moved as usize].to_vec()].concat()
+    );
+    assert_eq!(ram(&cpu, BUF + 512 + moved, 512), vec![0xEE; 512], "the rest dropped");
     sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
 
@@ -1953,7 +1968,8 @@ fn dma_card_errors_and_odd_blocks() {
 #[test]
 fn dcache_range_ops_and_mnt_busy() {
     // Without the option: CPU_FEATURES[27] = 0, the registers read 0,
-    // CACHE_CTRL[5:4] do nothing; FLUSH still keeps MNT_BUSY up for its walk.
+    // CACHE_CTRL[5:4] do nothing; FLUSH still keeps MNT_BUSY up for its
+    // walk, 4,097 cycles (once: the RTL's double walk is being fixed).
     let mut cpu = cpu(false, false);
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & (1 << 27), 0);
     assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 0);
@@ -1962,8 +1978,10 @@ fn dcache_range_ops_and_mnt_busy() {
     assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 0, "no range ops");
     cpu.mmio_write(CACHE_CTRL_REG, 0b10);
     assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1, "FLUSH walks");
-    pass(&mut cpu, 2048);
-    assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 0);
+    pass(&mut cpu, 4096);
+    assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1);
+    cpu.tick(1);
+    assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 0, "4,097 cycles");
 
     let mut cpu = cpu_dma(true);
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & (1 << 27), 1 << 27);
@@ -1975,39 +1993,26 @@ fn dcache_range_ops_and_mnt_busy() {
     assert_eq!(cpu.mmio_read(CACHE_OP_LEN_REG), 0x4000);
     cpu.mmio_write(CACHE_CTRL_REG, 0b01_0000);
     assert_eq!(cpu.mmio_read(CACHE_CTRL_REG), 0);
-    // MNT_BUSY for the walk: 0x4000 bytes = 512 lines, 8 + 2 per line.
     assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1);
     let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
-    assert!((1032..1050).contains(&busy), "{busy}");
+    // 0x4000 bytes = 512 lines, nothing dirty: 1 + 2 per set.
+    assert!((1025..1025 + 16).contains(&busy), "{busy}");
     // LEN = 0 is a no-op.
     cpu.mmio_write(CACHE_OP_LEN_REG, 0);
     cpu.mmio_write(CACHE_CTRL_REG, 0b11_0000);
     assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 0);
-    // An op asked for during a walk queues behind it: MNT_BUSY covers both.
-    cpu.mmio_write(CACHE_OP_LEN_REG, 0x4000);
-    cpu.mmio_write(CACHE_CTRL_REG, 0b10_0000);
-    cpu.mmio_write(CACHE_CTRL_REG, 0b10);
-    let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
-    assert!((3080..3100).contains(&busy), "{busy}");
     // FLUSH with range bits: the whole-cache op only.
+    cpu.mmio_write(CACHE_OP_LEN_REG, 0x4000);
     cpu.mmio_write(CACHE_CTRL_REG, 0b11_0010);
     let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
-    assert!((2048..2064).contains(&busy), "{busy}");
-    // A dirty line costs ~10 more cycles to walk.
-    for k in 0..20 {
-        cpu_store(&mut cpu, BUF + 32 * k, k);
-    }
-    cpu.mmio_write(CACHE_OP_ADDR_REG, BUF);
-    cpu.mmio_write(CACHE_OP_LEN_REG, 0x4000);
-    cpu.mmio_write(CACHE_CTRL_REG, 0b01_0000);
-    let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
-    assert!((1232..1250).contains(&busy), "{busy}");
+    assert!((4097..4097 + 16).contains(&busy), "{busy}");
+    // A whole-cache walk: + 3 per dirty line.
     for k in 0..20 {
         cpu_store(&mut cpu, BUF + 32 * k, k);
     }
     cpu.mmio_write(CACHE_CTRL_REG, 0b10);
     let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
-    assert!((2248..2264).contains(&busy), "{busy}");
+    assert!((4157..4157 + 16).contains(&busy), "{busy}");
     // ADDR / LEN are copied when an op is accepted: rewriting them while
     // it is queued (legal) does not change it.  Lines A and B dirty; a
     // clean of A queued behind a FLUSH; then the registers point at B.
@@ -2028,6 +2033,268 @@ fn dcache_range_ops_and_mnt_busy() {
     dma_cmd(&mut cpu, 24, 1, 1, 512, b, true);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     assert_eq!(problems(&cpu), 1, "B was not");
+    assert!(!cpu.sd_dma_summary().unwrap().contains("whole-cache"), "no conversion so far");
+}
+
+/// Wait for `MNT_BUSY` to drop, then time `ctrl` over `[addr, + len)`.
+fn walk_cycles(cpu: &mut Cpu, addr: u64, len: u64, ctrl: u64) -> u64 {
+    until(cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, addr);
+    cpu.mmio_write(CACHE_OP_LEN_REG, len);
+    cpu.mmio_write(CACHE_CTRL_REG, ctrl);
+    let start = cpu.cycles;
+    while cpu.mmio_read(CACHE_STATUS_REG) != 0 {
+        cpu.tick(1);
+    }
+    cpu.cycles - start
+}
+
+#[test]
+fn range_walk_timings() {
+    // HW_PERF_PLAN.md §7 results (tb_soc): 1 + 2 per set for min(n, 1024)
+    // sets, + 6 for a set with a dirty line of the range (+ 3 for a
+    // second one); RANGE_INV costs the same as RANGE_CLEAN.
+    let mut cpu = Cpu::with_mem_size(&[0; 0x100], CODE_BASE, 1 << 20);
+    cpu.install(Hardware {
+        sd_card: Some(SdCard::from_bytes(image()).unwrap()),
+        sd_native: true,
+        sd_dma: true,
+        dcache_range_ops: true,
+        ..Hardware::default()
+    });
+    let base = 0x1_0000;
+    let dirty = |cpu: &mut Cpu, lines: u64| {
+        for k in 0..lines {
+            cpu_store(cpu, base + 32 * k, k);
+        }
+    };
+    assert_eq!(walk_cycles(&mut cpu, base, 32 * 32, 0b01_0000), 65, "32 lines clean");
+    dirty(&mut cpu, 32);
+    assert_eq!(walk_cycles(&mut cpu, base, 32 * 32, 0b10_0000), 257, "32 lines dirty, RANGE_INV");
+    assert_eq!(walk_cycles(&mut cpu, base, 32 * 1024, 0b01_0000), 2049, "1,024 lines clean");
+    dirty(&mut cpu, 1024);
+    assert_eq!(walk_cycles(&mut cpu, base, 32 * 1024, 0b01_0000), 8193, "1,024 lines dirty");
+    // 1,536 lines: 1,024 sets, 512 of them with two range lines.
+    dirty(&mut cpu, 1536);
+    assert_eq!(walk_cycles(&mut cpu, base, 32 * 1536, 0b11_0000), 1 + 2048 + 6 * 1024 + 3 * 512);
+    // A dirty line outside the range costs nothing; one line of a range
+    // that starts mid-line ([4:0] read 0) is the line it starts in.
+    cpu_store(&mut cpu, base + 0x8000, 1);
+    assert_eq!(walk_cycles(&mut cpu, base, 64, 0b01_0000), 5);
+    assert_eq!(walk_cycles(&mut cpu, base + 0x8000 + 31, 1, 0b01_0000), 9);
+    // The whole cache: 4,097 + 3 per dirty line.
+    dirty(&mut cpu, 100);
+    assert_eq!(walk_cycles(&mut cpu, 0, 0, 0b100), 4097 + 300);
+    // RANGE_IINV: min(n, 64) cycles; a range of the I-cache's size or more,
+    // or one that meets a sweep running, sweeps everything (64).
+    assert_eq!(walk_cycles(&mut cpu, base, 32, 0b100_0000), 1);
+    assert_eq!(walk_cycles(&mut cpu, base, 32 * 32, 0b100_0000), 32);
+    assert_eq!(walk_cycles(&mut cpu, base, 4096, 0b100_0000), 64, "4 KiB: 128 lines");
+    assert_eq!(walk_cycles(&mut cpu, base, 1 << 20, 0b100_0000), 64);
+    cpu.mmio_write(CACHE_OP_LEN_REG, 32 * 8);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b100_0000);
+    cpu.tick(4);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b100_0000);
+    let start = cpu.cycles;
+    while cpu.mmio_read(CACHE_STATUS_REG) != 0 {
+        cpu.tick(1);
+    }
+    assert_eq!(cpu.cycles - start, 64, "a second sweep during one sweeps everything");
+    // RANGE_IINV with FLUSH: both happen (the sweep under the walk).
+    cpu.mmio_write(CACHE_OP_LEN_REG, 32 * 8);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b100_0010);
+    assert_eq!(cpu.cache_ctl.isweep_until, cpu.cycles + 8, "the sweep runs");
+    while cpu.mmio_read(CACHE_STATUS_REG) != 0 {
+        cpu.tick(1);
+    }
+    // ICACHE_INV is no walk: MNT_BUSY stays 0.
+    cpu.mmio_write(CACHE_CTRL_REG, 0b1000);
+    assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 0);
+    // An I-cache sweep and a D-cache walk run side by side.
+    cpu.mmio_write(CACHE_OP_LEN_REG, 32 * 8);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b101_0000);
+    let start = cpu.cycles;
+    while cpu.mmio_read(CACHE_STATUS_REG) != 0 {
+        cpu.tick(1);
+    }
+    assert_eq!(cpu.cycles - start, 17, "the D walk (17) covers the sweep (8)");
+}
+
+#[test]
+fn cache_op_addr_is_32_bits() {
+    // CACHE_OP_ADDR is a 32-bit register (DDR is 128 MiB): the upper half
+    // of a 64-bit store is dropped, a store to 0x34 does nothing, and the
+    // range is the low 32 bits'.
+    let mut cpu = cpu_dma(true);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, 0xABCD_0001_0001_2345);
+    assert_eq!(cpu.mmio_read(CACHE_OP_ADDR_REG), 0x1_2340);
+    cpu.mmio_store(CACHE_OP_ADDR_REG + 4, 0xFFFF_FFFF, 4);
+    assert_eq!(cpu.mmio_read(CACHE_OP_ADDR_REG), 0x1_2340);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, 0xFFFF_FFFF_FFFF_FFFF);
+    assert_eq!(cpu.mmio_read(CACHE_OP_ADDR_REG), 0xFFFF_FFE0);
+    // A clean "above 4 GiB" cleans the line at the address's low 32 bits.
+    cpu_store(&mut cpu, BUF, 1);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, (1 << 32) | BUF);
+    cpu.mmio_write(CACHE_OP_LEN_REG, 32);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b01_0000);
+    until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    native_init(&mut cpu);
+    dma_cmd(&mut cpu, 24, 1, 1, 512, BUF, true);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 0, "the line at BUF was cleaned");
+}
+
+#[test]
+fn range_op_queue_has_depth_one() {
+    // MMIO_MAP "Range operations": one range op can wait behind a running
+    // walk with its own range; one that finds that slot taken, a
+    // whole-cache walk waiting, or that covers more than 64 KiB becomes a
+    // whole-cache walk (an INVALIDATE if either op invalidates); a
+    // whole-cache request absorbs a waiting range op.
+    let mut cpu = cpu_dma(true);
+    native_init(&mut cpu);
+    let summary = |cpu: &Cpu| cpu.sd_dma_summary().unwrap();
+    let wait = |cpu: &mut Cpu| until(cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    let range = |cpu: &mut Cpu, addr: u64, len: u64, ctrl: u64| {
+        cpu.mmio_write(CACHE_OP_ADDR_REG, addr);
+        cpu.mmio_write(CACHE_OP_LEN_REG, len);
+        cpu.mmio_write(CACHE_CTRL_REG, ctrl);
+    };
+    let (a, b, c) = (BUF, BUF + 0x1000, BUF + 0x2000);
+    // A range op behind a running range walk waits with its own range:
+    // two walks, 1 + 2 x 16 cycles each, and nothing converted.
+    range(&mut cpu, a, 512, 0b01_0000);
+    range(&mut cpu, b, 512, 0b01_0000);
+    let busy = wait(&mut cpu);
+    assert!((66..66 + 16).contains(&busy), "{busy}");
+    assert!(!summary(&cpu).contains("whole-cache"));
+    // Behind a running whole walk too.
+    cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    range(&mut cpu, a, 512, 0b01_0000);
+    let busy = wait(&mut cpu);
+    assert!((4130..4130 + 16).contains(&busy), "{busy}");
+    assert!(!summary(&cpu).contains("whole-cache"));
+    // A third op while one waits: both become one whole-cache walk.
+    range(&mut cpu, a, 512, 0b01_0000);
+    range(&mut cpu, b, 512, 0b01_0000);
+    range(&mut cpu, c, 512, 0b01_0000);
+    let busy = wait(&mut cpu);
+    assert!((33 + 4097..33 + 4097 + 16).contains(&busy), "{busy}");
+    assert!(summary(&cpu).contains(", 1 range ops made whole-cache walks"), "{}", summary(&cpu));
+    // ... an INVALIDATE when the waiting one invalidates: a line a DMA wrote
+    // outside both ranges is invalidated too (no stale load after).
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF + 0x8000, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    range(&mut cpu, a, 512, 0b01_0000);
+    range(&mut cpu, b, 512, 0b10_0000);
+    range(&mut cpu, c, 512, 0b01_0000);
+    wait(&mut cpu);
+    cpu_load(&mut cpu, BUF + 0x8000);
+    assert_eq!(problems(&cpu), 0, "the converted walk invalidated");
+    // 2,048 lines (64 KiB from a line boundary) is still a range op; the
+    // lines counted are those from ADDR & ~31 covering [ADDR, + LEN), so
+    // 64 KiB from 8 bytes into a line (LEN = 64 KiB + 8, as a driver
+    // writes it for an unaligned buffer) is 2,049 and becomes a whole-cache
+    // walk at once.
+    let busy = walk_cycles(&mut cpu, 0, 64 * 1024, 0b01_0000);
+    assert_eq!(busy, 2049);
+    assert!(summary(&cpu).contains(", 2 range ops made whole-cache walks"));
+    range(&mut cpu, 8, 64 * 1024 + 8, 0b01_0000);
+    let busy = wait(&mut cpu);
+    assert!((4097..4097 + 16).contains(&busy), "{busy}");
+    assert!(summary(&cpu).contains(", 3 range ops made whole-cache walks"), "{}", summary(&cpu));
+    // A range op while a whole-cache request waits merges into it.
+    cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    range(&mut cpu, a, 512, 0b01_0000);
+    let busy = wait(&mut cpu);
+    assert!((2 * 4097..2 * 4097 + 16).contains(&busy), "{busy}");
+    assert!(summary(&cpu).contains(", 4 range ops made whole-cache walks"));
+    // A whole-cache request absorbs a waiting range op (no conversion
+    // counted: that op's own request was taken).  A FLUSH absorbing a
+    // RANGE_INV becomes an INVALIDATE.
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF + 0x8000, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    range(&mut cpu, a, 512, 0b01_0000);
+    range(&mut cpu, b, 512, 0b10_0000);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    let busy = wait(&mut cpu);
+    assert!((33 + 4097..33 + 4097 + 16).contains(&busy), "{busy}");
+    cpu_load(&mut cpu, BUF + 0x8000);
+    assert_eq!(problems(&cpu), 0, "the FLUSH became an INVALIDATE");
+    assert!(summary(&cpu).contains(", 4 range ops made whole-cache walks"));
+    // MNT_BUSY covers the waiting ops: it reads 1 until the last is done.
+    range(&mut cpu, a, 512, 0b01_0000);
+    range(&mut cpu, b, 512, 0b01_0000);
+    pass(&mut cpu, 40);
+    assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1);
+}
+
+#[test]
+fn range_inv_writes_dirty_lines_back() {
+    // RANGE_INV alone writes a dirty line back before it drops it (spec
+    // v1.2; the RTL): not a problem, and the line is clean after it.
+    let mut cpu = cpu_dma(true);
+    native_init(&mut cpu);
+    let range = |cpu: &mut Cpu, addr: u64, len: u64, ctrl: u64| {
+        until(cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+        cpu.mmio_write(CACHE_OP_ADDR_REG, addr);
+        cpu.mmio_write(CACHE_OP_LEN_REG, len);
+        cpu.mmio_write(CACHE_CTRL_REG, ctrl);
+        until(cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    };
+    let (clean, inv) = (0b01_0000, 0b10_0000);
+    cpu_store(&mut cpu, BUF + 64, 1);
+    range(&mut cpu, BUF, 512, inv);
+    assert_eq!(problems(&cpu), 0, "a dirty line under RANGE_INV is written back");
+    dma_cmd(&mut cpu, 24, 1, 1, 512, BUF, true);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 0, "and clean after it");
+    // The failure it can cause: a line dirtied in a device-bound buffer
+    // after its clean (the driver's map) is written back over the DMA's
+    // data by the unmap's RANGE_INV.  The DMA write is reported (it could
+    // be clobbered), and the writeback that does clobber it.
+    range(&mut cpu, BUF, 512, clean);
+    cpu_store(&mut cpu, BUF + 128, 7);
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 1, "the DMA write over a dirty line");
+    range(&mut cpu, BUF, 512, inv);
+    assert_eq!(problems(&cpu), 2, "its writeback over the DMA's data");
+    cpu_load(&mut cpu, BUF + 128);
+    assert_eq!(problems(&cpu), 2, "invalidated: the load sees DDR");
+    // Once per line: a second DMA into it before the clean is not
+    // reported again, and a clean line DMA'd into is never reported.
+    range(&mut cpu, BUF, 512, clean);
+    cpu_store(&mut cpu, BUF + 256, 7);
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    dma_cmd(&mut cpu, 17, 4, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 3);
+    range(&mut cpu, BUF, 512, clean | inv);
+    assert_eq!(problems(&cpu), 4, "RANGE_CLEAN | RANGE_INV writes it back too");
+    // A whole-cache walk catches it as well: a store into a line a DMA
+    // wrote (stale: reported), then FLUSH writes it back over the rest of
+    // the DMA's line.
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    cpu_store(&mut cpu, BUF + 32, 1);
+    assert_eq!(problems(&cpu), 5, "store to a stale line");
+    cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    until(&mut cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    assert_eq!(problems(&cpu), 6, "the FLUSH's writeback over the DMA's data");
+    // The correct sequence never is: clean, DMA, invalidate, then the CPU
+    // writes the buffer and cleans it again.
+    range(&mut cpu, BUF, 512, clean);
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    range(&mut cpu, BUF, 512, inv);
+    cpu_store(&mut cpu, BUF + 32, 1);
+    range(&mut cpu, BUF, 512, inv);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b100);
+    until(&mut cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    assert_eq!(problems(&cpu), 6);
 }
 
 #[test]
@@ -2081,6 +2348,126 @@ fn dma_phase_rules() {
     until(&mut cpu, 100, |cpu| status(cpu) & ST_DMA_BUSY == 0);
     pass(&mut cpu, 50_000);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 512, "nothing more moved");
+}
+
+#[test]
+fn dma_abort_leaves_committed_blocks_for_pio() {
+    // SD_NATIVE_PLAN.md §8.4 / §8.5: DMA_EN = 0 finishes the block in
+    // progress; blocks the card side committed that the engine had not
+    // started stay in the FIFO, and PIO takes them (and the card side
+    // goes on into the FIFO) once DMA_BUSY has dropped.
+    let mut cpu = cpu_dma(false);
+    native_init(&mut cpu);
+    // A stalled engine moves nothing while the card side fills the FIFO:
+    // three committed blocks, DATA_BUSY (the engine owes them), no
+    // DATA_DONE.  DMA_EN = 0: DATA_DONE at once (the card side is done),
+    // DMA_BUSY drops, and the blocks are PIO's.
+    inject(&mut cpu, &["dmastall@1"]);
+    fill(&mut cpu, BUF, &[0xEE; 3 * BLOCK]);
+    dma_cmd(&mut cpu, 18, 50, 3, 512, BUF, false);
+    pass(&mut cpu, 100_000);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 3 * 64);
+    assert_eq!(status(&mut cpu) & (ST_DATA_BUSY | ST_DMA_BUSY | ST_DATA_DONE), ST_DATA_BUSY | ST_DMA_BUSY);
+    assert_eq!(rd(&mut cpu, SDM_DATA), 0, "the FIFO port is the engine's");
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 3 * 64, "nothing popped");
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    tick(&mut cpu);
+    assert_eq!(status(&mut cpu) & (ST_DATA_BUSY | ST_DMA_BUSY | ST_DATA_DONE), ST_DATA_DONE);
+    assert_eq!(pop(&mut cpu, 3 * 64), (50..53).flat_map(pattern).collect::<Vec<_>>());
+    assert_eq!(ram(&cpu, BUF, 3 * BLOCK), vec![0xEE; 3 * BLOCK]);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+
+    // DMA_EN = 0 with a block on its way to DDR: it lands; until then
+    // DMA_BUSY holds the FIFO port (loads read 0 and pop nothing, stores
+    // set FIFO_ERR, FIFO_THRESH reads 0) although the card side already
+    // goes on into the FIFO as PIO.
+    fill(&mut cpu, BUF, &[0xEE; 4 * BLOCK]);
+    dma_cmd(&mut cpu, 18, 60, 0, 512, BUF, false);
+    until(&mut cpu, 10_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 2);
+    wr(&mut cpu, SDM_STATUS, u64::from(ST_STICKY));
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    let level = rd(&mut cpu, SDM_FIFO);
+    assert_eq!(level, 512, "the card side filled the FIFO as PIO");
+    assert_ne!(status(&mut cpu) & ST_DMA_BUSY, 0, "the block in flight");
+    assert_eq!(status(&mut cpu) & ST_FIFO_THRESH, 0);
+    assert_eq!(rd(&mut cpu, SDM_DATA), 0);
+    wr(&mut cpu, SDM_DATA, 1);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), level, "nothing popped or pushed");
+    assert_ne!(status(&mut cpu) & ST_FIFO_ERR, 0);
+    let drained = until(&mut cpu, 1000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    assert!(drained <= 64, "{drained}");
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 2 * 512, "the block in progress finished");
+    assert_eq!(ram(&cpu, BUF, 2 * BLOCK), (60..62).flat_map(pattern).collect::<Vec<_>>());
+    assert_ne!(status(&mut cpu) & ST_FIFO_THRESH, 0, "PIO's now");
+    assert_eq!(pop(&mut cpu, 64), pattern(62));
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+}
+
+#[test]
+fn dma_data_command_while_dma_busy_is_ignored() {
+    // A data command written while DMA_BUSY (DATA_BUSY clear: here after a
+    // CMD12, the engine still finishing its block) is ignored by the RTL;
+    // the emulator ignores it too, says so on stderr and counts it.
+    let mut cpu = cpu_dma(false);
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    dma_cmd(&mut cpu, 18, 0, 0, 512, BUF, false);
+    until(&mut cpu, 10_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 2);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(status(&mut cpu) & (ST_DATA_BUSY | ST_DMA_BUSY), ST_DMA_BUSY);
+    wr(&mut cpu, SDM_STATUS, u64::from(ST_STICKY));
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    wr(&mut cpu, SDM_ARG, 7);
+    wr(&mut cpu, SDM_CMD, cmd_word(17, R1, CMD_DATA));
+    assert_eq!(status(&mut cpu) & (ST_CMD_DONE | ST_DATA_BUSY), 0, "ignored");
+    assert!(
+        cpu.sd_dma_summary().unwrap().contains(", 1 data commands ignored while DMA_BUSY"),
+        "{}",
+        cpu.sd_dma_summary().unwrap()
+    );
+    // A non-data command goes out; once DMA_BUSY has dropped the data
+    // command does too.
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
+    until(&mut cpu, 1000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 17, 7, R1, CMD_DATA);
+    assert_eq!(pop(&mut cpu, 64), pattern(7));
+}
+
+#[test]
+fn dma_read_moves_whatever_is_in_the_fifo() {
+    // A DMA read moves the FIFO's head: words left in it before the
+    // command (here pushed through SDM_DATA) reach DDR ahead of the card's
+    // data, and the block's tail stays behind.  Drivers reset the FIFO
+    // first; the emulator says so on stderr and counts it.
+    let mut cpu = cpu_dma(false);
+    native_init(&mut cpu);
+    let junk: Vec<u64> = (0..8).map(|k| 0x1111_1111_1111_1111 * (k + 1)).collect();
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    for &w in &junk {
+        wr(&mut cpu, SDM_DATA, w);
+    }
+    fill(&mut cpu, BUF, &[0xEE; 2 * BLOCK]);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
+    wr(&mut cpu, SDM_DMA_ADDR, BUF);
+    wr(&mut cpu, SDM_CFG, CFG_4BIT | CFG_DMA_EN);
+    sdm_ok(&mut cpu, 17, 9, R1, CMD_DATA);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    let head: Vec<u8> = junk.iter().flat_map(|w| w.to_le_bytes()).collect();
+    assert_eq!(ram(&cpu, BUF, BLOCK), [head, pattern(9)[..448].to_vec()].concat());
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 512);
+    assert_eq!(ram(&cpu, BUF + 512, BLOCK), vec![0xEE; BLOCK]);
+    assert_eq!(status(&mut cpu) & ST_DMA_BUSY, 0);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), 8, "the block's tail");
+    assert_eq!(pop(&mut cpu, 8), pattern(9)[448..]);
+    assert!(cpu.sd_dma_summary().unwrap().contains(", 1 DMA reads started with words in the FIFO"));
+    // With the FIFO reset first (as the kernel does): the block alone.
+    dma_cmd(&mut cpu, 17, 9, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(ram(&cpu, BUF, BLOCK), pattern(9));
+    assert!(cpu.sd_dma_summary().unwrap().contains(", 1 DMA reads started"));
 }
 
 #[test]
@@ -2218,14 +2605,17 @@ fn dma_coherence_checker() {
     cpu.mmio_write(CACHE_CTRL_REG, 0b100);
     cpu_load(&mut cpu, BUF);
     assert_eq!(problems(&cpu), 6, "load before the walk completed");
+    // Its writeback of the line dirtied above lands over the DMA's data.
     until(&mut cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    assert_eq!(problems(&cpu), 7, "the dirty line written back over the DMA's data");
     cpu_load(&mut cpu, BUF + 32);
-    assert_eq!(problems(&cpu), 6);
-    // A range invalidate alone drops a dirty line's data.
+    assert_eq!(problems(&cpu), 7);
+    // A range invalidate alone writes a dirty line back (spec v1.2): no
+    // data lost.
     cpu_store(&mut cpu, BUF + 1024, 1);
     range(&mut cpu, BUF + 1024, 32, inv);
     assert_eq!(problems(&cpu), 7);
-    // Clean + invalidate does not; [4:0] of the address read 0, so the
+    // Nor with clean + invalidate; [4:0] of the address read 0, so the
     // length counts from the line's start.
     cpu_store(&mut cpu, BUF + 1024 + 0x20, 1);
     range(&mut cpu, BUF + 1024 + 0x3F, 1, clean | inv);
@@ -2298,15 +2688,18 @@ fn dma_icache_coherence() {
     cpu.mmio_write(CACHE_CTRL_REG, 0b1000);
     fetch(&mut cpu, BUF + 64);
     assert_eq!(problems(&cpu), 1);
-    // RANGE_IINV of the buffer: once its walk completes (MNT_BUSY, 8 + 2
-    // per line).
+    // RANGE_IINV of the buffer: fetch is coherent with it at once (every
+    // lookup misses during its sweep), which keeps MNT_BUSY up for min(n,
+    // 64) cycles.
     dma_read(&mut cpu, BUF);
     cpu.mmio_write(CACHE_OP_ADDR_REG, BUF);
     cpu.mmio_write(CACHE_OP_LEN_REG, 256);
     cpu.mmio_write(CACHE_CTRL_REG, iinv);
     assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1);
+    fetch(&mut cpu, BUF + 64);
+    assert_eq!(problems(&cpu), 1, "covered at once");
     let busy = until(&mut cpu, 1000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
-    assert!((24..=48).contains(&busy), "{busy}");
+    assert!((8..=16).contains(&busy), "{busy}");
     fetch(&mut cpu, BUF + 64);
     assert_eq!(problems(&cpu), 1, "covered");
     fetch(&mut cpu, BUF + 256);
@@ -2329,6 +2722,14 @@ fn dma_icache_coherence() {
     dma_cmd(&mut cpu, 24, 1, 1, 512, BUF + 0x4000, true);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     assert_eq!(problems(&cpu), 2, "and the line was cleaned");
+    // RANGE_IINV with a whole-cache INVALIDATE: both happen.
+    dma_read(&mut cpu, BUF);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, BUF);
+    cpu.mmio_write(CACHE_OP_LEN_REG, 512);
+    cpu.mmio_write(CACHE_CTRL_REG, iinv | 0b100);
+    fetch(&mut cpu, BUF + 64);
+    assert_eq!(problems(&cpu), 2, "the I-cache range dropped with the INVALIDATE");
+    until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
     // I-cache fills come through the D-cache: a DMA'd line with the
     // I-cache dropped but no D-cache invalidate is still a problem.
     dma_cmd(&mut cpu, 17, 3, 1, 512, BUF + 0x8000, false);

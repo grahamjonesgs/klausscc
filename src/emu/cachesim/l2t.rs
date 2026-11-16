@@ -773,6 +773,10 @@ impl Timed {
         self.nlb.flush();
     }
 
+    pub(super) fn icache_range_inv(&mut self, pa: u64, len: u64) {
+        self.nlb.range_inv(pa, len);
+    }
+
     pub(super) fn discard(&mut self) {
         self.nlb.discard();
     }

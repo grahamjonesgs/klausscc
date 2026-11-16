@@ -475,7 +475,13 @@ impl Cpu {
     /// With `--sd-dma`: the DMA engine's counts and the coherence checker's.
     #[must_use]
     pub fn sd_dma_summary(&self) -> Option<String> {
-        let sd = self.sd.as_ref()?.dma_summary()?;
+        use std::fmt::Write as _;
+        let mut sd = self.sd.as_ref()?.dma_summary()?;
+        if self.cache_ctl.conversions != 0 {
+            // Range ops the queue turned into whole-cache walks (a driver
+            // that polls MNT_BUSY before each op never causes one).
+            let _ = write!(sd, ", {} range ops made whole-cache walks", self.cache_ctl.conversions);
+        }
         let problems = self.coherence.as_ref().map_or(0, |c| c.problems());
         Some(format!("{sd}; DMA coherence problems: {problems}"))
     }

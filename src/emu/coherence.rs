@@ -8,10 +8,15 @@
 //! hold, per 32-byte line:
 //!
 //! - **dirty**: the CPU stored to the line since the last clean that covered
-//!   it (`CACHE_CTRL` FLUSH or INVALIDATE, or a range clean).  A DMA that
-//!   reads the line (memory to card) would send DDR's stale copy; one that
-//!   writes it (card to memory) could be clobbered later by the line's
-//!   writeback.  A range invalidate alone drops it, losing the CPU's data.
+//!   it (`CACHE_CTRL` FLUSH or INVALIDATE, `RANGE_CLEAN` or `RANGE_INV`:
+//!   every one writes a dirty line back, `RANGE_INV` alone included, spec
+//!   v1.2).  A DMA that reads the line (memory to card) would send DDR's
+//!   stale copy; one that writes it (card to memory) could be clobbered
+//!   later by the line's writeback.
+//! - **dmaw**: a DMA wrote the line since the last clean that covered it.
+//!   A walk that then writes the line back while it is still dirty puts
+//!   the CPU's copy over the device's data in DDR: the failure the
+//!   dirty-line report at the DMA write warns of, now certain.
 //! - **stale**: a DMA wrote the line since the last D-cache invalidate that
 //!   covered it.  A CPU load or store to it could hit an old cached copy.
 //! - **istale**: a DMA wrote the line since the last I-cache invalidate that
@@ -87,6 +92,8 @@ pub(super) struct Coherence {
     dirty: Lines,
     /// DMA writes not yet invalidated in the D-cache.
     stale: Lines,
+    /// DMA writes since the line's last clean.
+    dmaw: Lines,
     /// DMA writes not yet invalidated in the I-cache.
     istale: Lines,
     /// Lines in RAM.
@@ -109,6 +116,7 @@ impl Coherence {
         Self {
             dirty: Lines::new(lines),
             stale: Lines::new(lines),
+            dmaw: Lines::new(lines),
             istale: Lines::new(lines),
             lines,
             problems: 0,
@@ -148,12 +156,9 @@ impl Coherence {
         self.dirty.count
     }
 
-    /// Dirty lines among those `[addr, addr + len)` touches.
-    pub(super) fn dirty_lines_in(&self, addr: u64, len: u64) -> u64 {
-        if self.dirty.count == 0 {
-            return 0;
-        }
-        self.span(addr, len).filter(|&line| self.dirty.get(line)).count() as u64
+    /// The line at `addr` is dirty (false outside RAM).
+    pub(super) fn is_dirty(&self, addr: u64) -> bool {
+        self.dirty.count != 0 && addr / LINE < self.lines as u64 && self.dirty.get((addr / LINE) as usize)
     }
 
     /// A CPU load or store of `n` bytes at physical `addr` (RAM).
@@ -231,13 +236,16 @@ impl Coherence {
             ));
         }
         for line in self.span(addr, len) {
-            if self.dirty.get(line) {
-                self.dirty.set(line, false);
+            // Reported once per line until it is cleaned: the line stays
+            // dirty (it still is in the cache), so the walk that writes it
+            // back over this data is caught too (`writeback`).
+            if self.dirty.get(line) && !self.dmaw.get(line) {
                 self.report(&format!(
                     "DMA write of line 0x{:08X}, which the CPU wrote and nothing cleaned since (its writeback could clobber the data)",
                     line as u64 * LINE
                 ));
             }
+            self.dmaw.set(line, true);
             self.stale.set(line, true);
             self.istale.set(line, true);
         }
@@ -264,31 +272,54 @@ impl Coherence {
         }
     }
 
+    /// A walk writes `line` back if it is dirty: a problem if a DMA wrote
+    /// the line since its last clean (the CPU's copy lands over the
+    /// device's data).  The line is clean afterwards.
+    fn writeback(&mut self, line: usize) {
+        if self.dirty.get(line) && self.dmaw.get(line) {
+            self.report(&format!(
+                "a cache walk wrote back dirty line 0x{:08X} over data a DMA wrote since its last clean (the device's data is overwritten)",
+                line as u64 * LINE
+            ));
+        }
+        self.dirty.set(line, false);
+        self.dmaw.set(line, false);
+    }
+
+    /// Every line both dirty and DMA-written, for a whole-cache walk.
+    fn writeback_all(&mut self) {
+        if self.dirty.count != 0 && self.dmaw.count != 0 {
+            for w in 0..self.dirty.bits.len() {
+                let mut both = self.dirty.bits[w] & self.dmaw.bits[w];
+                while both != 0 {
+                    let line = w * 64 + both.trailing_zeros() as usize;
+                    both &= both - 1;
+                    self.writeback(line);
+                }
+            }
+        }
+        self.dirty.clear_all();
+        self.dmaw.clear_all();
+    }
+
     /// `CACHE_CTRL` FLUSH completed: every dirty line written back.
     pub(super) fn flush_all(&mut self) {
-        self.dirty.clear_all();
+        self.writeback_all();
     }
 
     /// `CACHE_CTRL` INVALIDATE completed: written back, then dropped.
     pub(super) fn invalidate_all(&mut self) {
-        self.dirty.clear_all();
+        self.writeback_all();
         self.stale.clear_all();
     }
 
     /// A D-cache range op on the lines `[addr, addr + len)` touches
-    /// completed: `clean` wrote dirty lines back, `inv` dropped lines
-    /// (without a writeback unless `clean` too).
-    pub(super) fn range(&mut self, addr: u64, len: u64, clean: bool, inv: bool) {
+    /// completed: `RANGE_CLEAN` and `RANGE_INV` both write the dirty lines
+    /// back (spec v1.2: a dirty line is never dropped unwritten), and
+    /// `inv` then drops the lines.
+    pub(super) fn range(&mut self, addr: u64, len: u64, inv: bool) {
         for line in self.span(addr, len) {
-            if inv && !clean && self.dirty.get(line) {
-                self.report(&format!(
-                    "range invalidate (no clean) dropped line 0x{:08X}, which the CPU wrote: its data is lost",
-                    line as u64 * LINE
-                ));
-            }
-            if clean || inv {
-                self.dirty.set(line, false);
-            }
+            self.writeback(line);
             if inv {
                 self.stale.set(line, false);
             }
