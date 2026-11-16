@@ -2137,6 +2137,28 @@ fn dma_faults() {
     );
 }
 
+/// A DMA write landing while a whole-cache FLUSH (clean only) is pending is
+/// not a hazard; a whole-cache INVALIDATE is.
+#[test]
+fn dma_write_during_flush_is_no_problem() {
+    let mut cpu = cpu_dma(true);
+    native_init(&mut cpu);
+    for _ in 0..3 {
+        cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    }
+    assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1, "FLUSH walks pending");
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 0, "DMA write during a FLUSH");
+    until(&mut cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    for _ in 0..3 {
+        cpu.mmio_write(CACHE_CTRL_REG, 0b100);
+    }
+    dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 1, "DMA write during an INVALIDATE");
+}
+
 #[test]
 fn dma_coherence_checker() {
     let mut cpu = cpu_dma(true);
@@ -2219,9 +2241,11 @@ fn dma_coherence_checker() {
     // A DMA writing memory while a walk runs: its writebacks could land
     // over the device's data.
     until(&mut cpu, 1_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 1);
-    // Three queued FLUSHes outlast the next block.
+    // Three queued INVALIDATEs outlast the next block.  (A pending
+    // whole-cache FLUSH is no hazard for a DMA write: see
+    // dma_write_during_flush_is_no_problem.)
     for _ in 0..3 {
-        cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+        cpu.mmio_write(CACHE_CTRL_REG, 0b100);
     }
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     assert_eq!(problems(&cpu), 9, "DMA writes (the first block's landing, the second) while MNT_BUSY");

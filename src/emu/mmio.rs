@@ -112,12 +112,15 @@ impl CacheCtl {
     /// A D-cache walk that covers `[addr, addr + len)` is pending or running
     /// at cycle `now` (a whole-cache one, or a range one that overlaps it).
     /// An I-cache walk writes nothing back, and a D-cache walk elsewhere
-    /// touches none of these lines.
-    pub(crate) fn dwalk_covers(&self, now: u64, addr: u64, len: u64) -> bool {
+    /// touches none of these lines.  For a DMA write (`write`) a pending
+    /// whole-cache FLUSH is no hazard: it only cleans, and a dirty line the
+    /// DMA overwrites is reported separately.
+    pub(crate) fn dwalk_covers(&self, now: u64, addr: u64, len: u64, write: bool) -> bool {
         self.pending.iter().any(|&(at, op, _)| {
             at > now
                 && match op {
-                    WalkOp::Flush | WalkOp::Invalidate => true,
+                    WalkOp::Flush => !write,
+                    WalkOp::Invalidate => true,
                     WalkOp::Range { start, len: n, .. } => start < addr.saturating_add(len) && addr < start.saturating_add(n),
                     WalkOp::IRange { .. } => false,
                 }

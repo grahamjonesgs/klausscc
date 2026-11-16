@@ -370,7 +370,7 @@ impl DmaBus<'_> {
     fn read(&mut self, addr: u64, len: usize) -> Option<Vec<u8>> {
         let range = self.range(addr, len)?;
         if let Some(coh) = self.coherence.as_deref_mut() {
-            coh.dma_read(addr, len as u64, self.cache.dwalk_covers(self.now, addr, len as u64));
+            coh.dma_read(addr, len as u64, self.cache.dwalk_covers(self.now, addr, len as u64, false));
         }
         Some(self.mem[range].to_vec())
     }
@@ -381,7 +381,7 @@ impl DmaBus<'_> {
             return false;
         };
         if let Some(coh) = self.coherence.as_deref_mut() {
-            coh.dma_write(addr, data.len() as u64, self.cache.dwalk_covers(self.now, addr, data.len() as u64));
+            coh.dma_write(addr, data.len() as u64, self.cache.dwalk_covers(self.now, addr, data.len() as u64, true));
         }
         self.mem[range].copy_from_slice(data);
         true
