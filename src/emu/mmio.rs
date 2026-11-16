@@ -31,15 +31,16 @@ const ICACHE_INFO_VALUE: u64 = (16 << 10 << 32) | (16 << 24) | (1024 << 8) | 1;
 /// clears it with the other counters.
 const CNT_ZERO_LINES: u32 = 0x0070;
 /// `CACHE_CTRL`: `[0]` clears the counters, `[1]` FLUSH, `[2]` INVALIDATE,
-/// `[3]` `ICACHE_INV`, `[4]` `RANGE_CLEAN` and `[5]` `RANGE_INV`
-/// (`--dcache-range-ops`).
+/// `[3]` `ICACHE_INV`, `[4]` `RANGE_CLEAN`, `[5]` `RANGE_INV` and `[6]`
+/// `RANGE_IINV` (`--dcache-range-ops`).
 const CACHE_CTRL: u32 = 0x0000;
 /// `CACHE_STATUS`: `[0]` `MNT_BUSY`, a maintenance walk pending or running.
 const CACHE_STATUS: u32 = 0x0010;
 /// `CACHE_OP_ADDR` (`--dcache-range-ops`): a range op's physical start;
-/// `[4:0]` ignored.
+/// `[4:0]` read 0 and are not stored.
 const CACHE_OP_ADDR: u32 = 0x0030;
-/// `CACHE_OP_LEN` (`--dcache-range-ops`): a range op's length in bytes.
+/// `CACHE_OP_LEN` (`--dcache-range-ops`): a range op's length in bytes,
+/// `[31:0]` (`[63:32]` read 0); 0 is a no-op.
 const CACHE_OP_LEN: u32 = 0x0038;
 /// `CACHE_CTRL` bits.
 const CTRL_CLEAR: u64 = 1;
@@ -48,18 +49,39 @@ const CTRL_INVALIDATE: u64 = 1 << 2;
 const CTRL_ICACHE_INV: u64 = 1 << 3;
 const CTRL_RANGE_CLEAN: u64 = 1 << 4;
 const CTRL_RANGE_INV: u64 = 1 << 5;
-/// Cycles a whole-cache walk keeps `MNT_BUSY` up: 1024 sets x 2 ways
-/// ("a few thousand cycles"; more with dirty lines on the board).
+const CTRL_RANGE_IINV: u64 = 1 << 6;
+/// Cycles a whole-cache walk keeps `MNT_BUSY` up: 1024 sets x 2 ways, plus
+/// [`WALK_CYCLES_PER_DIRTY_LINE`] for each line it writes back (spec v1.1).
 const WALK_FULL_CYCLES: u64 = 2048;
-/// A range walk: cycles per line it touches, and its fixed cost.
+/// A range walk: its fixed cost and cycles per line it touches (plus the
+/// dirty lines' writebacks).
+const WALK_RANGE_CYCLES: u64 = 8;
 const WALK_RANGE_CYCLES_PER_LINE: u64 = 2;
-const WALK_RANGE_CYCLES: u64 = 16;
+/// A dirty line's writeback during a walk.
+const WALK_CYCLES_PER_DIRTY_LINE: u64 = 10;
+/// Lines in the D-cache (64 KiB): a whole walk writes back at most these.
+const DCACHE_LINES: u64 = 2048;
 
-/// The cache controller's maintenance state.  The emulator has no data
-/// cache, so a walk changes no data; but `MNT_BUSY` reads 1 for as long as
-/// the walk would take, and the `--sd-dma` coherence checker sees each one.
+/// What a walk does when it completes.
+#[derive(Debug, Clone, Copy)]
+enum WalkOp {
+    /// FLUSH: write every dirty line back.
+    Flush,
+    /// INVALIDATE: write back, then drop every line.
+    Invalidate,
+    /// `RANGE_CLEAN` / `RANGE_INV` of the lines from `start` (a line
+    /// address) for `len` bytes.
+    Range { start: u64, len: u64, clean: bool, inv: bool },
+    /// `RANGE_IINV`: the same lines dropped from the I-cache.
+    IRange { start: u64, len: u64 },
+}
+
+/// The cache controller's maintenance state.  The emulator has no caches,
+/// so a walk changes no data; but `MNT_BUSY` reads 1 for as long as the
+/// walk would take, and the `--sd-dma` coherence checker sees each one
+/// when it completes.
 #[derive(Debug, Default)]
-pub(super) struct CacheCtl {
+pub(crate) struct CacheCtl {
     /// The range ops are modelled (`--dcache-range-ops`).
     pub(super) range_ops: bool,
     /// `CACHE_OP_ADDR`.
@@ -69,17 +91,37 @@ pub(super) struct CacheCtl {
     /// `MNT_BUSY` until this cycle; a walk asked for during one queues
     /// behind it.
     busy_until: u64,
+    /// The walks accepted and not yet complete, oldest first, with the
+    /// cycle each completes and the coherence checker's sequence number.
+    pending: std::collections::VecDeque<(u64, WalkOp, u64)>,
 }
 
 impl CacheCtl {
-    /// Start a walk of `cycles` at cycle `now`, after any in flight.
-    fn walk(&mut self, now: u64, cycles: u64) {
+    /// Queue a walk of `cycles` at cycle `now`, after any in flight;
+    /// `seq` is the coherence checker's number for it (0 without one).
+    fn walk(&mut self, now: u64, cycles: u64, op: WalkOp, seq: u64) {
         self.busy_until = self.busy_until.max(now) + cycles;
+        self.pending.push_back((self.busy_until, op, seq));
     }
 
     /// `MNT_BUSY` at cycle `now`.
     pub(super) const fn busy(&self, now: u64) -> bool {
         now < self.busy_until
+    }
+
+    /// A D-cache walk that covers `[addr, addr + len)` is pending or running
+    /// at cycle `now` (a whole-cache one, or a range one that overlaps it).
+    /// An I-cache walk writes nothing back, and a D-cache walk elsewhere
+    /// touches none of these lines.
+    pub(crate) fn dwalk_covers(&self, now: u64, addr: u64, len: u64) -> bool {
+        self.pending.iter().any(|&(at, op, _)| {
+            at > now
+                && match op {
+                    WalkOp::Flush | WalkOp::Invalidate => true,
+                    WalkOp::Range { start, len: n, .. } => start < addr.saturating_add(len) && addr < start.saturating_add(n),
+                    WalkOp::IRange { .. } => false,
+                }
+        })
     }
 }
 
@@ -343,7 +385,7 @@ impl Cpu {
             SD_DEV_SELECT => {
                 let now = self.cycles;
                 if let Some(sd) = self.sd.as_mut() {
-                    sd.write(addr & 0xFFFF, data, bytes, now, self.coherence.as_deref_mut());
+                    sd.write(addr & 0xFFFF, data, bytes, now);
                 }
             }
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
@@ -372,51 +414,92 @@ impl Cpu {
         let now = self.cycles;
         let ctl = &mut self.cache_ctl;
         match offset {
-            CACHE_OP_ADDR | CACHE_OP_LEN if ctl.range_ops => {
-                if ctl.busy(now)
-                    && let Some(coh) = self.coherence.as_deref_mut()
-                {
-                    coh.op_regs_while_busy(if offset == CACHE_OP_ADDR { "CACHE_OP_ADDR" } else { "CACHE_OP_LEN" });
-                }
-                if offset == CACHE_OP_ADDR {
-                    ctl.op_addr = data;
-                } else {
-                    ctl.op_len = data;
-                }
-            }
+            // Writable at any time: a range op copies them when it is
+            // accepted (spec v1.1), so one queued behind a walk keeps the
+            // values of its CACHE_CTRL write.
+            CACHE_OP_ADDR if ctl.range_ops => ctl.op_addr = data & !(coherence::LINE - 1),
+            CACHE_OP_LEN if ctl.range_ops => ctl.op_len = data & 0xFFFF_FFFF,
             CACHE_CTRL => {
                 if data & CTRL_CLEAR != 0 {
                     self.zero_lines = 0;
                 }
-                if data & CTRL_ICACHE_INV != 0
-                    && let Some(sim) = self.cachesim.as_mut()
-                {
-                    sim.icache_inv();
-                }
-                if data & (CTRL_FLUSH | CTRL_INVALIDATE) != 0 {
-                    ctl.walk(now, WALK_FULL_CYCLES);
+                if data & CTRL_ICACHE_INV != 0 {
+                    // A 64-cycle sweep, not a walk: done at once.
+                    if let Some(sim) = self.cachesim.as_mut() {
+                        sim.icache_inv();
+                    }
                     if let Some(coh) = self.coherence.as_deref_mut() {
-                        if data & CTRL_INVALIDATE != 0 {
-                            coh.invalidate_all();
-                        } else {
-                            coh.flush_all();
-                        }
+                        coh.icache_all();
                     }
                 }
+                let coh = self.coherence.as_deref_mut();
+                if data & (CTRL_FLUSH | CTRL_INVALIDATE) != 0 {
+                    // The whole-cache op runs; range bits with it are ignored
+                    // (RANGE_IINV included: it is a range op).
+                    let dirty = coh.as_deref().map_or(0, |c| c.dirty_lines().min(DCACHE_LINES));
+                    let op = if data & CTRL_INVALIDATE != 0 {
+                        WalkOp::Invalidate
+                    } else {
+                        WalkOp::Flush
+                    };
+                    let seq = coh.map_or(0, coherence::Coherence::walk_accepted);
+                    ctl.walk(now, WALK_FULL_CYCLES + dirty * WALK_CYCLES_PER_DIRTY_LINE, op, seq);
+                    return;
+                }
+                if !ctl.range_ops || ctl.op_len == 0 {
+                    return;
+                }
+                // The walk covers ceil(LEN / 32) lines from ADDR (whose
+                // [4:0] are 0).
+                let (start, len) = (ctl.op_addr, ctl.op_len);
+                let lines = len.div_ceil(coherence::LINE);
                 let clean = data & CTRL_RANGE_CLEAN != 0;
                 let inv = data & CTRL_RANGE_INV != 0;
-                if ctl.range_ops && (clean || inv) && ctl.op_len != 0 {
-                    // Bits [4:0] of the address are ignored: the walk covers
-                    // the lines [ADDR & !31, (ADDR & !31) + LEN) touches.
-                    let start = ctl.op_addr & !(coherence::LINE - 1);
-                    let lines = ctl.op_len.div_ceil(coherence::LINE);
-                    ctl.walk(now, WALK_RANGE_CYCLES + lines.saturating_mul(WALK_RANGE_CYCLES_PER_LINE));
-                    if let Some(coh) = self.coherence.as_deref_mut() {
-                        coh.range(start, ctl.op_len, clean, inv);
-                    }
+                if clean || inv {
+                    let dirty = coh.as_deref().map_or(0, |c| c.dirty_lines_in(start, len));
+                    let cycles = WALK_RANGE_CYCLES + lines * WALK_RANGE_CYCLES_PER_LINE + dirty * WALK_CYCLES_PER_DIRTY_LINE;
+                    let seq = coh.map_or(0, coherence::Coherence::walk_accepted);
+                    ctl.walk(now, cycles, WalkOp::Range { start, len, clean, inv }, seq);
+                }
+                if data & CTRL_RANGE_IINV != 0 {
+                    ctl.walk(
+                        now,
+                        WALK_RANGE_CYCLES + lines * WALK_RANGE_CYCLES_PER_LINE,
+                        WalkOp::IRange { start, len },
+                        0,
+                    );
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Complete the cache walks whose time is up: their effect on the
+    /// coherence checker (and a `RANGE_IINV`'s on the cache simulator,
+    /// which drops its whole I-cache for it).
+    fn cache_walks_complete(&mut self) {
+        while let Some(&(at, op, seq)) = self.cache_ctl.pending.front() {
+            if at > self.cycles {
+                break;
+            }
+            self.cache_ctl.pending.pop_front();
+            if let WalkOp::IRange { .. } = op
+                && let Some(sim) = self.cachesim.as_mut()
+            {
+                sim.icache_inv();
+            }
+            let Some(coh) = self.coherence.as_deref_mut() else {
+                continue;
+            };
+            match op {
+                WalkOp::Flush => coh.flush_all(),
+                WalkOp::Invalidate => coh.invalidate_all(),
+                WalkOp::Range { start, len, clean, inv } => coh.range(start, len, clean, inv),
+                WalkOp::IRange { start, len } => coh.icache_range(start, len),
+            }
+            if seq != 0 {
+                coh.walk_completed(seq);
+            }
         }
     }
 
@@ -460,13 +543,17 @@ impl Cpu {
     /// pending bit when the count passes `TIMER_PERIOD` and restarts from 0.
     pub(super) fn tick(&mut self, cycles: u64) {
         self.cycles += cycles;
+        if !self.cache_ctl.pending.is_empty() {
+            self.cache_walks_complete();
+        }
         if let Some(sd) = self.sd.as_deref_mut()
             && sd.dma_next_event().is_some_and(|at| at <= self.cycles)
         {
             let mut bus = DmaBus {
                 mem: &mut self.mem,
                 coherence: self.coherence.as_deref_mut(),
-                walk_busy: self.cache_ctl.busy(self.cycles),
+                cache: &self.cache_ctl,
+                now: self.cycles,
             };
             sd.dma_advance(self.cycles, &mut bus);
         }

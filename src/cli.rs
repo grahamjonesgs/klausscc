@@ -199,7 +199,7 @@ pub(crate) struct Cli {
     #[arg(long, value_name = "FILE", requires = "emu_host", conflicts_with = "board")]
     pub(crate) sd_image: Option<PathBuf>,
 
-    /// With --sd-image, make the card fail: KIND[:CMD]@N[xCOUNT] fails the Nth matching event since the start and the COUNT-1 after it (default 1), then the card behaves again, so retries succeed. KIND: wcrc (a written block gets a CRC error and is not programmed), wbusy (a written block's busy never ends: BUSY_TIMEOUT in SD mode, MISO held low until CS goes high in SPI mode), rerr or rcrc (a read block arrives bad: DATA_CRC_ERR in SD mode, error token 0x04 in SPI mode), cmdto (a command, or only command CMD, gets no response). Repeatable; each injected fault is logged on stderr
+    /// With --sd-image, make the card fail: KIND[:CMD]@N[xCOUNT] fails the Nth matching event since the start and the COUNT-1 after it (default 1), then the card behaves again, so retries succeed. KIND: wcrc (a written block gets a CRC error and is not programmed), wbusy (a written block's busy never ends: BUSY_TIMEOUT in SD mode, MISO held low until CS goes high in SPI mode), rerr or rcrc (a read block arrives bad: DATA_CRC_ERR in SD mode, error token 0x04 in SPI mode), cmdto (a command, or only command CMD, gets no response); with --sd-dma also, counting data commands written with DMA_EN: dmaerr (DMA_ERR as if the range left DDR: a counted command is refused up front), dmastall (the engine moves nothing until DMA_EN = 0, SDM_FIFO[31], CMD12 or SD_MODE = 0 stops it), dmahang (stalls, and only SD_MODE = 0 drops DMA_BUSY), dmastuck (stalls, and DMA_BUSY never drops). Repeatable; each injected fault is logged on stderr
     #[arg(long, value_name = "SPEC", requires = "sd_image", value_parser = clap::value_parser!(crate::emu::SdFault))]
     pub(crate) sd_fault: Vec<crate::emu::SdFault>,
 
@@ -207,11 +207,11 @@ pub(crate) struct Cli {
     #[arg(long, requires = "emu_host", conflicts_with = "board")]
     pub(crate) sd_native: bool,
 
-    /// With --sd-native: the native SD controller's DMA engine (klaussCPU SD DMA spec v1, not yet in a bitstream): SDM_DMA_ADDR (0xF000_0150), SDM_CFG[1] DMA_EN, SDM_STATUS[5] DMA_BUSY and [27] DMA_ERR, SDM_CAPS[10]. A data command with DMA_EN moves its blocks between the card and DDR at the card's pace (the IRQ comes when the last block is done). Also checks DMA coherence as if the D-cache were there (CPU-written lines a DMA reads without a clean, DMA-written lines the CPU reads without an invalidate, a DMA started while CACHE_STATUS.MNT_BUSY): problems go to stderr and the run's summary. Without it --sd-native models today's bitstream
+    /// With --sd-native: the native SD controller's DMA engine (klaussCPU SD DMA spec v1.2, not yet in a bitstream): SDM_DMA_ADDR (0xF000_0150), SDM_CFG[16] DMA_EN, SDM_STATUS[5] DMA_BUSY and [27] DMA_ERR, SDM_CAPS[10]. A data command with DMA_EN moves its blocks between the card and DDR at the card's pace (the IRQ comes when the last block is done). Also checks DMA coherence as if the caches were there (CPU-written lines a DMA reads or overwrites without a clean, DMA-written lines the CPU reads without a D-cache invalidate or executes without an I-cache invalidate, a DMA while CACHE_STATUS.MNT_BUSY): problems go to stderr and the run's summary. Without it --sd-native models today's bitstream
     #[arg(long, requires = "sd_native")]
     pub(crate) sd_dma: bool,
 
-    /// Give the emulator the D-cache range clean/invalidate ops (klaussCPU spec v1, not yet in a bitstream): CACHE_OP_ADDR (0xF005_0030), CACHE_OP_LEN (0xF005_0038), CACHE_CTRL[4] RANGE_CLEAN and [5] RANGE_INV, and CPU_FEATURES bit 27. The emulator has no D-cache, so they change no data, but CACHE_STATUS.MNT_BUSY reads 1 for as long as the walk would take and --sd-dma's coherence checker sees them. For --emulate and --gdbserver on the emulator
+    /// Give the emulator the cache range clean/invalidate ops (klaussCPU spec v1.2, not yet in a bitstream): CACHE_OP_ADDR (0xF005_0030), CACHE_OP_LEN (0xF005_0038), CACHE_CTRL[4] RANGE_CLEAN, [5] RANGE_INV and [6] RANGE_IINV (the I-cache), and CPU_FEATURES bit 27. The emulator has no D-cache, so they change no data, but CACHE_STATUS.MNT_BUSY reads 1 for as long as the walk would take and --sd-dma's coherence checker sees them. For --emulate and --gdbserver on the emulator
     #[arg(long, requires = "emu_host", conflicts_with = "board")]
     pub(crate) dcache_range_ops: bool,
 

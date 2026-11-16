@@ -169,8 +169,8 @@ pub struct Hardware {
     /// `SDM_DMA_ADDR`, `SDM_CFG.DMA_EN`, `DMA_BUSY`, `DMA_ERR`,
     /// `SDM_CAPS[10]`, and the DMA coherence checker.
     pub sd_dma: bool,
-    /// The D-cache range clean/invalidate ops (`--dcache-range-ops`):
-    /// `CACHE_OP_ADDR`, `CACHE_OP_LEN`, `CACHE_CTRL[5:4]` and
+    /// The cache range clean/invalidate ops (`--dcache-range-ops`):
+    /// `CACHE_OP_ADDR`, `CACHE_OP_LEN`, `CACHE_CTRL[6:4]` and
     /// `CPU_FEATURES[27]`.
     pub dcache_range_ops: bool,
 }
@@ -463,7 +463,11 @@ impl Cpu {
         self.set_tlb_entries(hw.tlb_entries.unwrap_or(TLB_ENTRIES_DEFAULT));
         self.set_has_tlb_walker(!hw.no_tlb_walker);
         let dma = hw.sd_native && hw.sd_dma;
-        self.sd = (hw.sd_card.is_some() || hw.sd_native).then(|| Box::new(SdController::new(hw.sd_card, hw.sd_native, dma)));
+        self.sd = (hw.sd_card.is_some() || hw.sd_native).then(|| {
+            let mut sd = SdController::new(hw.sd_card, hw.sd_native, dma);
+            sd.set_ddr_size(self.mem.len() as u64);
+            Box::new(sd)
+        });
         self.cache_ctl.range_ops = hw.dcache_range_ops;
         self.coherence = dma.then(|| Box::new(coherence::Coherence::new(self.mem.len())));
     }
@@ -686,6 +690,9 @@ impl Cpu {
             }
         };
         let word = words[0];
+        if let Some(coh) = self.coherence.as_deref_mut() {
+            coh.cpu_fetch(fetch_pa, 4 * (word >> 30).max(1));
+        }
         if let Some(sim) = self.cachesim.as_mut() {
             sim.fetch(pc, self.um, fetch_pa, (word >> 30).max(1), (self.instret, self.cycles));
         }

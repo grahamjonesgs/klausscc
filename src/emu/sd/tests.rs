@@ -1175,6 +1175,10 @@ fn fault_specs_parse_and_print() {
         ("rcrc@5x2", FaultKind::ReadError, None, 5, 2),
         ("cmdto@100", FaultKind::CmdTimeout, None, 100, 1),
         ("cmdto:17@2x4", FaultKind::CmdTimeout, Some(17), 2, 4),
+        ("dmaerr@3", FaultKind::DmaErr, None, 3, 1),
+        ("dmastall@1x2", FaultKind::DmaStall, None, 1, 2),
+        ("dmahang@7", FaultKind::DmaHang, None, 7, 1),
+        ("dmastuck@9", FaultKind::DmaStuck, None, 9, 1),
     ] {
         let fault: SdFault = spec.parse().unwrap();
         assert_eq!((fault.kind, fault.cmd, fault.at, fault.count), (kind, cmd, at, count), "{spec}");
@@ -1192,6 +1196,7 @@ fn fault_specs_parse_and_print() {
         "cmdto:64@1",
         "cmdto:x@1",
         "wcrc@-1",
+        "dmaerr:17@1",
     ] {
         assert!(bad.parse::<SdFault>().is_err(), "{bad}");
     }
@@ -1507,6 +1512,8 @@ fn status(cpu: &mut Cpu) -> u32 {
 /// Start a data command by DMA: FIFO reset, `SDM_BLK`, `SDM_DMA_ADDR`,
 /// `DMA_EN` on the 4-bit bus, then the command.
 fn dma_cmd(cpu: &mut Cpu, index: u64, arg: u32, blocks: u64, size: u64, addr: u64, write: bool) {
+    // SDM_DMA_ADDR is ignored while DMA_BUSY: wait out a drain first.
+    until(cpu, 100_000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
     wr(cpu, SDM_FIFO, FIFO_RESET);
     wr(cpu, SDM_BLK, (blocks << 16) | size);
     wr(cpu, SDM_DMA_ADDR, addr);
@@ -1524,7 +1531,7 @@ fn dma_registers_and_caps() {
     assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0008_0101);
     wr(&mut cpu, SDM_DMA_ADDR, 0x1000);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), 0);
-    wr(&mut cpu, SDM_CFG, 0b111);
+    wr(&mut cpu, SDM_CFG, 0b111 | CFG_DMA_EN);
     assert_eq!(rd(&mut cpu, SDM_CFG), 0b101);
     wr(&mut cpu, SDM_IRQ_EN, u64::from(ST_DMA_ERR | ST_DATA_DONE));
     assert_eq!(rd(&mut cpu, SDM_IRQ_EN), u64::from(ST_DATA_DONE));
@@ -1547,9 +1554,10 @@ fn dma_registers_and_caps() {
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), 0x1234_5670);
     wr(&mut cpu, SDM_DMA_ADDR, 0xABCD_0001_0000_000F);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), 0xABCD_0001_0000_0008);
-    // DMA_EN is SDM_CFG[1].
-    wr(&mut cpu, SDM_CFG, 0b111);
-    assert_eq!(rd(&mut cpu, SDM_CFG), 0b111);
+    // DMA_EN is SDM_CFG[16] (spec v1.1); [1] is not it.
+    assert_eq!(CFG_DMA_EN, 1 << 16);
+    wr(&mut cpu, SDM_CFG, 0b111 | CFG_DMA_EN);
+    assert_eq!(rd(&mut cpu, SDM_CFG), 0b101 | CFG_DMA_EN);
     // IRQ_EN[27] enables DMA_ERR.
     wr(&mut cpu, SDM_IRQ_EN, u64::from(ST_DMA_ERR | ST_DATA_DONE));
     assert_eq!(rd(&mut cpu, SDM_IRQ_EN), u64::from(ST_DMA_ERR | ST_DATA_DONE));
@@ -1655,17 +1663,23 @@ fn dma_multi_block_write() {
     wr(&mut cpu, SDM_IRQ_EN, u64::from(ST_DATA_DONE));
     cpu.mmio_write(INT2_EN, 0b10);
     // Five blocks: the engine fetches them all into the FIFO at once
-    // (DMA_BUSY drops, SDM_DMA_ADDR is past them), then the card takes
-    // them at its pace; DATA_DONE when the last one is programmed.
+    // (SDM_DMA_ADDR is past them), then the card takes them at its pace;
+    // DATA_DONE when the last one is programmed, and DMA_BUSY drops with
+    // it (spec v1.1 item 7).
     dma_cmd(&mut cpu, 25, 40, 5, 512, BUF, true);
     tick(&mut cpu);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 5 * 512, "fetched ahead");
     assert_eq!(rd(&mut cpu, SDM_FIFO), 5 * 64);
     let st = status(&mut cpu);
-    assert_eq!(st & (ST_DATA_BUSY | ST_DMA_BUSY | ST_DATA_DONE | ST_FIFO_THRESH), ST_DATA_BUSY);
+    assert_eq!(
+        st & (ST_DATA_BUSY | ST_DMA_BUSY | ST_DATA_DONE | ST_FIFO_THRESH),
+        ST_DATA_BUSY | ST_DMA_BUSY
+    );
     assert_eq!(rd(&mut cpu, SDM_BLKDONE), 0);
     until(&mut cpu, 10_000_000, |cpu| {
-        let done = status(cpu) & ST_DATA_DONE != 0;
+        let st = status(cpu);
+        let done = st & ST_DATA_DONE != 0;
+        assert_eq!(st & ST_DMA_BUSY == 0, done, "DMA_BUSY drops with DATA_DONE");
         let blocks = rd(cpu, SDM_BLKDONE) as usize;
         assert_eq!(card_bytes(cpu)[40 * BLOCK..(40 + blocks) * BLOCK], data[..blocks * BLOCK]);
         assert_eq!(cpu.mmio_read(INT2_PENDING) == 2, done);
@@ -1688,10 +1702,15 @@ fn dma_multi_block_write() {
     until(&mut cpu, 10_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 2);
     tick(&mut cpu);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 10 * 512);
-    until(&mut cpu, 10_000_000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
-    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 12 * 512);
-    assert_eq!(status(&mut cpu) & ST_DATA_DONE, 0, "the card still has blocks to program");
+    until(&mut cpu, 10_000_000, |cpu| rd(cpu, SDM_DMA_ADDR) == BUF + 12 * 512);
+    assert_eq!(
+        status(&mut cpu) & (ST_DATA_DONE | ST_DMA_BUSY),
+        ST_DMA_BUSY,
+        "all fetched, the card still has blocks to program"
+    );
     until(&mut cpu, 10_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(status(&mut cpu) & ST_DMA_BUSY, 0);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 12 * 512, "never fetched past size x count");
     assert_eq!(card_bytes(&cpu)[60 * BLOCK..72 * BLOCK], data[..]);
     sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
@@ -1776,6 +1795,37 @@ fn dma_abort_by_dma_en_and_fifo_reset() {
     assert!(cpu.sd_dma_summary().unwrap().contains(", 4 aborts,"));
 }
 
+/// Write the registers of a DMA data command and the command itself, as
+/// `dma_cmd`, without expecting `CMD_DONE`; returns `SDM_STATUS`.
+fn dma_cmd_raw(cpu: &mut Cpu, index: u64, blocks: u64, size: u64, addr: u64, write: bool) -> u32 {
+    until(cpu, 100_000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    wr(cpu, SDM_FIFO, FIFO_RESET);
+    wr(cpu, SDM_BLK, (blocks << 16) | size);
+    wr(cpu, SDM_DMA_ADDR, addr);
+    wr(cpu, SDM_CFG, CFG_4BIT | CFG_DMA_EN);
+    wr(cpu, SDM_STATUS, u64::from(ST_STICKY | ST_DMA_ERR));
+    wr(cpu, SDM_ARG, 0);
+    wr(cpu, SDM_CMD, cmd_word(index, R1, CMD_DATA | if write { CMD_WRITE } else { 0 }));
+    status(cpu)
+}
+
+/// A data command refused up front (spec v1.1 items 2 and 5): `DMA_ERR`
+/// at once, no `CMD_DONE`, no data phase, nothing moved, and the card got
+/// nothing (it is still in tran).
+fn assert_refused(cpu: &mut Cpu, st: u32, addr: u64) {
+    assert_eq!(
+        st & (ST_DMA_ERR | ST_ERR_ANY | ST_CMD_DONE | ST_DATA_BUSY | ST_DMA_BUSY | ST_DATA_DONE),
+        ST_DMA_ERR | ST_ERR_ANY
+    );
+    assert_eq!(rd(cpu, SDM_DMA_ADDR), addr);
+    wr(cpu, SDM_STATUS, u64::from(ST_DMA_ERR));
+    assert_eq!(
+        state_of(sdm_ok(cpu, 13, u32::from(RCA) << 16, R1, 0)),
+        4,
+        "tran: no command reached the card"
+    );
+}
+
 #[test]
 fn dma_err_outside_ddr() {
     let mut cpu = cpu_dma(false);
@@ -1784,44 +1834,71 @@ fn dma_err_outside_ddr() {
     let end = DMA_MEM as u64;
     wr(&mut cpu, SDM_IRQ_EN, u64::from(ST_DMA_ERR));
     cpu.mmio_write(INT2_EN, 0b10);
-    // Four blocks from two blocks before DDR's end: two land, then
-    // DMA_ERR ends the data phase; the address is DDR's end.
+    fill(&mut cpu, end - 4 * 512, &[0xEE; 4 * BLOCK]);
+    // With a block count the whole transfer is checked when SDM_CMD is
+    // written: four blocks from two before DDR's end are refused.
+    let st = dma_cmd_raw(&mut cpu, 18, 4, 512, end - 2 * 512, false);
+    assert_eq!(cpu.mmio_read(INT2_PENDING), 2, "IRQ_EN[27]");
+    assert_refused(&mut cpu, st, end - 2 * 512);
+    assert_eq!(ram(&cpu, end - 2 * 512, 2 * BLOCK), vec![0xEE; 2 * BLOCK]);
+    assert_eq!(cpu.mmio_read(INT2_PENDING), 0, "W1C");
+    // Exactly to the end is fine.
+    dma_cmd(&mut cpu, 18, 7, 2, 512, end - 2 * 512, false);
+    until(&mut cpu, 10_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(ram(&cpu, end - 2 * 512, 2 * BLOCK), (7..9).flat_map(pattern).collect::<Vec<_>>());
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    // A counted write that would read past the end, and one from above
+    // 4 GiB: refused.
+    let st = dma_cmd_raw(&mut cpu, 25, 2, 512, end - 512, true);
+    assert_refused(&mut cpu, st, end - 512);
+    let st = dma_cmd_raw(&mut cpu, 25, 2, 512, 1 << 32, true);
+    assert_refused(&mut cpu, st, 1 << 32);
+    // A block size not a multiple of 8 (ACMD22's 4) is refused too.
+    let st = dma_cmd_raw(&mut cpu, 17, 1, 516, BUF, false);
+    assert_refused(&mut cpu, st, BUF);
+
+    // Open-ended (count 0): each block is checked before it moves.  Two
+    // land, the third gets DMA_ERR: nothing of it reaches DDR, the address
+    // is the first byte not transferred, and the card side goes on into
+    // the FIFO (the failed block first) until it is full.
     fill(&mut cpu, end - 2 * 512, &[0xEE; 2 * BLOCK]);
-    dma_cmd(&mut cpu, 18, 0, 4, 512, end - 2 * 512, false);
+    dma_cmd(&mut cpu, 18, 0, 0, 512, end - 2 * 512, false);
     until(&mut cpu, 10_000_000, |cpu| status(cpu) & ST_ERR_ANY != 0);
     let st = status(&mut cpu);
-    assert_eq!(
-        st & (ST_DMA_ERR | ST_ERR_ANY | ST_DATA_BUSY | ST_DMA_BUSY | ST_DATA_DONE),
-        ST_DMA_ERR | ST_ERR_ANY
-    );
+    assert_eq!(st & (ST_DMA_ERR | ST_DATA_BUSY | ST_DATA_DONE), ST_DMA_ERR | ST_DATA_BUSY);
     assert_eq!(st & ST_ERRORS, 0, "only DMA_ERR");
-    assert_eq!(cpu.mmio_read(INT2_PENDING), 2, "IRQ_EN[27]");
+    until(&mut cpu, 1000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), end);
-    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 2);
     assert_eq!(ram(&cpu, end - 2 * 512, 2 * BLOCK), (0..2).flat_map(pattern).collect::<Vec<_>>());
-    // W1C.
-    wr(&mut cpu, SDM_STATUS, u64::from(ST_DMA_ERR));
-    assert_eq!(status(&mut cpu) & (ST_DMA_ERR | ST_ERR_ANY), 0);
-    assert_eq!(cpu.mmio_read(INT2_PENDING), 0);
+    assert_eq!(rd(&mut cpu, SDM_FIFO), FIFO_WORDS as u64, "the FIFO filled");
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 10, "good blocks received: 2 in DDR, 8 in the FIFO");
+    assert_eq!(pop(&mut cpu, BLOCK / 8), pattern(2), "the failed block is the FIFO's first");
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
     sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
     // A block that would cross the end: nothing of it is written.
     fill(&mut cpu, end - 256, &[0xEE; 256]);
-    dma_cmd(&mut cpu, 17, 0, 1, 512, end - 256, false);
+    dma_cmd(&mut cpu, 18, 0, 0, 512, end - 256, false);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_ERR_ANY != 0);
     assert_eq!(status(&mut cpu) & (ST_DMA_ERR | ST_DATA_DONE), ST_DMA_ERR);
     assert_eq!(ram(&cpu, end - 256, 256), vec![0xEE; 256]);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), end - 256);
-    wr(&mut cpu, SDM_STATUS, u64::from(ST_STICKY | ST_DMA_ERR));
-    // A write from outside DDR (above 4 GiB): DMA_ERR at the first fetch.
-    dma_cmd(&mut cpu, 25, 0, 2, 512, 1 << 32, true);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    // An open-ended write from outside DDR: DMA_ERR at the first fetch;
+    // the card side waits for data that never comes, until CMD12.
+    dma_cmd(&mut cpu, 25, 0, 0, 512, 1 << 32, true);
     tick(&mut cpu);
-    assert_eq!(status(&mut cpu) & (ST_DMA_ERR | ST_DATA_BUSY | ST_DMA_BUSY), ST_DMA_ERR);
+    assert_eq!(status(&mut cpu) & (ST_DMA_ERR | ST_DATA_BUSY), ST_DMA_ERR | ST_DATA_BUSY);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), 1 << 32);
     sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
     assert_eq!(native_acmd22(&mut cpu), 0);
-    assert!(cpu.sd_dma_summary().unwrap().contains(", 3 DMA_ERR,"));
+    assert!(
+        cpu.sd_dma_summary().unwrap().contains(", 7 DMA_ERR,"),
+        "{}",
+        cpu.sd_dma_summary().unwrap()
+    );
 }
 
 #[test]
@@ -1853,18 +1930,13 @@ fn dma_card_errors_and_odd_blocks() {
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
     assert_eq!(native_acmd22(&mut cpu), 1);
     assert!(cpu.sd_dma_summary().unwrap().contains(", 2 card errors"));
-    // ACMD22 by DMA: a 4-byte block moves as its FIFO word, 8 bytes with
-    // [63:32] = 0, and the address advances by 8 (this model's reading of
-    // the spec: the engine moves FIFO words).
+    // ACMD22 by DMA: its 4-byte block is not a multiple of 8, so the
+    // engine refuses it up front (spec v1.1 item 2); by PIO it works.
     fill(&mut cpu, BUF, &[0xEE; 16]);
-    sdm_ok(&mut cpu, 55, rca, R1, 0);
-    dma_cmd(&mut cpu, 22, 0, 1, 4, BUF, false);
-    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
-    assert_eq!(
-        ram(&cpu, BUF, 16),
-        [0, 0, 0, 1, 0, 0, 0, 0, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE]
-    );
-    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 8);
+    let st = dma_cmd_raw(&mut cpu, 22, 1, 4, BUF, false);
+    assert_refused(&mut cpu, st, BUF);
+    assert_eq!(ram(&cpu, BUF, 16), [0xEE; 16]);
+    assert_eq!(native_acmd22(&mut cpu), 1);
     // ACMD51's 8-byte SCR.
     sdm_ok(&mut cpu, 55, rca, R1, 0);
     dma_cmd(&mut cpu, 51, 0, 1, 8, BUF + 64, false);
@@ -1889,17 +1961,18 @@ fn dcache_range_ops_and_mnt_busy() {
 
     let mut cpu = cpu_dma(true);
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & (1 << 27), 1 << 27);
-    // The registers read back; CACHE_CTRL's bits self-clear (it reads 0).
+    // The registers read back, ADDR's [4:0] as 0 and LEN's [31:0] only;
+    // CACHE_CTRL's bits self-clear (it reads 0).
     cpu.mmio_write(CACHE_OP_ADDR_REG, 0x1_2345);
-    cpu.mmio_write(CACHE_OP_LEN_REG, 0x4000);
-    assert_eq!(cpu.mmio_read(CACHE_OP_ADDR_REG), 0x1_2345);
+    cpu.mmio_write(CACHE_OP_LEN_REG, 0x7_0000_4000);
+    assert_eq!(cpu.mmio_read(CACHE_OP_ADDR_REG), 0x1_2340);
     assert_eq!(cpu.mmio_read(CACHE_OP_LEN_REG), 0x4000);
     cpu.mmio_write(CACHE_CTRL_REG, 0b01_0000);
     assert_eq!(cpu.mmio_read(CACHE_CTRL_REG), 0);
-    // MNT_BUSY for the walk: 0x4000 bytes = 512 lines.
+    // MNT_BUSY for the walk: 0x4000 bytes = 512 lines, 8 + 2 per line.
     assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1);
     let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
-    assert!((1000..1100).contains(&busy), "{busy}");
+    assert!((1032..1050).contains(&busy), "{busy}");
     // LEN = 0 is a no-op.
     cpu.mmio_write(CACHE_OP_LEN_REG, 0);
     cpu.mmio_write(CACHE_CTRL_REG, 0b11_0000);
@@ -1909,12 +1982,153 @@ fn dcache_range_ops_and_mnt_busy() {
     cpu.mmio_write(CACHE_CTRL_REG, 0b10_0000);
     cpu.mmio_write(CACHE_CTRL_REG, 0b10);
     let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
-    assert!((3000..3200).contains(&busy), "{busy}");
-    assert_eq!(problems(&cpu), 0);
-    // Writing the registers while a walk is pending is reported.
-    cpu.mmio_write(CACHE_CTRL_REG, 0b10_0000);
-    cpu.mmio_write(CACHE_OP_ADDR_REG, 0);
-    assert_eq!(problems(&cpu), 1);
+    assert!((3080..3100).contains(&busy), "{busy}");
+    // FLUSH with range bits: the whole-cache op only.
+    cpu.mmio_write(CACHE_CTRL_REG, 0b11_0010);
+    let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    assert!((2048..2064).contains(&busy), "{busy}");
+    // A dirty line costs ~10 more cycles to walk.
+    for k in 0..20 {
+        cpu_store(&mut cpu, BUF + 32 * k, k);
+    }
+    cpu.mmio_write(CACHE_OP_ADDR_REG, BUF);
+    cpu.mmio_write(CACHE_OP_LEN_REG, 0x4000);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b01_0000);
+    let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    assert!((1232..1250).contains(&busy), "{busy}");
+    for k in 0..20 {
+        cpu_store(&mut cpu, BUF + 32 * k, k);
+    }
+    cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    let busy = until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    assert!((2248..2264).contains(&busy), "{busy}");
+    // ADDR / LEN are copied when an op is accepted: rewriting them while
+    // it is queued (legal) does not change it.  Lines A and B dirty; a
+    // clean of A queued behind a FLUSH; then the registers point at B.
+    let (a, b) = (BUF + 0x2000, BUF + 0x3000);
+    cpu_store(&mut cpu, a, 1);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    cpu_store(&mut cpu, b, 1);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, a);
+    cpu.mmio_write(CACHE_OP_LEN_REG, 32);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b01_0000);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, b);
+    until(&mut cpu, 100_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    assert_eq!(problems(&cpu), 0, "writing the registers during a walk is fine");
+    native_init(&mut cpu);
+    dma_cmd(&mut cpu, 24, 1, 1, 512, a, true);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 0, "A was cleaned");
+    dma_cmd(&mut cpu, 24, 1, 1, 512, b, true);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 1, "B was not");
+}
+
+#[test]
+fn dma_phase_rules() {
+    // Spec v1.1 items 8 and 9.
+    let mut cpu = cpu_dma(false);
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    // During a DMA phase SDM_DATA loads read 0 and stores are dropped with
+    // FIFO_ERR; FIFO_THRESH reads 0.
+    dma_cmd(&mut cpu, 18, 0, 0, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 1);
+    assert_eq!(rd(&mut cpu, SDM_DATA), 0);
+    assert_eq!(status(&mut cpu) & (ST_FIFO_THRESH | ST_FIFO_ERR), 0);
+    wr(&mut cpu, SDM_DATA, 5);
+    assert_eq!(status(&mut cpu) & ST_FIFO_ERR, ST_FIFO_ERR);
+    // A CMD12 ends the phase: DMA_BUSY drops after the burst in flight,
+    // and the blocks received are in DDR.
+    let blocks = rd(&mut cpu, SDM_BLKDONE);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(status(&mut cpu) & ST_DATA_BUSY, 0);
+    until(&mut cpu, 100, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + blocks * 512);
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
+    // A CMD12 during a DMA write ends the fetching.
+    dma_cmd(&mut cpu, 25, 100, 0, 512, BUF, true);
+    tick(&mut cpu);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 8 * 512, "4 KiB ahead at most");
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    until(&mut cpu, 100, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    pass(&mut cpu, 50_000);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 8 * 512);
+    // DMA_EN is sampled when SDM_CMD is written: set during a PIO phase it
+    // changes nothing (the FIFO still moves the data).
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (2 << 16) | 512);
+    sdm_ok(&mut cpu, 23, 2, R1, 0);
+    sdm_ok(&mut cpu, 18, 40, R1, CMD_DATA);
+    wr(&mut cpu, SDM_CFG, CFG_4BIT | CFG_DMA_EN);
+    assert_eq!(status(&mut cpu) & ST_DMA_BUSY, 0);
+    assert_eq!(pop(&mut cpu, 128), (40..42).flat_map(pattern).collect::<Vec<_>>());
+    assert_ne!(status(&mut cpu) & ST_DATA_DONE, 0);
+    // Clearing SD_MODE resets the engine: a DMA in flight stops once its
+    // burst completes.
+    dma_cmd(&mut cpu, 18, 0, 0, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 1);
+    let ctrl = rd(&mut cpu, SD_CTRL);
+    wr(&mut cpu, SD_CTRL, ctrl & !CTRL_SD_MODE);
+    assert_eq!(status(&mut cpu) & ST_DATA_BUSY, 0);
+    until(&mut cpu, 100, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    pass(&mut cpu, 50_000);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF + 512, "nothing more moved");
+}
+
+#[test]
+fn dma_faults() {
+    let mut cpu = cpu_dma(false);
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    inject(&mut cpu, &["dmaerr@1", "dmaerr@2", "dmastall@3", "dmahang@4", "dmastuck@5"]);
+    // dmaerr on a counted command: refused up front.
+    let st = dma_cmd_raw(&mut cpu, 18, 4, 512, BUF, false);
+    assert_refused(&mut cpu, st, BUF);
+    // On an open-ended one: DMA_ERR at the first block, which goes to the
+    // FIFO.
+    fill(&mut cpu, BUF, &[0xEE; BLOCK]);
+    dma_cmd(&mut cpu, 18, 0, 0, 512, BUF, false);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DMA_ERR != 0);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF);
+    assert_eq!(ram(&cpu, BUF, BLOCK), vec![0xEE; BLOCK]);
+    assert_eq!(pop(&mut cpu, BLOCK / 8), pattern(0));
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    // dmastall: nothing moves, DMA_BUSY stays up, until DMA_EN = 0 stops
+    // it; the card side then goes on into the FIFO, as for any abort.
+    dma_cmd(&mut cpu, 18, 0, 2, 512, BUF, false);
+    pass(&mut cpu, 100_000);
+    assert_eq!(status(&mut cpu) & (ST_DMA_BUSY | ST_DATA_DONE), ST_DMA_BUSY);
+    assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF);
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    until(&mut cpu, 1000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    // dmahang: DMA_EN = 0, SDM_FIFO[31] and CMD12 do not drop DMA_BUSY;
+    // clearing SD_MODE does.
+    dma_cmd(&mut cpu, 25, 0, 2, 512, BUF, true);
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    pass(&mut cpu, 100_000);
+    assert_ne!(status(&mut cpu) & ST_DMA_BUSY, 0);
+    let ctrl = rd(&mut cpu, SD_CTRL);
+    wr(&mut cpu, SD_CTRL, ctrl & !CTRL_SD_MODE);
+    until(&mut cpu, 1000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+    wr(&mut cpu, SD_CTRL, ctrl);
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
+    // dmastuck: not even that.
+    dma_cmd(&mut cpu, 17, 0, 1, 512, BUF, false);
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    wr(&mut cpu, SD_CTRL, ctrl & !CTRL_SD_MODE);
+    pass(&mut cpu, 100_000);
+    assert_ne!(status(&mut cpu) & ST_DMA_BUSY, 0);
+    assert_eq!(
+        cpu.sd_fault_summary().unwrap(),
+        "SD faults injected: 5 (dmaerr@1: 1, dmaerr@2: 1, dmastall@3: 1, dmahang@4: 1, dmastuck@5: 1)"
+    );
 }
 
 #[test]
@@ -1942,64 +2156,140 @@ fn dma_coherence_checker() {
     dma_cmd(&mut cpu, 24, 1, 1, 512, BUF, true);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     assert_eq!(problems(&cpu), 1);
-    // The clean not waited for: the DMA reads during the walk.
+    // The clean not waited for: the DMA reads during the walk, and the
+    // walk's effect counts only when it completes, so the line is still
+    // dirty too.
     cpu_store(&mut cpu, BUF + 8, 0x56);
     cpu.mmio_write(CACHE_OP_ADDR_REG, BUF);
     cpu.mmio_write(CACHE_OP_LEN_REG, 512);
     cpu.mmio_write(CACHE_CTRL_REG, clean);
     dma_cmd(&mut cpu, 24, 1, 1, 512, BUF, true);
     tick(&mut cpu);
-    assert_eq!(problems(&cpu), 2, "DMA while MNT_BUSY");
+    assert_eq!(problems(&cpu), 3, "DMA while MNT_BUSY, of a dirty line");
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     // A DMA read into a buffer the CPU then reads without an invalidate.
     dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     assert_eq!(cpu_load(&mut cpu, BUF + 64), u64::from_le_bytes(pattern(3)[64..72].try_into().unwrap()));
-    assert_eq!(problems(&cpu), 3, "stale line read");
+    assert_eq!(problems(&cpu), 4, "stale line read");
     // With the invalidate: fine.
     dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
     range(&mut cpu, BUF, 512, inv);
     cpu_load(&mut cpu, BUF + 64);
     cpu_load(&mut cpu, BUF + 504);
-    assert_eq!(problems(&cpu), 3);
+    assert_eq!(problems(&cpu), 4);
     // A DMA into a line the CPU dirtied (no clean before): its writeback
     // could clobber the data.
     cpu_store(&mut cpu, BUF + 256, 1);
     dma_cmd(&mut cpu, 17, 3, 1, 512, BUF, false);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
-    assert_eq!(problems(&cpu), 4);
-    // A whole-cache INVALIDATE covers everything.
+    assert_eq!(problems(&cpu), 5);
+    // A whole-cache INVALIDATE covers everything, once it completes: a
+    // load during its walk is still a problem.
     cpu.mmio_write(CACHE_CTRL_REG, 0b100);
     cpu_load(&mut cpu, BUF);
-    assert_eq!(problems(&cpu), 4);
+    assert_eq!(problems(&cpu), 6, "load before the walk completed");
+    until(&mut cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    cpu_load(&mut cpu, BUF + 32);
+    assert_eq!(problems(&cpu), 6);
     // A range invalidate alone drops a dirty line's data.
     cpu_store(&mut cpu, BUF + 1024, 1);
     range(&mut cpu, BUF + 1024, 32, inv);
-    assert_eq!(problems(&cpu), 5);
-    // Clean + invalidate does not; [4:0] of the address are ignored, so the
+    assert_eq!(problems(&cpu), 7);
+    // Clean + invalidate does not; [4:0] of the address read 0, so the
     // length counts from the line's start.
     cpu_store(&mut cpu, BUF + 1024 + 0x20, 1);
     range(&mut cpu, BUF + 1024 + 0x3F, 1, clean | inv);
     dma_cmd(&mut cpu, 24, 1, 1, 512, BUF + 1024, true);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
-    assert_eq!(problems(&cpu), 5);
-    // Not a coherence problem, but a misuse: SDM_DMA_ADDR during a DMA
-    // is ignored and reported.
+    assert_eq!(problems(&cpu), 7);
+    // SDM_DMA_ADDR during a DMA is ignored and reads back the live
+    // address (spec v1.1 item 8): not a problem.
     dma_cmd(&mut cpu, 18, 0, 4, 512, BUF, false);
     wr(&mut cpu, SDM_DMA_ADDR, BUF + 0x8000);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), BUF);
-    assert_eq!(problems(&cpu), 6);
-    // Range ops issued after the DMA cover it; a whole FLUSH cleans all.
+    assert_eq!(problems(&cpu), 7);
+    // A DMA writing memory while a walk runs: its writebacks could land
+    // over the device's data.
+    until(&mut cpu, 1_000_000, |cpu| rd(cpu, SDM_BLKDONE) == 1);
+    // Three queued FLUSHes outlast the next block.
+    for _ in 0..3 {
+        cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+    }
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 8, "DMA write while MNT_BUSY");
     sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    // Range ops issued after the DMA cover it; a whole FLUSH cleans all.
     cpu.mmio_write(CACHE_CTRL_REG, 0b100);
+    until(&mut cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
     cpu_store(&mut cpu, BUF, 7);
     cpu.mmio_write(CACHE_CTRL_REG, 0b10);
     until(&mut cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
     dma_cmd(&mut cpu, 24, 1, 1, 512, BUF, true);
     until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
-    assert_eq!(problems(&cpu), 6);
+    assert_eq!(problems(&cpu), 8);
+}
+
+#[test]
+fn dma_icache_coherence() {
+    // Code a DMA wrote must be invalidated in the I-cache before it runs:
+    // ICACHE_INV, or RANGE_IINV over it; a CPU store to a line also does
+    // (the I-cache snoops CPU stores).
+    let mut cpu = cpu_dma(true);
+    native_init(&mut cpu);
+    let iinv = 0b100_0000;
+    let fetch = |cpu: &mut Cpu, addr: u64| cpu.coherence.as_deref_mut().unwrap().cpu_fetch(addr as u32, 4);
+    let dma_read = |cpu: &mut Cpu, addr: u64| {
+        cpu.mmio_write(CACHE_CTRL_REG, 0b10);
+        until(cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+        dma_cmd(cpu, 17, 3, 1, 512, addr, false);
+        until(cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+        // The D-side invalidate, so only the I-side is in question.
+        cpu.mmio_write(CACHE_CTRL_REG, 0b100);
+        until(cpu, 1_000_000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    };
+    dma_read(&mut cpu, BUF);
+    fetch(&mut cpu, BUF + 64);
+    assert_eq!(problems(&cpu), 1, "executing DMA-written code without an I-cache invalidate");
+    fetch(&mut cpu, BUF + 68);
+    assert_eq!(problems(&cpu), 1, "reported once per line");
+    // ICACHE_INV: at once.
+    dma_read(&mut cpu, BUF);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b1000);
+    fetch(&mut cpu, BUF + 64);
+    assert_eq!(problems(&cpu), 1);
+    // RANGE_IINV of the buffer: once its walk completes (MNT_BUSY, 8 + 2
+    // per line).
+    dma_read(&mut cpu, BUF);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, BUF);
+    cpu.mmio_write(CACHE_OP_LEN_REG, 256);
+    cpu.mmio_write(CACHE_CTRL_REG, iinv);
+    assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1);
+    let busy = until(&mut cpu, 1000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    assert!((24..=48).contains(&busy), "{busy}");
+    fetch(&mut cpu, BUF + 64);
+    assert_eq!(problems(&cpu), 1, "covered");
+    fetch(&mut cpu, BUF + 256);
+    assert_eq!(problems(&cpu), 2, "past the range");
+    // A CPU store to a line counts as its invalidate.
+    dma_read(&mut cpu, BUF);
+    cpu_store(&mut cpu, BUF + 128, 0);
+    fetch(&mut cpu, BUF + 132);
+    assert_eq!(problems(&cpu), 2);
+    // ICACHE_INV with the range bits: both happen.
+    dma_read(&mut cpu, BUF);
+    cpu_store(&mut cpu, BUF + 0x4000, 1);
+    cpu.mmio_write(CACHE_OP_ADDR_REG, BUF + 0x4000);
+    cpu.mmio_write(CACHE_OP_LEN_REG, 32);
+    cpu.mmio_write(CACHE_CTRL_REG, 0b1000 | 0b01_0000);
+    assert_eq!(cpu.mmio_read(CACHE_STATUS_REG), 1, "the range clean walks");
+    fetch(&mut cpu, BUF + 64);
+    assert_eq!(problems(&cpu), 2, "the I-cache dropped at once");
+    until(&mut cpu, 1000, |cpu| cpu.mmio_read(CACHE_STATUS_REG) == 0);
+    dma_cmd(&mut cpu, 24, 1, 1, 512, BUF + 0x4000, true);
+    until(&mut cpu, 1_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+    assert_eq!(problems(&cpu), 2, "and the line was cleaned");
 }
 
 #[test]

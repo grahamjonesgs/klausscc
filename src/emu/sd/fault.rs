@@ -14,6 +14,10 @@
 //! | `wbusy` | the same | the busy never ends: `BUSY_TIMEOUT` (at once) | data response `0x05`, then MISO stays `0x00` until CS goes high or the slot is powered off |
 //! | `rerr` (or `rcrc`) | a memory block read (CMD17/CMD18) | the block arrives with a bad CRC: `DATA_CRC_ERR`, nothing reaches the FIFO | error token `0x04` (card ECC failed) in place of the block; a CMD18 sends nothing more until CMD12 |
 //! | `cmdto` | a command the card receives (any index, or only `CMD`) | no response: `CMD_TIMEOUT` | no response: R1 stays `0xFF` |
+//! | `dmaerr` | a data command written with `DMA_EN` (`--sd-dma`) | `DMA_ERR` as if its range left DDR: a counted one is refused up front, an open-ended one stops before its first block | - |
+//! | `dmastall` | the same | the engine moves nothing (`DMA_BUSY` stays 1, no `DATA_DONE`), but `DMA_EN` = 0, `SDM_FIFO[31]`, CMD12 and clearing `SD_MODE` stop it as usual | - |
+//! | `dmahang` | the same | stalls, and only clearing `SD_MODE` drops `DMA_BUSY` | - |
+//! | `dmastuck` | the same | stalls, and `DMA_BUSY` never drops again | - |
 //!
 //! A failed write is not programmed, so ACMD22 counts only the blocks
 //! before it.  A command that gets no response is not executed at all (the
@@ -35,6 +39,14 @@ pub enum FaultKind {
     ReadError,
     /// A command gets no response.
     CmdTimeout,
+    /// A DMA data command gets `DMA_ERR`.
+    DmaErr,
+    /// A DMA data command's engine moves nothing until stopped.
+    DmaStall,
+    /// The same, and only clearing `SD_MODE` stops it.
+    DmaHang,
+    /// The same, and nothing stops it.
+    DmaStuck,
 }
 
 impl FaultKind {
@@ -45,6 +57,10 @@ impl FaultKind {
             Self::WriteBusy => "wbusy",
             Self::ReadError => "rerr",
             Self::CmdTimeout => "cmdto",
+            Self::DmaErr => "dmaerr",
+            Self::DmaStall => "dmastall",
+            Self::DmaHang => "dmahang",
+            Self::DmaStuck => "dmastuck",
         }
     }
 }
@@ -58,6 +74,8 @@ pub(super) enum Event {
     Read(u64),
     /// A command with this index.
     Command(u8),
+    /// A data command with this index written with `DMA_EN` (`--sd-dma`).
+    DmaCommand(u8),
 }
 
 /// One `--sd-fault` spec.
@@ -81,7 +99,9 @@ impl SdFault {
     /// Whether `event` is one this spec counts.
     const fn matches(&self, event: Event) -> bool {
         match (self.kind, event) {
-            (FaultKind::WriteCrc | FaultKind::WriteBusy, Event::Write(_)) | (FaultKind::ReadError, Event::Read(_)) => true,
+            (FaultKind::WriteCrc | FaultKind::WriteBusy, Event::Write(_))
+            | (FaultKind::ReadError, Event::Read(_))
+            | (FaultKind::DmaErr | FaultKind::DmaStall | FaultKind::DmaHang | FaultKind::DmaStuck, Event::DmaCommand(_)) => true,
             (FaultKind::CmdTimeout, Event::Command(index)) => match self.cmd {
                 Some(cmd) => cmd == index,
                 None => true,
@@ -123,7 +143,11 @@ impl FromStr for SdFault {
 
     /// Parse `KIND[:CMD]@N[xCOUNT]`.
     fn from_str(spec: &str) -> Result<Self, String> {
-        let bad = |why: &str| format!("bad SD fault '{spec}': {why} (expected KIND[:CMD]@N[xCOUNT], KIND = wcrc, wbusy, rerr or cmdto)");
+        let bad = |why: &str| {
+            format!(
+                "bad SD fault '{spec}': {why} (expected KIND[:CMD]@N[xCOUNT], KIND = wcrc, wbusy, rerr, cmdto, dmaerr, dmastall, dmahang or dmastuck)"
+            )
+        };
         let (head, tail) = spec.split_once('@').ok_or_else(|| bad("no '@'"))?;
         let (name, cmd) = match head.split_once(':') {
             Some((name, cmd)) => (name, Some(cmd)),
@@ -134,6 +158,10 @@ impl FromStr for SdFault {
             "wbusy" => FaultKind::WriteBusy,
             "rerr" | "rcrc" => FaultKind::ReadError,
             "cmdto" => FaultKind::CmdTimeout,
+            "dmaerr" => FaultKind::DmaErr,
+            "dmastall" => FaultKind::DmaStall,
+            "dmahang" => FaultKind::DmaHang,
+            "dmastuck" => FaultKind::DmaStuck,
             _ => return Err(bad("unknown kind")),
         };
         let cmd = match cmd {
@@ -208,6 +236,7 @@ impl Faults {
                     Event::Write(lba) => format!("write block {} (block address {lba})", spec.seen),
                     Event::Read(lba) => format!("read block {} (block address {lba})", spec.seen),
                     Event::Command(index) => format!("command {} (CMD{index})", spec.seen),
+                    Event::DmaCommand(index) => format!("DMA data command {} (CMD{index})", spec.seen),
                 };
                 eprintln!("klausscc sd: injected {} at {what}", spec.kind.name());
             }

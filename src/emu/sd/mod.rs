@@ -40,14 +40,15 @@
 //! timeout fires for a present card that answers; one that does not answer
 //! (an illegal command, a read past its end) times out at once.
 //!
-//! **DMA** (`--sd-dma`, with `--sd-native`; the klaussCPU SD DMA spec v1):
-//! `SDM_DMA_ADDR`, `SDM_CFG[1]` `DMA_EN`, `SDM_STATUS[5]` `DMA_BUSY` and
-//! `[27]` `DMA_ERR`, `SDM_CAPS[10]`.  A data command written with `DMA_EN`
-//! moves its blocks between the card and DDR, and unlike PIO it takes
-//! modelled time: the card side finishes a block every
+//! **DMA** (`--sd-dma`, with `--sd-native`; the klaussCPU SD DMA spec
+//! v1.2): `SDM_DMA_ADDR`, `SDM_CFG[16]` `DMA_EN`, `SDM_STATUS[5]`
+//! `DMA_BUSY` and `[27]` `DMA_ERR`, `SDM_CAPS[10]`.  A data command written
+//! with `DMA_EN` moves its blocks between the card and DDR, and unlike PIO
+//! it takes modelled time: the card side finishes a block every
 //! [`SdController::block_cycles`], driven from [`Cpu::tick`](super::Cpu),
-//! a read storing it into DDR at once and a write fetching blocks into the
-//! FIFO ahead of the card.  See `doc/EMULATOR_ISA_SEMANTICS.md`, "SD DMA".
+//! a read storing it into DDR as it completes and a write fetching blocks
+//! into the FIFO ahead of the card.  See `doc/EMULATOR_ISA_SEMANTICS.md`,
+//! "SD DMA".
 
 mod card;
 mod fault;
@@ -185,8 +186,10 @@ const BUSY_TIMEOUT_RESET: u64 = 12_500_000;
 const CFG_MASK: u64 = 0b101;
 /// `SDM_CFG[0]`: 4-bit bus.
 const CFG_4BIT: u64 = 1;
-/// `SDM_CFG[1]` `DMA_EN` (`--sd-dma`; reserved, reading 0, without it).
-const CFG_DMA_EN: u64 = 1 << 1;
+/// `SDM_CFG[16]` `DMA_EN` (`--sd-dma`; reserved, reading 0, without it).
+/// (`[1]` is the high-speed edge and `[7:4]` the sample phase, which this
+/// model, with no high speed, leaves reserved.)
+const CFG_DMA_EN: u64 = 1 << 16;
 /// `SDM_FIFO[31]` (write): reset the FIFO.
 const FIFO_RESET: u64 = 1 << 31;
 /// FIFO depth in 64-bit words (4 KiB, 8 blocks).
@@ -200,6 +203,10 @@ const DMA_ADDR_MASK: u64 = !7;
 /// Cycles `DMA_BUSY` stays up after an abort (the spec: "within a few
 /// hundred cycles"; the burst in flight completes).
 const DMA_ABORT_DRAIN: u64 = 200;
+/// DDR latency of a DMA burst, in cycles (spec v1.1: ~44, pipelined).
+const DMA_DDR_LATENCY: u64 = 44;
+/// FIFO words per DDR burst (32 bytes).
+const DMA_BURST_WORDS: usize = 4;
 /// SD clocks from a data command's store to its first data block: the
 /// command (48), Ncr and the response (56), and Nac / Nwr.
 const DMA_FIRST_BLOCK_CLOCKS: u64 = 120;
@@ -223,6 +230,7 @@ struct Shift {
 
 /// A native data phase in progress (`SDM_STATUS.DATA_BUSY`).
 #[derive(Debug, Clone, Copy)]
+#[expect(clippy::struct_excessive_bools, reason = "independent flags of one data phase")]
 struct Phase {
     /// Host to card.
     write: bool,
@@ -237,6 +245,13 @@ struct Phase {
     fetched: u32,
     /// DMA: the cycle the card side finishes its current block.
     block_at: u64,
+    /// DMA read: every block is in; `DATA_DONE` (and `DMA_BUSY` = 0) at
+    /// this cycle, when the last block's bursts are in DDR.
+    done_at: Option<u64>,
+    /// DMA: the engine moves nothing (`--sd-fault dmastall` and worse).
+    stalled: bool,
+    /// DMA, open-ended: `DMA_ERR` at the first block (`--sd-fault dmaerr`).
+    fail: bool,
 }
 
 impl Phase {
@@ -297,6 +312,11 @@ pub(super) struct SdController {
     dma_addr: u64,
     /// `DMA_BUSY` stays up until this cycle after an abort.
     dma_drain_until: u64,
+    /// `--sd-fault dmahang` / `dmastuck`: the engine is wedged, `DMA_BUSY`
+    /// reads 1 until `SD_MODE` is cleared (hang) or for good (stuck).
+    dma_wedged: Option<FaultKind>,
+    /// DDR's size: `DMA_ERR` past it.
+    ddr_size: u64,
     /// What the DMA engine did, for the run's summary.
     dma_stats: DmaStats,
 }
@@ -318,15 +338,17 @@ struct DmaStats {
     card_errors: u64,
 }
 
-/// The DMA master's view of DDR: the RAM, the coherence checker and whether
-/// a cache walk is still running.
+/// The DMA master's view of DDR: the RAM, the coherence checker and the
+/// cache walks still running.
 pub(super) struct DmaBus<'a> {
     /// The RAM (its length is DDR's size).
     pub(super) mem: &'a mut [u8],
     /// The `--sd-dma` coherence checker.
     pub(super) coherence: Option<&'a mut crate::emu::coherence::Coherence>,
-    /// `CACHE_STATUS.MNT_BUSY`.
-    pub(super) walk_busy: bool,
+    /// The cache controller, for the D-cache walks still running at `now`.
+    pub(super) cache: &'a crate::emu::mmio::CacheCtl,
+    /// The current cycle.
+    pub(super) now: u64,
 }
 
 impl DmaBus<'_> {
@@ -341,7 +363,7 @@ impl DmaBus<'_> {
     fn read(&mut self, addr: u64, len: usize) -> Option<Vec<u8>> {
         let range = self.range(addr, len)?;
         if let Some(coh) = self.coherence.as_deref_mut() {
-            coh.dma_read(addr, len as u64, self.walk_busy);
+            coh.dma_read(addr, len as u64, self.cache.dwalk_covers(self.now, addr, len as u64));
         }
         Some(self.mem[range].to_vec())
     }
@@ -352,7 +374,7 @@ impl DmaBus<'_> {
             return false;
         };
         if let Some(coh) = self.coherence.as_deref_mut() {
-            coh.dma_write(addr, data.len() as u64);
+            coh.dma_write(addr, data.len() as u64, self.cache.dwalk_covers(self.now, addr, data.len() as u64));
         }
         self.mem[range].copy_from_slice(data);
         true
@@ -387,8 +409,16 @@ impl SdController {
             dma: native && dma,
             dma_addr: 0,
             dma_drain_until: 0,
+            dma_wedged: None,
+            ddr_size: u64::MAX,
             dma_stats: DmaStats::default(),
         }
+    }
+
+    /// DDR's size in bytes: a DMA that would touch a byte at or above it
+    /// gets `DMA_ERR`.
+    pub(super) const fn set_ddr_size(&mut self, size: u64) {
+        self.ddr_size = size;
     }
 
     /// The DMA engine's summary for the run, with `--sd-dma`.
@@ -476,10 +506,9 @@ impl SdController {
         }
     }
 
-    /// Write `data` to the register at `offset`; `bytes` is the store's
-    /// width (1, 2, 4 or 8), which only `SD_BUF` looks at.  A misuse of the
-    /// DMA registers is reported to `coherence`, if given.
-    pub(super) fn write(&mut self, offset: u32, data: u64, bytes: u32, now: u64, coherence: Option<&mut crate::emu::coherence::Coherence>) {
+    /// Write `data` to the register at `offset` at cycle `now`; `bytes` is
+    /// the store's width (1, 2, 4 or 8), which only `SD_BUF` looks at.
+    pub(super) fn write(&mut self, offset: u32, data: u64, bytes: u32, now: u64) {
         if offset & SD_BUF_SELECT != 0 {
             let word = &mut self.buf[((offset >> 3) & 63) as usize];
             if bytes >= 8 {
@@ -492,7 +521,7 @@ impl SdController {
             return;
         }
         match offset {
-            SD_CTRL => self.write_ctrl(data),
+            SD_CTRL => self.write_ctrl(data, now),
             SD_DATA => self.exchange(data as u8, now),
             _ if !self.native => {}
             SDM_CMD => self.command(data, now),
@@ -505,8 +534,12 @@ impl SdController {
                 let mask = if self.dma { CFG_MASK | CFG_DMA_EN } else { CFG_MASK };
                 self.cfg = data & mask;
                 if self.cfg & CFG_DMA_EN == 0 {
-                    // DMA_EN = 0 aborts a DMA in progress.
+                    // DMA_EN = 0 aborts a DMA in progress (DMA_EN is
+                    // sampled per data command: setting it during a PIO
+                    // phase changes nothing until the next one).
                     self.dma_abort(now);
+                    // The card side goes on into the FIFO.
+                    self.pump();
                 }
             }
             SDM_FIFO if data & FIFO_RESET != 0 => {
@@ -515,22 +548,12 @@ impl SdController {
                 self.dir = None;
                 self.pushed = 0;
             }
-            SDM_DMA_ADDR if self.dma => {
-                if self.dma_busy(now) {
-                    // Not in the spec; ignored here so that a driver doing
-                    // it shows up.
-                    if let Some(coh) = coherence {
-                        coh.sd_misuse("SDM_DMA_ADDR written while DMA_BUSY (ignored)");
-                    }
-                } else {
-                    self.dma_addr = data & DMA_ADDR_MASK;
-                }
-            }
-            SDM_DATA if self.dma_running() => {
-                if let Some(coh) = coherence {
-                    coh.sd_misuse("SDM_DATA written during a DMA (ignored)");
-                }
-            }
+            // Ignored while DMA_BUSY (spec v1.1 item 8, no error bit): it
+            // reads back the live address, so a driver can check it took.
+            SDM_DMA_ADDR if self.dma && !self.dma_busy(now) => self.dma_addr = data & DMA_ADDR_MASK,
+            // During a DMA phase a store to the FIFO port is dropped and
+            // sets FIFO_ERR (item 8).
+            SDM_DATA if self.dma_running() => self.status |= ST_FIFO_ERR,
             SDM_DATA => {
                 if self.fifo.len() < FIFO_WORDS {
                     self.fifo.push_back(data);
@@ -567,8 +590,9 @@ impl SdController {
 
     // ---- SPI mode ----
 
-    /// `SD_CTRL` write: power the card up or down as `PWR_ON` changes.
-    fn write_ctrl(&mut self, data: u64) {
+    /// `SD_CTRL` write at cycle `now`: power the card up or down as
+    /// `PWR_ON` changes.
+    fn write_ctrl(&mut self, data: u64, now: u64) {
         let mask = if self.native { 0x7_FFFF } else { 0x3_FFFF };
         let was_sd_mode = self.sd_mode();
         self.ctrl = data & mask;
@@ -580,8 +604,15 @@ impl SdController {
             }
         }
         if was_sd_mode && !self.sd_mode() {
-            // Leaving SD mode abandons a native data phase.
-            self.phase = None;
+            // Leaving SD mode resets the native engine: it abandons a data
+            // phase, and a DMA stops once its burst in flight completes
+            // (spec v1.1 item 9) -- unless --sd-fault dmastuck wedged it.
+            if self.phase.take().is_some_and(|p| p.dma) || self.dma_wedged == Some(FaultKind::DmaHang) {
+                self.dma_drain_until = now + DMA_DDR_LATENCY;
+            }
+            if self.dma_wedged == Some(FaultKind::DmaHang) {
+                self.dma_wedged = None;
+            }
         }
     }
 
@@ -641,28 +672,34 @@ impl SdController {
         self.phase.is_some_and(|p| p.dma)
     }
 
-    /// `DMA_BUSY` at cycle `now`: a DMA phase with memory work left (a read
-    /// until its last block is in DDR; a write until its last block is
-    /// fetched), or the drain after an abort.
+    /// `DMA_BUSY` at cycle `now`: a DMA phase (until `DATA_DONE`, for a
+    /// write too: spec v1.1 item 7), the drain after an abort or a
+    /// `DMA_ERR`, or a wedged engine.
     fn dma_busy(&self, now: u64) -> bool {
-        let running = self
-            .phase
-            .is_some_and(|p| p.dma && (!p.write || p.count == 0 || p.fetched < u32::from(p.count)));
-        running || now < self.dma_drain_until
+        self.dma_running() || now < self.dma_drain_until || self.dma_wedged.is_some()
     }
 
     /// `DMA_EN` = 0 or a FIFO reset during a DMA: the engine stops (after
     /// the burst in flight: `DMA_BUSY` drops [`DMA_ABORT_DRAIN`] cycles
     /// later) and the data phase goes on as without DMA, through the FIFO,
-    /// until the driver ends it (CMD12, FIFO reset).
+    /// until the driver ends it (CMD12, FIFO reset).  A wedged engine
+    /// (`dmahang`, `dmastuck`) keeps `DMA_BUSY` up regardless.
     fn dma_abort(&mut self, now: u64) {
         if let Some(phase) = self.phase.as_mut()
             && phase.dma
         {
             phase.dma = false;
+            phase.done_at = None;
             self.dma_drain_until = now + DMA_ABORT_DRAIN;
             self.dma_stats.aborts += 1;
         }
+    }
+
+    /// Cycles from a read block's last word in the FIFO to its last burst
+    /// accepted in DDR: a 32-byte burst per four words, pipelined behind
+    /// the DDR latency.
+    const fn dma_store_cycles(words: usize) -> u64 {
+        DMA_DDR_LATENCY + words.div_ceil(DMA_BURST_WORDS) as u64
     }
 
     /// The SD clock period in CPU cycles: CLK = 100 MHz / (2 (div + 1)).
@@ -679,9 +716,13 @@ impl SdController {
     }
 
     /// The cycle of the DMA engine's next event, if it has one: a fetch
-    /// for a write (at once), or the card side's next block.
+    /// for a write (at once), the card side's next block, or a read's
+    /// `DATA_DONE`.  A stalled engine has none.
     pub(super) fn dma_next_event(&self) -> Option<u64> {
-        let phase = self.phase.filter(|p| p.dma)?;
+        let phase = self.phase.filter(|p| p.dma && !p.stalled)?;
+        if let Some(at) = phase.done_at {
+            return Some(at);
+        }
         if phase.write && self.dma_fetch_wanted(&phase) {
             return Some(0);
         }
@@ -695,12 +736,28 @@ impl SdController {
 
     /// Run the DMA engine up to cycle `now`.
     pub(super) fn dma_advance(&mut self, now: u64, bus: &mut DmaBus<'_>) {
-        while let Some(mut phase) = self.phase.filter(|p| p.dma) {
+        while let Some(mut phase) = self.phase.filter(|p| p.dma && !p.stalled) {
+            if let Some(at) = phase.done_at {
+                if at <= now {
+                    self.status |= ST_DATA_DONE;
+                    self.phase = None;
+                }
+                return;
+            }
             if phase.write && self.dma_fetch_wanted(&phase) {
-                // Memory to FIFO, ahead of the card: a block at a time.
+                // Memory to FIFO, ahead of the card: a block at a time
+                // (never past size x count; an open-ended write at most
+                // the FIFO's 4 KiB ahead), each fetch checked against the
+                // end of DDR.  Its DDR latency is hidden: the card needs
+                // the block only after the command and its response.
                 let words = phase.words();
-                let Some(bytes) = bus.read(self.dma_addr, words * 8) else {
-                    self.dma_error();
+                let fetched = if phase.fail || !self.dma_in_ddr(self.dma_addr, (words * 8) as u64) {
+                    None
+                } else {
+                    bus.read(self.dma_addr, words * 8)
+                };
+                let Some(bytes) = fetched else {
+                    self.dma_error(now);
                     return;
                 };
                 self.fifo
@@ -731,10 +788,16 @@ impl SdController {
                 match self.card.as_mut().map_or(ReadBlock::None, |card| card.sd_read_block(phase.size, bus4)) {
                     ReadBlock::Good(block) => {
                         // FIFO to memory: the block's words, so a 4-mod-8
-                        // block's last word lands whole ([63:32] = 0).
+                        // block's last word lands whole ([63:32] = 0).  A
+                        // block goes to DDR only after its CRC passed (a
+                        // bad one never does), and only if all of it fits
+                        // in DDR: else DMA_ERR, and the block stays in the
+                        // FIFO, where the card side goes on (item 5).
                         let bytes: Vec<u8> = block_to_words(&block).flat_map(u64::to_le_bytes).collect();
-                        if !bus.write(self.dma_addr, &bytes) {
-                            self.dma_error();
+                        if phase.fail || !self.dma_in_ddr(self.dma_addr, bytes.len() as u64) || !bus.write(self.dma_addr, &bytes) {
+                            self.fifo.extend(block_to_words(&block));
+                            self.blkdone = self.blkdone.wrapping_add(1);
+                            self.dma_error(now);
                             return;
                         }
                         self.dma_addr += bytes.len() as u64;
@@ -754,23 +817,53 @@ impl SdController {
                 return;
             }
             if phase.count != 0 && self.blkdone >= phase.count {
-                // A read's last byte is in DDR; a write's last block is on
-                // the card and its busy is over.
-                self.status |= ST_DATA_DONE;
-                self.phase = None;
-                return;
+                if phase.write {
+                    // The last block is on the card and its busy is over:
+                    // DATA_DONE, and DMA_BUSY drops with it.
+                    self.status |= ST_DATA_DONE;
+                    self.phase = None;
+                } else {
+                    // DATA_DONE once the last block's bursts are in DDR.
+                    phase.done_at = Some(phase.block_at + Self::dma_store_cycles(words));
+                    self.phase = Some(phase);
+                }
+                continue;
             }
             phase.block_at += self.block_cycles(&phase);
             self.phase = Some(phase);
         }
     }
 
-    /// `DMA_ERR`: the address left DDR.  The data phase ends as for
-    /// `FIFO_ERR`; nothing of the block moved.
-    fn dma_error(&mut self) {
+    /// `[addr, addr + len)` is all in DDR.
+    const fn dma_in_ddr(&self, addr: u64, len: u64) -> bool {
+        match addr.checked_add(len) {
+            Some(end) => end <= self.ddr_size,
+            None => false,
+        }
+    }
+
+    /// `DMA_ERR` during a phase: the DMA ends (nothing of the block moved;
+    /// `SDM_DMA_ADDR` is the first byte not transferred), not the card's
+    /// data phase, which goes on through the FIFO until the clock stops or
+    /// a CMD12 (spec v1.1 item 5).
+    fn dma_error(&mut self, now: u64) {
         self.status |= ST_DMA_ERR;
-        self.phase = None;
         self.dma_stats.errors += 1;
+        if let Some(phase) = self.phase.as_mut() {
+            phase.dma = false;
+            phase.done_at = None;
+        }
+        self.dma_drain_until = now + DMA_DDR_LATENCY;
+        self.pump();
+    }
+
+    /// A data command with `DMA_EN` that the engine refuses up front (spec
+    /// v1.1 items 2 and 5): a block size not a multiple of 8, or a counted
+    /// transfer that would leave DDR.
+    fn dma_refused(&self) -> bool {
+        let size = self.blk_size() as u64;
+        let count = self.blk >> 16;
+        !size.is_multiple_of(8) || (count != 0 && !self.dma_in_ddr(self.dma_addr, size * count))
     }
 
     /// The block size in bytes, `SDM_BLK[11:0]`; a size field of 0 acts as
@@ -815,16 +908,35 @@ impl SdController {
         let index = (cmd & CMD_INDEX) as u8;
         let rtype = (cmd >> CMD_RESP_SHIFT) & 7;
         let data = cmd & CMD_DATA != 0;
+        let dma = data && self.dma && self.cfg & CFG_DMA_EN != 0;
+        let mut fault = None;
         if data {
             if self.phase.is_some() {
                 // A data command while DATA_BUSY is ignored entirely.
                 return;
+            }
+            if dma {
+                fault = self.card.as_mut().and_then(|card| card.dma_fault(index));
+                let count = self.blk >> 16;
+                if self.dma_refused() || (fault == Some(FaultKind::DmaErr) && count != 0) {
+                    // Refused up front: DMA_ERR, no card command sent,
+                    // nothing moves.
+                    self.status |= ST_DMA_ERR;
+                    self.dma_stats.errors += 1;
+                    return;
+                }
             }
             self.blkdone = 0;
             self.dir = Some(cmd & CMD_WRITE != 0);
             self.thresh_size = self.blk_size();
         }
         let stopped = if cmd & CMD_STOP != 0 { self.phase.take() } else { None };
+        if stopped.is_some_and(|p| p.dma) {
+            // A CMD12 during a DMA ends the data phase: a read's blocks
+            // already received are in DDR, a write's fetching ends, and
+            // DMA_BUSY drops after the burst in flight (item 9).
+            self.dma_drain_until = now + DMA_DDR_LATENCY;
+        }
         let response = match self.card.as_mut() {
             Some(card) => card.sd_command(index, self.arg),
             None => Response::None,
@@ -839,7 +951,6 @@ impl SdController {
         }
         if data {
             if errors == 0 {
-                let dma = self.dma && self.cfg & CFG_DMA_EN != 0;
                 let mut phase = Phase {
                     write: cmd & CMD_WRITE != 0,
                     size: self.blk_size(),
@@ -847,7 +958,13 @@ impl SdController {
                     dma,
                     fetched: 0,
                     block_at: 0,
+                    done_at: None,
+                    stalled: matches!(fault, Some(FaultKind::DmaStall | FaultKind::DmaHang | FaultKind::DmaStuck)),
+                    fail: fault == Some(FaultKind::DmaErr),
                 };
+                if matches!(fault, Some(FaultKind::DmaHang | FaultKind::DmaStuck)) {
+                    self.dma_wedged = fault;
+                }
                 if dma {
                     phase.block_at = now + DMA_FIRST_BLOCK_CLOCKS * self.sd_clock_cycles() + self.block_cycles(&phase);
                     self.dma_stats.commands += 1;
