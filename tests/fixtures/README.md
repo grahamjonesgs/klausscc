@@ -130,7 +130,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | 08 | `test_memory.kla` | Memory access | MEMSET64RR, MEMREADRR, MEMSETR, MEMREADR; the sub-word absolute LDABS8/16/32, LDABS8S/16S/32S, STABS8/16/32 |
 | 09 | `test_stack.kla` | Stack | PUSH, POP, PUSHV, LIFO ordering |
 | 10 | `test_call_ret.kla` | Subroutines | CALL, RET, nested calls, CALLE, CALLNE |
-| 11 | `test_io.kla` | Step sequence | Prints the step numbers 1 to 10, pausing after each; it does not use the LED, 7-segment, switch or RGB registers. No expected values, so it is skipped |
+| 11 | `test_io.kla` | Step sequence | Prints the step numbers 1 to 10, pausing after each; it does not use the LED, 7-segment, switch or RGB registers. No expected values, so it is not in `all_tests.txt`; run it by hand to watch the UART |
 | 12 | `test_strings.kla` | String data | `#name "string"` data layout, read back a byte at a time with LDIDX8 |
 | 13 | `test_edge_cases.kla` | Edge cases | Zero wrap, max values, sign boundary, all 16 registers |
 | 14 | `test_sign_extend.kla` | Type conversion | SEXTB, SEXTH, ZEXTB, ZEXTH |
@@ -154,7 +154,7 @@ header; `test_indexed_mem.kla` has none and fills the gap at 15.
 | — | `hello_world.kla` | Compiled C | Arithmetic, factorial, GCD, Fibonacci, primes |
 | — | `test_64bit.kla` | Compiled C | 33 64-bit checks; expects main's return value (the failure count) `00000000` |
 
-The list holds every file here with expected values (plus `test_io`), so a
+The list holds every file here with expected values, so a
 board run covers the whole emulator corpus; `all_tests_lists_every_file_with_expected_values`
 (in `src/commands/emulate.rs`) checks this.  The exceptions are `hw_mpu.kla`
 and `hw_tlb.kla`, which need a bitstream with the MPU / TLB
