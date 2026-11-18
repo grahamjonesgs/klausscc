@@ -245,6 +245,9 @@ pub struct SdCard {
     bus4: bool,
     /// CMD6 switched function group 1 to high speed (function 1).
     high_speed: bool,
+    /// CMD6 switches to high speed since the start (`--sd-hs-window`'s
+    /// `@N`).
+    hs_switches: u32,
     /// Card status error bits for the next SD-mode response.
     status_err: u32,
     /// The block count CMD23 set for the next CMD18/CMD25.
@@ -367,6 +370,7 @@ impl SdCard {
             rca: 0,
             bus4: false,
             high_speed: false,
+            hs_switches: 0,
             status_err: 0,
             block_count: None,
             written: 0,
@@ -470,6 +474,9 @@ impl SdCard {
         }
         if arg >> 31 != 0 && !cancelled && arg & 0xF != 0xF {
             self.high_speed = arg & 0xF == 1;
+            if self.high_speed {
+                self.hs_switches = self.hs_switches.saturating_add(1);
+            }
         }
         status[14] = (selection >> 16) as u8;
         status[15] = (selection >> 8) as u8;
@@ -482,6 +489,11 @@ impl SdCard {
     /// Function group 1 is high speed (CMD6 mode 1 switched it).
     pub(super) const fn high_speed(&self) -> bool {
         self.high_speed
+    }
+
+    /// CMD6 switches to high speed since the start.
+    pub(super) const fn hs_switches(&self) -> u32 {
+        self.hs_switches
     }
 
     /// How the image's size maps onto the card, if not exactly: the CSD

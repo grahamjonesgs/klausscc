@@ -215,8 +215,8 @@ pub(crate) struct Cli {
     #[arg(long, requires = "sd_native")]
     pub(crate) sd_no_hs: bool,
 
-    /// With --sd-native: the data eye at 50 MHz, as the sample instants LO..HI in ns after CLK's rising edge (e.g. 13..27.5) that sample well. Phase p (SDM_CFG[7:4]) at IDELAY tap t ([12:8]) samples at 10 + 5p - 0.078t ns, taken modulo the 20 ns clock (so phases p and p + 4 agree, as on the hardware). At divider 0 with SDM_CFG[1] HS_SAMPLE, an instant outside the window gives CMD_CRC_ERR on responses and DATA_CRC_ERR on read blocks, so a driver's calibration can be tested. Without it every phase and tap samples well
-    #[arg(long, value_name = "LO..HI", requires = "sd_native", conflicts_with = "sd_no_hs", value_parser = clap::value_parser!(crate::emu::HsWindow))]
+    /// With --sd-native: the data eye at 50 MHz, LO..HI in ns after CLK's rising edge (e.g. 13..27.5): the eye of the bit the card launches on that edge. Phase p (SDM_CFG[7:4]) at IDELAY tap t ([12:8]) samples at T = 10 + 5p - 0.078t ns, and samples well if T - 20k ns is in the eye for some k (so phases p and p + 4 agree, as on the hardware). At divider 0 with SDM_CFG[1] HS_SAMPLE, an instant outside the window gives CMD_CRC_ERR on responses and DATA_CRC_ERR on read blocks, so a driver's calibration can be tested; one a clock before the eye (k = -1: the bit before, a slow card at p0/p1) passes commands and single blocks but loses the next start bit after a CLK park (DATA_CRC_ERR and DATA_END_ERR). With @N the window applies only from the card's Nth switch to high speed (CMD6) on, so a later re-initialisation's calibration can be made to fail (e.g. 0.1..0.2@2: no sample point works after the first). Without it every phase and tap samples well
+    #[arg(long, value_name = "LO..HI[@N]", requires = "sd_native", conflicts_with = "sd_no_hs", value_parser = clap::value_parser!(crate::emu::HsWindow))]
     pub(crate) sd_hs_window: Option<crate::emu::HsWindow>,
 
     /// Give the emulator the cache range clean/invalidate ops (klaussCPU spec v1.2, not yet in a bitstream): CACHE_OP_ADDR (0xF005_0030), CACHE_OP_LEN (0xF005_0038), CACHE_CTRL[4] RANGE_CLEAN, [5] RANGE_INV and [6] RANGE_IINV (the I-cache), and CPU_FEATURES bit 27. The emulator has no D-cache, so they change no data, but CACHE_STATUS.MNT_BUSY reads 1 for as long as the walk would take and --sd-dma's coherence checker sees them. For --emulate and --gdbserver on the emulator
@@ -790,6 +790,9 @@ mod tests {
         assert_eq!(cli.sd_hs_window, None);
         let cli = parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-hs-window", "12.5..27"]).unwrap();
         assert_eq!(cli.sd_hs_window, Some("12.5..27".parse().unwrap()));
+        let cli = parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-hs-window", "0.1..0.2@2"]).unwrap();
+        assert_eq!(cli.sd_hs_window.unwrap().to_string(), "0.1..0.2 ns from switch 2");
+        assert!(parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-hs-window", "1..2@0"]).is_err());
         assert!(parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-no-hs"]).unwrap().sd_no_hs);
         assert!(parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-hs-window", "27..12"]).is_err());
         assert!(parse(&["-i", "p.elf", "--emulate", "--sd-hs-window", "12..27"]).is_err(), "needs --sd-native");

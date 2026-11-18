@@ -420,13 +420,17 @@ pub(super) struct SdController {
 /// the next start bit after a CLK park (the CPU session's sdhs review:
 /// `DATA_CRC_ERR` and `DATA_END_ERR`, `BLKDONE` short), though single
 /// blocks and commands pass.  A window 20 ns or wider passes everything
-/// (k = 0).
+/// (k = 0).  `LO..HI@N` applies the window only from the card's Nth
+/// switch to high speed (CMD6) on: before it every sample point is good,
+/// so a later re-initialisation's calibration can be made to fail.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HsWindow {
     /// The first good instant, in ps.
     lo: i64,
     /// The last good instant, in ps.
     hi: i64,
+    /// The card's switch to high speed from which the window applies.
+    from: u32,
 }
 
 /// The 50 MHz clock period, in ps.
@@ -460,10 +464,14 @@ impl HsWindow {
 impl std::str::FromStr for HsWindow {
     type Err = String;
 
-    /// Parse `LO..HI`, in ns (decimals allowed).
+    /// Parse `LO..HI[@N]`, in ns (decimals allowed).
     fn from_str(spec: &str) -> Result<Self, String> {
-        let bad = || format!("bad --sd-hs-window {spec:?}: expected LO..HI in ns, e.g. 13..27.5");
-        let (lo, hi) = spec.split_once("..").ok_or_else(bad)?;
+        let bad = || format!("bad --sd-hs-window {spec:?}: expected LO..HI[@N] in ns, e.g. 13..27.5 or 0.1..0.2@2");
+        let (range, from) = match spec.split_once('@') {
+            Some((range, n)) => (range, n.trim().parse::<u32>().ok().filter(|&n| n >= 1).ok_or_else(bad)?),
+            None => (spec, 1),
+        };
+        let (lo, hi) = range.split_once("..").ok_or_else(bad)?;
         let ns = |s: &str| s.trim().parse::<f64>().ok().filter(|v| v.is_finite() && v.abs() < 1e6);
         let (Some(lo), Some(hi)) = (ns(lo), ns(hi)) else {
             return Err(bad());
@@ -474,13 +482,18 @@ impl std::str::FromStr for HsWindow {
         Ok(Self {
             lo: (lo * 1000.0).round() as i64,
             hi: (hi * 1000.0).round() as i64,
+            from,
         })
     }
 }
 
 impl std::fmt::Display for HsWindow {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}..{} ns", self.lo as f64 / 1000.0, self.hi as f64 / 1000.0)
+        write!(f, "{}..{} ns", self.lo as f64 / 1000.0, self.hi as f64 / 1000.0)?;
+        if self.from != 1 {
+            write!(f, " from switch {}", self.from)?;
+        }
+        Ok(())
     }
 }
 
@@ -963,7 +976,14 @@ impl SdController {
     fn hs_sample_fails(&self) -> bool {
         self.at_50_mhz()
             && self.cfg & CFG_HS_SAMPLE != 0
-            && self.hs_window.is_some_and(|w| !w.passes(HsWindow::instant(self.cfg)))
+            && self.hs_window().is_some_and(|w| !w.passes(HsWindow::instant(self.cfg)))
+    }
+
+    /// `--sd-hs-window`, once the card has switched to high speed often
+    /// enough for it to apply.
+    fn hs_window(&self) -> Option<HsWindow> {
+        let switches = self.card.as_ref().map_or(0, SdCard::hs_switches);
+        self.hs_window.filter(|w| switches >= w.from)
     }
 
     /// At 50 MHz with `HS_SAMPLE`, the phase and tap take the bit before
@@ -972,7 +992,7 @@ impl SdController {
     fn hs_sample_early(&self) -> bool {
         self.at_50_mhz()
             && self.cfg & CFG_HS_SAMPLE != 0
-            && self.hs_window.is_some_and(|w| w.slot(HsWindow::instant(self.cfg)).is_some_and(|k| k < 0))
+            && self.hs_window().is_some_and(|w| w.slot(HsWindow::instant(self.cfg)).is_some_and(|k| k < 0))
     }
 
     /// Note high-speed misuse of kind `kind` (an index of `hs_notes`).

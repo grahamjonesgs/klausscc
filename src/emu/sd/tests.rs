@@ -3184,3 +3184,38 @@ fn hs_early_sample_loses_a_block_after_a_park() {
     assert_eq!(status(&mut cpu) & ST_ERRORS, 0, "the engine keeps the FIFO from filling");
     assert_eq!(ram(&cpu, BUF, 12 * BLOCK), (0..12).flat_map(pattern).collect::<Vec<_>>());
 }
+
+#[test]
+fn hs_window_from_the_nth_switch() {
+    // 0.1..0.2@2: no phase or tap samples in the window, but it applies
+    // only from the card's second switch to high speed.
+    let mut cpu = cpu_hs(false, false, Some("0.1..0.2@2"));
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    switch_hs(&mut cpu, 2, 8);
+    for phase in 0..7 {
+        wr(&mut cpu, SDM_CFG, cfg_hs(phase, 0));
+        sdm_ok(&mut cpu, 13, rca, R1, 0);
+    }
+    assert_eq!(card(&cpu).hs_switches(), 1);
+    // A power cycle and a second switch: now nothing works at 50 MHz...
+    native_init(&mut cpu);
+    switch_hs(&mut cpu, 2, 8);
+    assert_eq!(card(&cpu).hs_switches(), 2);
+    for phase in 0..7 {
+        for tap in [0, 8, 16, 24, 31] {
+            wr(&mut cpu, SDM_CFG, cfg_hs(phase, tap));
+            assert_eq!(sdm(&mut cpu, 13, rca, R1, 0) & ST_ERRORS, ST_CMD_CRC_ERR, "phase {phase} tap {tap}");
+        }
+    }
+    // ...but CMD6 back to default speed still reaches the card (its
+    // response is unreadable), and 25 MHz works again.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 64);
+    assert_eq!(sdm(&mut cpu, 6, 0x80FF_FFF0, R1, CMD_DATA) & ST_ERRORS, ST_CMD_CRC_ERR);
+    assert!(!card(&cpu).high_speed());
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    wr(&mut cpu, SD_CTRL, 1 | CTRL_SD_MODE | CTRL_PWR_ON);
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4);
+    assert_eq!(cpu.sd.as_ref().unwrap().hs_notes, [0, 0, 0]);
+}
