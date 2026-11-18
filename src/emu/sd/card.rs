@@ -220,7 +220,7 @@ struct Spi {
 /// The emulated SDHC card.
 #[expect(
     clippy::struct_excessive_bools,
-    reason = "independent card state bits: power, bus mode, APP_CMD, bus width"
+    reason = "independent card state bits: power, bus mode, APP_CMD, bus width, speed"
 )]
 pub struct SdCard {
     /// The blocks.
@@ -243,6 +243,8 @@ pub struct SdCard {
     rca: u16,
     /// ACMD6 chose the 4-bit bus.
     bus4: bool,
+    /// CMD6 switched function group 1 to high speed (function 1).
+    high_speed: bool,
     /// Card status error bits for the next SD-mode response.
     status_err: u32,
     /// The block count CMD23 set for the next CMD18/CMD25.
@@ -364,6 +366,7 @@ impl SdCard {
             app_cmd: false,
             rca: 0,
             bus4: false,
+            high_speed: false,
             status_err: 0,
             block_count: None,
             written: 0,
@@ -428,24 +431,45 @@ impl SdCard {
         status
     }
 
-    /// The 64-byte CMD6 switch status for `arg`: every group supports only
-    /// function 0 (so high speed is not offered), and a request for any
-    /// other function reports 0xF (cannot switch).
-    fn switch_status(arg: u32) -> Vec<u8> {
+    /// CMD6 (`arg[31]` the mode) and its 64-byte switch status.  Function
+    /// group 1 (bus speed) supports functions 0 (default speed) and 1 (high
+    /// speed, support bits `0x8003`); groups 2-6 only function 0 (`0x8001`).
+    /// Each group's result is the function asked for if supported, the
+    /// current one for 0xF (no change), else 0xF; mode 1 then switches
+    /// group 1, unless a group reported 0xF, which cancels the whole switch
+    /// (SD Physical Layer §4.3.10).  The switch takes effect at once (the
+    /// spec: after the status block; nothing here can tell the difference).
+    /// CMD0 and a power cycle return to default speed.
+    fn switch_function(&mut self, arg: u32) -> Vec<u8> {
         let mut status = vec![0_u8; 64];
         // [511:496] maximum current: 100 mA.
         status[1] = 100;
-        // [495:400] support of groups 6..1: 0x8001 each.
+        // [495:400] support of groups 6..1: function 0 everywhere, and
+        // function 1 (high speed) in group 1 (bytes 12-13).
         for group in 0..6 {
             status[2 + 2 * group] = 0x80;
             status[3 + 2 * group] = 0x01;
         }
+        status[13] |= 0x02;
         // [399:376] function selection of groups 6..1, a nibble each.
         let mut selection = 0_u32;
+        let mut cancelled = false;
         for group in 0..6 {
             let want = (arg >> (4 * group)) & 0xF;
-            let got = if want == 0 || want == 0xF { 0 } else { 0xF };
+            let current = if group == 0 { u32::from(self.high_speed) } else { 0 };
+            let got = match want {
+                0xF => current,
+                0 => 0,
+                1 if group == 0 => 1,
+                _ => {
+                    cancelled = true;
+                    0xF
+                }
+            };
             selection |= got << (4 * group);
+        }
+        if arg >> 31 != 0 && !cancelled && arg & 0xF != 0xF {
+            self.high_speed = arg & 0xF == 1;
         }
         status[14] = (selection >> 16) as u8;
         status[15] = (selection >> 8) as u8;
@@ -453,6 +477,11 @@ impl SdCard {
         // [375:368] data structure version 1 (busy status follows, all 0).
         status[17] = 1;
         status
+    }
+
+    /// Function group 1 is high speed (CMD6 mode 1 switched it).
+    pub(super) const fn high_speed(&self) -> bool {
+        self.high_speed
     }
 
     /// How the image's size maps onto the card, if not exactly: the CSD
@@ -556,13 +585,14 @@ impl SdCard {
         self.stuck_busy = false;
     }
 
-    /// CMD0: back to idle, keeping the bus mode.
+    /// CMD0: back to idle (and default speed), keeping the bus mode.
     fn reset(&mut self) {
         self.state = State::Idle;
         self.acmd41_polls = 0;
         self.app_cmd = false;
         self.rca = 0;
         self.bus4 = false;
+        self.high_speed = false;
         self.block_count = None;
         self.pending = Pending::None;
     }
@@ -674,7 +704,7 @@ impl SdCard {
             }
             (16, State::Tran) => self.r1(16, state, false),
             (6, State::Tran) => {
-                self.pending = Pending::Blocks([Self::switch_status(arg)].into());
+                self.pending = Pending::Blocks([self.switch_function(arg)].into());
                 self.state = State::Data;
                 self.r1(6, state, false)
             }
@@ -1035,7 +1065,8 @@ impl SdCard {
             (true, 23) | (_, 16 | 59) => out.push(r1),
             (_, 6) => {
                 out.extend([r1, 0xFF]);
-                out.extend(data_block(&Self::switch_status(arg)));
+                let status = self.switch_function(arg);
+                out.extend(data_block(&status));
             }
             (_, 8) => out.extend([r1, 0x00, 0x00, ((arg >> 8) & 0xF) as u8, arg as u8]),
             (_, 9 | 10) => {

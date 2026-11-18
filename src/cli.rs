@@ -211,6 +211,14 @@ pub(crate) struct Cli {
     #[arg(long, requires = "sd_native")]
     pub(crate) sd_dma: bool,
 
+    /// With --sd-native: model a bitstream before klaussCPU sdhs, whose native SD controller has no high speed: SDM_CAPS[9] (high speed), [11] (delay line) and [27:24] (sample phases), SDM_CFG[1] and [12:4] (the HS sample phase and IDELAY tap) and SDM_STATUS[6] (IDELAY_RDY) read 0. Without it --sd-native has high speed (SD_NATIVE_PLAN.md §9), as the sdhs bitstream: SDM_CAPS 0x0708_0B01 (0x0708_0F01 with --sd-dma), and the card switches to high speed with CMD6
+    #[arg(long, requires = "sd_native")]
+    pub(crate) sd_no_hs: bool,
+
+    /// With --sd-native: the data eye at 50 MHz, as the sample instants LO..HI in ns after CLK's rising edge (e.g. 13..27.5) that sample well. Phase p (SDM_CFG[7:4]) at IDELAY tap t ([12:8]) samples at 10 + 5p - 0.078t ns, taken modulo the 20 ns clock (so phases p and p + 4 agree, as on the hardware). At divider 0 with SDM_CFG[1] HS_SAMPLE, an instant outside the window gives CMD_CRC_ERR on responses and DATA_CRC_ERR on read blocks, so a driver's calibration can be tested. Without it every phase and tap samples well
+    #[arg(long, value_name = "LO..HI", requires = "sd_native", conflicts_with = "sd_no_hs", value_parser = clap::value_parser!(crate::emu::HsWindow))]
+    pub(crate) sd_hs_window: Option<crate::emu::HsWindow>,
+
     /// Give the emulator the cache range clean/invalidate ops (klaussCPU spec v1.2, not yet in a bitstream): CACHE_OP_ADDR (0xF005_0030), CACHE_OP_LEN (0xF005_0038), CACHE_CTRL[4] RANGE_CLEAN, [5] RANGE_INV and [6] RANGE_IINV (the I-cache), and CPU_FEATURES bit 27. The emulator has no D-cache, so they change no data, but CACHE_STATUS.MNT_BUSY reads 1 for as long as the walk would take and --sd-dma's coherence checker sees them. For --emulate and --gdbserver on the emulator
     #[arg(long, requires = "emu_host", conflicts_with = "board")]
     pub(crate) dcache_range_ops: bool,
@@ -778,6 +786,18 @@ mod tests {
         assert_eq!(cli.sd_image, Some(PathBuf::from("card.img")));
         assert!(cli.sd_native);
         assert_eq!(cli.sd_fault, Vec::new());
+        assert!(!cli.sd_no_hs, "high speed by default, as the sdhs bitstream");
+        assert_eq!(cli.sd_hs_window, None);
+        let cli = parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-hs-window", "12.5..27"]).unwrap();
+        assert_eq!(cli.sd_hs_window, Some("12.5..27".parse().unwrap()));
+        assert!(parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-no-hs"]).unwrap().sd_no_hs);
+        assert!(parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-hs-window", "27..12"]).is_err());
+        assert!(parse(&["-i", "p.elf", "--emulate", "--sd-hs-window", "12..27"]).is_err(), "needs --sd-native");
+        assert!(parse(&["-i", "p.elf", "--emulate", "--sd-no-hs"]).is_err(), "needs --sd-native");
+        assert!(
+            parse(&["-i", "p.elf", "--emulate", "--sd-native", "--sd-no-hs", "--sd-hs-window", "12..27"]).is_err(),
+            "no window without high speed"
+        );
         let cli = parse(&[
             "-i",
             "p.elf",

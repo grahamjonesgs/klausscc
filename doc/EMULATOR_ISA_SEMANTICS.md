@@ -539,7 +539,7 @@ must agree on the block size and bus width (`SDM_CFG[0]` and ACMD6),
 else `DATA_CRC_ERR` / `WRITE_CRC_ERR`; a read past the end gives
 `DATA_TIMEOUT`, a write the card is not receiving `WRITE_NO_TOKEN`. The
 card's states are idle/ready/ident/stby/tran/data/rcv/prg (prg passes at
-once) and ina; CMD0, 2, 3, 6 (high speed unsupported), 7, 8, 9, 10, 12,
+once) and ina; CMD0, 2, 3, 6 (high speed: see below), 7, 8, 9, 10, 12,
 13, 15, 16, 17, 18, 23, 24, 25, 55 and ACMD6, 13, 22, 23, 41, 42, 51
 (ACMD22: the blocks the last CMD24/CMD25 wrote, 4 bytes big-endian). The
 emulator does not reload programs: every `--emulate` run and every
@@ -569,15 +569,48 @@ received, a
 48-bit response leaves `SDM_RESP1` = 0 and `SDM_RESP0[63:38]` = 0;
 response types 5-7 act as 0; `SDM_ARG` keeps 32 bits.
 
+### SD high speed (`--sd-no-hs`, `--sd-hs-window`)
+
+`--sd-native` has the high-speed sampling of the klaussCPU `sdhs`
+bitstream (`SD_NATIVE_PLAN.md` §9): `SDM_CAPS[9]` (high speed), `[11]`
+(the input delay line) and `[27:24]` = 7 (sample phases), so `SDM_CAPS` =
+`0x0708_0B01`; `SDM_CFG[1]` `HS_SAMPLE`, `[7:4]` the sample phase and
+`[12:8]` the IDELAY tap are kept and read back (phases 7-15 act as 6);
+`SDM_STATUS[6]` `IDELAY_RDY` reads 1 (live, no interrupt). `--sd-no-hs`
+models the bitstreams before it: those bits read 0 and `SDM_CAPS` is
+`0x0008_0101`. The card's CMD6 (SD and SPI mode) supports functions 0 and
+1 in function group 1 (support `0x8003`) and only function 0 in groups
+2-6: each group reports the function asked for, the current one for 0xF,
+or 0xF when unsupported, which in mode 1 cancels the whole switch; mode 1
+then switches group 1 at once. CMD0 and a power cycle return the card to
+default speed. `SD_CTRL` divider 0 runs CLK at 50 MHz, and the DMA's block
+time follows the clock (half that of divider 1). Every sample instant is
+good unless `--sd-hs-window LO..HI` gives the eye of the bit the card
+launches on CLK's rising edge, in ns after that edge: phase p at tap t
+samples at T = 10 + 5p − 0.078t ns, and T samples well if T − 20k is in
+the eye for some k (phases p and p + 4 sample the same point); at
+divider 0 with `HS_SAMPLE`, an instant outside the window gives
+`CMD_CRC_ERR` on response types 1-3 (the card has executed the command)
+and `DATA_CRC_ERR` on read blocks (the card has sent them). k = −1 (T a
+clock before the eye: the strobe takes the bit before its slot's, a slow
+card at phases 0-1) passes commands and single blocks but loses the next
+start bit after a CLK park: the block after a read parked with the FIFO
+full gets `DATA_CRC_ERR` and `DATA_END_ERR` (`SDM_BLKDONE` short), as the
+klaussCPU sdhs simulation shows; phase p + 4 at the same tap does not. Misuse the
+hardware would punish is only noted on stderr (`klausscc sd: ...`, the
+first few of each kind): a command at 50 MHz to a card at default speed
+or without `HS_SAMPLE`, and a change of `SDM_CFG[12:4]`/`[1]` while
+`DATA_BUSY` or `DMA_BUSY`.
+
 ### SD DMA (`--sd-dma`)
 
 `--sd-dma` (needs `--sd-native`) adds the DMA engine of the klaussCPU SD
 DMA spec v1.2, modelled on its RTL (branch `sddma`, `SD_NATIVE_PLAN.md`
 §8): `SDM_DMA_ADDR` (`+0x150`, 64-bit, `[2:0]` read 0), `SDM_CFG[16]`
-`DMA_EN` (`[1]` and `[7:4]` are the high-speed edge and phase, reserved
-here), `SDM_STATUS[5]` `DMA_BUSY` (live) and `[27]` `DMA_ERR` (sticky,
+`DMA_EN`, `SDM_STATUS[5]` `DMA_BUSY` (live) and `[27]` `DMA_ERR` (sticky,
 W1C, in `ERR_ANY` and `SDM_IRQ_EN[27]`), and `SDM_CAPS[10]` (`SDM_CAPS` =
-`0x0008_0501`). Without it those read 0 as on today's bitstream.
+`0x0708_0F01` with high speed, `0x0008_0501` with `--sd-no-hs`). Without
+it those read 0 as on the bitstreams before `sddma`.
 `DMA_EN` is sampled when `SDM_CMD` is written: a data command written while
 it is 1 moves its blocks between the card and DDR at `SDM_DMA_ADDR`
 through the FIFO, and `SDM_DMA_ADDR` advances as they move (it is always

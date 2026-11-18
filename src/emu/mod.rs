@@ -83,7 +83,7 @@ mod trace;
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
 pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE, UART_SCRIPT_GAP};
 pub use mmu::{MpuRegion, TlbEntry};
-pub use sd::{FaultKind, SdCard, SdFault};
+pub use sd::{FaultKind, HsWindow, SdCard, SdFault};
 pub use system::{Cause, SystemRegs};
 
 use crate::layout::is_mmio;
@@ -169,6 +169,14 @@ pub struct Hardware {
     /// `SDM_DMA_ADDR`, `SDM_CFG.DMA_EN`, `DMA_BUSY`, `DMA_ERR`,
     /// `SDM_CAPS[10]`, and the DMA coherence checker.
     pub sd_dma: bool,
+    /// A native controller without high speed (`--sd-no-hs`, with
+    /// `sd_native`): `SDM_CAPS[9]`, `[11]`, `[27:24]`, `SDM_CFG[12:4]` /
+    /// `[1]` and `SDM_STATUS[6]` read 0, as on the bitstreams before
+    /// klaussCPU `sdhs`.
+    pub sd_no_hs: bool,
+    /// Where the data eye is at 50 MHz (`--sd-hs-window`): sample instants
+    /// outside it get CRC errors.  `None`: everywhere.
+    pub sd_hs_window: Option<HsWindow>,
     /// The cache range clean/invalidate ops (`--dcache-range-ops`):
     /// `CACHE_OP_ADDR`, `CACHE_OP_LEN`, `CACHE_CTRL[6:4]` and
     /// `CPU_FEATURES[27]`.
@@ -466,6 +474,7 @@ impl Cpu {
         self.sd = (hw.sd_card.is_some() || hw.sd_native).then(|| {
             let mut sd = SdController::new(hw.sd_card, hw.sd_native, dma);
             sd.set_ddr_size(self.mem.len() as u64);
+            sd.set_high_speed(!hw.sd_no_hs, hw.sd_hs_window);
             Box::new(sd)
         });
         self.cache_ctl.range_ops = hw.dcache_range_ops;

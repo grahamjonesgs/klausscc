@@ -52,6 +52,21 @@
 //! FIFO ahead of the card.  `DMA_BUSY` is the engine's phase or a block
 //! still on its way to DDR, and gates the FIFO port and data commands.
 //! See `doc/EMULATOR_ISA_SEMANTICS.md`, "SD DMA".
+//!
+//! **High speed** (`SD_NATIVE_PLAN.md` §9, klaussCPU `sdhs`; every
+//! `--sd-native` controller unless `--sd-no-hs`): `SDM_CAPS[9]` high speed,
+//! `[11]` the input delay line and `[27:24]` = 7 sample phases;
+//! `SDM_CFG[1]` `HS_SAMPLE`, `[7:4]` the sample phase and `[12:8]` the
+//! IDELAY tap, kept and read back; `SDM_STATUS[6]` `IDELAY_RDY` = 1.  The
+//! card's CMD6 switches function group 1 to high speed, and `SD_CTRL`
+//! divider 0 (50 MHz) halves the modelled block time.  Every phase and tap
+//! samples well, unless `--sd-hs-window` ([`HsWindow`]) says where the
+//! data eye is: then at 50 MHz with `HS_SAMPLE` a sample instant outside
+//! it gives `CMD_CRC_ERR` on responses and `DATA_CRC_ERR` on read blocks,
+//! so a driver's calibration can be tested.  A command at 50 MHz to a card
+//! still at default speed, or without `HS_SAMPLE`, and a change of the
+//! high-speed `SDM_CFG` bits while an engine is busy, are noted on stderr
+//! (the hardware would misbehave; the model does not).
 
 mod card;
 mod fault;
@@ -141,6 +156,9 @@ const ST_CARD_PRESENT: u32 = 1 << 3;
 const ST_FIFO_THRESH: u32 = 1 << 4;
 /// `[5]` `DMA_BUSY` (live, `--sd-dma`).
 const ST_DMA_BUSY: u32 = 1 << 5;
+/// `[6]` `IDELAY_RDY` (live, high speed): the delay line is calibrated,
+/// which in the model it always is.
+const ST_IDELAY_RDY: u32 = 1 << 6;
 /// `[8]` `CMD_DONE`.
 const ST_CMD_DONE: u32 = 1 << 8;
 /// `[9]` `DATA_DONE`.
@@ -157,6 +175,8 @@ const ST_CMD_IDX_ERR: u32 = 1 << 19;
 const ST_DATA_TIMEOUT: u32 = 1 << 20;
 /// `[21]` `DATA_CRC_ERR`.
 const ST_DATA_CRC_ERR: u32 = 1 << 21;
+/// `[22]` `DATA_END_ERR`.
+const ST_DATA_END_ERR: u32 = 1 << 22;
 /// `[23]` `WRITE_CRC_ERR`.
 const ST_WRITE_CRC_ERR: u32 = 1 << 23;
 /// `[24]` `WRITE_NO_TOKEN`.
@@ -190,17 +210,32 @@ const CFG_MASK: u64 = 0b101;
 /// `SDM_CFG[0]`: 4-bit bus.
 const CFG_4BIT: u64 = 1;
 /// `SDM_CFG[16]` `DMA_EN` (`--sd-dma`; reserved, reading 0, without it).
-/// (`[1]` is the high-speed edge and `[7:4]` the sample phase, which this
-/// model, with no high speed, leaves reserved.)
 const CFG_DMA_EN: u64 = 1 << 16;
+/// `SDM_CFG[1]` `HS_SAMPLE` (high speed; reserved without it): the engines
+/// sample at the phase `[7:4]`.
+const CFG_HS_SAMPLE: u64 = 1 << 1;
+/// `SDM_CFG[7:4]` `HS_PHASE`: 0-6 (7-15 act as 6).
+const CFG_HS_PHASE_SHIFT: u32 = 4;
+/// `SDM_CFG[12:8]` `IDELAY_TAP`: 0-31, 78 ps each.
+const CFG_IDELAY_TAP_SHIFT: u32 = 8;
+/// The high-speed sampling bits `[12:4]` and `[1]`.
+const CFG_HS_BITS: u64 = 0x1FF0 | CFG_HS_SAMPLE;
 /// `SDM_FIFO[31]` (write): reset the FIFO.
 const FIFO_RESET: u64 = 1 << 31;
 /// FIFO depth in 64-bit words (4 KiB, 8 blocks).
 const FIFO_WORDS: usize = 512;
-/// `SDM_CAPS`: version 1, 4-bit, no high speed, 8 blocks of FIFO.
+/// `SDM_CAPS`: version 1, 4-bit, 8 blocks of FIFO (and, without
+/// `CAPS_HS`, no high speed: the bitstreams before `sdhs`).
 const CAPS: u64 = (8 << 16) | (1 << 8) | 1;
 /// `SDM_CAPS[10]`: DMA present (`--sd-dma`).
 const CAPS_DMA: u64 = 1 << 10;
+/// `SDM_CAPS` high speed: `[9]`, the delay line `[11]` and 7 sample
+/// phases `[27:24]` (with `CAPS`: `0x0708_0B01`, the sdhs bitstream's
+/// `0x0708_0F01` less DMA).
+const CAPS_HS: u64 = (7 << 24) | (1 << 11) | (1 << 9);
+/// Debug lines on stderr for each kind of high-speed misuse the model
+/// sees; the rest are only counted.
+const HS_NOTES_REPORTED: u64 = 4;
 /// `SDM_DMA_ADDR[2:0]` read 0.
 const DMA_ADDR_MASK: u64 = !7;
 /// DDR latency of a DMA burst, in cycles (spec v1.1: ~44, pipelined).
@@ -234,6 +269,7 @@ struct Shift {
 
 /// The card side of a native data phase in progress (`SDM_STATUS.DATA_BUSY`).
 #[derive(Debug, Clone, Copy)]
+#[expect(clippy::struct_excessive_bools, reason = "independent flags of the data phase")]
 struct Phase {
     /// Host to card.
     write: bool,
@@ -251,6 +287,10 @@ struct Phase {
     /// to DDR (RTL `r_dd_pend`): `DATA_BUSY` until it has moved the last,
     /// then `DATA_DONE`.
     dd_pend: bool,
+    /// A read whose FIFO had no room for the next block after the last
+    /// one: CLK parked after its end bit (high speed, `--sd-hs-window`: a
+    /// sample point a clock early then loses the next start bit).
+    parked: bool,
 }
 
 /// The DMA engine's phase (RTL `r_dm_ph`), from a data command written
@@ -360,6 +400,88 @@ pub(super) struct SdController {
     ddr_size: u64,
     /// What the DMA engine did, for the run's summary.
     dma_stats: DmaStats,
+    /// High speed is modelled (`SDM_CAPS[9]`; not with `--sd-no-hs`).
+    hs: bool,
+    /// `--sd-hs-window`: where the data eye is at 50 MHz.
+    hs_window: Option<HsWindow>,
+    /// High-speed misuse seen: commands at 50 MHz to a card at default
+    /// speed, commands at 50 MHz without `HS_SAMPLE`, and changes of the
+    /// sampling bits while an engine was busy.
+    hs_notes: [u64; 3],
+}
+
+/// `--sd-hs-window LO..HI`: the eye of the bit the card launches on CLK's
+/// rising edge, in ns after that edge at 50 MHz (`SD_NATIVE_PLAN` §9.3:
+/// phase p and tap t sample at T = 10 + 5p - 0.078t ns).  The bits repeat
+/// every 20 ns, so T samples well if T - 20k is in the eye for some k:
+/// phases p and p + 4 sample the same point of the eye.  k says which bit
+/// the strobe takes: 0 the bit of its slot, 1 the next one, and -1 (T a
+/// clock before the eye, a slow card at p0/p1) the one before, which loses
+/// the next start bit after a CLK park (the CPU session's sdhs review:
+/// `DATA_CRC_ERR` and `DATA_END_ERR`, `BLKDONE` short), though single
+/// blocks and commands pass.  A window 20 ns or wider passes everything
+/// (k = 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HsWindow {
+    /// The first good instant, in ps.
+    lo: i64,
+    /// The last good instant, in ps.
+    hi: i64,
+}
+
+/// The 50 MHz clock period, in ps.
+const HS_PERIOD_PS: i64 = 20_000;
+
+impl HsWindow {
+    /// The sample instant of `SDM_CFG`'s phase and tap, in ps after CLK's
+    /// rising edge.
+    const fn instant(cfg: u64) -> i64 {
+        let phase = (cfg >> CFG_HS_PHASE_SHIFT) & 0xF;
+        let phase = if phase > 6 { 6 } else { phase };
+        let tap = (cfg >> CFG_IDELAY_TAP_SHIFT) & 0x1F;
+        10_000 + 5_000 * phase as i64 - 78 * tap as i64
+    }
+
+    /// The bit offset k with `t` - 20k ns in the eye, if any (`t` in ps).
+    const fn slot(self, t: i64) -> Option<i64> {
+        if self.hi - self.lo >= HS_PERIOD_PS {
+            return Some(0);
+        }
+        let d = (t - self.lo).rem_euclid(HS_PERIOD_PS);
+        if d <= self.hi - self.lo { Some((t - self.lo - d) / HS_PERIOD_PS) } else { None }
+    }
+
+    /// The instant `t` (ps) samples within the window, modulo the clock.
+    const fn passes(self, t: i64) -> bool {
+        self.slot(t).is_some()
+    }
+}
+
+impl std::str::FromStr for HsWindow {
+    type Err = String;
+
+    /// Parse `LO..HI`, in ns (decimals allowed).
+    fn from_str(spec: &str) -> Result<Self, String> {
+        let bad = || format!("bad --sd-hs-window {spec:?}: expected LO..HI in ns, e.g. 13..27.5");
+        let (lo, hi) = spec.split_once("..").ok_or_else(bad)?;
+        let ns = |s: &str| s.trim().parse::<f64>().ok().filter(|v| v.is_finite() && v.abs() < 1e6);
+        let (Some(lo), Some(hi)) = (ns(lo), ns(hi)) else {
+            return Err(bad());
+        };
+        if lo > hi {
+            return Err(format!("bad --sd-hs-window {spec:?}: LO is after HI"));
+        }
+        Ok(Self {
+            lo: (lo * 1000.0).round() as i64,
+            hi: (hi * 1000.0).round() as i64,
+        })
+    }
+}
+
+impl std::fmt::Display for HsWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}..{} ns", self.lo as f64 / 1000.0, self.hi as f64 / 1000.0)
+    }
 }
 
 /// What the DMA engine did in a run.
@@ -464,7 +586,18 @@ impl SdController {
             dma_wedged: None,
             ddr_size: u64::MAX,
             dma_stats: DmaStats::default(),
+            hs: native,
+            hs_window: None,
+            hs_notes: [0; 3],
         }
+    }
+
+    /// High speed (`hs`, the default with `native`; `--sd-no-hs` models the
+    /// bitstreams before it) and, with it, the data eye at 50 MHz
+    /// (`--sd-hs-window`; `None`: every sample instant is good).
+    pub(super) const fn set_high_speed(&mut self, hs: bool, window: Option<HsWindow>) {
+        self.hs = self.native && hs;
+        self.hs_window = if self.hs { window } else { None };
     }
 
     /// DDR's size in bytes: a DMA that would touch a byte at or above it
@@ -549,7 +682,8 @@ impl SdController {
             SDM_BLK => self.blk,
             SDM_STATUS => {
                 let busy = if self.dma_busy() { ST_DMA_BUSY } else { 0 };
-                u64::from(self.sdm_status() | busy)
+                let idelay = if self.hs { ST_IDELAY_RDY } else { 0 };
+                u64::from(self.sdm_status() | busy | idelay)
             }
             SDM_IRQ_EN => u64::from(self.irq_en),
             SDM_TIMEOUT => self.timeout,
@@ -565,7 +699,7 @@ impl SdController {
                 self.pump();
                 word
             }
-            SDM_CAPS => CAPS | if self.dma { CAPS_DMA } else { 0 },
+            SDM_CAPS => CAPS | if self.dma { CAPS_DMA } else { 0 } | if self.hs { CAPS_HS } else { 0 },
             _ => 0,
         }
     }
@@ -595,7 +729,19 @@ impl SdController {
             SDM_IRQ_EN => self.irq_en = data as u32 & (ST_FIFO_THRESH | self.sticky_mask()),
             SDM_TIMEOUT => self.timeout = data,
             SDM_CFG => {
-                let mask = if self.dma { CFG_MASK | CFG_DMA_EN } else { CFG_MASK };
+                let mut mask = CFG_MASK;
+                if self.dma {
+                    mask |= CFG_DMA_EN;
+                }
+                if self.hs {
+                    mask |= CFG_HS_BITS;
+                }
+                if (self.cfg ^ data) & mask & CFG_HS_BITS != 0 && (self.phase.is_some() || self.dma_busy()) {
+                    // SD_NATIVE_PLAN §9.2: only with CMD_BUSY = DATA_BUSY =
+                    // DMA_BUSY = 0 (a change mid-frame can drop or repeat a
+                    // sample; a tap change can glitch the delayed lines).
+                    self.hs_note(2, "SDM_CFG's sampling bits [12:4]/[1] changed while DATA_BUSY or DMA_BUSY");
+                }
                 self.cfg = data & mask;
                 if self.cfg & CFG_DMA_EN == 0 {
                     // DMA_EN = 0 aborts a DMA in progress (DMA_EN is
@@ -807,6 +953,56 @@ impl SdController {
         2 * ((self.ctrl & 0xFFFF) + 1)
     }
 
+    /// `SD_CTRL`'s divider is 0: CLK runs at 50 MHz.
+    const fn at_50_mhz(&self) -> bool {
+        self.ctrl.trailing_zeros() >= 16
+    }
+
+    /// At 50 MHz (divider 0) with `HS_SAMPLE`, the phase and tap sample
+    /// outside `--sd-hs-window`: responses and read blocks arrive bad.
+    fn hs_sample_fails(&self) -> bool {
+        self.at_50_mhz()
+            && self.cfg & CFG_HS_SAMPLE != 0
+            && self.hs_window.is_some_and(|w| !w.passes(HsWindow::instant(self.cfg)))
+    }
+
+    /// At 50 MHz with `HS_SAMPLE`, the phase and tap take the bit before
+    /// their slot's (k = -1 in `--sd-hs-window`): a CLK park loses a start
+    /// bit.
+    fn hs_sample_early(&self) -> bool {
+        self.at_50_mhz()
+            && self.cfg & CFG_HS_SAMPLE != 0
+            && self.hs_window.is_some_and(|w| w.slot(HsWindow::instant(self.cfg)).is_some_and(|k| k < 0))
+    }
+
+    /// Note high-speed misuse of kind `kind` (an index of `hs_notes`).
+    fn hs_note(&mut self, kind: usize, what: &str) {
+        self.hs_notes[kind] += 1;
+        if self.hs_notes[kind] <= HS_NOTES_REPORTED {
+            eprintln!("klausscc sd: {what}");
+        }
+    }
+
+    /// A command goes out at the current clock: at 50 MHz the card must be
+    /// in high speed and the host sample at the HS phase.
+    fn hs_check_command(&mut self, index: u8) {
+        if !self.at_50_mhz() {
+            return;
+        }
+        if self.card.as_ref().is_some_and(|card| !card.high_speed()) {
+            self.hs_note(
+                0,
+                &format!("CMD{index} at 50 MHz (SD_CTRL divider 0) with the card at default speed: switch it with CMD6 first"),
+            );
+        }
+        if self.hs && self.cfg & CFG_HS_SAMPLE == 0 {
+            self.hs_note(
+                1,
+                &format!("CMD{index} at 50 MHz without SDM_CFG[1] HS_SAMPLE: the default sample point misses the data eye at 50 MHz"),
+            );
+        }
+    }
+
     /// The cycles the card side takes for one block of `phase`.
     const fn block_cycles(&self, phase: &Phase) -> u64 {
         let bits_per_clock = if self.cfg & CFG_4BIT != 0 { 4 } else { 1 };
@@ -978,13 +1174,16 @@ impl SdController {
                 WriteBlock::BusyTimeout => error = ST_BUSY_TIMEOUT,
             }
         } else {
-            match self.card.as_mut().map_or(ReadBlock::None, |card| card.sd_read_block(phase.size, bus4)) {
-                ReadBlock::Good(block) => {
+            match self.read_block(phase.size, bus4, std::mem::take(&mut phase.parked)) {
+                Ok(ReadBlock::Good(block)) => {
                     self.fifo.extend(block_to_words(&block));
                     self.blkdone = self.blkdone.wrapping_add(1);
+                    // No room for the next one: CLK parks after this one.
+                    phase.parked = FIFO_WORDS - self.fifo.len() < words;
                 }
-                ReadBlock::Bad => error = ST_DATA_CRC_ERR,
-                ReadBlock::None => error = ST_DATA_TIMEOUT,
+                Ok(ReadBlock::Bad) => error = ST_DATA_CRC_ERR,
+                Ok(ReadBlock::None) => error = ST_DATA_TIMEOUT,
+                Err(bad) => error = bad,
             }
         }
         if error != 0 {
@@ -1008,6 +1207,25 @@ impl SdController {
         }
         phase.block_at += self.block_cycles(&phase);
         self.phase = Some(phase);
+    }
+
+    /// The card sends the next read block of `size` bytes, after CLK
+    /// parked if `parked`: the error bits for a block the host receives
+    /// badly (outside `--sd-hs-window`: `DATA_CRC_ERR`; after a park with
+    /// the sample a bit early: its start bit lost, `DATA_CRC_ERR` and
+    /// `DATA_END_ERR`), else what the card sent.
+    fn read_block(&mut self, size: usize, bus4: bool, parked: bool) -> Result<ReadBlock, u32> {
+        let bad = if self.hs_sample_fails() {
+            ST_DATA_CRC_ERR
+        } else if parked && self.hs_sample_early() {
+            ST_DATA_CRC_ERR | ST_DATA_END_ERR
+        } else {
+            0
+        };
+        match self.card.as_mut().map_or(ReadBlock::None, |card| card.sd_read_block(size, bus4)) {
+            ReadBlock::Good(_) if bad != 0 => Err(bad),
+            outcome => Ok(outcome),
+        }
     }
 
     /// `[addr, addr + len)` is all in DDR.
@@ -1083,6 +1301,7 @@ impl SdController {
         let index = (cmd & CMD_INDEX) as u8;
         let rtype = (cmd >> CMD_RESP_SHIFT) & 7;
         let data = cmd & CMD_DATA != 0;
+        self.hs_check_command(index);
         let dma = data && self.dma && self.cfg & CFG_DMA_EN != 0;
         let mut fault = None;
         if data {
@@ -1146,7 +1365,12 @@ impl SdController {
             Some(card) => card.sd_command(index, self.arg),
             None => Response::None,
         };
-        let errors = self.take_response(index, rtype, response);
+        let mut errors = self.take_response(index, rtype, response);
+        if errors == 0 && matches!(rtype, 1..=3) && self.hs_sample_fails() {
+            // The card got the command (the host's outputs do not depend
+            // on the phase) and answered; the host sampled it badly.
+            errors |= ST_CMD_CRC_ERR;
+        }
         if let Some(stopped) = stopped
             && stopped.count == 0
             && errors == 0
@@ -1164,6 +1388,7 @@ impl SdController {
                     dma,
                     block_at: 0,
                     dd_pend: false,
+                    parked: false,
                 };
                 if matches!(fault, Some(FaultKind::DmaHang | FaultKind::DmaStuck)) {
                     self.dma_wedged = fault;
@@ -1280,7 +1505,7 @@ impl SdController {
         if !self.sd_mode() {
             return;
         }
-        let Some(phase) = self.phase.filter(|p| !p.dma) else {
+        let Some(mut phase) = self.phase.filter(|p| !p.dma) else {
             return;
         };
         let words = phase.words();
@@ -1301,16 +1526,18 @@ impl SdController {
                 }
             } else {
                 if FIFO_WORDS - self.fifo.len() < words {
+                    // CLK parks after the last block's end bit.
+                    phase.parked = true;
                     break;
                 }
-                let outcome = self.card.as_mut().map_or(ReadBlock::None, |card| card.sd_read_block(phase.size, bus4));
-                match outcome {
-                    ReadBlock::Good(block) => {
+                match self.read_block(phase.size, bus4, std::mem::take(&mut phase.parked)) {
+                    Ok(ReadBlock::Good(block)) => {
                         self.fifo.extend(block_to_words(&block));
                         self.blkdone = self.blkdone.wrapping_add(1);
                     }
-                    ReadBlock::Bad => error = ST_DATA_CRC_ERR,
-                    ReadBlock::None => error = ST_DATA_TIMEOUT,
+                    Ok(ReadBlock::Bad) => error = ST_DATA_CRC_ERR,
+                    Ok(ReadBlock::None) => error = ST_DATA_TIMEOUT,
+                    Err(bad) => error = bad,
                 }
             }
             if error != 0 {

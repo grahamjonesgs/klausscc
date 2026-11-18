@@ -55,6 +55,8 @@ fn cpu(card: bool, native: bool) -> Cpu {
         sd_card: card.then(|| SdCard::from_bytes(image()).unwrap()),
         sd_native: native,
         sd_dma: false,
+        sd_no_hs: false,
+        sd_hs_window: None,
         dcache_range_ops: false,
     });
     cpu
@@ -560,7 +562,7 @@ fn pop(cpu: &mut Cpu, n: usize) -> Vec<u8> {
 /// and the Linux mmc core do, ending selected in tran with a 4-bit bus.
 fn native_init(cpu: &mut Cpu) {
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & !(1 << 27), 0x200D | (1 << 21) | (3 << 22) | (1 << 25));
-    assert_eq!(rd(cpu, SDM_CAPS) & !CAPS_DMA, 0x0008_0101);
+    assert_eq!(rd(cpu, SDM_CAPS) & !CAPS_DMA & !CAPS_HS, 0x0008_0101);
     wr(cpu, SD_CTRL, CLK_IDENT | CTRL_SD_MODE);
     wr(cpu, SD_CTRL, CLK_IDENT | CTRL_SD_MODE | CTRL_PWR_ON);
     wr(cpu, SDM_CFG, 0b100); // CLK_ON: the 74 init clocks
@@ -629,12 +631,12 @@ fn native_init_r2_layout_and_registers() {
     for offset in [SDM_ARG, SDM_RESP0, SDM_RESP1, SDM_IRQ_EN, SDM_CFG, SDM_FIFO, SDM_BLKDONE] {
         assert_eq!(rd(&mut cpu, offset), 0, "offset 0x{offset:03X}");
     }
-    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32, ST_DAT0 | ST_CARD_PRESENT);
+    assert_eq!(rd(&mut cpu, SDM_STATUS) as u32, ST_DAT0 | ST_CARD_PRESENT | ST_IDELAY_RDY);
     assert_eq!(rd(&mut cpu, SD_STATUS) & STATUS_NO_CARD, 0, "the raw pin: low with a card in");
     assert_eq!(rd(&mut cpu, SDM_CMD), 0, "write-only");
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR_TEST), 0, "reserved");
     wr(&mut cpu, SDM_CFG, 0xFFFF_FFFF);
-    assert_eq!(rd(&mut cpu, SDM_CFG), 0b101, "only 4-bit and CLK_ON");
+    assert_eq!(rd(&mut cpu, SDM_CFG), 0x1FF7, "4-bit, HS_SAMPLE, CLK_ON, the phase and the tap");
     wr(&mut cpu, SDM_BLK, 0xFFFF_FFFF);
     assert_eq!(rd(&mut cpu, SDM_BLK), 0xFFFF_0FFC, "size [1:0] reads 0");
     wr(&mut cpu, SDM_BLK, (1 << 16) | 3);
@@ -707,15 +709,18 @@ fn native_status_registers_cmd6_and_acmd13() {
     assert_eq!(rd(&mut cpu, SDM_FIFO), 8);
     let status = pop(&mut cpu, 8);
     assert_eq!(status[0] >> 6, 0b10, "DAT_BUS_WIDTH: 4 bits");
-    // CMD6 check mode for high speed: group 1 supports only function 0, and
-    // the selection says function 1 cannot be switched to.
+    // CMD6 check mode for high speed: group 1 supports functions 0 and 1,
+    // and the selection says function 1 can be switched to; nothing
+    // switches in mode 0.
     wr(&mut cpu, SDM_BLK, (1 << 16) | 64);
     sdm_ok(&mut cpu, 6, 0x00FF_FFF1, R1, CMD_DATA);
     let switch = pop(&mut cpu, 8);
-    assert_eq!(switch[13] & 0x02, 0, "no high speed in group 1's support");
-    assert_eq!(switch[16] & 0xF, 0xF, "group 1: cannot switch");
+    assert_eq!(switch[12..14], [0x80, 0x03], "group 1 supports default and high speed");
+    assert_eq!(switch[2..12], [0x80, 0x01].repeat(5), "groups 6-2: function 0 only");
+    assert_eq!(switch[16] & 0xF, 1, "group 1: high speed available");
     assert_eq!(switch[17], 1, "data structure version");
     assert_eq!(rd(&mut cpu, SDM_FIFO), 0);
+    assert!(!card(&cpu).high_speed());
     assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "back in tran");
 }
 
@@ -1528,11 +1533,11 @@ fn dma_registers_and_caps() {
     // and without --dcache-range-ops CPU_FEATURES[27] = 0 and the range
     // registers read 0.
     let mut cpu = cpu(true, true);
-    assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0008_0101);
+    assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0708_0B01);
     wr(&mut cpu, SDM_DMA_ADDR, 0x1000);
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), 0);
     wr(&mut cpu, SDM_CFG, 0b111 | CFG_DMA_EN);
-    assert_eq!(rd(&mut cpu, SDM_CFG), 0b101);
+    assert_eq!(rd(&mut cpu, SDM_CFG), 0b111);
     wr(&mut cpu, SDM_IRQ_EN, u64::from(ST_DMA_ERR | ST_DATA_DONE));
     assert_eq!(rd(&mut cpu, SDM_IRQ_EN), u64::from(ST_DATA_DONE));
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & (1 << 27), 0);
@@ -1550,7 +1555,7 @@ fn dma_registers_and_caps() {
     assert_eq!(cpu_dma(true).mmio_read(CPU_FEATURES), 0x0AE0_200D);
     let mut cpu = cpu_dma(false);
     assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x02E0_200D, "--sd-dma alone adds no CPU_FEATURES bit");
-    assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0008_0501);
+    assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0708_0F01, "the sdhs bitstream's");
     assert_eq!(rd(&mut cpu, SDM_CAPS) & 0xFF, 1);
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & (1 << 27), 0, "the range ops are a separate option");
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & (1 << 21), 1 << 21);
@@ -1562,7 +1567,7 @@ fn dma_registers_and_caps() {
     assert_eq!(rd(&mut cpu, SDM_DMA_ADDR), 0xABCD_0001_0000_0008);
     // DMA_EN is SDM_CFG[16] (spec v1.1); [1] is not it.
     assert_eq!(CFG_DMA_EN, 1 << 16);
-    wr(&mut cpu, SDM_CFG, 0b111 | CFG_DMA_EN);
+    wr(&mut cpu, SDM_CFG, 0b101 | CFG_DMA_EN);
     assert_eq!(rd(&mut cpu, SDM_CFG), 0b101 | CFG_DMA_EN);
     // IRQ_EN[27] enables DMA_ERR.
     wr(&mut cpu, SDM_IRQ_EN, u64::from(ST_DMA_ERR | ST_DATA_DONE));
@@ -2858,4 +2863,324 @@ fn dma_write_response_error_leaves_a_block_in_the_fifo() {
     assert!(summary.contains("1 DMA data commands started with words in the FIFO"), "{summary}");
     assert!(summary.contains("5 DMA writes fetched blocks before a failed response"), "{summary}");
     assert_eq!(problems(&cpu), 0);
+}
+
+// ---- high speed (SD_NATIVE_PLAN §9) ----
+
+/// A machine with the card and the native controller: `dma` its DMA
+/// engine, `no_hs` a bitstream before high speed, `window` the data eye.
+fn cpu_hs(dma: bool, no_hs: bool, window: Option<&str>) -> Cpu {
+    let mut cpu = Cpu::with_mem_size(&[0; 0x100], CODE_BASE, DMA_MEM);
+    cpu.install(Hardware {
+        sd_card: Some(SdCard::from_bytes(image()).unwrap()),
+        sd_native: true,
+        sd_dma: dma,
+        sd_no_hs: no_hs,
+        sd_hs_window: window.map(|w| w.parse().unwrap()),
+        ..Hardware::default()
+    });
+    cpu
+}
+
+/// `SDM_CFG` for the 4-bit bus sampling at `phase` and `tap`.
+const fn cfg_hs(phase: u64, tap: u64) -> u64 {
+    CFG_4BIT | CFG_HS_SAMPLE | (phase << 4) | (tap << 8)
+}
+
+/// CMD6 with `arg` and its 64-byte status, on the 4-bit bus.
+fn cmd6(cpu: &mut Cpu, arg: u32) -> Vec<u8> {
+    wr(cpu, SDM_FIFO, FIFO_RESET);
+    wr(cpu, SDM_BLK, (1 << 16) | 64);
+    sdm_ok(cpu, 6, arg, R1, CMD_DATA);
+    assert_ne!(status(cpu) & ST_DATA_DONE, 0);
+    pop(cpu, 8)
+}
+
+/// After `native_init`: CMD6 to high speed, then 50 MHz with the HS
+/// sample point at `phase` / `tap`.
+fn switch_hs(cpu: &mut Cpu, phase: u64, tap: u64) {
+    assert_eq!(cmd6(cpu, 0x80FF_FFF1)[16] & 0xF, 1, "switched");
+    wr(cpu, SDM_CFG, cfg_hs(phase, tap));
+    wr(cpu, SD_CTRL, CTRL_SD_MODE | CTRL_PWR_ON);
+}
+
+#[test]
+fn hs_registers_and_the_bitstreams_before_it() {
+    // sdhs: SDM_CAPS 0x0708_0B01 (| [10] with DMA), the sampling bits
+    // [1], [7:4], [12:8] kept as written (phases 7-15 too), IDELAY_RDY.
+    let mut cpu = cpu_hs(false, false, None);
+    assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0708_0B01);
+    assert_eq!(rd(&mut cpu, SDM_CAPS) >> 24 & 0xF, 7, "7 sample phases");
+    assert_eq!(rd(&mut cpu, SDM_CFG), 0, "reset 0");
+    assert_eq!(status(&mut cpu) & ST_IDELAY_RDY, ST_IDELAY_RDY);
+    for cfg in [cfg_hs(2, 8), cfg_hs(6, 31), cfg_hs(15, 0), 0x823, CFG_HS_SAMPLE] {
+        wr(&mut cpu, SDM_CFG, cfg);
+        assert_eq!(rd(&mut cpu, SDM_CFG), cfg);
+    }
+    wr(&mut cpu, SDM_CFG, !0);
+    assert_eq!(rd(&mut cpu, SDM_CFG), 0x1FF7, "[16] DMA_EN is not there without --sd-dma");
+    // IDELAY_RDY is live: W1C does nothing to it, and it is no interrupt.
+    wr(&mut cpu, SDM_STATUS, u64::from(ST_IDELAY_RDY));
+    assert_eq!(status(&mut cpu) & ST_IDELAY_RDY, ST_IDELAY_RDY);
+    wr(&mut cpu, SDM_IRQ_EN, !0);
+    assert_eq!(rd(&mut cpu, SDM_IRQ_EN) as u32 & ST_IDELAY_RDY, 0);
+    assert_eq!(rd(&mut cpu, SDM_CAPS) & CAPS_DMA, 0);
+    assert_eq!(rd(&mut cpu_hs(true, false, None), SDM_CAPS), 0x0708_0F01, "the sdhs bitstream with DMA");
+
+    // --sd-no-hs: the bitstreams before sdhs, as the model was.
+    let mut cpu = cpu_hs(false, true, None);
+    assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0008_0101);
+    assert_eq!(rd(&mut cpu_hs(true, true, None), SDM_CAPS), 0x0008_0501);
+    wr(&mut cpu, SDM_CFG, !0);
+    assert_eq!(rd(&mut cpu, SDM_CFG), 0b101, "only 4-bit and CLK_ON");
+    assert_eq!(status(&mut cpu) & ST_IDELAY_RDY, 0);
+    // The card still offers high speed: cards do.
+    wr(&mut cpu, SDM_CFG, 0);
+    native_init(&mut cpu);
+    assert_eq!(cmd6(&mut cpu, 0x00FF_FFF1)[13] & 2, 2);
+}
+
+#[test]
+fn hs_cmd6_switch_and_back() {
+    let mut cpu = cpu_hs(false, false, None);
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    // Mode 0 (check) with no change: group 1 is at default speed.
+    let st = cmd6(&mut cpu, 0x00FF_FFFF);
+    assert_eq!((st[0], st[1]), (0, 100), "max current");
+    assert_eq!(st[12..14], [0x80, 0x03]);
+    assert_eq!(st[14..17], [0, 0, 0], "every group at function 0");
+    assert_eq!(st[17], 1, "version 1");
+    assert!(st[18..].iter().all(|&b| b == 0), "no busy status, reserved 0");
+    // Unsupported functions report 0xF; in mode 1 they cancel the switch.
+    assert_eq!(cmd6(&mut cpu, 0x00FF_FFF2)[16] & 0xF, 0xF, "group 1 function 2");
+    let st = cmd6(&mut cpu, 0x80FF_FF11);
+    assert_eq!(st[16], 0xF1, "group 2 function 1: not supported; group 1 would be 1");
+    assert!(!card(&cpu).high_speed(), "cancelled: nothing switched");
+    // Mode 1, group 1 function 1 (Linux's 0x80FF_FFF1): high speed, and
+    // the card stays in tran.
+    assert_eq!(cmd6(&mut cpu, 0x80FF_FFF1)[16], 0x01);
+    assert!(card(&cpu).high_speed());
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4, "tran");
+    // 0xF (no change) reports the current function.
+    assert_eq!(cmd6(&mut cpu, 0x00FF_FFFF)[16] & 0xF, 1);
+    assert_eq!(cmd6(&mut cpu, 0x80FF_FFFF)[16] & 0xF, 1);
+    assert!(card(&cpu).high_speed());
+    // Function 0 in mode 1 goes back to default speed.
+    assert_eq!(cmd6(&mut cpu, 0x80FF_FFF0)[16] & 0xF, 0);
+    assert!(!card(&cpu).high_speed());
+    // CMD0 reverts.
+    cmd6(&mut cpu, 0x80FF_FFF1);
+    assert!(card(&cpu).high_speed());
+    sdm(&mut cpu, 0, 0, R_NONE, 0);
+    assert!(!card(&cpu).high_speed(), "CMD0");
+    // So does a power cycle.
+    native_init(&mut cpu);
+    cmd6(&mut cpu, 0x80FF_FFF1);
+    wr(&mut cpu, SD_CTRL, CLK_IDENT | CTRL_SD_MODE);
+    assert!(!card(&cpu).high_speed(), "power off");
+}
+
+#[test]
+fn hs_block_time_at_divider_0() {
+    // A DMA read of ten blocks on the 4-bit bus: about 10 x 1050 clocks,
+    // 4 cycles each at 25 MHz (divider 1) and 2 at 50 MHz (divider 0).
+    let mut cpu = cpu_hs(true, false, None);
+    native_init(&mut cpu);
+    let time = |cpu: &mut Cpu, cfg: u64| {
+        wr(cpu, SDM_FIFO, FIFO_RESET);
+        wr(cpu, SDM_BLK, (10 << 16) | 512);
+        wr(cpu, SDM_DMA_ADDR, BUF);
+        wr(cpu, SDM_CFG, cfg | CFG_DMA_EN);
+        sdm_ok(cpu, 18, 0, R1, CMD_DATA);
+        let cycles = until(cpu, 10_000_000, |cpu| status(cpu) & ST_DATA_DONE != 0);
+        assert_eq!(ram(cpu, BUF, 10 * BLOCK), (0..10).flat_map(pattern).collect::<Vec<_>>());
+        sdm_ok(cpu, 12, 0, R1B, CMD_STOP);
+        until(cpu, 100_000, |cpu| status(cpu) & ST_DMA_BUSY == 0);
+        wr(cpu, SDM_CFG, cfg);
+        cycles
+    };
+    let slow = time(&mut cpu, CFG_4BIT);
+    assert!((40_000..50_000).contains(&slow), "{slow} cycles at 25 MHz");
+    switch_hs(&mut cpu, 2, 8);
+    let fast = time(&mut cpu, cfg_hs(2, 8));
+    assert!((20_000..25_000).contains(&fast), "{fast} cycles at 50 MHz");
+    assert!(fast * 2 <= slow + 200 && fast * 2 + 200 >= slow, "half: {fast} vs {slow}");
+    // PIO at 50 MHz reads the same data (no window: every phase passes).
+    for phase in 0..16 {
+        wr(&mut cpu, SDM_CFG, cfg_hs(phase, 31));
+        wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+        wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
+        sdm_ok(&mut cpu, 17, 3, R1, CMD_DATA);
+        assert_eq!(pop(&mut cpu, 64), pattern(3), "phase {phase}");
+    }
+    assert_eq!(cpu.sd.as_ref().unwrap().hs_notes, [0, 0, 0], "used as the plan says");
+}
+
+#[test]
+fn hs_window_parse_and_instants() {
+    let w: HsWindow = "13..27.5".parse().unwrap();
+    assert_eq!(w.to_string(), "13..27.5 ns");
+    assert!("27..13".parse::<HsWindow>().is_err());
+    assert!("13".parse::<HsWindow>().is_err());
+    assert!("a..b".parse::<HsWindow>().is_err());
+    // Phase p, tap t: 10 + 5p - 0.078t ns; phases 7-15 act as 6.
+    assert_eq!(HsWindow::instant(cfg_hs(0, 0)), 10_000);
+    assert_eq!(HsWindow::instant(cfg_hs(2, 8)), 19_376);
+    assert_eq!(HsWindow::instant(cfg_hs(6, 0)), 40_000);
+    assert_eq!(HsWindow::instant(cfg_hs(15, 31)), 40_000 - 78 * 31);
+    // Modulo the 20 ns clock: phase p and p + 4 agree.
+    for phase in 0..3 {
+        for tap in [0, 8, 16, 24, 31] {
+            let a = w.passes(HsWindow::instant(cfg_hs(phase, tap)));
+            assert_eq!(a, w.passes(HsWindow::instant(cfg_hs(phase + 4, tap))), "phase {phase} tap {tap}");
+        }
+    }
+    assert!(!w.passes(10_000) && w.passes(15_000) && w.passes(20_000) && w.passes(25_000) && !w.passes(30_000));
+    assert!(w.passes(35_000 + 20_000 * 3) && !w.passes(-10_000));
+    // The board's sweep (§9.7): everything but phases 0 and 4 at taps 0-16.
+    let board: HsWindow = "10.1..28.6".parse().unwrap();
+    for phase in 0..7 {
+        for tap in [0, 8, 16, 24] {
+            let pass = board.passes(HsWindow::instant(cfg_hs(phase, tap)));
+            assert_eq!(pass, !(phase % 4 == 0 && tap <= 16), "phase {phase} tap {tap}");
+        }
+    }
+    let all: HsWindow = "0..20".parse().unwrap();
+    assert!((0..7).all(|p| all.passes(HsWindow::instant(cfg_hs(p, 0)))));
+}
+
+#[test]
+fn hs_window_gives_crc_errors_outside_it() {
+    let mut cpu = cpu_hs(false, false, Some("17..23"));
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    // At 25 MHz the window does not apply, HS_SAMPLE or not.
+    wr(&mut cpu, SDM_CFG, cfg_hs(0, 0));
+    sdm_ok(&mut cpu, 13, rca, R1, 0);
+    switch_hs(&mut cpu, 0, 0);
+    // Phase 0 (10 ns) is outside: CMD_CRC_ERR, the response held as
+    // received; the card executed the command.
+    let st = sdm(&mut cpu, 13, rca, R1, 0);
+    assert_eq!(st & ST_ERRORS, ST_CMD_CRC_ERR);
+    assert_eq!(state_of(rd(&mut cpu, SDM_RESP0)), 4);
+    // Phase 2, tap 8 (19.4 ns) and phase 2 at tap 31 (17.6 ns) are inside.
+    for (phase, tap) in [(2, 8), (2, 31), (6, 8)] {
+        wr(&mut cpu, SDM_CFG, cfg_hs(phase, tap));
+        sdm_ok(&mut cpu, 13, rca, R1, 0);
+    }
+    // A data command whose response fails: no data phase, and the card,
+    // which sent its single block anyway, is back in tran.
+    wr(&mut cpu, SDM_CFG, cfg_hs(3, 0));
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 64);
+    let st = sdm(&mut cpu, 6, 0x00FF_FFFF, R1, CMD_DATA);
+    assert_eq!(st & (ST_ERRORS | ST_DATA_BUSY | ST_DATA_DONE), ST_CMD_CRC_ERR);
+    wr(&mut cpu, SDM_CFG, cfg_hs(2, 8));
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4);
+    // Read blocks: a CMD18 inside the window fills the FIFO; moved outside
+    // it (which a driver must not do while DATA_BUSY: noted on stderr),
+    // the next block arrives bad and ends the phase; CMD12 recovers.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (10 << 16) | 512);
+    sdm_ok(&mut cpu, 18, 40, R1, CMD_DATA);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8);
+    wr(&mut cpu, SDM_CFG, cfg_hs(4, 0));
+    assert_eq!(pop(&mut cpu, 64), pattern(40));
+    let st = status(&mut cpu);
+    assert_eq!(st & (ST_ERRORS | ST_DATA_BUSY), ST_DATA_CRC_ERR);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8);
+    assert_eq!(cpu.sd.as_ref().unwrap().hs_notes, [0, 0, 1]);
+    wr(&mut cpu, SDM_CFG, cfg_hs(2, 8));
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    assert_eq!(state_of(sdm_ok(&mut cpu, 13, rca, R1, 0)), 4);
+    // At 50 MHz without HS_SAMPLE the window does not apply either (the
+    // model notes it).
+    wr(&mut cpu, SDM_CFG, CFG_4BIT);
+    sdm_ok(&mut cpu, 13, rca, R1, 0);
+    assert_eq!(cpu.sd.as_ref().unwrap().hs_notes, [0, 1, 1]);
+}
+
+#[test]
+fn hs_notes_50_mhz_at_default_speed() {
+    // 50 MHz with the card never switched: noted (the model still works).
+    let mut cpu = cpu_hs(false, false, None);
+    native_init(&mut cpu);
+    wr(&mut cpu, SDM_CFG, cfg_hs(2, 8));
+    wr(&mut cpu, SD_CTRL, CTRL_SD_MODE | CTRL_PWR_ON);
+    sdm_ok(&mut cpu, 13, u32::from(RCA) << 16, R1, 0);
+    assert_eq!(cpu.sd.as_ref().unwrap().hs_notes, [1, 0, 0]);
+}
+
+#[test]
+fn hs_window_bit_slots() {
+    // The eye of the slot's bit is 21..34 ns: 30 ns (phase 4) takes it,
+    // 10 ns (phase 0) the bit before (k = -1), 40 ns (phase 6) none.
+    let w: HsWindow = "21..34".parse().unwrap();
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(4, 0))), Some(0));
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(0, 0))), Some(-1));
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(0, 24))), Some(-1));
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(3, 31))), Some(0), "25 - 2.4 = 22.6 ns");
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(6, 0))), None);
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(2, 0))), None);
+    // An eye before 20 ns: 40 ns (phase 6) takes the next bit (k = 1).
+    let w: HsWindow = "10.1..28.6".parse().unwrap();
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(6, 8))), Some(1));
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(2, 8))), Some(0));
+    assert_eq!(w.slot(HsWindow::instant(cfg_hs(0, 24))), Some(-1), "8.1 ns: a clock before 28.1");
+    assert_eq!("0..25".parse::<HsWindow>().unwrap().slot(5_000), Some(0), "wide: no offset");
+}
+
+#[test]
+fn hs_early_sample_loses_a_block_after_a_park() {
+    let mut cpu = cpu_hs(false, false, Some("21..34"));
+    native_init(&mut cpu);
+    let rca = u32::from(RCA) << 16;
+    switch_hs(&mut cpu, 0, 0);
+    // Phase 0 (10 ns) takes the bit before: commands, single blocks and a
+    // read that never parks pass.
+    sdm_ok(&mut cpu, 13, rca, R1, 0);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (1 << 16) | 512);
+    sdm_ok(&mut cpu, 17, 5, R1, CMD_DATA);
+    assert_eq!(pop(&mut cpu, 64), pattern(5));
+    wr(&mut cpu, SDM_BLK, (8 << 16) | 512);
+    sdm_ok(&mut cpu, 18, 0, R1, CMD_DATA);
+    assert_eq!(status(&mut cpu) & (ST_ERRORS | ST_DATA_DONE), ST_DATA_DONE);
+    assert_eq!(pop(&mut cpu, 8 * 64), (0..8).flat_map(pattern).collect::<Vec<_>>());
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    // Ten blocks: the FIFO fills at 8, CLK parks, and the block after the
+    // park loses its start bit.
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (10 << 16) | 512);
+    sdm_ok(&mut cpu, 18, 20, R1, CMD_DATA);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8);
+    assert_eq!(pop(&mut cpu, 64), pattern(20));
+    assert_eq!(status(&mut cpu) & (ST_ERRORS | ST_DATA_BUSY), ST_DATA_CRC_ERR | ST_DATA_END_ERR);
+    assert_eq!(rd(&mut cpu, SDM_BLKDONE), 8, "short");
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+    // Phase 4 samples the same point a bit later: the park is harmless.
+    wr(&mut cpu, SDM_CFG, cfg_hs(4, 0));
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (10 << 16) | 512);
+    sdm_ok(&mut cpu, 18, 20, R1, CMD_DATA);
+    let mut got = pop(&mut cpu, 64);
+    got.extend(pop(&mut cpu, 9 * 64));
+    assert_eq!(status(&mut cpu) & (ST_ERRORS | ST_DATA_DONE), ST_DATA_DONE);
+    assert_eq!(got, (20..30).flat_map(pattern).collect::<Vec<_>>());
+    sdm_ok(&mut cpu, 12, 0, R1B, CMD_STOP);
+
+    // DMA: the engine moves each block to DDR before the next one ends,
+    // so the FIFO never fills, CLK never parks, and phase 0 reads well.
+    let mut cpu = cpu_hs(true, false, Some("21..34"));
+    native_init(&mut cpu);
+    switch_hs(&mut cpu, 0, 0);
+    wr(&mut cpu, SDM_FIFO, FIFO_RESET);
+    wr(&mut cpu, SDM_BLK, (12 << 16) | 512);
+    wr(&mut cpu, SDM_DMA_ADDR, BUF);
+    wr(&mut cpu, SDM_CFG, cfg_hs(0, 0) | CFG_DMA_EN);
+    sdm_ok(&mut cpu, 18, 0, R1, CMD_DATA);
+    until(&mut cpu, 10_000_000, |cpu| status(cpu) & (ST_DATA_DONE | ST_ERRORS) != 0);
+    assert_eq!(status(&mut cpu) & ST_ERRORS, 0, "the engine keeps the FIFO from filling");
+    assert_eq!(ram(&cpu, BUF, 12 * BLOCK), (0..12).flat_map(pattern).collect::<Vec<_>>());
 }
