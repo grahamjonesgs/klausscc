@@ -305,8 +305,9 @@ fn run_assemble(
 }
 
 /// The emulated machine's optional hardware: `--mpu`, `--tlb-entries`,
-/// `--no-tlb-walker`, and the SD card
-/// (`--sd-image`, opened read-write) and controller (`--sd-native`).
+/// `--no-tlb-walker`, the SD card (`--sd-image`, opened read-write) and
+/// controller (`--sd-native`), the switches (`--switches`) and the board
+/// I/O log (`--board-io-log`, created).
 fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, Error> {
     let sd_card = match cli.sd_image.as_deref() {
         None => None,
@@ -325,6 +326,17 @@ fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, 
             Some(card)
         }
     };
+    let board_io_log = match cli.board_io_log.as_deref() {
+        None => None,
+        Some(path) if path.as_os_str() == "-" => Some(emu::BoardIoLog::stderr()),
+        Some(path) => Some(emu::BoardIoLog::new(std::fs::File::create(path).map_err(|source| {
+            msg_list.error(format!("Unable to create --board-io-log {}: {source}", path.display()));
+            Error::Write {
+                path: path.to_path_buf(),
+                source,
+            }
+        })?)),
+    };
     Ok(emu::Hardware {
         mpu: cli.mpu,
         tlb_entries: cli.tlb_entries,
@@ -335,6 +347,8 @@ fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, 
         sd_no_hs: cli.sd_no_hs,
         sd_hs_window: cli.sd_hs_window,
         dcache_range_ops: cli.dcache_range_ops,
+        switches: cli.switches.unwrap_or(0),
+        board_io_log,
     })
 }
 

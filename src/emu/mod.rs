@@ -66,6 +66,7 @@
 //! the MPU, the TLB and the one translation every memory access an
 //! instruction makes goes through.
 
+mod board_io;
 mod cachesim;
 mod coherence;
 mod tlbsim;
@@ -80,6 +81,7 @@ mod system;
 mod tests;
 mod trace;
 
+pub use board_io::BoardIoLog;
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
 pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_CYCLES_PER_STORE, UART_SCRIPT_GAP};
 pub use mmu::{MpuRegion, TlbEntry};
@@ -181,6 +183,11 @@ pub struct Hardware {
     /// `CACHE_OP_ADDR`, `CACHE_OP_LEN`, `CACHE_CTRL[6:4]` and
     /// `CPU_FEATURES[27]`.
     pub dcache_range_ops: bool,
+    /// What the slide switches read (`--switches`, `SWITCHES` at
+    /// `0xF004_0008`).
+    pub switches: u16,
+    /// Log each LED, RGB LED and display write (`--board-io-log`).
+    pub board_io_log: Option<BoardIoLog>,
 }
 
 /// A memory write, as the trace annotates it.
@@ -368,6 +375,8 @@ pub struct Cpu {
     cache_ctl: mmio::CacheCtl,
     /// The DMA coherence checker (`--sd-dma`).
     coherence: Option<Box<coherence::Coherence>>,
+    /// The LEDs, RGB LEDs, 7-segment display and switches.
+    board_io: board_io::BoardIo,
 }
 
 impl Cpu {
@@ -460,12 +469,14 @@ impl Cpu {
             sd: None,
             cache_ctl: mmio::CacheCtl::default(),
             coherence: None,
+            board_io: board_io::BoardIo::default(),
         }
     }
 
     /// Fit the optional hardware: the MPU, and an SD controller when there
     /// is a card or the native controller.  Without a card and
-    /// `sd_native`, the SD window stays unmodelled (reads 0).
+    /// `sd_native`, the SD window stays unmodelled (reads 0).  Also sets
+    /// what the switches read and the board I/O log.
     pub fn install(&mut self, hw: Hardware) {
         self.set_has_mpu(hw.mpu);
         self.set_tlb_entries(hw.tlb_entries.unwrap_or(TLB_ENTRIES_DEFAULT));
@@ -478,6 +489,8 @@ impl Cpu {
             Box::new(sd)
         });
         self.cache_ctl.range_ops = hw.dcache_range_ops;
+        self.board_io.switches = hw.switches;
+        self.board_io.log = hw.board_io_log;
         self.coherence = dma.then(|| Box::new(coherence::Coherence::new(self.mem.len())));
     }
 

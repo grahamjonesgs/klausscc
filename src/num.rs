@@ -102,6 +102,12 @@ pub(crate) fn parse_u32(token: &str) -> Result<u32, String> {
     u32::try_from(value).map_err(|_| format!("\"{token}\" is outside 0..=0xFFFFFFFF"))
 }
 
+/// Parse a literal that must fit in a `u16` (`--switches`).
+pub(crate) fn parse_u16(token: &str) -> Result<u16, String> {
+    let value = parse_int(token).map_err(|err| format!("{err} in \"{token}\""))?;
+    u16::try_from(value).map_err(|_| format!("\"{token}\" is outside 0..=0xFFFF"))
+}
+
 /// Accumulate `digits` in `radix`, rejecting empty input and 64-bit overflow.
 fn digits_value(digits: impl Iterator<Item = char>, radix: u32) -> Result<u64, LiteralError> {
     let mut value: u64 = 0;

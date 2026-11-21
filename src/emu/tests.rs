@@ -5265,3 +5265,173 @@ fn tlb_walker_runs_a_user_program_across_pages() {
     assert!(matches!(r.stop, StopReason::InvalidOpcode(_)), "{:?}", r.stop);
     assert_eq!(cpu.parked_exception().map(|(c, _)| c), Some(Cause::Illegal));
 }
+
+// ---- board I/O: RGB LEDs, 7-segment display, LEDs and switches ------------
+
+const RGB1_REG: u32 = 0xF002_0000;
+const RGB2_REG: u32 = 0xF002_0008;
+const SEG_LOW_REG: u32 = 0xF003_0000;
+const SEG_HIGH_REG: u32 = 0xF003_0008;
+const SEG_ALL_REG: u32 = 0xF003_0010;
+const SEG_BLANK_REG: u32 = 0xF003_0018;
+const LEDS_REG: u32 = 0xF004_0000;
+const SWITCHES_REG: u32 = 0xF004_0008;
+
+/// A `--board-io-log` sink the test can read back.
+#[derive(Clone, Default)]
+struct SharedLog(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl std::io::Write for SharedLog {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl SharedLog {
+    fn text(&self) -> String {
+        String::from_utf8(self.0.lock().unwrap().clone()).unwrap()
+    }
+}
+
+#[test]
+fn board_io_reads_at_program_start() {
+    // KlaussCPU.sv: LOAD_COMPLETE clears st.led and st.RGB_LED_1/2, and
+    // START_WAIT sets both displays to 32'h22_22_22_22 (blank, the display
+    // controller's 8'h22 " ") as it starts the pipeline.  SEG_BLANK and the
+    // unlisted offsets read 0 (the read mux's default).
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    assert_eq!(cpu.mmio_read(RGB1_REG), 0);
+    assert_eq!(cpu.mmio_read(RGB2_REG), 0);
+    assert_eq!(cpu.mmio_read(SEG_LOW_REG), 0x2222_2222);
+    assert_eq!(cpu.mmio_read(SEG_HIGH_REG), 0x2222_2222);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_2222_2222);
+    assert_eq!(cpu.mmio_read(SEG_BLANK_REG), 0, "write only");
+    assert_eq!(cpu.mmio_read(LEDS_REG), 0);
+    assert_eq!(cpu.mmio_read(SWITCHES_REG), 0, "no --switches");
+    for addr in [0xF002_0010, 0xF003_0020, 0xF004_0010, 0xF004_0004, 0xF003_0004] {
+        assert_eq!(cpu.mmio_read(addr), 0, "0x{addr:08X}");
+    }
+}
+
+#[test]
+fn board_io_leds_and_rgb_read_back_masked() {
+    // st.led <= w_mmio_write_data[15:0]; st.RGB_LED_n <= [11:0]; each read
+    // zero-extends ({48'b0, st.led}, {52'b0, st.RGB_LED_n}).
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.mmio_write(LEDS_REG, 0xFFFF_FFFF_FFFF_5A5A);
+    assert_eq!(cpu.mmio_read(LEDS_REG), 0x5A5A);
+    cpu.mmio_write(RGB1_REG, 0xFFFF_1F00);
+    cpu.mmio_write(RGB2_REG, 0x0000_00AB);
+    assert_eq!(cpu.mmio_read(RGB1_REG), 0xF00);
+    assert_eq!(cpu.mmio_read(RGB2_REG), 0x0AB);
+    // Writes elsewhere in the windows change nothing.
+    cpu.mmio_write(0xF004_0010, 0x1111);
+    cpu.mmio_write(0xF002_0010, 0x111);
+    cpu.mmio_write(0xF004_0001, 0x1111);
+    assert_eq!(cpu.mmio_read(LEDS_REG), 0x5A5A);
+    assert_eq!(cpu.mmio_read(RGB1_REG), 0xF00);
+    assert_eq!(cpu.mmio_read(RGB2_REG), 0x0AB);
+}
+
+#[test]
+fn board_io_seven_segment_pads_digits() {
+    // SEG_LOW / SEG_HIGH take [15:0] as {4'h0, digit} per byte into
+    // st.seven_seg_value2 (lower) / value1 (upper); SEG_ALL takes [31:16]
+    // to the upper display and [15:0] to the lower; reads are the padded
+    // values, SEG_ALL {value1, value2}.
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.mmio_write(SEG_LOW_REG, 0xFFFF_1234);
+    assert_eq!(cpu.mmio_read(SEG_LOW_REG), 0x0102_0304);
+    assert_eq!(cpu.mmio_read(SEG_HIGH_REG), 0x2222_2222, "the upper display stays blank");
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_0102_0304);
+    cpu.mmio_write(SEG_HIGH_REG, 0xBEEF);
+    assert_eq!(cpu.mmio_read(SEG_HIGH_REG), 0x0B0E_0E0F);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0B0E_0E0F_0102_0304);
+    cpu.mmio_write(SEG_ALL_REG, 0xFFFF_FFFF_DEAD_5678);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0D0E_0A0D_0506_0708);
+    assert_eq!(cpu.mmio_read(SEG_HIGH_REG), 0x0D0E_0A0D);
+    assert_eq!(cpu.mmio_read(SEG_LOW_REG), 0x0506_0708);
+    // SEG_BLANK: any write, both displays 32'h22222222.
+    cpu.mmio_write(SEG_BLANK_REG, 0);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_2222_2222);
+    cpu.mmio_write(0xF003_0020, 0x1234);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_2222_2222, "no register at 0x20");
+}
+
+#[test]
+fn board_io_switches_read_the_given_value() {
+    // --switches (Hardware::switches): SWITCHES reads {48'b0, i_switch};
+    // a write is dropped.
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.install(Hardware {
+        switches: 0x1234,
+        ..Hardware::default()
+    });
+    assert_eq!(cpu.mmio_read(SWITCHES_REG), 0x1234);
+    cpu.mmio_write(SWITCHES_REG, 0xFFFF);
+    assert_eq!(cpu.mmio_read(SWITCHES_REG), 0x1234, "read only");
+    assert_eq!(cpu.mmio_read(LEDS_REG), 0, "and LEDS is not written either");
+}
+
+#[test]
+fn board_io_sub_word_stores_are_lane_replicated() {
+    // The core replicates a sub-word store's data across the doubleword
+    // (pipeline_core.sv exo_wdata: {8{c[7:0]}}, {4{c[15:0]}}, {2{c[31:0]}})
+    // and these devices ignore the byte enables, so a byte store to LEDS
+    // sets both bytes.  A sub-word load takes the low bytes of the reply.
+    let cpu = run_source(
+        "_start
+SETR B 0xF0040000
+SETR A 0x1F5A
+MEMSET8 A B
+LDIDX64 C B 0
+SETR B 0xF0030000
+SETR A 0xFF1234
+STIDX16 A B 0x10
+LDIDX64 D B 0x10
+LDIDX8 E B 0x10
+LDIDX32 F B 0x10
+SETR B 0xF0020000
+SETR A 0xABC
+MEMSET8 A B
+LDIDX64 G B 0
+HALT",
+    );
+    assert_eq!(cpu.regs[2], 0x5A5A, "LEDS after a byte store of 0x5A");
+    assert_eq!(cpu.regs[3], 0x0102_0304_0102_0304, "SEG_ALL after a 16-bit store of 0x1234");
+    assert_eq!(cpu.regs[4], 0x04, "LDIDX8 of SEG_ALL");
+    assert_eq!(cpu.regs[5], 0x0102_0304, "LDIDX32 of SEG_ALL: the lower display");
+    assert_eq!(cpu.regs[6], 0xCBC, "RGB1 after a byte store of 0xBC");
+}
+
+#[test]
+fn board_io_log_records_each_store() {
+    let log = SharedLog::default();
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.install(Hardware {
+        board_io_log: Some(BoardIoLog::new(log.clone())),
+        ..Hardware::default()
+    });
+    cpu.mmio_write(LEDS_REG, 0x5A5A);
+    cpu.mmio_write(LEDS_REG, 0x5A5A);
+    cpu.mmio_write(RGB1_REG, 0xF00);
+    cpu.mmio_write(RGB2_REG, 0x1_00F);
+    cpu.mmio_write(SEG_LOW_REG, 0x1234);
+    cpu.mmio_write(SEG_HIGH_REG, 0xABCD);
+    cpu.mmio_write(SEG_ALL_REG, 0x1234_5678);
+    cpu.mmio_write(SEG_BLANK_REG, 7);
+    cpu.mmio_store(LEDS_REG, 0x01, 1);
+    // Not logged: the read-only switches, unlisted offsets, reads.
+    cpu.mmio_write(SWITCHES_REG, 1);
+    cpu.mmio_write(0xF003_0020, 1);
+    let _ = cpu.mmio_read(LEDS_REG);
+    assert_eq!(
+        log.text(),
+        "LEDS 0x5a5a\nLEDS 0x5a5a\nRGB1 0xf00\nRGB2 0x00f\nSEG_LOW 1234\nSEG_HIGH abcd\nSEG_ALL 12345678\nSEG_BLANK\nLEDS 0x0101\n"
+    );
+}

@@ -58,6 +58,8 @@ fn cpu(card: bool, native: bool) -> Cpu {
         sd_no_hs: false,
         sd_hs_window: None,
         dcache_range_ops: false,
+        switches: 0,
+        board_io_log: None,
     });
     cpu
 }

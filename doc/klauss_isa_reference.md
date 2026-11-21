@@ -127,6 +127,8 @@ The input's extension picks what `-i` does: a `.kla` file is assembled, a `.kbt`
 | `--mpu` | Give the emulator the MMU stage 2 MPU (see [MPU and TLB](#mpu-and-tlb)), for `--emulate`, `--emulate-test` and `--gdbserver` without `--board`. Without it the emulator has no MPU, as the Nexys A7 bitstream has none |
 | `--uart-in FILE` | With `--emulate` or `-m`: type FILE's bytes into the emulated UART receiver, one byte whenever the receive FIFO has room and 2,000 instructions have passed since the last, like keyboard input. For scripted sessions with programs that read the console (the UART output is printed when the run ends). With `-m` (board serial monitor) the bytes go to the board a line at a time, one byte every 3 ms, in place of the keyboard (no raw mode; Ctrl+C still ends the run); lines are 200 ms apart unless `--uart-prompt` paces them. Not for `--gdbserver` |
 | `--uart-prompt TEXT` | With `--uart-in`: type each line (the first one too) only after the program has printed TEXT since the previous line, e.g. a shell's prompt, so typed input doesn't interleave with output. The run stops (`stop = InputDone`) when TEXT is printed again after the file's last line (end the file with a newline). With `-m` the monitor prints `Script done.` and exits when TEXT comes back after the last line |
+| `--switches <VALUE>` | What the emulator's 16 slide switches read (`SWITCHES`, `0xF004_0008`), e.g. `0x1234`; default 0. For `--emulate` and `--gdbserver` without `--board` |
+| `--board-io-log <FILE>` | Log each store to the emulator's LED bar, RGB LEDs and 7-segment display to `FILE`, one line each with what the device latched (`LEDS 0x5a5a`, `RGB1 0xf00`, `SEG_LOW 1234`, `SEG_HIGH abcd`, `SEG_ALL deadbeef`, `SEG_BLANK`); `-` writes them to stderr after `klausscc io: `. For `--emulate` and `--gdbserver` without `--board` |
 | `--gdbserver <PORT>` | Debug an ELF on the emulator over the GDB remote protocol on `127.0.0.1:PORT` (for lldb) |
 | `--board` | With `--gdbserver`, debug the real board over its USB-JTAG instead (needs a `DEBUG_EN=1` bitstream and a klausscc built with `--features board`). With `-s`, the ELF is first loaded over the UART. |
 | `--jtag-khz <KHZ>` | JTAG clock for `--board` (default: 10000) |
@@ -1235,9 +1237,9 @@ The v1 I/O instructions (LEDs, 7-segment, RGB, switches and UART: `LEDV`, `7SEGR
 | Base | Device | In the emulator |
 |------|--------|-----------------|
 | `0xF001_0000` | UART | Yes |
-| `0xF002_0000` | RGB LEDs | No (reads 0, writes ignored) |
-| `0xF003_0000` | 7-segment display | No |
-| `0xF004_0000` | LEDs and switches | No |
+| `0xF002_0000` | RGB LEDs | Yes |
+| `0xF003_0000` | 7-segment display | Yes |
+| `0xF004_0000` | LEDs and switches | Yes (the switches read `--switches`, default 0) |
 | `0xF00D_0000` | Performance counters | `PERF_CTRL`, `PERF_CYCLES`, `PERF_INSTR` only |
 | `0xF00F_0000` | Interrupt controller and timer | Yes (timer source only) |
 
@@ -1295,7 +1297,7 @@ For printing values and text, use the built-in `$TXR`, `$NEWLINE`, `$TXCHAR`, `$
 
 ### LEDs, Switches, 7-Segment and RGB LEDs
 
-These exist only on the board.
+The emulator models them: reads return what the board would, the switches read the value given with `--switches` (default 0), and `--board-io-log FILE` records each write to the LEDs, RGB LEDs and display (see `EMULATOR_ISA_SEMANTICS.md`, "Board I/O").
 
 | Address | Register | Access | Description |
 |---------|----------|--------|-------------|
@@ -1308,7 +1310,7 @@ These exist only on the board.
 | `0xF002_0000` | `RGB1` | RW | RGB LED 1: bits 11:8 red, 7:4 green, 3:0 blue |
 | `0xF002_0008` | `RGB2` | RW | RGB LED 2, same layout |
 
-Reading `SEG_LOW`, `SEG_HIGH` and `SEG_ALL` returns the display's internal padded form (`0x0d` per digit), not the value written.
+Reading `SEG_LOW`, `SEG_HIGH` and `SEG_ALL` returns the display's internal padded form (`0x0d` per digit), not the value written: `SEG_LOW` and `SEG_HIGH` 32 bits, `SEG_ALL` 64 bits (upper display in bits 63:32). A blank display reads `0x22` per digit, and both displays are blank when a program starts. These devices ignore the store size: a byte or halfword store is repeated across the register, so `MEMSET8` of `0x5A` to `LEDS` lights `0x5A5A`.
 
 ```
 _start

@@ -1,6 +1,8 @@
 //! Memory-mapped devices: the UART, the interrupt controller / timer and
-//! the performance counters, and the decode for the SD controller (`sd`).
+//! the performance counters, and the decode for the SD controller (`sd`)
+//! and the board's LEDs, display and switches (`board_io`).
 
+use super::board_io::{IO_DEV_SELECT, RGB_DEV_SELECT, SEG_DEV_SELECT};
 use super::sd::DmaBus;
 use super::{CYCLES_PER_MS, Cpu, PerfBase, StopReason, coherence};
 
@@ -385,10 +387,11 @@ impl Cpu {
     // ---- memory-mapped I/O ---------------------------------------------------
 
     /// Service an MMIO read (`addr[31:28] == 0xF`), returning the value in the low
-    /// bits of a 64-bit word.  `addr[27:16] == 0x001` selects the UART; every
-    /// other device/offset reads 0 (RTL `default: 0`).
+    /// bits of a 64-bit word.  `addr[27:16]` selects the device; an
+    /// unmodelled device or offset reads 0 (RTL `default: 0`).
     pub(super) fn mmio_read(&mut self, addr: u32) -> u64 {
         match (addr >> 16) & 0xFFF {
+            dev @ (RGB_DEV_SELECT | SEG_DEV_SELECT | IO_DEV_SELECT) => return self.board_io.read(dev, addr & 0xFFFF),
             IRQ_DEV_SELECT => return self.irq_mmio_read(addr & 0xFFFF),
             PERF_DEV_SELECT => {
                 return match addr & 0xFFFF {
@@ -442,8 +445,8 @@ impl Cpu {
     }
 
     /// Service an MMIO write.  A UART `TX_DATA` store transmits `data[7:0]` (or,
-    /// while the transmitter is busy, is dropped); every other device/offset
-    /// is ignored (RTL `default: 0`).
+    /// while the transmitter is busy, is dropped); a store to an unmodelled
+    /// device or offset is ignored (RTL `default: ;`).
     pub(super) fn mmio_write(&mut self, addr: u32, data: u64) {
         self.mmio_store(addr, data, 8);
     }
@@ -459,6 +462,7 @@ impl Cpu {
                 }
             }
             UART_DEV_SELECT if (addr & 0xFFFF) == UART_TX_DATA => self.tx_byte((data & 0xFF) as u8),
+            dev @ (RGB_DEV_SELECT | SEG_DEV_SELECT | IO_DEV_SELECT) => self.board_io.write(dev, addr & 0xFFFF, data, bytes),
             IRQ_DEV_SELECT => self.irq_mmio_write(addr & 0xFFFF, data),
             CACHE_DEV_SELECT => self.cache_mmio_write(addr & 0xFFFF, data),
             PERF_DEV_SELECT if addr & 0xFFFF == PERF_CTRL && data & 1 != 0 => {

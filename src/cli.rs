@@ -9,7 +9,7 @@ use crate::error::Error;
 use crate::link::netload::NETBOOT_DEFAULT_PORT;
 use crate::link::serial::{ResetMethod, SerialTarget};
 use crate::loader::BinaryInput;
-use crate::num::parse_u32;
+use crate::num::{parse_u16, parse_u32};
 use crate::output::{filename_stem, output_file_name};
 use clap::Parser;
 use clap::builder::NonEmptyStringValueParser;
@@ -222,6 +222,14 @@ pub(crate) struct Cli {
     /// Give the emulator the cache range clean/invalidate ops (klaussCPU spec v1.2, not yet in a bitstream): CACHE_OP_ADDR (0xF005_0030), CACHE_OP_LEN (0xF005_0038), CACHE_CTRL[4] RANGE_CLEAN, [5] RANGE_INV and [6] RANGE_IINV (the I-cache), and CPU_FEATURES bit 27. The emulator has no D-cache, so they change no data, but CACHE_STATUS.MNT_BUSY reads 1 for as long as the walk would take and --sd-dma's coherence checker sees them. For --emulate and --gdbserver on the emulator
     #[arg(long, requires = "emu_host", conflicts_with = "board")]
     pub(crate) dcache_range_ops: bool,
+
+    /// What the emulator's 16 slide switches read (SWITCHES, 0xF004_0008), e.g. 0x1234; 0 without it. For --emulate and --gdbserver on the emulator
+    #[arg(long, value_name = "VALUE", value_parser = parse_u16, requires = "emu_host", conflicts_with = "board")]
+    pub(crate) switches: Option<u16>,
+
+    /// Log each store the program makes to the emulator's LED bar (LEDS, 0xF004_0000), RGB LEDs (RGB1, RGB2, 0xF002_0000) and 7-segment display (SEG_LOW, SEG_HIGH, SEG_ALL, SEG_BLANK, 0xF003_0000) to FILE, one line a store with what the device latched: "LEDS 0x5a5a", "RGB1 0xf00", "SEG_LOW 1234", "SEG_HIGH abcd", "SEG_ALL deadbeef", "SEG_BLANK". With '-' the lines go to stderr, after "klausscc io: ". For --emulate and --gdbserver on the emulator
+    #[arg(long, value_name = "FILE", requires = "emu_host", conflicts_with = "board")]
+    pub(crate) board_io_log: Option<PathBuf>,
 
     /// Type the bytes of this file into the UART receiver like keyboard input, for scripted sessions with programs that read the console. With --emulate: one byte at a time whenever the receive FIFO has room (with a short gap between bytes). With -m (serial monitor): sent to the board line by line, one byte every 3 ms, instead of forwarding the keyboard (no raw mode; Ctrl+C still ends the run). Needs --emulate or -m
     #[arg(long, value_name = "FILE", requires = "uart_host", conflicts_with = "gdbserver")]
@@ -780,6 +788,18 @@ mod tests {
         assert!(parse(&["-i", "prog.elf", "--emulate", "--mpu"]).unwrap().mpu);
         assert!(!cli.no_tlb_walker, "the TLB walker by default, as on the release bitstream");
         assert!(parse(&["-i", "prog.elf", "--emulate", "--no-tlb-walker"]).unwrap().no_tlb_walker);
+        assert_eq!(cli.switches, None, "the switches read 0 by default");
+        assert_eq!(cli.board_io_log, None);
+        let cli = parse(&["-i", "p.elf", "--emulate", "--switches", "0x1234", "--board-io-log", "io.log"]).unwrap();
+        assert_eq!(cli.switches, Some(0x1234));
+        assert_eq!(cli.board_io_log, Some(PathBuf::from("io.log")));
+        assert_eq!(
+            parse(&["-i", "p.elf", "--gdbserver", "1234", "--switches", "65535"]).unwrap().switches,
+            Some(0xFFFF)
+        );
+        assert!(parse(&["-i", "p.elf", "--emulate", "--switches", "0x10000"]).is_err(), "16 bits");
+        assert!(parse(&["-i", "p.elf", "--switches", "1"]).is_err(), "needs the emulator");
+        assert!(parse(&["-i", "p.elf", "--board-io-log", "io.log"]).is_err(), "needs the emulator");
         assert_eq!(cli.sd_image, None, "no SD card by default");
         assert!(!cli.sd_native, "no native SD controller by default, as on the release bitstream");
         let cli = parse(&["-i", "prog.elf", "--emulate", "--sd-image", "card.img", "--sd-native"]).unwrap();

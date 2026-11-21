@@ -27,6 +27,7 @@ RTL.
 | `src/emu/mmio.rs` | UART, interrupt controller / timer, performance counters, `CPU_FEATURES` |
 | `src/emu/system.rs` | MMU stage 1: user mode, exception entry, the system registers, the LR/SC reservation |
 | `src/emu/sd/` | the SD controller at `0xF000_0000` (SPI mode, and the native controller with `--sd-native` and its DMA engine with `--sd-dma`) and the emulated card (`--sd-image`) |
+| `src/emu/board_io.rs` | the RGB LEDs (`0xF002_0000`), the 7-segment display (`0xF003_0000`), the LED bar and switches (`0xF004_0000`); `--switches`, `--board-io-log` |
 | `src/emu/coherence.rs` | the `--sd-dma` DMA coherence checker |
 | `src/emu/mmu.rs` | MMU stages 2 and 3: the MPU, the TLB, the address map, and `translate`, which every memory access an instruction makes goes through |
 | `src/emu/debug.rs` | the debugger's view: registers, memory, watchpoints, stop reasons |
@@ -741,6 +742,49 @@ is not a read event. Each injected fault is logged on stderr
 the run ends with the totals (`SD faults injected: ...`). Without
 `--sd-fault` nothing changes.
 
+## Board I/O: LEDs, RGB LEDs, 7-segment display, switches
+
+The three simple devices of klaussCPU `MMIO_MAP.md` are modelled on the
+RTL (the MMIO read mux and write handler in `KlaussCPU.sv`):
+
+| Address | Register | Write | Read |
+|---|---|---|---|
+| `0xF002_0000` | `RGB1` | `[11:0]` (`[11:8]` R, `[7:4]` G, `[3:0]` B) | the last write, 12 bits |
+| `0xF002_0008` | `RGB2` | the same | the same |
+| `0xF003_0000` | `SEG_LOW` | 4 hex digits `[15:0]` to the lower display | its padded value, 32 bits |
+| `0xF003_0008` | `SEG_HIGH` | 4 hex digits `[15:0]` to the upper display | its padded value, 32 bits |
+| `0xF003_0010` | `SEG_ALL` | 8 hex digits `[31:0]`, `[31:16]` to the upper display | `{upper, lower}` padded, 64 bits |
+| `0xF003_0018` | `SEG_BLANK` | any write blanks both displays | 0 |
+| `0xF004_0000` | `LEDS` | `[15:0]` | the last write, 16 bits |
+| `0xF004_0008` | `SWITCHES` | dropped | `--switches VALUE` (default 0), 16 bits |
+
+A display holds each digit as a byte `{4'h0, digit}`, so after a
+`SEG_ALL` write of `0x12345678`, `SEG_ALL` reads `0x0102_0304_0506_0708`.
+A blank display reads `0x2222_2222` (`0x22` is the display controller's
+" " glyph). A program starts as one loaded onto the board does:
+`LOAD_COMPLETE` clears the LEDs and RGB LEDs, and `START_WAIT` blanks both
+displays as it starts the pipeline, so `LEDS`, `RGB1` and `RGB2` read 0
+and `SEG_LOW` / `SEG_HIGH` read `0x2222_2222`. Every other offset in the
+three windows reads 0 and ignores writes.
+
+These devices ignore the byte enables, and the core replicates a sub-word
+store's data across the doubleword (`pipeline_core.sv` `exo_wdata`:
+`{8{c[7:0]}}`, `{4{c[15:0]}}`, `{2{c[31:0]}}`), so the emulator does the
+same: a `MEMSET8` of `0x5A` to `LEDS` sets `0x5A5A`, and a 16-bit store
+of `0x1234` to `SEG_ALL` shows `12341234`. A sub-word load takes the low
+bytes of the register, as for every device.
+
+`--board-io-log FILE` writes one line for each store to an LED, RGB LED
+or display register, with what the device latched: `LEDS 0x5a5a`,
+`RGB1 0xf00`, `RGB2 0x00f`, `SEG_LOW 1234`, `SEG_HIGH abcd`, `SEG_ALL
+deadbeef` (the digits written) and `SEG_BLANK`. A store of the same value
+twice is logged twice; stores to `SWITCHES` or unlisted offsets are not
+logged. Each line is written as it happens, unbuffered, so a run that is
+killed keeps its log. With `-` the lines go to stderr after `klausscc io:
+`, as the emulator's other stderr notes do. Before this model these
+windows read 0 and dropped writes, which no bitstream ever did, so there is
+no option for the old behaviour.
+
 ## Differences from the RTL
 
 No difference in the architectural effect of an instruction is known.
@@ -779,10 +823,12 @@ access reads 0 or is ignored.
   timer (source 0) fires, and with `--sd-native` the SD controller
   through the source 2 cascade.
 - MMIO is the UART (`0xF001_0000`: `TX_DATA`, `RX_DATA`, `STATUS`), the
-  interrupt controller / timer (`0xF00F_0000`), the performance
-  counters (`0xF00D_0000`) and, with `--sd-image` or `--sd-native`, the
-  SD controller (`0xF000_0000`, see "SD card"). Other MMIO reads return
-  0 and writes are ignored.
+  RGB LEDs, 7-segment display, LEDs and switches (`0xF002_0000` to
+  `0xF004_0000`, see "Board I/O"), the cache controller
+  (`0xF005_0000`, see "Cache maintenance"), the interrupt controller /
+  timer (`0xF00F_0000`), the performance counters (`0xF00D_0000`) and,
+  with `--sd-image` or `--sd-native`, the SD controller (`0xF000_0000`,
+  see "SD card"). Other MMIO reads return 0 and writes are ignored.
 - The UART transmitter is timed on the modelled clock, not on the
   board's. A `TX_DATA` store sets `STATUS.TX_BUSY` for
   `UART_CYCLES_PER_STORE` = 334 cycles: a frame of

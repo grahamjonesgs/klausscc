@@ -228,3 +228,54 @@ fn a_nonsensical_combination_fails_before_any_work() {
     assert!(stderr.contains("Usage: klausscc"), "reported like clap's own errors: {stderr}");
     assert_eq!(summaries(&out.stderr), 0, "nothing ran: {stderr}");
 }
+
+#[test]
+fn switches_and_board_io_log() {
+    // The program copies the switches to the LED bar and shows DEADBEEF.
+    let dir = tempfile::tempdir().unwrap();
+    let program = "_start
+SETR B 0xF0040000
+LDIDX64 A B 8
+MEMSET64 A B
+SETR B 0xF0030000
+SETR A 0xDEADBEEF
+STIDX32 A B 0x10
+STIDX64 A B 0x18
+HALT
+";
+    std::fs::write(dir.path().join("io.kla"), program).unwrap();
+
+    let out = klausscc(
+        dir.path(),
+        &["-i", "io.kla", "--emulate", "--switches", "0x1234", "--board-io-log", "io.log"],
+    );
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let log = std::fs::read_to_string(dir.path().join("io.log")).unwrap();
+    assert_eq!(log, "LEDS 0x1234\nSEG_ALL deadbeef\nSEG_BLANK\n");
+
+    // '-': the same lines on stderr, after "klausscc io: "; the switches
+    // read 0 without --switches.
+    let out = klausscc(dir.path(), &["-i", "io.kla", "--emulate", "--board-io-log", "-"]);
+    assert!(out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("klausscc io: LEDS 0x0000\nklausscc io: SEG_ALL deadbeef\n"),
+        "stderr: {stderr}"
+    );
+
+    // Without --board-io-log nothing is logged.
+    let out = klausscc(dir.path(), &["-i", "io.kla", "--emulate", "--switches", "4660"]);
+    assert!(out.status.success());
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("klausscc io:"));
+
+    // A switch value wider than 16 bits is a usage error, as is either
+    // option without the emulator.
+    let out = klausscc(dir.path(), &["-i", "io.kla", "--emulate", "--switches", "0x10000"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("outside 0..=0xFFFF"));
+    let out = klausscc(dir.path(), &["-i", "io.kla", "--switches", "1"]);
+    assert_eq!(out.status.code(), Some(1));
+    let out = klausscc(dir.path(), &["-i", "io.kla", "--board-io-log", "x.log"]);
+    assert_eq!(out.status.code(), Some(1));
+    assert!(!dir.path().join("x.log").exists());
+}
