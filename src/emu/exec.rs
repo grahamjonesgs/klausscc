@@ -231,15 +231,23 @@ impl Cpu {
         self.map_data(self.sp, 1, false)
     }
 
-    /// Push a doubleword (SP grows down) to `slot`, from [`Cpu::map_push`].
+    /// Push a doubleword (SP grows down) to `slot`, from [`Cpu::map_push`]:
+    /// a store of all 8 bytes at SP - 8 aligned down, for the user
+    /// watchpoints.
     fn push(&mut self, slot: Mapped, value: u64) {
         self.write64(slot, value);
+        self.uw_dword(slot.va(), true);
         self.sp = self.sp.wrapping_sub(8);
     }
 
-    /// Pop a doubleword from `slot`, from [`Cpu::map_pop`].
-    fn pop(&mut self, slot: Mapped) -> u64 {
+    /// Pop a doubleword from `slot`, from [`Cpu::map_pop`]: a load of all 8
+    /// bytes at SP aligned down, for the user watchpoints unless `frame`
+    /// (`IRET`'s frame read, which is never watched).
+    fn pop(&mut self, slot: Mapped, frame: bool) -> u64 {
         let value = self.read64(slot);
+        if !frame {
+            self.uw_dword(slot.va(), false);
+        }
         self.sp = self.sp.wrapping_add(8);
         value
     }
@@ -650,6 +658,7 @@ impl Cpu {
         } else {
             self.read_sub(at, size_bytes)
         };
+        self.uw_access(ea, size_bytes, false);
         self.regs[f.rd] = if f.bit(23) { sign_extend(val, size_bytes) } else { val };
         Ok(Flow::Next)
     }
@@ -680,6 +689,7 @@ impl Cpu {
         } else {
             self.write_sub(at, data, size_bytes);
         }
+        self.uw_access(ea, size_bytes, true);
         Ok(Flow::Next)
     }
 
@@ -703,6 +713,8 @@ impl Cpu {
         }
         for dw in 0..DCBZ_LINE / 8 {
             self.write64(line.offset(dw * 8), 0);
+            // A store of the whole line; EADDR is rs1 (`MMU_PLAN.md` §13.3).
+            self.uw_dw(ea, line.va().wrapping_add(dw * 8), 0xFF, true);
         }
         self.last_write = Some(super::MemWrite {
             addr: at.pa() & !(DCBZ_LINE - 1),
@@ -725,6 +737,7 @@ impl Cpu {
         atomic_check(ea, bytes, false)?;
         let at = self.map_data(ea, 1, false)?;
         let val = if bytes == 8 { self.read64(at) } else { self.read_sub(at, 4) };
+        self.uw_bytes(ea, bytes, false);
         self.regs[f.rd] = if f.bit(23) { sign_extend(val, 4) } else { val };
         self.reservation = Some(ea >> 3);
         Ok(Flow::Next)
@@ -753,10 +766,25 @@ impl Cpu {
             } else {
                 self.write_sub(at, data, 4);
             }
+            // A failing SC stores nothing, so it hits no watchpoint.
+            self.uw_bytes(ea, bytes, true);
         }
         self.regs[f.rd] = u64::from(!reserved);
         self.reservation = None;
         Ok(Flow::Next)
+    }
+
+    /// A class 6 / 7 load or store of `size_bytes` at the raw EA `ea` was
+    /// made: for the user watchpoints, a 64-bit one covers the doubleword
+    /// `EA[31:3]` (A = 1, or A = 0 with MAL64 = 0, the aligned-down
+    /// doubleword), the others their bytes (a `MEMGET32` in both
+    /// doublewords it spans).  `EADDR` is the raw EA (`MMU_PLAN.md` §13.3).
+    fn uw_access(&mut self, ea: u32, size_bytes: usize, store: bool) {
+        if size_bytes == 8 {
+            self.uw_dword(ea, store);
+        } else {
+            self.uw_bytes(ea, size_bytes as u32, store);
+        }
     }
 
     /// Effective address of a load or store from its MODE field `[22:21]`.
@@ -849,6 +877,7 @@ impl Cpu {
                 let fp = self.regs[15] as u32;
                 let at = self.map_data(fp, 1, false)?;
                 self.regs[15] = self.read64(at);
+                self.uw_dword(fp, false);
                 self.sp = fp.wrapping_add(8);
             }
             (1, 10) => {
@@ -864,6 +893,10 @@ impl Cpu {
                 let second = self.map_data(fp.wrapping_add(8) & !7, 1, false)?;
                 self.regs[15] = self.read64(first);
                 let ra = self.read64(second);
+                // Both doublewords are watched; EADDR is R15 unless only
+                // the second hit (`MMU_PLAN.md` §13.3).
+                self.uw_dword(fp, false);
+                self.uw_dword(second.va(), false);
                 self.sp = fp.wrapping_add(16);
                 if let Some(sim) = self.cachesim.as_mut() {
                     sim.ret(ra as u32);
@@ -907,7 +940,7 @@ impl Cpu {
             2 => {
                 // POP rd
                 let slot = self.map_pop()?;
-                self.regs[f.rd] = self.pop(slot);
+                self.regs[f.rd] = self.pop(slot, false);
             }
             3 => self.regs[f.rd] = u64::from(self.sp),    // GETSP
             4 => self.sp = self.regs[f.rs1] as u32,       // SETSP
@@ -915,7 +948,7 @@ impl Cpu {
             // RET — restore PC from [31:0] of the popped slot.
             6 => {
                 let slot = self.map_pop()?;
-                let target = self.pop(slot) as u32;
+                let target = self.pop(slot, false) as u32;
                 if let Some(sim) = self.cachesim.as_mut() {
                     sim.ret(target);
                 }
@@ -941,15 +974,18 @@ impl Cpu {
     /// the kernel SP just above the popped frame.  The LR/SC reservation is
     /// cleared.
     fn iret(&mut self, slot: Mapped) -> Flow {
-        let ctx = self.pop(slot);
+        let ctx = self.pop(slot, true);
         self.flags = Flags::from_ctx((ctx >> CTX_FLAGS_SHIFT) as u8 & 0x7F);
         self.int_mask = ((ctx >> CTX_INT_MASK_SHIFT) & 0xF) as u8;
         self.irq_disabled = (ctx >> CTX_IRQ_DISABLED_SHIFT) & 1 != 0;
         self.reservation = None;
-        if (ctx >> CTX_PREV_MODE_SHIFT) & 1 != 0 {
+        let to_user = (ctx >> CTX_PREV_MODE_SHIFT) & 1 != 0;
+        if to_user {
             std::mem::swap(&mut self.sp, &mut self.sp_alt);
             self.um = true;
         }
+        // SS [45] with PM arms a single step (MMU_PLAN §13.2).
+        self.udbg_iret(ctx, to_user);
         Flow::Jump(ctx as u32)
     }
 

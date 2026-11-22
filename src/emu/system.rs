@@ -16,6 +16,7 @@
 //! then parks, debug-halts or enters the handler.
 
 use super::mmu::{MPU_REGIONS, TLB_HI_BITS, TLB_LO_BITS, TLB_PTB_BITS, TLB_WALK_EN, TLB_WALK_RR_SHIFT, TLB_WCNT_MASK, XlateFault};
+use super::udbg::{CPU_FEATURES_UDBG, ECAUSE_UDBG_SHIFT, UserWatch};
 use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, CTX_PREV_MODE_SHIFT, CYCLES_PER_INSTRUCTION, Cpu, StopReason};
 
 /// An exception cause: its `ECAUSE` value (`MMU_PLAN.md` §4.1).
@@ -58,6 +59,14 @@ pub enum Cause {
     TlbMissStore = 12,
     /// The same for fetches.
     TlbMissFetch = 13,
+    /// The user single step completed an instruction (`MMU_PLAN.md` §13.2;
+    /// not with `--no-ustep`).  The frame PC is the next instruction; `EADDR` = the
+    /// stepped instruction's PC; `ECAUSE[12]` SSTEP is set.
+    Step = 14,
+    /// An instruction hit a user watchpoint (§13.3) and completed.  The
+    /// frame PC is the next instruction; `EADDR` = the access's EA;
+    /// `ECAUSE[12:9]` = SSTEP, WRITE, WP1, WP0.
+    Watch = 15,
 }
 
 impl Cause {
@@ -97,6 +106,10 @@ const CPU_FEATURES_DCACHE_RANGE: u64 = 1 << 27;
 /// §11.8): bit 25.  The release bitstream has it (`--no-tlb-walker` models
 /// the ones before).
 const CPU_FEATURES_TLB_WALKER: u64 = 1 << 25;
+
+/// `ECAUSE[12:9]` with the user single step and watchpoints (not with
+/// `--no-ustep`): `MTSR` writes `[12:0]` (`[8:0]` without them).
+const ECAUSE_UDBG_BITS: u64 = 0xF << ECAUSE_UDBG_SHIFT;
 
 /// `STATUS[8]` `MPU_EN` (stage 2).
 const STATUS_MPU_EN: u64 = 1 << 8;
@@ -178,7 +191,8 @@ pub struct SystemRegs {
     pub sp_alt: u32,
     /// `EVEC`.
     pub evec: u32,
-    /// `ECAUSE`: the cause code in `[7:0]` and GUARD in `[8]`.
+    /// `ECAUSE`: the cause code in `[7:0]`, GUARD in `[8]` and (not with
+    /// `--no-ustep`) WP0 / WP1 / WRITE / SSTEP in `[12:9]`.
     pub ecause: u16,
     /// `EADDR`.
     pub eaddr: u32,
@@ -210,6 +224,11 @@ pub struct SystemRegs {
     pub tlb_walk: u32,
     /// `TLB_WCNT` (0 without the walker).
     pub tlb_wcnt: u64,
+    /// `WP0_ADDR` / `WP0_CTRL` and `WP1_ADDR` / `WP1_CTRL` (0 with
+    /// `--no-ustep`).
+    pub wp: [UserWatch; 2],
+    /// A user single step is armed (or its STEP pending).
+    pub step_armed: bool,
 }
 
 impl Cpu {
@@ -227,13 +246,19 @@ impl Cpu {
         let kernel_sp = if prev_user { self.sp_alt } else { self.sp };
         let Some(slot) = self.frame_slot(kernel_sp) else {
             self.double_fault(kernel_sp);
+            // The park replaces the entry, and disarms as it would
+            // (MMU_PLAN §13.2).
+            self.udbg_double_fault();
             return false;
         };
         if prev_user {
             std::mem::swap(&mut self.sp, &mut self.sp_alt);
             self.um = false;
         }
-        let ctx = (u64::from(prev_user) << CTX_PREV_MODE_SHIFT)
+        // Frame bit 45 SS = the armed step, and every entry disarms (MMU_PLAN
+        // §13.2); 0 with --no-ustep.
+        let ctx = self.udbg_take_arm()
+            | (u64::from(prev_user) << CTX_PREV_MODE_SHIFT)
             | (u64::from(self.irq_disabled) << CTX_IRQ_DISABLED_SHIFT)
             | (u64::from(self.int_mask) << CTX_INT_MASK_SHIFT)
             | (u64::from(self.flags.to_ctx()) << CTX_FLAGS_SHIFT)
@@ -332,6 +357,7 @@ impl Cpu {
         }
         self.ecause = cause as u8;
         self.ecause_guard = guard;
+        self.ecause_udbg = 0;
         self.eaddr = eaddr;
         if tlb {
             self.tlb_hi = (eaddr & 0xFFFF_0000) | u32::from(self.asid);
@@ -363,7 +389,9 @@ impl Cpu {
                     | if self.mal64 { STATUS_MAL64 } else { 0 }
             }
             sr::EVEC => u64::from(self.evec),
-            sr::ECAUSE => u64::from(self.ecause) | if self.ecause_guard { ECAUSE_GUARD } else { 0 },
+            sr::ECAUSE => {
+                u64::from(self.ecause) | if self.ecause_guard { ECAUSE_GUARD } else { 0 } | u64::from(self.ecause_udbg) << ECAUSE_UDBG_SHIFT
+            }
             sr::EADDR => u64::from(self.eaddr),
             sr::USP => u64::from(self.sp_alt),
             sr::SCRATCH0 => self.scratch[0],
@@ -392,7 +420,8 @@ impl Cpu {
             sr::TLB_PTB if self.has_tlb_walker => u64::from(self.tlb_ptb),
             sr::TLB_WALK if self.has_tlb_walker => self.tlb_walk_sr(),
             sr::TLB_WCNT if self.has_tlb_walker => self.tlb_wcnt,
-            _ => return None,
+            // The watchpoints' SRs 0x40-0x43, not with --no-ustep.
+            _ => return self.wp_sr_read(n),
         })
     }
 
@@ -423,10 +452,14 @@ impl Cpu {
             }
             sr::EVEC => self.evec = value as u32 & !3,
             // Spec (confirmed in MMU_PLAN 424e236): §6.1 makes ECAUSE RW with GUARD in [8]; MTSR writes
-            // [8:0], so software can set or clear GUARD.
+            // [8:0], so software can set or clear GUARD.  Unless --no-ustep it
+            // writes [12:0] (MMU_PLAN §13.1) unless --no-ustep.
             sr::ECAUSE => {
                 self.ecause = value as u8;
                 self.ecause_guard = value & ECAUSE_GUARD != 0;
+                if self.has_udbg {
+                    self.ecause_udbg = ((value & ECAUSE_UDBG_BITS) >> ECAUSE_UDBG_SHIFT) as u8;
+                }
             }
             sr::EADDR => self.eaddr = value as u32,
             sr::USP => self.sp_alt = value as u32,
@@ -463,7 +496,7 @@ impl Cpu {
                 self.tlb_walk_rr = (value >> TLB_WALK_RR_SHIFT) as u32 & self.tlb_index_mask();
             }
             sr::TLB_WCNT if self.has_tlb_walker => self.tlb_wcnt = value & TLB_WCNT_MASK,
-            _ => return false,
+            _ => return self.wp_sr_write(n, value),
         }
         true
     }
@@ -476,7 +509,7 @@ impl Cpu {
             irq_disabled: self.irq_disabled,
             sp_alt: self.sp_alt,
             evec: self.evec,
-            ecause: u16::from(self.ecause) | if self.ecause_guard { 0x100 } else { 0 },
+            ecause: u16::from(self.ecause) | if self.ecause_guard { 0x100 } else { 0 } | u16::from(self.ecause_udbg) << ECAUSE_UDBG_SHIFT,
             eaddr: self.eaddr,
             scratch: self.scratch,
             tp: self.tp,
@@ -492,6 +525,8 @@ impl Cpu {
             tlb_ptb: if self.has_tlb_walker { self.tlb_ptb } else { 0 },
             tlb_walk: if self.has_tlb_walker { self.tlb_walk_sr() as u32 } else { 0 },
             tlb_wcnt: if self.has_tlb_walker { self.tlb_wcnt } else { 0 },
+            wp: self.wp,
+            step_armed: self.us_armed,
         }
     }
 
@@ -501,11 +536,13 @@ impl Cpu {
     }
 
     /// Set the mode bits and the inactive SP from a debugger (the board's
-    /// debug registers 20 and 21, writable while halted, §6.2).
+    /// debug registers 20 and 21, writable while halted, §6.2).  A write
+    /// with UM = 0 disarms the user single step and drops a pending STEP.
     pub fn set_mode_regs(&mut self, sp_alt: u32, um: bool, irq_disabled: bool) {
         self.sp_alt = sp_alt;
         self.um = um;
         self.irq_disabled = irq_disabled;
+        self.udbg_mode_write(um);
     }
 
     /// Give the CPU the stage 2 MPU (`--mpu`), or take it away (the
@@ -544,13 +581,16 @@ impl Cpu {
 
     /// `CPU_FEATURES` (MMIO `0xF00F_0048`): `0x200D` (`0x100D` with 16 TLB
     /// entries), or `0x20FF` with the MPU, plus bits 22-23 (DCBZ, MAL64),
-    /// bit 21 with the native SD controller and bit 25 with the TLB walker.
+    /// bit 21 with the native SD controller, bit 25 with the TLB walker,
+    /// bit 27 with the cache range ops and bits 28-29 with the user single
+    /// step and watchpoints.
     pub(super) fn cpu_features(&self) -> u64 {
         let mpu = if self.has_mpu { CPU_FEATURES_MPU } else { 0 };
         let sd = if self.has_sd_native() { CPU_FEATURES_SD_NATIVE } else { 0 };
         let walker = if self.has_tlb_walker { CPU_FEATURES_TLB_WALKER } else { 0 };
         let range = if self.cache_ctl.range_ops { CPU_FEATURES_DCACHE_RANGE } else { 0 };
-        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd | walker | range
+        let udbg = if self.has_udbg { CPU_FEATURES_UDBG } else { 0 };
+        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd | walker | range | udbg
     }
 
     /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`

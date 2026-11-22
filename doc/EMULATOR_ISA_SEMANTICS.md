@@ -210,11 +210,14 @@ with `park_kind` 2, as an old bitstream does for these encodings).
 user SP in supervisor mode, the kernel SP in user mode), and the system
 registers `MFSR`/`MTSR` reach: 0 `STATUS` (`[0]` UM, `[1]` DI, both
 read-only; `[8]` MPU_EN and `[9]` TE from stages 2 and 3), 1 `EVEC`
-(`[1:0]` read 0), 2 `ECAUSE` (the cause in `[7:0]`, GUARD in `[8]`), 3
+(`[1:0]` read 0), 2 `ECAUSE` (the cause in `[7:0]`, GUARD in `[8]`,
+and the user debug bits `[12:9]` below; `MTSR` writes `[12:0]`, `[8:0]`
+with `--no-ustep`), 3
 `EADDR`, 4 `USP` (= `SP_ALT`), 5/6 `SCRATCH0/1`, 7 `TP`, 8 `CYCLE`
-(read-only), and the stage 2/3 registers 0x10-0x2F, 0x30-0x34 and the
-TLB walker's 0x35-0x37 (next section). Any other SR number, and `MTSR` to
-`CYCLE`, is ILLEGAL.
+(read-only), the stage 2/3 registers 0x10-0x2F, 0x30-0x34 and the
+TLB walker's 0x35-0x37 (next section), and the user watchpoints'
+0x40-0x43 (below). Any other SR number, and `MTSR` to `CYCLE`, is
+ILLEGAL.
 `CPU_FEATURES` at `0xF00F_0048` reads `0x200D`: stage 1, the TLB with
 32 entries, LR/SC, and no MPU, as on the Nexys A7 bitstream since
 klaussCPU `tlb32`. `--tlb-entries 16` (`Cpu::set_tlb_entries`) models the
@@ -223,7 +226,11 @@ klaussCPU `tlb32`. `--tlb-entries 16` (`Cpu::set_tlb_entries`) models the
 `0x20FF` (bit 1, and `[7:4]` = 15 for 16 regions). Bits 22-23 (DCBZ,
 MAL64) are set, and bit 25, the hardware TLB walker, as on the release
 bitstream; `--no-tlb-walker` (`Cpu::set_has_tlb_walker`) clears it and
-makes SRs 0x35-0x37 ILLEGAL.
+makes SRs 0x35-0x37 ILLEGAL. Bits 28-29, the user single step and the
+watchpoints, are set as on the release bitstream (klaussCPU
+`ustep_release_60bcc36`); `--no-ustep` (`Cpu::set_has_udbg`) clears them,
+makes SRs 0x40-0x43 ILLEGAL, `ECAUSE` 9 bits, and frame bit 45 ignored
+(`0x02C0_200D` in all, against `0x32C0_200D`).
 
 **CYCLE** is the emulator's modelled cycle count since reset: 2 cycles
 per retired instruction (`CYCLES_PER_INSTRUCTION`), 2 per exception
@@ -439,6 +446,57 @@ counted apart from the TLB refill vector entries. A walk (either way)
 costs `CYCLES_PER_INSTRUCTION` modelled cycles, and the restarted
 instruction its own cycles when it retires; no performance counter
 counts the walk but `TLB_WCNT`.
+
+**User single step and watchpoints** (klaussCPU `MMU_PLAN.md` §13, as
+merged to master in c5da780; not with `--no-ustep`).
+
+*Step.* An `IRET` whose frame has PM = 1 and bit 45 SS = 1 arms a step
+if `EVEC` != 0 (an `IRET` to supervisor mode, or with `EVEC` = 0, ignores
+SS). The next instruction to complete is the stepped one; then, before
+the next instruction and before any interrupt, STEP (`ECAUSE` 14 |
+SSTEP `[12]` = `0x100E`) is entered at `EVEC`: frame PC = the
+architectural successor (fall-through, or the target of a taken branch,
+CALL, RET, LEAVERET), `EADDR` = the stepped instruction's PC, DI set.
+Every entry (an exception, an interrupt, STEP, WATCH) pushes the armed
+state as frame bit 45 and disarms, and so does a DOUBLE_FAULT park in
+its place; so a fault or SYSCALL of the stepped instruction is entered
+as usual with SS = 1 in its frame and no STEP, an interrupt may be taken
+before the stepped instruction (its ISR's `IRET` re-arms), never between
+it and its STEP, and nothing is stepped in supervisor mode. A walker
+refill is no entry: the restarted instruction is still the stepped one.
+A TRAP or misaligned access that stops in an attached debugger leaves
+the step armed. A debugger write of the mode register with UM = 0
+(`Cpu::set_mode_regs`, the board's debug register 21) disarms and drops
+a pending STEP.
+
+*Watch.* SRs 0x40 `WP0_ADDR` and 0x42 `WP1_ADDR` (`[31:3]` a doubleword
+VA), 0x41 `WP0_CTRL` and 0x43 `WP1_CTRL` (`[7:0]` byte mask, `[8]` R,
+`[9]` W, `[10]` U = user accesses only); supervisor only (PRIVILEGED in
+user mode), 0 at reset. A watchpoint is enabled with R or W set and a
+nonzero mask. An instruction's data accesses that happen (not a faulting
+instruction's, nor a failing SC's, nor a not-taken CALLcc's) are compared
+by VA: a byte, 16- or 32-bit access, LR.W / SC.W, covers its bytes (a
+spanning `MEMGET32` its bytes in both doublewords); a 64-bit access
+(A = 0 or 1), LR.D / SC.D, a push (PUSH, PUSHV, CALL, ENTER) or pop (POP,
+RET, LEAVE) all 8 bytes of the aligned-down doubleword; LEAVERET both
+doublewords `[R15]` and `[R15 + 8]`; DCBZ all four doublewords of its
+line, as a store. Not compared: `IRET`'s frame read, entry pushes,
+walker reads, fetches, debugger accesses, DMA. A supervisor access hits
+only with U = 0 and DI = 0; nothing hits while `EVEC` = 0 or a debugger
+is attached. A hit lets the instruction complete; then, before the next
+one and before any interrupt, WATCH (`ECAUSE` 15 | WP0 `[9]` | WP1
+`[10]` | WRITE `[11]` | SSTEP `[12]`) is entered: frame PC = the
+successor, `EADDR` = the raw EA (DCBZ: rs1), or the second doubleword's
+start when only that one of a spanning `MEMGET32` or LEAVERET hit. A
+step and a watch on one instruction are one WATCH with SSTEP, frame
+SS = 1. The entry clears the LR/SC reservation like any other, so a hit
+between an LR and its SC makes the SC fail.
+
+The emulator commits an instruction at once, so its STEP or WATCH is
+pending until the next step, which takes it before anything else; a
+debugger that stops in between (a breakpoint on the successor, a single
+step) sees the PC at the successor, and the entry comes at the first
+step after it resumes, as with the RTL's debug module.
 
 **Priority.** For one access: MISALIGNED > ACCESS (the address map,
 MMIO) > TLB_MISS > ACCESS (TLB permission), within the §4.1 order (an

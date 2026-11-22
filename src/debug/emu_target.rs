@@ -290,9 +290,17 @@ impl EmuTarget {
                     u8::from(s.te),
                     s.sp_alt
                 );
+                // ECAUSE[12:9] (not with --no-ustep): WP0, WP1, WRITE, SSTEP.
+                let mut udbg = String::new();
+                for (i, name) in ["WP0", "WP1", "WRITE", "SSTEP"].iter().enumerate() {
+                    if s.ecause & (0x200 << i) != 0 {
+                        udbg.push(' ');
+                        udbg.push_str(name);
+                    }
+                }
                 outputln!(
                     out,
-                    "EVEC 0x{:08X}   ECAUSE {}{}   EADDR 0x{:08X}",
+                    "EVEC 0x{:08X}   ECAUSE {}{}{udbg}   EADDR 0x{:08X}",
                     s.evec,
                     s.ecause & 0xFF,
                     if s.ecause & 0x100 != 0 { " GUARD" } else { "" },
@@ -323,6 +331,18 @@ impl EmuTarget {
                         s.tlb_walk & 1,
                         s.tlb_walk >> 8,
                         s.tlb_wcnt
+                    );
+                }
+                // The user single step and watchpoints, unless --no-ustep.
+                if self.cpu.has_udbg() {
+                    outputln!(
+                        out,
+                        "WP0_ADDR 0x{:08X} WP0_CTRL 0x{:03X}   WP1_ADDR 0x{:08X} WP1_CTRL 0x{:03X}   user step {}",
+                        s.wp[0].addr,
+                        s.wp[0].ctrl,
+                        s.wp[1].addr,
+                        s.wp[1].ctrl,
+                        if s.step_armed { "armed" } else { "off" }
                     );
                 }
                 if let Some((cause, addr)) = self.cpu.parked_exception() {
@@ -843,6 +863,27 @@ mod tests {
         let mut out = String::new();
         no_walker.monitor("sr", &mut out);
         assert!(!out.contains("TLB_PTB"), "--no-tlb-walker: {out}");
+        // By default (not --no-ustep): the watchpoint SRs, the step and
+        // ECAUSE[12:9].
+        let mut ustep = target_with(0x6C60_2000); // MTSR ECAUSE A
+        let mut regs = ustep.regs();
+        regs.r[0] = 0x1FFF;
+        ustep.set_regs(&regs);
+        assert!(ustep.step(None).is_ok());
+        assert!(matches!(ustep.run(|| false), RunEvent::Stop(SingleThreadStopReason::DoneStep)));
+        let mut out = String::new();
+        ustep.monitor("sr", &mut out);
+        assert!(out.contains("ECAUSE 255 GUARD WP0 WP1 WRITE SSTEP"), "{out}");
+        assert!(
+            out.contains("WP0_ADDR 0x00000000 WP0_CTRL 0x000   WP1_ADDR 0x00000000 WP1_CTRL 0x000   user step off"),
+            "{out}"
+        );
+        // --no-ustep: none of it.
+        let mut no_ustep = target_with(0);
+        no_ustep.cpu.set_has_udbg(false);
+        let mut out = String::new();
+        no_ustep.monitor("sr", &mut out);
+        assert!(!out.contains("WP0_ADDR"), "--no-ustep: {out}");
     }
 
     #[test]

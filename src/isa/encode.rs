@@ -815,6 +815,12 @@ mod tests {
             ("MTSR TLB_WALK B", "6C636010"),    // 0x36
             ("MFSR D tlb_wcnt", "6C437300"),    // 0x37
             ("MTSR 0x38 B", "6C638010"),        // no SR there: still a number
+            ("MTSR wp0_addr B", "6C640010"),    // 0x40, the user watchpoints (MMU_PLAN §13)
+            ("MTSR WP0_CTRL B", "6C641010"),    // 0x41
+            ("MFSR D wp1_addr", "6C442300"),    // 0x42
+            ("MFSR D WP1_CTRL", "6C443300"),    // 0x43
+            ("MTSR 64 B", "6C640010"),          // as klausscpu-llvm's mtsr 64
+            ("MTSR 0x44 B", "6C644010"),        // no SR there: still a number
         ];
         for (src, want) in cases {
             assert_eq!(hex(src), want, "{src}");
@@ -826,6 +832,7 @@ mod tests {
                 "{bad}"
             );
         }
+        assert_eq!(disassembler.word(0x6C44_3300).unwrap().0, "MFSR D WP1_CTRL");
         assert_eq!(disassembler.word(0x6C09_0000).unwrap().0, "TLBWI");
         assert_eq!(disassembler.word(0x6C0C_0000).unwrap().0, "TLBINV");
         assert_eq!(disassembler.word(0x6C41_0300).unwrap().0, "MFSR D MPU_BASE0");

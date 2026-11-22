@@ -1,0 +1,276 @@
+// Test 31: the user single step and watchpoints (klaussCPU MMU_PLAN.md
+// §13, released in ustep_release_60bcc36).  Needs a bitstream with
+// CPU_FEATURES (0xF00F_0048) bits 28 and 29: on an older one a1 prints
+// zero and the test halts there (a mismatch, not a park).
+//
+// The exception handler logs {ECAUSE, EADDR, frame} for every entry (the
+// log pointer in SCRATCH1) and returns, so a STEP's frame (SS = 1) steps
+// on; a PRIVILEGED (the user routine's HALT) returns to the kernel
+// continuation in SCRATCH0.  Then each entry prints as three lines:
+// ECAUSE << 16 | frame [63:44] (SS, PM), EADDR (minus the routine's start
+// for a STEP), and the frame PC minus the routine's start.  The handler
+// uses K and N; the user routines leave them alone.
+//
+//   a) CPU_FEATURES[29:28]
+//   b) the watchpoint SRs and ECAUSE's 13 bits
+//   c) a stepped routine: SETR (2 words), CALLREL, NOP, RET, SYSCALL, HALT
+//   d) watchpoints, not stepped: a 64-bit store (W), a byte load the W-only
+//      watchpoint ignores, a spanning MEMGET32 hitting only its second
+//      doubleword (EADDR = its start)
+//   e) step + watch: one WATCH with SSTEP, then the step goes on
+//   f) a supervisor watch: U = 1 never hits the kernel, U = 0 hits with
+//      interrupts enabled (frame PM = 0) and not after DI
+//
+// Expected UART output:
+//   00000003  a1 CPU_FEATURES[29:28]: the step and the watchpoints
+//   00000000  b1 WP0_ADDR after the load
+//   FFFFFFF8  b2 WP0_ADDR keeps [31:3]
+//   000007FF  b3 WP1_CTRL keeps [10:0]
+//   00001FFF  b4 MTSR ECAUSE writes [12:0]
+//   100E0003  c1 STEP (SSTEP), SS and PM
+//   00000000  c2 EADDR: the SETR
+//   00000008  c3 frame PC: the CALLREL
+//   100E0003  c4 STEP
+//   00000008  c5 the CALLREL
+//   00000018  c6 its target, the NOP
+//   100E0003  c7 STEP
+//   00000018  c8 the NOP
+//   0000001C  c9 the RET
+//   100E0003  c10 STEP
+//   0000001C  c11 the RET
+//   00000010  c12 the return address, the SYSCALL
+//   00040003  c13 SYSCALL, with SS
+//   00000000  c14 EADDR 0
+//   00000014  c15 frame PC: the next instruction, HALT
+//   00020003  c16 PRIVILEGED, the stepped HALT
+//   6C010000  c17 EADDR: the HALT word
+//   00000014  c18 frame PC: the HALT
+//   0A0F0001  d1 WATCH WP0 WRITE, PM (not stepped)
+//   06F00000  d2 EADDR
+//   0000000C  d3 frame PC: after the store
+//   040F0001  d4 WATCH WP1: the MEMGET32's second doubleword only
+//   06F00008  d5 EADDR: that doubleword's start
+//   0000001C  d6 frame PC: after the load
+//   00020001  d7 PRIVILEGED
+//   6C010000  d8
+//   0000001C  d9
+//   100E0003  e1 STEP
+//   00000000  e2
+//   00000008  e3
+//   1A0F0003  e4 WATCH WP0 WRITE SSTEP: the stepped store, one entry
+//   06F00000  e5 EADDR
+//   0000000C  e6 frame PC: after the store
+//   100E0003  e7 STEP: the step goes on
+//   0000000C  e8
+//   00000010  e9
+//   00020003  e10 PRIVILEGED
+//   6C010000  e11
+//   00000010  e12
+//   020F0000  f1 WATCH WP0 from supervisor mode: PM 0, SS 0
+//   06F00100  f2 EADDR: the kernel's variable
+//   0000000C  f3 frame PC: after the second load
+
+_start
+DELAYV 0x0500
+$NEWLINE
+
+// a) CPU_FEATURES[29:28]
+SETR B 0xF00F0048
+MEMGET64 A B
+SHRV A 28
+ANDV A 3
+$TXR A
+$NEWLINE
+BNEV A 3 NO_USTEP:
+
+// b) the SRs
+MFSR A 64
+$TXR A
+$NEWLINE
+SETR B 0xFFFFFFFF
+MTSR WP0_ADDR B
+MTSR WP1_CTRL B
+MTSR ECAUSE B
+MFSR A WP0_ADDR
+$TXR A
+$NEWLINE
+MFSR A WP1_CTRL
+$TXR A
+$NEWLINE
+MFSR A ECAUSE
+$TXR A
+$NEWLINE
+SETR B 0
+MTSR WP0_ADDR B
+MTSR WP1_CTRL B
+SETR B HANDLER:
+MTSR EVEC B
+
+// c) the step
+SETR B CONT_C:
+MTSR SCRATCH0 B
+SETR B 0x06E00000            // the log
+MTSR SCRATCH1 B
+SETR B 0x07000000
+MTSR USP B
+SETR B USER_C:
+SETR64 C 0x300000000000      // frame bits 45 (SS) and 44 (PM)
+ORR B B C
+PUSH B
+IRET
+CONT_C:
+SETR J USER_C:
+CALL PRINT_LOG:
+
+// d) watchpoints, not stepped
+SETR B 0x06F00000
+SETR C 0x60F                 // WP0: bytes 0-3, W, U
+MTSR WP0_ADDR B
+MTSR WP0_CTRL C
+SETR B 0x06F00008
+SETR C 0x101                 // WP1: byte 0, R
+MTSR WP1_ADDR B
+MTSR WP1_CTRL C
+SETR B CONT_D:
+MTSR SCRATCH0 B
+SETR B 0x06E00000
+MTSR SCRATCH1 B
+SETR B USER_D:
+SETR64 C 0x100000000000      // PM only
+ORR B B C
+PUSH B
+IRET
+CONT_D:
+SETR J USER_D:
+CALL PRINT_LOG:
+
+// e) step + watch
+SETR B 0x06F00000
+SETR C 0x2FF                 // WP0: the doubleword, W
+MTSR WP0_ADDR B
+MTSR WP0_CTRL C
+SETR B 0
+MTSR WP1_CTRL B
+SETR B CONT_E:
+MTSR SCRATCH0 B
+SETR B 0x06E00000
+MTSR SCRATCH1 B
+SETR B USER_E:
+SETR64 C 0x300000000000
+ORR B B C
+PUSH B
+IRET
+CONT_E:
+SETR J USER_E:
+CALL PRINT_LOG:
+
+// f) a supervisor watch on the kernel's variable at 0x06F0_0100
+SETR B 0x06E00000
+MTSR SCRATCH1 B
+SETR B 0x06F00100
+SETR C 0x5FF                 // WP0: the doubleword, R, U
+MTSR WP0_ADDR B
+MTSR WP0_CTRL C
+SETR D 0x1FF                 // R
+SETR E 1
+EI E
+S_LOADS:
+MEMGET64 A B                 // U = 1: no hit
+MTSR WP0_CTRL D
+MEMGET64 A B                 // U = 0, interrupts enabled: WATCH
+DI E
+MEMGET64 A B                 // DI = 1: no hit
+EI E
+SETR B 0
+MTSR WP0_CTRL B
+SETR J S_LOADS:
+CALL PRINT_LOG:
+SETR B 0
+MTSR EVEC B
+HALT
+
+NO_USTEP:
+HALT
+
+// c) the stepped routine
+USER_C:
+SETR A 5
+CALLREL USUB_C:
+SYSCALL
+HALT
+USUB_C:
+NOP
+RET
+
+// d) the watched routine
+USER_D:
+SETR B 0x06F00000
+MEMSET64 C B                 // WP0, W: a hit
+MEMGET8 C B                  // a load: WP0 is W only
+SETR B 0x06F00006
+MEMGET32 C B                 // bytes 6-7 and 8-9: WP1 on the second only
+HALT
+
+// e) step + watch
+USER_E:
+SETR B 0x06F00000
+MEMSET64 C B                 // stepped and watched
+NOP
+HALT
+
+// The exception handler: log {ECAUSE, EADDR, frame} at SCRATCH1, then
+// return; PRIVILEGED (the user HALT) returns to the kernel continuation.
+HANDLER:
+MFSR K SCRATCH1
+MFSR N ECAUSE
+STIDX64 N K 0
+MFSR N EADDR
+STIDX64 N K 8
+GETSP N
+LDIDX64 N N 0
+STIDX64 N K 16
+ADDV K 24
+MTSR SCRATCH1 K
+MFSR N ECAUSE
+ANDV N 0xFF
+BEQI N 2 HANDLER_EXIT:
+IRET
+HANDLER_EXIT:
+ADDSP 8                      // drop the user frame
+MFSR N SCRATCH0              // and return to the kernel continuation
+PUSH N
+IRET
+
+// Print the log from 0x06E0_0000 to SCRATCH1, three lines an entry; J is
+// the routine's start.
+PRINT_LOG:
+SETR L 0x06E00000
+MFSR I SCRATCH1
+PL_LOOP:
+CMPRR L I
+JMPE PL_DONE:
+LDIDX64 A L 0
+LDIDX64 H L 16
+COPY G H
+SHRV G 44
+SHLV A 16
+ORR A A G
+$TXR A
+$NEWLINE
+LDIDX64 A L 0
+ANDV A 0xFF
+LDIDX64 G L 8
+BNEV A 14 PL_RAW:
+SUBR G G J
+PL_RAW:
+$TXR G
+$NEWLINE
+SUBR A H J
+$TXR A
+$NEWLINE
+ADDV L 24
+JMP PL_LOOP:
+PL_DONE:
+RET
+
+!include uart_stubs.kla

@@ -2138,15 +2138,15 @@ fn stage1_reset_state_and_cpu_features() {
     assert!(!cpu.has_mpu());
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x200D | (3 << 22) | (1 << 25),
-        "CPU_FEATURES: stages 1 and 3 and LR/SC, 32 entries, no MPU, DCBZ and MAL64, the TLB walker"
+        0x200D | (3 << 22) | (1 << 25) | (3 << 28),
+        "CPU_FEATURES: stages 1 and 3 and LR/SC, 32 entries, no MPU, DCBZ and MAL64, the TLB walker, the user step and watchpoints"
     );
     assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
     cpu.set_has_mpu(true);
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x20FF | (3 << 22) | (1 << 25),
-        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 32 entries, DCBZ and MAL64, the TLB walker"
+        0x20FF | (3 << 22) | (1 << 25) | (3 << 28),
+        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 32 entries, DCBZ and MAL64, the TLB walker, the user step and watchpoints"
     );
 }
 
@@ -2328,7 +2328,7 @@ fn stage1_supervisor_sr_reads_and_writes() {
     let mut cpu = stage1_cpu(&[HALT], &[HALT], false);
     for (sr, value, back) in [
         (SR_EVEC, 0x1237, 0x1234),
-        (SR_ECAUSE, 0x3FF, 0x1FF),
+        (SR_ECAUSE, 0x3FFF, 0x1FFF), // [12:0] (9 bits with --no-ustep)
         (SR_EADDR, 0x1_2345_6789, 0x2345_6789),
         (SR_USP, 0x1_0000_7000, 0x7000),
         (SR_SCRATCH0, u64::MAX, u64::MAX),
@@ -3418,7 +3418,7 @@ fn tlb_kseg_is_direct_and_the_hole_faults() {
     // MMIO is identity in supervisor mode.
     let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
     step_with_b(&mut cpu, 0xF00F_0048);
-    assert_eq!(cpu.regs[3], 0x200D | (3 << 22) | (1 << 25), "CPU_FEATURES (no MPU)");
+    assert_eq!(cpu.regs[3], 0x200D | (3 << 22) | (1 << 25) | (3 << 28), "CPU_FEATURES (no MPU)");
 }
 
 #[test]
@@ -4461,7 +4461,11 @@ fn tlb_walker_cpu_features_bit_25_and_no_tlb_walker() {
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     assert_eq!(cpu.mmio_read(0xF00F_0048) & (1 << 25), 1 << 25, "CPU_FEATURES[25]: the walker");
     cpu.set_has_tlb_walker(false);
-    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22), "--no-tlb-walker: bit 25 clear");
+    assert_eq!(
+        cpu.mmio_read(0xF00F_0048),
+        0x200D | (3 << 22) | (3 << 28),
+        "--no-tlb-walker: bit 25 clear"
+    );
     // Hardware { no_tlb_walker } (--no-tlb-walker) does the same.
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     cpu.install(Hardware {
@@ -5434,4 +5438,1110 @@ fn board_io_log_records_each_store() {
         log.text(),
         "LEDS 0x5a5a\nLEDS 0x5a5a\nRGB1 0xf00\nRGB2 0x00f\nSEG_LOW 1234\nSEG_HIGH abcd\nSEG_ALL 12345678\nSEG_BLANK\nLEDS 0x0101\n"
     );
+}
+
+// ---- User single step and watchpoints (klaussCPU MMU_PLAN.md §13) ----
+
+const SR_WP0_ADDR: u32 = 0x40;
+const SR_WP0_CTRL: u32 = 0x41;
+const SR_WP1_ADDR: u32 = 0x42;
+const SR_WP1_CTRL: u32 = 0x43;
+/// `WPn_CTRL` R `[8]`, W `[9]`, U `[10]`.
+const WP_R: u64 = 1 << 8;
+const WP_W: u64 = 1 << 9;
+const WP_U: u64 = 1 << 10;
+/// `ECAUSE` of every STEP: 14 with SSTEP `[12]`.
+const EC_STEP: u16 = 0x100E;
+/// `ECAUSE` 15 WATCH and its bits `[12:9]`.
+const EC_WATCH: u16 = 15;
+const EC_WP0: u16 = 1 << 9;
+const EC_WP1: u16 = 1 << 10;
+const EC_WRITE: u16 = 1 << 11;
+const EC_SSTEP: u16 = 1 << 12;
+/// `ECAUSE` PRIVILEGED, SYSCALL, `MISALIGNED_LOAD` and `ACCESS_LOAD`.
+const EC_PRIV: u16 = 2;
+const EC_SYSCALL: u16 = 4;
+const EC_MISAL_LD: u16 = 5;
+const EC_ACC_LD: u16 = 7;
+/// Frame `[45:44]`: SS and PM.  A stepped user frame, an unstepped one.
+const HI_STEP: u64 = 3;
+const HI_USER: u64 = 1;
+/// SUBR D D D: sets Z.
+const SUBR_D: u32 = 0x4460_0333;
+/// Where the user debug tests put the user code, data and stack: the board
+/// test's `USER_BASE`, `USER_DATA` and `USER_SP` (klaussCPU
+/// `tools/board/ustep_test.c`), so that `gen_ustep.py`'s routines and
+/// their logs apply unchanged.
+const UD_BASE: u32 = 0x0061_0000;
+const UD_DATA: u32 = 0x0062_0000;
+const UD_SP: u32 = 0x0063_0000;
+/// The user debug tests' RAM: 8 MiB, past [`UD_SP`].
+const UD_MEM: usize = 8 << 20;
+
+/// One exception entry as the handler sees it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UdEntry {
+    /// `ECAUSE` `[12:0]`.
+    ecause: u16,
+    /// `EADDR`.
+    eaddr: u32,
+    /// The frame's PC.
+    pc: u32,
+    /// The frame's `[63:44]`: `[1]` SS, `[0]` PM.
+    hi: u64,
+}
+
+/// An expected [`UdEntry`].
+const fn ue(ecause: u16, eaddr: u32, pc: u32, hi: u64) -> UdEntry {
+    UdEntry { ecause, eaddr, pc, hi }
+}
+
+/// The entry the CPU has just made (its frame is at SP).
+fn ud_entry(cpu: &Cpu) -> UdEntry {
+    let frame = cpu.peek64(cpu.sp);
+    UdEntry {
+        ecause: cpu.system_regs().ecause,
+        eaddr: cpu.eaddr,
+        pc: frame as u32,
+        hi: frame >> 44,
+    }
+}
+
+/// Write `words` at `addr`.
+fn put_words(cpu: &mut Cpu, addr: u32, words: &[u32]) {
+    let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+    assert!(cpu.debug_write(addr, &bytes));
+}
+
+/// Set user watchpoint `n` (0 or 1) as `MTSR` would.
+fn set_wp(cpu: &mut Cpu, n: u32, addr: u32, ctrl: u64) {
+    assert!(cpu.sr_write(SR_WP0_ADDR + 2 * n, u64::from(addr)));
+    assert!(cpu.sr_write(SR_WP0_CTRL + 2 * n, ctrl));
+}
+
+/// A CPU with the user single step and watchpoints: `EVEC` = [`HANDLER`], which holds an `IRET`; the
+/// user code `user` at [`UD_BASE`]; and at the code base an `IRET` whose
+/// frame on the kernel stack enters it in user mode on [`UD_SP`], with SS
+/// = `ss`.  Interrupts are enabled (DI = 0, as at reset).
+fn ud_cpu(user: &[u32], ss: bool) -> Cpu {
+    let mut cpu = Cpu::with_mem_size(&image_from_words(&[IRET]), CODE_BASE, UD_MEM);
+    cpu.set_has_udbg(true);
+    put_words(&mut cpu, HANDLER, &[IRET]);
+    cpu.evec = HANDLER;
+    put_words(&mut cpu, UD_BASE, user);
+    let frame = (1_u64 << 44) | (u64::from(ss) << 45) | u64::from(UD_BASE);
+    assert!(cpu.debug_write(KERNEL_SP - 8, &frame.to_le_bytes()));
+    (cpu.sp, cpu.sp_alt) = (KERNEL_SP - 8, UD_SP);
+    cpu
+}
+
+/// Run `cpu` until its user code's `HALT` is PRIVILEGED (at most 2000
+/// steps), logging every exception entry.  The handler returns at once
+/// (an `IRET` of the frame, so a stepped frame re-arms), except that, as
+/// in the board test's kernel, a SYSCALL with `cfg` sets the watchpoints
+/// from r5-r8 (`WP0_ADDR`, `WP0_CTRL`, `WP1_ADDR`, `WP1_CTRL`) and is not
+/// logged, and an `ACCESS_LOAD` or `MISALIGNED_LOAD` skips its (one-word)
+/// load.
+fn ud_log(cpu: &mut Cpu, cfg: bool) -> Vec<UdEntry> {
+    let mut log = Vec::new();
+    for _ in 0..2000 {
+        let before = cpu.exc_entries;
+        assert_eq!(cpu.step_one(true), None, "pc 0x{:08X}, log {log:#x?}", cpu.pc);
+        if cpu.exc_entries == before {
+            continue;
+        }
+        assert_eq!(cpu.pc, HANDLER, "entered EVEC");
+        assert!(!cpu.um && cpu.irq_disabled, "supervisor mode, DI");
+        assert!(!cpu.user_step_armed(), "every entry disarms");
+        let e = ud_entry(cpu);
+        let cause = e.ecause & 0xFF;
+        if cfg && cause == EC_SYSCALL {
+            for n in 0..2 {
+                let (addr, ctrl) = (cpu.regs[5 + 2 * n], cpu.regs[6 + 2 * n]);
+                set_wp(cpu, n as u32, addr as u32, ctrl);
+            }
+            continue;
+        }
+        log.push(e);
+        if cause == EC_PRIV && e.eaddr == HALT {
+            return log;
+        }
+        if cause == EC_ACC_LD || cause == EC_MISAL_LD {
+            let frame = cpu.peek64(cpu.sp) + 4;
+            assert!(cpu.debug_write(cpu.sp, &frame.to_le_bytes()));
+        }
+    }
+    panic!("no user HALT: {log:#x?}");
+}
+
+/// A `gen_ustep.py` log entry: (`ECAUSE`, `EADDR`, `EADDR` relative to the
+/// routine, frame PC offset, frame >> 44).
+type BoardExp = (u16, u32, bool, u32, u64);
+
+/// `gen_ustep.py`'s expected log for a routine run at [`UD_BASE`].
+fn board_log(exp: &[BoardExp]) -> Vec<UdEntry> {
+    exp.iter()
+        .map(|&(ecause, eaddr, rel, frame, hi)| ue(ecause, eaddr + if rel { UD_BASE } else { 0 }, UD_BASE + frame, hi))
+        .collect()
+}
+
+#[test]
+fn ustep_cpu_features_srs_and_ecause() {
+    // With --no-ustep (the bitstreams before it): CPU_FEATURES[29:28]
+    // clear, SRs 0x40-0x43 ILLEGAL, ECAUSE 9 bits.
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.install(Hardware {
+        no_ustep: true,
+        ..Hardware::default()
+    });
+    assert!(!cpu.has_udbg());
+    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22) | (1 << 25));
+    for sr in SR_WP0_ADDR..=SR_WP1_CTRL {
+        assert_eq!(cpu.sr_read(sr), None, "SR {sr:#x} without --ustep");
+        assert!(!cpu.sr_write(sr, 1), "SR {sr:#x} without --ustep");
+    }
+    assert!(cpu.sr_write(SR_ECAUSE, 0xFFFF));
+    assert_eq!(cpu.sr_read(SR_ECAUSE), Some(0x1FF), "MTSR ECAUSE writes [8:0]");
+    let mut cpu = stage1_cpu(&[mfsr(3, SR_WP0_ADDR), HALT], &[HALT], false);
+    cpu.set_has_udbg(false);
+    assert_eq!(cpu.step_one(true), None);
+    assert_entered(&cpu, Cause::Illegal, mfsr(3, SR_WP0_ADDR), CODE_BASE, false);
+
+    // By default, as the release bitstream: bits 28 and 29, the SRs at 0
+    // after reset with only their bits, ECAUSE 13 bits.  0x44 is still no
+    // SR.
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.install(Hardware::default());
+    assert!(cpu.has_udbg());
+    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22) | (1 << 25) | (3 << 28));
+    for (sr, back) in [
+        (SR_WP0_ADDR, 0xFFFF_FFF8),
+        (SR_WP0_CTRL, 0x7FF),
+        (SR_WP1_ADDR, 0xFFFF_FFF8),
+        (SR_WP1_CTRL, 0x7FF),
+    ] {
+        assert_eq!(cpu.sr_read(sr), Some(0), "SR {sr:#x} after reset");
+        assert!(cpu.sr_write(sr, u64::MAX));
+        assert_eq!(cpu.sr_read(sr), Some(back), "SR {sr:#x} keeps its bits");
+    }
+    assert!(cpu.sr_write(SR_WP1_ADDR, 0x1234_5677));
+    assert!(cpu.sr_write(SR_WP1_CTRL, 0x0001_F904));
+    assert_eq!((cpu.sr_read(SR_WP1_ADDR), cpu.sr_read(SR_WP1_CTRL)), (Some(0x1234_5670), Some(0x104)));
+    assert_eq!(
+        cpu.system_regs().wp,
+        [
+            UserWatch {
+                addr: 0xFFFF_FFF8,
+                ctrl: 0x7FF
+            },
+            UserWatch {
+                addr: 0x1234_5670,
+                ctrl: 0x104
+            }
+        ]
+    );
+    assert_eq!(cpu.sr_read(0x44), None, "0x44 is no SR");
+    assert!(cpu.sr_write(SR_ECAUSE, 0xFFFF));
+    assert_eq!(cpu.sr_read(SR_ECAUSE), Some(0x1FFF), "MTSR ECAUSE writes [12:0]");
+    assert_eq!(cpu.system_regs().ecause, 0x1FFF);
+    // Taking the feature away clears the watchpoints.
+    cpu.set_has_udbg(false);
+    cpu.set_has_udbg(true);
+    assert_eq!(cpu.sr_read(SR_WP0_ADDR), Some(0));
+
+    // Supervisor MFSR / MTSR reach them; user mode gets PRIVILEGED (and
+    // ILLEGAL for 0x44, legality first).
+    let code = [mtsr(SR_WP0_CTRL, 1), mfsr(3, SR_WP0_CTRL), HALT];
+    let mut cpu = stage1_cpu(&code, &[HALT], false);
+    cpu.set_has_udbg(true);
+    cpu.regs[1] = 0x0FFF_F3FF;
+    for _ in 0..2 {
+        assert_eq!(cpu.step_one(true), None);
+    }
+    assert_eq!(cpu.regs[3], 0x3FF);
+    for (word, cause) in [
+        (mfsr(3, SR_WP0_ADDR), Cause::Privileged),
+        (mtsr(SR_WP0_ADDR, 1), Cause::Privileged),
+        (mfsr(3, SR_WP1_CTRL), Cause::Privileged),
+        (mtsr(SR_WP1_CTRL, 1), Cause::Privileged),
+        (mfsr(3, 0x44), Cause::Illegal),
+    ] {
+        let mut cpu = stage1_cpu(&[word, HALT], &[HALT], true);
+        cpu.set_has_udbg(true);
+        assert_eq!(cpu.step_one(true), None);
+        assert_entered(&cpu, cause, word, CODE_BASE, true);
+        assert_eq!(cpu.system_regs().ecause, cause as u16, "ECAUSE[12:9] = 0 for other causes");
+    }
+}
+
+// The four user routines of the board test, klaussCPU tools/board/gen_ustep.py
+// (ustep 60bcc36; ustep_user.h), with the logs it expects, which the RTL
+// produced in simulation (tests.py ud_board_routines) and on the board.
+
+/// Routine A, stepped: straight code, a taken FBR, CALL / RET, SYSCALL, a
+/// user MMIO load (`ACCESS_LOAD`), a misaligned load, JMP, HALT.
+#[rustfmt::skip]
+const BOARD_A: [u32; 18] = [
+    0x8BC0_0100, 0x0000_0005, 0x4420_0211, 0x7420_0215, 0x6C00_0000, 0x6300_000A, //
+    0x6C08_0000, 0x8BC0_0300, 0xF000_0000, 0x5B00_0430, 0x8BC0_0300, 0x0062_0001, //
+    0x5900_0430, 0x6100_0004, 0x6C00_0000, 0x5788_0110, 0x6580_0000, 0x6C01_0000,
+];
+const BOARD_A_EXP: [BoardExp; 13] = [
+    (0x100E, 0x00, true, 0x08, 3),
+    (0x100E, 0x08, true, 0x0C, 3),
+    (0x100E, 0x0C, true, 0x14, 3),
+    (0x100E, 0x14, true, 0x3C, 3),
+    (0x100E, 0x3C, true, 0x40, 3),
+    (0x100E, 0x40, true, 0x18, 3),
+    (0x0004, 0x00, false, 0x1C, 3),
+    (0x100E, 0x1C, true, 0x24, 3),
+    (0x0007, 0xF000_0000, false, 0x24, 3),
+    (0x100E, 0x28, true, 0x30, 3),
+    (0x0005, 0x0062_0001, false, 0x30, 3),
+    (0x100E, 0x34, true, 0x44, 3),
+    (0x0002, 0x6C01_0000, false, 0x44, 3),
+];
+
+/// Routine B, not stepped, the watchpoints set through SYSCALL: a 64-bit
+/// store, byte loads (a hit, a byte-mask miss), R only against a store,
+/// PUSH, CALL (frame = the target), RET (frame = the return address), a
+/// spanning `MEMGET32` hitting only its second doubleword, both
+/// watchpoints on one access.
+#[rustfmt::skip]
+const BOARD_B: [u32; 95] = [
+    0x8BC0_0900, 0x0062_0100, 0xCBC0_0A00, 0x5566_7788, 0x1122_3344, 0x8BC0_0500, //
+    0x0062_0100, 0x8BC0_0600, 0x0000_02FF, 0x8BC0_0700, 0x0000_0000, 0x8BC0_0800, //
+    0x0000_0000, 0x6C08_0000, 0x5F00_0A90, 0x8BC0_0500, 0x0062_0100, 0x8BC0_0600, //
+    0x0000_0504, 0x8BC0_0700, 0x0000_0000, 0x8BC0_0800, 0x0000_0000, 0x6C08_0000, //
+    0x5820_2490, 0x5820_3490, 0x8BC0_0500, 0x0062_0100, 0x8BC0_0600, 0x0000_01FF, //
+    0x8BC0_0700, 0x0000_0000, 0x8BC0_0800, 0x0000_0000, 0x6C08_0000, 0x5F00_0A90, //
+    0x8BC0_0500, 0x0062_FFF8, 0x8BC0_0600, 0x0000_02FF, 0x8BC0_0700, 0x0000_0000, //
+    0x8BC0_0800, 0x0000_0000, 0x6C08_0000, 0x6400_00A0, 0x6480_0A00, 0x8BC0_0500, //
+    0x0062_FFF8, 0x8BC0_0600, 0x0000_02FF, 0x8BC0_0700, 0x0000_0000, 0x8BC0_0800, //
+    0x0000_0000, 0x6C08_0000, 0x6300_0024, 0x8BC0_0500, 0x0062_FFF8, 0x8BC0_0600, //
+    0x0000_01FF, 0x8BC0_0700, 0x0000_0000, 0x8BC0_0800, 0x0000_0000, 0x6C08_0000, //
+    0x6300_001B, 0x8BC0_0900, 0x0062_0106, 0x8BC0_0500, 0x0062_0100, 0x8BC0_0600, //
+    0x0000_010F, 0x8BC0_0700, 0x0062_0108, 0x8BC0_0800, 0x0000_0101, 0x6C08_0000, //
+    0x5A00_0490, 0x8BC0_0900, 0x0062_0100, 0x8BC0_0500, 0x0062_0100, 0x8BC0_0600, //
+    0x0000_010F, 0x8BC0_0700, 0x0062_0100, 0x8BC0_0800, 0x0000_0101, 0x6C08_0000, //
+    0x5800_0490, 0x6100_0003, 0x6580_0000, 0x6580_0000, 0x6C01_0000,
+];
+const BOARD_B_EXP: [BoardExp; 8] = [
+    (0x0A0F, 0x0062_0100, false, 0x03C, 1),
+    (0x020F, 0x0062_0102, false, 0x064, 1),
+    (0x0A0F, 0x0062_FFF8, false, 0x0B8, 1),
+    (0x0A0F, 0x0062_FFF8, false, 0x170, 1),
+    (0x020F, 0x0062_FFF8, false, 0x10C, 1),
+    (0x040F, 0x0062_0108, false, 0x13C, 1),
+    (0x060F, 0x0062_0100, false, 0x16C, 1),
+    (0x0002, 0x6C01_0000, false, 0x178, 1),
+];
+
+/// Routine C, stepped, `WP0` = W on [`UD_DATA`] + 0x200: the stepped store
+/// is one WATCH with SSTEP, and the step goes on.
+#[rustfmt::skip]
+const BOARD_C: [u32; 5] = [0x8BC0_0900, 0x0062_0200, 0x5F00_0990, 0x5B00_0490, 0x6C01_0000];
+const BOARD_C_EXP: [BoardExp; 4] = [
+    (0x100E, 0x00, true, 0x08, 3),
+    (0x1A0F, 0x0062_0200, false, 0x0C, 3),
+    (0x100E, 0x0C, true, 0x10, 3),
+    (0x0002, 0x6C01_0000, false, 0x10, 3),
+];
+
+/// Routine D, stepped, `WP0` = R U on [`UD_SP`] - 16 and `WP1` = R U on
+/// [`UD_DATA`] + 0x308: four RETs with no CALL (the RTL's return stack
+/// drained), then a RET reading the watched `[SP]` and a LEAVERET watched
+/// on its second doubleword, each one WATCH with SSTEP.
+#[rustfmt::skip]
+const BOARD_D: [u32; 34] = [
+    0x8B80_0500, 0x0000_0010, 0x6400_0050, 0x6580_0000, 0x8B80_0500, 0x0000_0010, //
+    0x6400_0050, 0x6580_0000, 0x8B80_0500, 0x0000_0010, 0x6400_0050, 0x6580_0000, //
+    0x8B80_0500, 0x0000_0010, 0x6400_0050, 0x6580_0000, 0x6400_0060, 0x8B80_0500, //
+    0x0000_0010, 0x6400_0050, 0x6580_0000, 0x6480_0600, 0x8BC0_0600, 0x0062_0300, //
+    0x8B80_0500, 0x0000_0024, 0x5F20_1560, 0x8BC0_0500, 0x0000_1234, 0x5F20_0560, //
+    0x8BC0_0F00, 0x0062_0300, 0x6680_0000, 0x6C01_0000,
+];
+const BOARD_D_EXP: [BoardExp; 25] = [
+    (0x100E, 0x00, true, 0x08, 3),
+    (0x100E, 0x08, true, 0x0C, 3),
+    (0x100E, 0x0C, true, 0x10, 3),
+    (0x100E, 0x10, true, 0x18, 3),
+    (0x100E, 0x18, true, 0x1C, 3),
+    (0x100E, 0x1C, true, 0x20, 3),
+    (0x100E, 0x20, true, 0x28, 3),
+    (0x100E, 0x28, true, 0x2C, 3),
+    (0x100E, 0x2C, true, 0x30, 3),
+    (0x100E, 0x30, true, 0x38, 3),
+    (0x100E, 0x38, true, 0x3C, 3),
+    (0x100E, 0x3C, true, 0x40, 3),
+    (0x100E, 0x40, true, 0x44, 3),
+    (0x100E, 0x44, true, 0x4C, 3),
+    (0x100E, 0x4C, true, 0x50, 3),
+    (0x120F, 0x0062_FFF0, false, 0x54, 3),
+    (0x100E, 0x54, true, 0x58, 3),
+    (0x100E, 0x58, true, 0x60, 3),
+    (0x100E, 0x60, true, 0x68, 3),
+    (0x100E, 0x68, true, 0x6C, 3),
+    (0x100E, 0x6C, true, 0x74, 3),
+    (0x100E, 0x74, true, 0x78, 3),
+    (0x100E, 0x78, true, 0x80, 3),
+    (0x140F, 0x0062_0308, false, 0x84, 3),
+    (0x0002, 0x6C01_0000, false, 0x84, 3),
+];
+
+#[test]
+fn ustep_board_routine_a_one_step_per_instruction() {
+    let mut cpu = ud_cpu(&BOARD_A, true);
+    assert_eq!(ud_log(&mut cpu, false), board_log(&BOARD_A_EXP));
+}
+
+#[test]
+fn uwatch_board_routine_b_watchpoints() {
+    let mut cpu = ud_cpu(&BOARD_B, false);
+    assert_eq!(ud_log(&mut cpu, true), board_log(&BOARD_B_EXP));
+}
+
+#[test]
+fn ustep_board_routine_c_step_and_watch() {
+    let mut cpu = ud_cpu(&BOARD_C, true);
+    set_wp(&mut cpu, 0, UD_DATA + 0x200, 0xFF | WP_W);
+    let log = ud_log(&mut cpu, false);
+    assert_eq!(log, board_log(&BOARD_C_EXP));
+    assert_eq!(
+        log[1].ecause,
+        EC_WATCH | EC_WP0 | EC_WRITE | EC_SSTEP,
+        "one entry for the step and the watch"
+    );
+}
+
+#[test]
+fn ustep_board_routine_d_watched_returns() {
+    let mut cpu = ud_cpu(&BOARD_D, true);
+    set_wp(&mut cpu, 0, UD_SP - 16, 0xFF | WP_R | WP_U);
+    set_wp(&mut cpu, 1, UD_DATA + 0x308, 0xFF | WP_R | WP_U);
+    assert_eq!(ud_log(&mut cpu, false), board_log(&BOARD_D_EXP));
+}
+
+#[test]
+fn ustep_exact_successors_of_multi_word_ops_branches_calls_and_returns() {
+    let b = UD_BASE;
+    let user = [
+        0xCBC0_0200,
+        0x5566_7788,
+        0x1122_3344, // +0x00 SETR64 C (3 words)
+        0x8BD0_0100,
+        0x0001_2345, // +0x0C SETR B 0x12345 (2 words)
+        0x7420_0215, // +0x14 FBR.EQ B, #5, +2: not taken
+        0xA008_0000,
+        b + 0x34, // +0x18 JMPZ (Z = 0): not taken
+        0xA208_0000,
+        b + 0x34, // +0x20 CALLZ: not taken, nothing pushed
+        SUBR_D,   // +0x28 SUBR D D D: Z = 1
+        0xA008_0000,
+        b + 0x38,    // +0x2C JMPZ: taken
+        NOP,         // +0x34
+        0x6300_0003, // +0x38 CALLREL +3 -> +0x44, pushes +0x3C
+        0x6100_0004, // +0x3C JMPREL +4 -> +0x4C
+        NOP,         // +0x40
+        0x6600_0001, // +0x44 ENTER 1
+        0x6680_0000, // +0x48 LEAVERET -> +0x3C
+        HALT,        // +0x4C PRIVILEGED
+    ];
+    let mut cpu = ud_cpu(&user, true);
+    let step = |at: u32, next: u32| ue(EC_STEP, b + at, b + next, HI_STEP);
+    assert_eq!(
+        ud_log(&mut cpu, false),
+        [
+            step(0x00, 0x0C),
+            step(0x0C, 0x14),
+            step(0x14, 0x18),
+            step(0x18, 0x20),
+            step(0x20, 0x28),
+            step(0x28, 0x2C),
+            step(0x2C, 0x38),
+            step(0x38, 0x44),
+            step(0x44, 0x48),
+            step(0x48, 0x3C),
+            step(0x3C, 0x4C),
+            ue(EC_PRIV, HALT, b + 0x4C, HI_STEP),
+        ]
+    );
+    assert_eq!(cpu.sp_alt, UD_SP, "the user SP: CALLZ pushed nothing, LEAVERET unwound");
+    assert_eq!(cpu.regs[2], 0x1122_3344_5566_7788);
+    assert_eq!(cpu.instret, 1 + 11 + 11, "each user instruction retired once (and the IRETs)");
+}
+
+#[test]
+fn ustep_a_fault_or_syscall_has_ss_and_the_retry_is_stepped() {
+    // MEMGET64 D [B] with B in MMIO: ACCESS_LOAD with SS = 1, no STEP.
+    // The kernel fixes B and returns to the load: it is the stepped
+    // instruction again (one STEP for it), then SYSCALL: frame = next, SS.
+    let user = [0x5B00_0310, SYSCALL, NOP, HALT];
+    let mut cpu = ud_cpu(&user, true);
+    cpu.regs[1] = 0xF000_0000;
+    assert_eq!(cpu.step_one(true), None, "the arming IRET");
+    assert!(cpu.user_step_armed() && cpu.um);
+    assert_eq!(cpu.step_one(true), None, "the load faults");
+    assert_eq!(ud_entry(&cpu), ue(u16::from(Cause::AccessLoad as u8), 0xF000_0000, UD_BASE, HI_STEP));
+    assert_eq!(cpu.instret, 1, "the load did not retire");
+    cpu.regs[1] = u64::from(UD_DATA);
+    assert!(cpu.debug_write(UD_DATA, &0x1234_u64.to_le_bytes()));
+    assert_eq!(cpu.step_one(true), None, "the handler's IRET re-arms");
+    assert!(cpu.user_step_armed());
+    assert_eq!(cpu.step_one(true), None, "the load again");
+    assert_eq!(cpu.regs[3], 0x1234);
+    assert_eq!(cpu.step_one(true), None, "STEP");
+    assert_eq!(ud_entry(&cpu), ue(EC_STEP, UD_BASE, UD_BASE + 4, HI_STEP));
+    assert_eq!(cpu.step_one(true), None, "IRET");
+    assert_eq!(cpu.step_one(true), None, "SYSCALL");
+    assert_eq!(ud_entry(&cpu), ue(EC_SYSCALL, 0, UD_BASE + 8, HI_STEP));
+    // A kernel that stops stepping clears frame bit 45: the rest runs
+    // without a STEP.
+    let frame = cpu.peek64(cpu.sp) & !(1 << 45);
+    assert!(cpu.debug_write(cpu.sp, &frame.to_le_bytes()));
+    assert_eq!(ud_log(&mut cpu, false), [ue(EC_PRIV, HALT, UD_BASE + 12, HI_USER)]);
+}
+
+#[test]
+fn ustep_an_interrupt_comes_before_the_stepped_instruction_never_after() {
+    // The ISR is an IRET at 0x500.  A timer interrupt pending after the
+    // arming IRET is taken before the stepped instruction (frame SS = 1, PC = the
+    // instruction); its IRET re-arms.  One raised after the instruction
+    // waits until the STEP handler's IRET (DI was set by the entry).
+    const ISR: u32 = 0x500;
+    let mut cpu = ud_cpu(&[0x4BD0_7300, NOP, HALT], true); // SETR.S D, 7
+    put_words(&mut cpu, ISR, &[IRET]);
+    cpu.int_vec[0] = ISR;
+    assert_eq!(cpu.step_one(true), None, "the arming IRET");
+    (cpu.int_mask, cpu.timer_pending) = (1, true);
+    assert_eq!(cpu.step_one(true), None, "the interrupt");
+    assert_eq!(cpu.pc, ISR);
+    assert_eq!(cpu.exc_entries, 0, "no exception");
+    let frame = cpu.peek64(cpu.sp);
+    assert_eq!((frame as u32, frame >> 44), (UD_BASE, HI_STEP), "the IRQ frame has SS = 1");
+    assert!(!cpu.user_step_armed(), "the ISR runs unarmed");
+    assert_eq!(cpu.step_one(true), None, "the ISR's IRET");
+    assert!(cpu.user_step_armed(), "re-armed");
+    assert_eq!(cpu.step_one(true), None, "the stepped instruction");
+    assert_eq!(cpu.regs[3], 7);
+    cpu.timer_pending = true;
+    assert_eq!(cpu.step_one(true), None, "STEP, not the interrupt");
+    assert_eq!(ud_entry(&cpu), ue(EC_STEP, UD_BASE, UD_BASE + 4, HI_STEP));
+    assert_eq!(cpu.step_one(true), None, "the STEP handler's IRET re-arms");
+    assert_eq!(cpu.step_one(true), None, "now the interrupt, before the next stepped instruction");
+    assert_eq!(cpu.pc, ISR);
+    let frame = cpu.peek64(cpu.sp);
+    assert_eq!((frame as u32, frame >> 44), (UD_BASE + 4, HI_STEP));
+}
+
+#[test]
+fn ustep_arming_needs_pm_ss_evec_and_the_feature() {
+    // PM = 0 (an IRET to supervisor mode) ignores SS: the code runs on.
+    let mut cpu = ud_cpu(&[NOP, NOP, HALT], true);
+    let frame = (1_u64 << 45) | u64::from(UD_BASE);
+    assert!(cpu.debug_write(KERNEL_SP - 8, &frame.to_le_bytes()));
+    assert_eq!(cpu.run(100, None).stop, StopReason::Halt);
+    assert_eq!(cpu.exc_entries, 0, "no STEP in supervisor mode");
+    // EVEC = 0 at the IRET: no arm (the user HALT then parks).
+    let mut cpu = ud_cpu(&[NOP, NOP, HALT], true);
+    cpu.evec = 0;
+    assert_eq!(cpu.run(100, None).stop, StopReason::InvalidOpcode(HALT));
+    assert_eq!((cpu.exc_entries, cpu.pc), (0, UD_BASE + 8));
+    // SS = 0: nothing; frame bits [63:46] are ignored.
+    let mut cpu = ud_cpu(&[NOP, NOP, HALT], false);
+    let frame = cpu.peek64(KERNEL_SP - 8) | (0x3FFFF << 46);
+    assert!(cpu.debug_write(KERNEL_SP - 8, &frame.to_le_bytes()));
+    assert_eq!(ud_log(&mut cpu, false), [ue(EC_PRIV, HALT, UD_BASE + 8, HI_USER)]);
+    // With --no-ustep, frame bit 45 is ignored and never pushed.
+    let mut cpu = ud_cpu(&[NOP, NOP, HALT], true);
+    cpu.set_has_udbg(false);
+    assert_eq!(ud_log(&mut cpu, false), [ue(EC_PRIV, HALT, UD_BASE + 8, HI_USER)]);
+    assert_eq!(cpu.system_regs().ecause, 2);
+}
+
+#[test]
+fn ustep_a_walker_refill_is_no_entry() {
+    // TE = 1 with the walker: the stepped load's page (U_DATA) and the
+    // JMP's target page are not in the TLB.  Each walk restarts the
+    // instruction, still armed, and the one STEP comes after it.  A
+    // watchpoint on the pgd entry the walker reads never hits.
+    let load_at = U_CODE + CODE_BASE;
+    let target = 0x0007_0100;
+    let code = [
+        0x5B00_0310, // MEMGET64 D [B]
+        0xA000_0000,
+        target, // JMP to a page the TLB lacks (PA 0x100: HALT)
+    ];
+    let mut cpu = walker_cpu(&code, &[IRET], true);
+    cpu.set_has_udbg(true);
+    pt_map(&mut cpu, U_DATA, pte(DATA_FRAME, TLB_V | TLB_R));
+    pt_map(&mut cpu, target, pte(0, TLB_V | TLB_R | TLB_X));
+    put_words(&mut cpu, 0x100, &[HALT]);
+    assert!(cpu.debug_write(DATA_FRAME + 8, &0x99_u64.to_le_bytes()));
+    set_wp(&mut cpu, 0, PGD, 0xFF | WP_R);
+    cpu.regs[1] = u64::from(U_DATA + 8);
+    cpu.us_armed = true; // as an IRET of a frame with SS would
+    assert_eq!(cpu.step_one(true), None, "the walk");
+    assert_restarted(&cpu, load_at, 0, "the load's walk");
+    assert!(cpu.user_step_armed(), "a walk is no entry");
+    let mut log = Vec::new();
+    for _ in 0..20 {
+        let before = cpu.exc_entries;
+        assert_eq!(cpu.step_one(true), None);
+        if cpu.exc_entries != before {
+            assert_eq!(cpu.pc, K_HANDLER);
+            let frame = cpu.peek64(KERNEL_SP - 8);
+            log.push(ue(cpu.system_regs().ecause, cpu.eaddr, frame as u32, frame >> 44));
+            if cpu.ecause == Cause::Privileged as u8 {
+                break;
+            }
+        }
+    }
+    assert_eq!(
+        log,
+        [
+            ue(EC_STEP, load_at, load_at + 4, HI_STEP),
+            ue(EC_STEP, load_at + 4, target, HI_STEP),
+            ue(EC_PRIV, HALT, target, HI_STEP),
+        ]
+    );
+    assert_eq!(cpu.regs[3], 0x99);
+    assert_eq!(cpu.sr_read(SR_TLB_WCNT), Some(2), "two walks");
+}
+
+/// One watched user instruction (or two) and what it must log.
+struct WatchCase {
+    what: &'static str,
+    /// The user code; a HALT follows it.
+    code: &'static [u32],
+    /// B, the address register.
+    b: u32,
+    /// The user SP.
+    sp: u32,
+    /// R15, the frame pointer.
+    r15: u32,
+    /// A doubleword to store first: (address, value).
+    mem: Option<(u32, u64)>,
+    /// `WP0` and `WP1`: (address, `WPn_CTRL`).
+    wp: [(u32, u64); 2],
+    /// The entries before the HALT's: (`ECAUSE`, `EADDR`, frame PC offset).
+    log: &'static [(u16, u32, u32)],
+}
+
+/// A 32-byte-aligned user data line for the watch cases.
+const WD: u32 = UD_DATA + 0x400;
+/// No watchpoint.
+const NO_WP: (u32, u64) = (0, 0);
+
+const WATCH_CASES: &[WatchCase] = &[
+    WatchCase {
+        what: "16-bit store: its high byte",
+        code: &[0x5D00_0310], // MEMSET16 D [B]
+        b: WD + 6,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0x80 | WP_W), NO_WP],
+        log: &[(EC_WATCH | EC_WP0 | EC_WRITE, WD + 6, 4)],
+    },
+    WatchCase {
+        what: "16-bit store: the byte mask misses",
+        code: &[0x5D00_0310],
+        b: WD + 6,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0x3F | WP_W), NO_WP],
+        log: &[],
+    },
+    WatchCase {
+        what: "a byte store, R only: no hit",
+        code: &[0x5C00_0310], // MEMSET8 D [B]
+        b: WD + 1,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0x02 | WP_R | WP_U), NO_WP],
+        log: &[],
+    },
+    WatchCase {
+        what: "64-bit load, A = 0, at +3: the aligned-down doubleword, EADDR raw",
+        code: &[0x5B00_0310], // MEMREADRR D B
+        b: WD + 3,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0x01 | WP_R), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, WD + 3, 4)],
+    },
+    WatchCase {
+        what: "64-bit load, A = 1, at +3",
+        code: &[0x5B10_0310], // MEMGET64 D B
+        b: WD + 3,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [NO_WP, (WD, 0x80 | WP_R)],
+        log: &[(EC_WATCH | EC_WP1, WD + 3, 4)],
+    },
+    WatchCase {
+        what: "64-bit store, A = 0, at +5",
+        code: &[0x5F00_0310], // MEMSET64RR D B
+        b: WD + 5,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0x01 | WP_W), NO_WP],
+        log: &[(EC_WATCH | EC_WP0 | EC_WRITE, WD + 5, 4)],
+    },
+    WatchCase {
+        what: "MEMGET32 spanning: only the second doubleword (EADDR its start)",
+        code: &[0x5A00_0310], // MEMGET32 D B
+        b: WD + 6,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD + 8, 0x01 | WP_R), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, WD + 8, 4)],
+    },
+    WatchCase {
+        what: "MEMGET32 spanning: the second doubleword's bytes are 0 and 1 only",
+        code: &[0x5A00_0310],
+        b: WD + 6,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD + 8, 0xFC | WP_R), (WD, 0x3F | WP_R)],
+        log: &[],
+    },
+    WatchCase {
+        what: "MEMGET32 spanning: the first doubleword",
+        code: &[0x5A00_0310],
+        b: WD + 6,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0x40 | WP_R), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, WD + 6, 4)],
+    },
+    WatchCase {
+        what: "MEMGET32 spanning: both doublewords, one watchpoint each (EADDR raw)",
+        code: &[0x5A00_0310],
+        b: WD + 6,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD + 8, 0x02 | WP_R), (WD, 0x80 | WP_R)],
+        log: &[(EC_WATCH | EC_WP0 | EC_WP1, WD + 6, 4)],
+    },
+    WatchCase {
+        what: "two watchpoints on one access",
+        code: &[0x5800_0310], // MEMGET8 D B
+        b: WD,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0x01 | WP_R), (WD, 0xFF | WP_R | WP_W | WP_U)],
+        log: &[(EC_WATCH | EC_WP0 | EC_WP1, WD, 4)],
+    },
+    WatchCase {
+        what: "disabled: no byte mask, or neither R nor W",
+        code: &[0x5800_0310],
+        b: WD,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, WP_R | WP_W), (WD, 0xFF | WP_U)],
+        log: &[],
+    },
+    WatchCase {
+        what: "DCBZ: a store of the whole line, EADDR = rs1",
+        code: &[dcbz(1)],
+        b: WD + 0x13,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD + 0x18, 0x80 | WP_W), NO_WP],
+        log: &[(EC_WATCH | EC_WP0 | EC_WRITE, WD + 0x13, 4)],
+    },
+    WatchCase {
+        what: "DCBZ is no load",
+        code: &[dcbz(1)],
+        b: WD + 0x13,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0xFF | WP_R), NO_WP],
+        log: &[],
+    },
+    WatchCase {
+        what: "LR.D unwatched, SC.D succeeds: the store hits",
+        code: &[lr(LR_D, 3, 1), sc(SC_D, 4, 3, 1)],
+        b: WD,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0xFF | WP_W), NO_WP],
+        log: &[(EC_WATCH | EC_WP0 | EC_WRITE, WD, 8)],
+    },
+    WatchCase {
+        what: "LR.D hits; the WATCH entry clears the reservation, so the SC.D fails: no hit",
+        code: &[lr(LR_D, 3, 1), sc(SC_D, 4, 3, 1)],
+        b: WD,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0xFF | WP_R | WP_W), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, WD, 4)],
+    },
+    WatchCase {
+        what: "a failing SC.W (no reservation) stores nothing: no hit",
+        code: &[sc(SC_W, 4, 3, 1)],
+        b: WD + 4,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0xFF | WP_W), NO_WP],
+        log: &[],
+    },
+    WatchCase {
+        what: "LR.W / SC.W at +4: bytes 4-7",
+        code: &[lr(LR_W, 3, 1), sc(SC_W, 4, 3, 1)],
+        b: WD + 4,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0x0F | WP_R | WP_W), (WD, 0x80 | WP_W)],
+        log: &[(EC_WATCH | EC_WP1 | EC_WRITE, WD + 4, 8)],
+    },
+    WatchCase {
+        what: "PUSH at an unaligned SP: the aligned-down doubleword, EADDR SP - 8",
+        code: &[0x6400_0010], // PUSH B
+        b: 0,
+        sp: UD_SP - 4,
+        r15: 0,
+        mem: None,
+        wp: [(UD_SP - 16, 0x01 | WP_W), NO_WP],
+        log: &[(EC_WATCH | EC_WP0 | EC_WRITE, UD_SP - 12, 4)],
+    },
+    WatchCase {
+        what: "POP",
+        code: &[0x6480_0300], // POP D
+        b: 0,
+        sp: UD_SP - 8,
+        r15: 0,
+        mem: None,
+        wp: [(UD_SP - 8, 0x10 | WP_R), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, UD_SP - 8, 4)],
+    },
+    WatchCase {
+        what: "CALL: frame PC = the target",
+        code: &[0x6300_0002, NOP], // CALLREL +2
+        b: 0,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(UD_SP - 8, 0xFF | WP_W), NO_WP],
+        log: &[(EC_WATCH | EC_WP0 | EC_WRITE, UD_SP - 8, 8)],
+    },
+    WatchCase {
+        what: "a CALLZ not taken pushes nothing: no hit",
+        code: &[0xA208_0000, UD_BASE + 0x40], // CALLZ (Z = 0)
+        b: 0,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(UD_SP - 8, 0xFF | WP_W), NO_WP],
+        log: &[],
+    },
+    WatchCase {
+        what: "RET: frame PC = the return address",
+        code: &[0x6300_0003, 0x6100_0003, NOP, 0x6580_0000], // CALLREL +3; JMPREL +3; NOP; RET
+        b: 0,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(UD_SP - 8, 0xFF | WP_R), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, UD_SP - 8, 4)],
+    },
+    WatchCase {
+        what: "ENTER",
+        code: &[0x6600_0001],
+        b: 0,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(UD_SP - 8, 0xFF | WP_W), NO_WP],
+        log: &[(EC_WATCH | EC_WP0 | EC_WRITE, UD_SP - 8, 4)],
+    },
+    WatchCase {
+        what: "LEAVE: the load at R15",
+        code: &[0x6640_0000],
+        b: 0,
+        sp: UD_SP,
+        r15: WD + 2,
+        mem: None,
+        wp: [(WD, 0x01 | WP_R), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, WD + 2, 4)],
+    },
+    WatchCase {
+        what: "LEAVERET: only the second doubleword (EADDR its start), frame PC = the return address",
+        code: &[0x6680_0000, NOP],
+        b: 0,
+        sp: UD_SP,
+        r15: WD + 4,
+        mem: Some((WD + 8, UD_BASE as u64 + 8)),
+        wp: [(WD + 8, 0x01 | WP_R), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, WD + 8, 8)],
+    },
+    WatchCase {
+        what: "LEAVERET: the first doubleword",
+        code: &[0x6680_0000, NOP],
+        b: 0,
+        sp: UD_SP,
+        r15: WD + 4,
+        mem: Some((WD + 8, UD_BASE as u64 + 8)),
+        wp: [(WD, 0x80 | WP_R), NO_WP],
+        log: &[(EC_WATCH | EC_WP0, WD + 4, 8)],
+    },
+    WatchCase {
+        what: "LEAVERET: both (EADDR raw)",
+        code: &[0x6680_0000, NOP],
+        b: 0,
+        sp: UD_SP,
+        r15: WD + 4,
+        mem: Some((WD + 8, UD_BASE as u64 + 8)),
+        wp: [(WD + 8, 0x01 | WP_R), (WD, 0x01 | WP_R)],
+        log: &[(EC_WATCH | EC_WP0 | EC_WP1, WD + 4, 8)],
+    },
+    WatchCase {
+        what: "a misaligned load faults: no WATCH",
+        code: &[0x5900_0310], // MEMGET16 D B
+        b: WD + 1,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(WD, 0xFF | WP_R), NO_WP],
+        log: &[(EC_MISAL_LD, WD + 1, 0)],
+    },
+    WatchCase {
+        what: "a user MMIO load faults: no WATCH",
+        code: &[0x5B00_0310],
+        b: 0xF001_0000,
+        sp: UD_SP,
+        r15: 0,
+        mem: None,
+        wp: [(0xF001_0000, 0xFF | WP_R), NO_WP],
+        log: &[(EC_ACC_LD, 0xF001_0000, 0)],
+    },
+];
+
+#[test]
+fn uwatch_coverage_direction_and_eaddr_of_each_access() {
+    for case in WATCH_CASES {
+        let mut code = case.code.to_vec();
+        code.push(HALT);
+        let mut cpu = ud_cpu(&code, false);
+        (cpu.regs[1], cpu.regs[3], cpu.regs[15], cpu.sp_alt) = (u64::from(case.b), 0x5A, u64::from(case.r15), case.sp);
+        if let Some((addr, value)) = case.mem {
+            assert!(cpu.debug_write(addr, &value.to_le_bytes()));
+        }
+        for (n, &(addr, ctrl)) in case.wp.iter().enumerate() {
+            set_wp(&mut cpu, n as u32, addr, ctrl);
+        }
+        let mut want: Vec<UdEntry> = case
+            .log
+            .iter()
+            .map(|&(ecause, eaddr, at)| ue(ecause, eaddr, UD_BASE + at, HI_USER))
+            .collect();
+        want.push(ue(EC_PRIV, HALT, UD_BASE + 4 * case.code.len() as u32, HI_USER));
+        assert_eq!(ud_log(&mut cpu, false), want, "{}", case.what);
+    }
+}
+
+#[test]
+fn uwatch_supervisor_needs_u_clear_and_interrupts_enabled() {
+    // The board test's supervisor part: U = 1 never hits the kernel; U = 0
+    // hits with DI = 0 (frame PM = 0, SS = 0); DI = 1 does not.
+    let k = 0x6000;
+    let code = [
+        0x5B00_0310,          // +0x00 MEMGET64 D [B]: WP0 R U, no hit
+        mtsr(SR_WP0_CTRL, 2), // +0x04 WP0 = R
+        0x5B00_0310,          // +0x08 hits
+        0x6C06_0400,          // +0x0C DI E
+        0x5B00_0310,          // +0x10 DI = 1: no hit
+        0x6C07_0050,          // +0x14 EI F (F = 1)
+        0x5B00_0310,          // +0x18 hits
+        HALT,
+    ];
+    let mut cpu = stage1_cpu(&code, &[IRET], false);
+    cpu.set_has_udbg(true);
+    (cpu.regs[1], cpu.regs[2], cpu.regs[5]) = (k, 0xFF | WP_R, 1);
+    set_wp(&mut cpu, 0, k as u32, 0xFF | WP_R | WP_U);
+    let mut log = Vec::new();
+    while cpu.stop.is_none() {
+        let before = cpu.exc_entries;
+        cpu.step_one(true);
+        if cpu.exc_entries != before {
+            log.push(ud_entry(&cpu));
+        }
+    }
+    assert_eq!(cpu.stop, Some(StopReason::Halt));
+    let watch = |at: u32| ue(EC_WATCH | EC_WP0, k as u32, CODE_BASE + at, 0);
+    assert_eq!(log, [watch(0x0C), watch(0x1C)]);
+}
+
+#[test]
+fn uwatch_never_frame_reads_entry_pushes_with_evec_0_or_a_debugger_attached() {
+    // A supervisor watch (U = 0) on the frame slot: the arming IRET reads it
+    // with DI = 0, the SYSCALL entry pushes it, the handler's IRET reads it.
+    let mut cpu = ud_cpu(&[SYSCALL, HALT], false);
+    set_wp(&mut cpu, 0, KERNEL_SP - 8, 0xFF | WP_R | WP_W);
+    set_wp(&mut cpu, 1, KERNEL_SP - 8, 0x01 | WP_R);
+    assert!(!cpu.irq_disabled);
+    assert_eq!(
+        ud_log(&mut cpu, false),
+        [ue(EC_SYSCALL, 0, UD_BASE + 4, HI_USER), ue(EC_PRIV, HALT, UD_BASE + 4, HI_USER)]
+    );
+    // EVEC = 0, or a debugger attached: a hitting supervisor load runs on.
+    for attached in [false, true] {
+        let mut cpu = stage1_cpu(&[0x5B00_0310, 0x5F00_0310, HALT], &[IRET], false);
+        cpu.set_has_udbg(true);
+        cpu.regs[1] = 0x6000;
+        set_wp(&mut cpu, 0, 0x6000, 0xFF | WP_R | WP_W);
+        if attached {
+            cpu.set_debugger_attached(true);
+        } else {
+            cpu.evec = 0;
+        }
+        assert_eq!(cpu.run(100, None).stop, StopReason::Halt, "attached {attached}");
+        assert_eq!((cpu.exc_entries, cpu.parked), (0, None), "attached {attached}");
+    }
+}
+
+#[test]
+fn uwatch_comes_before_a_pending_interrupt() {
+    const ISR: u32 = 0x500;
+    let mut cpu = ud_cpu(&[0x5B00_0310, NOP, HALT], false);
+    put_words(&mut cpu, ISR, &[IRET]);
+    cpu.int_vec[0] = ISR;
+    cpu.regs[1] = u64::from(WD);
+    set_wp(&mut cpu, 0, WD, 0xFF | WP_R);
+    assert_eq!(cpu.step_one(true), None, "the IRET");
+    cpu.int_mask = 1;
+    assert_eq!(cpu.step_one(true), None, "the watched load");
+    cpu.timer_pending = true;
+    assert_eq!(cpu.step_one(true), None, "WATCH, not the interrupt");
+    assert_eq!(ud_entry(&cpu), ue(EC_WATCH | EC_WP0, WD, UD_BASE + 4, HI_USER));
+    assert_eq!(cpu.step_one(true), None, "the handler's IRET");
+    assert_eq!(cpu.step_one(true), None, "the interrupt");
+    assert_eq!(cpu.pc, ISR);
+    assert_eq!(cpu.peek64(cpu.sp) as u32, UD_BASE + 4);
+}
+
+#[test]
+fn ustep_and_the_debugger() {
+    // A debugger write of UM = 0 disarms the step and drops a pending STEP
+    // (klaussCPU ustep 60bcc36); UM = 1 keeps them.
+    let mut cpu = ud_cpu(&[NOP, NOP, HALT], true);
+    assert_eq!(cpu.step_one(true), None, "the IRET");
+    assert_eq!(cpu.step_one(true), None, "the stepped NOP");
+    assert!(cpu.udbg_pending());
+    let s = cpu.system_regs();
+    assert!(s.step_armed);
+    cpu.set_mode_regs(s.sp_alt, true, false);
+    assert!(cpu.udbg_pending() && cpu.user_step_armed(), "UM = 1 keeps the step");
+    cpu.set_mode_regs(s.sp_alt, false, false);
+    assert!(!cpu.udbg_pending() && !cpu.user_step_armed(), "UM = 0 disarms");
+    assert_eq!(cpu.step_one(true), None);
+    assert_eq!((cpu.exc_entries, cpu.pc), (0, UD_BASE + 8), "no STEP");
+
+    // A debugger single step of the stepped instruction stops before the
+    // STEP; the next step (even one that takes no interrupt) takes it.
+    let mut cpu = ud_cpu(&[NOP, NOP, HALT], true);
+    cpu.set_debugger_attached(true);
+    assert_eq!(cpu.step_one(false), None, "the IRET");
+    assert_eq!(cpu.step_one(false), None, "the stepped NOP");
+    assert_eq!(cpu.debug_regs().pc, UD_BASE + 4);
+    assert_eq!(cpu.step_one(false), None, "STEP");
+    assert_eq!(ud_entry(&cpu), ue(EC_STEP, UD_BASE, UD_BASE + 4, HI_STEP));
+
+    // A stepped TRAP debug-halts (attached, EXC_PASS clear): no STEP, still
+    // armed; after the debugger moves past it, the next instruction is the
+    // stepped one.
+    let mut cpu = ud_cpu(&[TRAP, NOP, HALT], true);
+    cpu.set_debugger_attached(true);
+    assert_eq!(cpu.step_one(true), None, "the IRET");
+    assert_eq!(cpu.step_one(true), Some(StopReason::Trap));
+    assert!(cpu.user_step_armed() && !cpu.udbg_pending());
+    cpu.clear_stop();
+    let mut regs = cpu.debug_regs();
+    regs.pc = UD_BASE + 4;
+    cpu.set_debug_regs(&regs);
+    assert_eq!(cpu.step_one(true), None, "the NOP");
+    assert_eq!(cpu.step_one(true), None, "STEP");
+    assert_eq!(ud_entry(&cpu), ue(EC_STEP, UD_BASE + 4, UD_BASE + 8, HI_STEP));
+}
+
+/// The trace and UART output of `image` run from `entry` on a CPU with
+/// `ustep` (never used), after `setup`.
+fn trace_with_ustep(image: &[u8], entry: u32, ustep: bool, setup: impl Fn(&mut Cpu)) -> (Vec<u8>, Vec<u8>, StopReason) {
+    let mut cpu = Cpu::with_mem_size(image, entry, TEST_MEM);
+    cpu.install(Hardware {
+        no_ustep: !ustep,
+        ..Hardware::default()
+    });
+    setup(&mut cpu);
+    let mut trace = Vec::new();
+    let r = cpu.run(100_000, Some(&mut trace));
+    (trace, r.uart, r.stop)
+}
+
+#[test]
+fn ustep_unused_changes_nothing() {
+    // With SS never set and both watchpoints off, programs that take
+    // exceptions, TLB refills and walks run exactly as with --no-ustep.
+    let user = &REFILL_KLA[REFILL_KLA.find("\n// The user program").expect("the user program")..];
+    let setup = |cpu: &mut Cpu| {
+        assert!(cpu.debug_write(0x4_FFFE, &[0xAA, 0xBB]));
+        assert!(cpu.debug_write(0x5_0000, &[0xCC, 0xDD]));
+    };
+    for source in [REFILL_KLA.to_owned(), format!("{WALK_KLA}{user}")] {
+        let (image, entry) = assemble_kla(&source);
+        let off = trace_with_ustep(&image, entry, false, setup);
+        let on = trace_with_ustep(&image, entry, true, setup);
+        assert_eq!(off.2, StopReason::Halt);
+        assert!(off.0.len() > 1000, "a real trace");
+        assert!(off == on, "the same trace, UART output and stop");
+    }
+    // The board routines unstepped, with and without the feature.
+    let mut off = ud_cpu(&BOARD_A, false);
+    off.set_has_udbg(false);
+    let mut on = ud_cpu(&BOARD_A, false);
+    assert_eq!(ud_log(&mut off, false), ud_log(&mut on, false));
+}
+
+#[test]
+fn ustep_a_double_fault_park_disarms() {
+    // TE = 1 with a kernel SP outside kseg (MMU_PLAN §11.3): the STEP
+    // entry after the stepped NOP double-faults instead, and the park
+    // disarms and drops the STEP as the entry would have (§13.2, klaussCPU
+    // master c5da780).  The same for a stepped instruction's own fault.
+    for faulting in [false, true] {
+        let code = [if faulting { SYSCALL } else { NOP }, HALT];
+        let mut cpu = te_cpu(&code, &[IRET], true);
+        cpu.set_has_udbg(true);
+        cpu.sp_alt = 0x0002_0000; // not kseg
+        cpu.us_armed = true;
+        let stop = cpu.step_one(true);
+        if faulting {
+            assert_eq!(stop, Some(StopReason::DoubleFault(0x0002_0000)), "SYSCALL's push");
+        } else {
+            assert_eq!(stop, None, "the stepped NOP");
+            assert!(cpu.udbg_pending());
+            assert_eq!(cpu.step_one(true), Some(StopReason::DoubleFault(0x0002_0000)), "STEP's push");
+        }
+        assert!(!cpu.user_step_armed() && !cpu.udbg_pending(), "faulting {faulting}: disarmed");
+        assert_eq!(cpu.exc_entries, 0);
+    }
 }

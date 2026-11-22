@@ -223,6 +223,10 @@ pub(crate) struct Cli {
     #[arg(long, requires = "emu_host", conflicts_with = "board")]
     pub(crate) dcache_range_ops: bool,
 
+    /// Model a bitstream without the user single step and data watchpoints (klaussCPU MMU_PLAN.md §13, released in ustep_release_60bcc36): CPU_FEATURES bits 28-29 read 0, the watchpoint system registers WP0_ADDR, WP0_CTRL, WP1_ADDR, WP1_CTRL (0x40-0x43) are illegal, frame bit 45 (SS) is ignored and ECAUSE is 9 bits. Without it the emulator has them, as the release bitstream does: an IRET to user mode with SS set runs one instruction, then the STEP exception (ECAUSE 14); a watched access completes, then the WATCH exception (ECAUSE 15, ECAUSE[12:9]). For --emulate, --emulate-test and --gdbserver on the emulator
+    #[arg(long, conflicts_with = "board")]
+    pub(crate) no_ustep: bool,
+
     /// What the emulator's 16 slide switches read (SWITCHES, 0xF004_0008), e.g. 0x1234; 0 without it. For --emulate and --gdbserver on the emulator
     #[arg(long, value_name = "VALUE", value_parser = parse_u16, requires = "emu_host", conflicts_with = "board")]
     pub(crate) switches: Option<u16>,
@@ -562,6 +566,9 @@ mod tests {
             &["-i", "prog.elf", "--emulate", "--mpu", "--max-instructions", "100"],
             &["--emulate-test", "tests", "--mpu"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--mpu"],
+            &["-i", "prog.elf", "--emulate", "--no-ustep"],
+            &["--emulate-test", "tests", "--no-ustep", "--mpu"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--no-ustep"],
             &["-i", "prog.elf", "--emulate", "--no-tlb-walker"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--no-tlb-walker", "--tlb-entries", "16"],
             &["-i", "prog.elf", "--emulate", "--sd-image", "sd.img"],
@@ -659,6 +666,7 @@ mod tests {
             &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--sd-image", "sd.img"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--sd-native"],
             &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--no-tlb-walker"],
+            &["-i", "prog.elf", "--gdbserver", "1234", "--board", "--no-ustep"],
             &["-i", "prog.elf", "-s", "COM3", "--no-tlb-walker"],
             // The SD card is the emulator's.
             &["-i", "prog.elf", "--sd-image", "sd.img"],
@@ -786,6 +794,11 @@ mod tests {
         assert!(!cli.mpu, "no MPU by default, as on the Nexys A7");
 
         assert!(parse(&["-i", "prog.elf", "--emulate", "--mpu"]).unwrap().mpu);
+        assert!(
+            !cli.no_ustep,
+            "the user single step and watchpoints by default, as on the release bitstream"
+        );
+        assert!(parse(&["-i", "prog.elf", "--emulate", "--no-ustep"]).unwrap().no_ustep);
         assert!(!cli.no_tlb_walker, "the TLB walker by default, as on the release bitstream");
         assert!(parse(&["-i", "prog.elf", "--emulate", "--no-tlb-walker"]).unwrap().no_tlb_walker);
         assert_eq!(cli.switches, None, "the switches read 0 by default");

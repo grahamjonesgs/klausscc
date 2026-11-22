@@ -818,13 +818,17 @@ by the `.kla` convention here (any case is accepted).
 | `0x35` | `TLB_PTB` | the TLB walker (MMU_PLAN §11.8, `CPU_FEATURES[25]`): `[26:3]` the useg pgd's physical address |
 | `0x36` | `TLB_WALK` | `[0]` EN, `[12:8]` RR: the entry the next walker refill writes |
 | `0x37` | `TLB_WCNT` | 48-bit count of walker refills |
+| `0x40`, `0x42` | `WP0_ADDR`, `WP1_ADDR` | the user watchpoints (MMU_PLAN §13, `CPU_FEATURES[29]`): `[31:3]` the watched doubleword's VA |
+| `0x41`, `0x43` | `WP0_CTRL`, `WP1_CTRL` | `[7:0]` byte mask, `[8]` R, `[9]` W, `[10]` U (user accesses only) |
 
 `STATUS` gains `[8]` MPU_EN and `[9]` TE (translation on), and `ECAUSE`
 gains `[8]` GUARD (the ACCESS_* fault was a denial by an MPU GUARD
 region). New causes: 11 TLB_MISS_LOAD, 12 TLB_MISS_STORE, 13
 TLB_MISS_FETCH. Examples: `MTSR MPU_BASE3 B` = `0x6C61_6010`, `MFSR D
 mpu_limit15` = `0x6C42_F300`, `MTSR TLB_HI B` = `0x6C63_0010`, `MFSR D
-tlbvec` = `0x6C43_4300`.
+tlbvec` = `0x6C43_4300`. The user single step and watchpoints (MMU_PLAN §13) add
+causes 14 STEP and 15 WATCH and `ECAUSE[12:9]` (WP0, WP1, WRITE, SSTEP);
+`MTSR WP0_ADDR B` = `0x6C64_0010`.
 
 **TLB instructions** (class B, 1 word, no operands, privileged, serializing;
 any other field set is illegal):

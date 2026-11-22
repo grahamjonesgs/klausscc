@@ -80,6 +80,7 @@ mod system;
 #[cfg(test)]
 mod tests;
 mod trace;
+mod udbg;
 
 pub use board_io::BoardIoLog;
 pub use debug::{Access, DebugRegs, StopReason, Watch, WatchHit, WatchKind};
@@ -87,6 +88,7 @@ pub use mmio::{IrqState, TxBusyWrite, TxBusyWrites, UART_CYCLES_PER_BYTE, UART_C
 pub use mmu::{MpuRegion, TlbEntry};
 pub use sd::{FaultKind, HsWindow, SdCard, SdFault};
 pub use system::{Cause, SystemRegs};
+pub use udbg::UserWatch;
 
 use crate::layout::is_mmio;
 use flags::Flags;
@@ -120,6 +122,9 @@ const CTX_IRQ_DISABLED_SHIFT: u32 = 43;
 /// Interrupt / exception frame: PM, the mode the entry came from (1 = user;
 /// `MMU_PLAN.md` §3.2), which `IRET` restores.
 const CTX_PREV_MODE_SHIFT: u32 = 44;
+/// Interrupt / exception frame: SS, the user single step armed
+/// (`MMU_PLAN.md` §13, [`udbg`]): pushed by every entry, read by `IRET`.
+const CTX_STEP_SHIFT: u32 = 45;
 /// Initial stack pointer — top of DDR2, grows down. The loader sets SP near the
 /// top of memory; we use a generous value below the 128 MiB ceiling so PUSH
 /// never wraps. Matches the board's full-descending stack convention.
@@ -149,7 +154,8 @@ pub struct EmulateResult {
 
 /// The optional hardware of an emulated machine.  The default is the
 /// Nexys A7 release bitstream with no SD card: no MPU, no native SD
-/// controller, 32 TLB entries and the hardware TLB walker.
+/// controller, 32 TLB entries, the hardware TLB walker and the user single
+/// step and watchpoints.
 #[derive(Debug, Default)]
 #[expect(clippy::struct_excessive_bools, reason = "one per optional unit, as the CLI flags")]
 pub struct Hardware {
@@ -183,6 +189,11 @@ pub struct Hardware {
     /// `CACHE_OP_ADDR`, `CACHE_OP_LEN`, `CACHE_CTRL[6:4]` and
     /// `CPU_FEATURES[27]`.
     pub dcache_range_ops: bool,
+    /// No user single step or watchpoints (`--no-ustep`, `MMU_PLAN.md`
+    /// §13, [`Cpu::set_has_udbg`]): the bitstreams before them.  The
+    /// default has them (frame bit 45 SS, STEP and WATCH, SRs 0x40-0x43,
+    /// `CPU_FEATURES[29:28]`), as the release bitstream does.
+    pub no_ustep: bool,
     /// What the slide switches read (`--switches`, `SWITCHES` at
     /// `0xF004_0008`).
     pub switches: u16,
@@ -318,6 +329,23 @@ pub struct Cpu {
     walk_restarts: u64,
     /// The exception the CPU last stopped on instead of entering a handler.
     parked: Option<(Cause, u32)>,
+    // ---- user single step and watchpoints (`udbg`, MMU_PLAN §13) ----
+    /// This CPU has them ([`Cpu::set_has_udbg`]; not with `--no-ustep`).
+    has_udbg: bool,
+    /// A user single step is armed: an `IRET` of a user frame with SS.
+    us_armed: bool,
+    /// The stepped instruction (at this PC) has completed: STEP, or WATCH
+    /// with SSTEP, is taken before the next one.
+    us_done: Option<u32>,
+    /// `WP0_ADDR` / `WP0_CTRL`, `WP1_ADDR` / `WP1_CTRL`.
+    wp: [udbg::UserWatch; 2],
+    /// Either watchpoint is enabled (so accesses are compared).
+    uw_any: bool,
+    /// The current instruction's watch hits; once it has completed, the
+    /// pending WATCH.
+    uw_hit: Option<udbg::UwHit>,
+    /// `ECAUSE[12:9]` (WP0, WP1, WRITE, SSTEP) as bits 0-3.
+    ecause_udbg: u8,
     // ---- MMU stages 2 and 3 (`mmu`) ----
     /// This CPU has the stage 2 MPU ([`Cpu::set_has_mpu`]).  The Nexys A7
     /// bitstream does not, so by default neither does the emulator: its SRs
@@ -446,6 +474,13 @@ impl Cpu {
             exc_entries: 0,
             walk_restarts: 0,
             parked: None,
+            has_udbg: true,
+            us_armed: false,
+            us_done: None,
+            wp: [udbg::UserWatch::default(); 2],
+            uw_any: false,
+            uw_hit: None,
+            ecause_udbg: 0,
             has_mpu: false,
             mpu: [MpuRegion::default(); MPU_REGIONS],
             mpu_en: false,
@@ -489,6 +524,7 @@ impl Cpu {
             Box::new(sd)
         });
         self.cache_ctl.range_ops = hw.dcache_range_ops;
+        self.set_has_udbg(!hw.no_ustep);
         self.board_io.switches = hw.switches;
         self.board_io.log = hw.board_io_log;
         self.coherence = dma.then(|| Box::new(coherence::Coherence::new(self.mem.len())));
@@ -663,6 +699,12 @@ impl Cpu {
     /// debugger single-step) no interrupt is taken, and a `WAIT` completes as
     /// if woken, leaving the interrupt pending for the next continue.
     fn step_inner(&mut self, allow_irq: bool) -> Option<(u32, u32)> {
+        if self.udbg_pending() {
+            // The STEP or WATCH boundary of the last instruction: before the
+            // next one and before any interrupt (MMU_PLAN §13.2, §13.3).
+            self.take_udbg_entry();
+            return None;
+        }
         if self.waiting {
             if !allow_irq {
                 if self.timer_can_fire() {
@@ -730,14 +772,25 @@ impl Cpu {
             sim.fetched(pc, self.um);
         }
         let fetch_um = self.um;
+        // Armed before the instruction: it is the stepped one (an IRET that
+        // arms a step is not; it runs in supervisor mode, never armed).
+        let stepped = self.us_armed;
         if !self.execute(words) {
             // An illegal word or a misaligned access parks without retiring:
             // the RTL gives it no trace line (`pipeline_core.sv` WB park,
             // kinds 2 and 5) and `PERF_INSTR` counts only retirements
             // (`KlaussCPU.sv` :2342-2343).  An exception taken to `EVEC`
             // retires nothing either (`MMU_PLAN.md` §7.2), and neither does
-            // an instruction the TLB walker restarts (§11.8).
+            // an instruction the TLB walker restarts (§11.8).  Its accesses
+            // did not happen, so it hit no user watchpoint.
+            self.uw_hit = None;
             return None;
+        }
+        if stepped && self.stop.is_none() {
+            // Completed: a pending STEP, as it was the stepped instruction
+            // (a TRAP that stopped in the debugger is still the stepped one
+            // after resume, MMU_PLAN §13.2).
+            self.us_done = Some(pc);
         }
         self.instret += 1;
         if let Some(sim) = self.cachesim.as_mut() {
