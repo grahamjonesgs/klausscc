@@ -25,7 +25,9 @@ One binary, `klausscc`, does everything needed to get a program onto the CPU:
   (`CPU_FEATURES` bit 25; `--no-tlb-walker` for the bitstreams without
   it) and the user single step and watchpoints of MMU_PLAN §13
   (`CPU_FEATURES` bits 28-29, STEP and WATCH, SRs `WP0_ADDR` ...
-  `WP1_CTRL`; `--no-ustep` for the bitstreams without them). `--sd-image
+  `WP1_CTRL`; `--no-ustep` for the bitstreams without them) and the
+  7-segment display's `SEG_RAW` / `SEG_MODE` (`CPU_FEATURES` bit 30;
+  `--no-seg7raw` for the bitstreams without them). `--sd-image
   FILE` puts an SDHC card holding a raw disk image in the SD slot, for
   today's SPI-mode controller, and `--sd-native` adds the native 4-bit
   SD controller (`CPU_FEATURES` bit 21, the source 2 interrupt cascade).

@@ -194,6 +194,10 @@ pub struct Hardware {
     /// default has them (frame bit 45 SS, STEP and WATCH, SRs 0x40-0x43,
     /// `CPU_FEATURES[29:28]`), as the release bitstream does.
     pub no_ustep: bool,
+    /// No `SEG_RAW` / `SEG_MODE` on the 7-segment display (`--no-seg7raw`,
+    /// klaussCPU `seg7raw`, [`Cpu::set_has_seg_raw`]): the bitstreams
+    /// before them.  The default has them (`CPU_FEATURES[30]`).
+    pub no_seg7raw: bool,
     /// What the slide switches read (`--switches`, `SWITCHES` at
     /// `0xF004_0008`).
     pub switches: u16,
@@ -525,6 +529,7 @@ impl Cpu {
         });
         self.cache_ctl.range_ops = hw.dcache_range_ops;
         self.set_has_udbg(!hw.no_ustep);
+        self.set_has_seg_raw(!hw.no_seg7raw);
         self.board_io.switches = hw.switches;
         self.board_io.log = hw.board_io_log;
         self.coherence = dma.then(|| Box::new(coherence::Coherence::new(self.mem.len())));

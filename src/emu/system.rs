@@ -15,6 +15,7 @@
 //! can fault before their first side effect and return the cause; [`Cpu::raise`]
 //! then parks, debug-halts or enters the handler.
 
+use super::board_io::CPU_FEATURES_SEG_RAW;
 use super::mmu::{MPU_REGIONS, TLB_HI_BITS, TLB_LO_BITS, TLB_PTB_BITS, TLB_WALK_EN, TLB_WALK_RR_SHIFT, TLB_WCNT_MASK, XlateFault};
 use super::udbg::{CPU_FEATURES_UDBG, ECAUSE_UDBG_SHIFT, UserWatch};
 use super::{CTX_FLAGS_SHIFT, CTX_INT_MASK_SHIFT, CTX_IRQ_DISABLED_SHIFT, CTX_PREV_MODE_SHIFT, CYCLES_PER_INSTRUCTION, Cpu, StopReason};
@@ -582,15 +583,16 @@ impl Cpu {
     /// `CPU_FEATURES` (MMIO `0xF00F_0048`): `0x200D` (`0x100D` with 16 TLB
     /// entries), or `0x20FF` with the MPU, plus bits 22-23 (DCBZ, MAL64),
     /// bit 21 with the native SD controller, bit 25 with the TLB walker,
-    /// bit 27 with the cache range ops and bits 28-29 with the user single
-    /// step and watchpoints.
+    /// bit 27 with the cache range ops, bits 28-29 with the user single
+    /// step and watchpoints and bit 30 with the display's `SEG_RAW`.
     pub(super) fn cpu_features(&self) -> u64 {
         let mpu = if self.has_mpu { CPU_FEATURES_MPU } else { 0 };
         let sd = if self.has_sd_native() { CPU_FEATURES_SD_NATIVE } else { 0 };
         let walker = if self.has_tlb_walker { CPU_FEATURES_TLB_WALKER } else { 0 };
         let range = if self.cache_ctl.range_ops { CPU_FEATURES_DCACHE_RANGE } else { 0 };
         let udbg = if self.has_udbg { CPU_FEATURES_UDBG } else { 0 };
-        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd | walker | range | udbg
+        let seg_raw = if self.has_seg_raw() { CPU_FEATURES_SEG_RAW } else { 0 };
+        CPU_FEATURES_NO_MPU | (u64::from(self.tlb_n) << 8) | CPU_FEATURES_PERF_HW | mpu | sd | walker | range | udbg | seg_raw
     }
 
     /// Tell the CPU a debugger is attached: ILLEGAL, TRAP and `MISALIGNED_LOAD/STORE`

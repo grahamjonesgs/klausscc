@@ -192,16 +192,14 @@ pub(crate) fn run_emulate_elf(
 /// `test_path` may be a single `.kla` file, a directory (all `*.kla` inside),
 /// or a test-list file (one path per line).  For each file with expected
 /// values, assemble + emulate and compare captured UART tokens in order,
-/// with the stage 2 MPU if `mpu` (`--mpu`) and the user single step and
-/// watchpoints if `ustep` (not `--no-ustep`).
+/// with the optional hardware `hw` says.
 #[cfg(not(tarpaulin_include))]
 pub(crate) fn run_emulate_test(
     isa: &Isa,
     macro_list: &[macros::Macro],
     test_path: &Path,
     max_instructions: u64,
-    mpu: bool,
-    ustep: bool,
+    hw: TestHw,
     msg_list: &mut Diagnostics,
 ) -> Result<(), Error> {
     // Resolve the list of .kla files to test.
@@ -235,7 +233,7 @@ pub(crate) fn run_emulate_test(
     let mut failed_files: Vec<String> = Vec::new();
 
     for file in &files {
-        match verify_emulated(file, isa, macro_list, max_instructions, mpu, ustep) {
+        match verify_emulated(file, isa, macro_list, max_instructions, hw) {
             Ok(Verdict::NotValidatable) => {} // skip non-validatable files silently
             Ok(Verdict::Pass { matched, instructions }) => {
                 total_files += 1;
@@ -282,6 +280,27 @@ pub(crate) fn run_emulate_test(
 }
 
 /// Outcome of checking one `.kla` file against the emulator.
+/// The optional hardware an `--emulate-test` run's CPU has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TestHw {
+    /// The stage 2 MPU (`--mpu`).
+    pub(crate) mpu: bool,
+    /// The user single step and watchpoints (not `--no-ustep`).
+    pub(crate) ustep: bool,
+    /// The display's `SEG_RAW` / `SEG_MODE` (not `--no-seg7raw`).
+    pub(crate) seg7raw: bool,
+}
+
+impl TestHw {
+    /// No MPU, user step or `SEG_RAW`: the bitstreams before them.
+    #[cfg(test)]
+    const OLD: Self = Self {
+        mpu: false,
+        ustep: false,
+        seg7raw: false,
+    };
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Verdict {
     /// The file has no expected UART values, so there is nothing to check.
@@ -309,17 +328,9 @@ pub(crate) enum Verdict {
 ///
 /// Each UART line contributes its leading 8 upper-case hex digits (mirroring the
 /// serial test runner), and the values are compared in order.  The CPU has
-/// the stage 2 MPU if `mpu` (`--mpu`) and the user single step and
-/// watchpoints if `ustep` (not `--no-ustep`).  Returns `Err` with a short reason
+/// the optional hardware `hw` says.  Returns `Err` with a short reason
 /// when the file cannot be read or does not assemble.
-pub(crate) fn verify_emulated(
-    file: &str,
-    isa: &Isa,
-    macro_list: &[macros::Macro],
-    max_instructions: u64,
-    mpu: bool,
-    ustep: bool,
-) -> Result<Verdict, String> {
+pub(crate) fn verify_emulated(file: &str, isa: &Isa, macro_list: &[macros::Macro], max_instructions: u64, hw: TestHw) -> Result<Verdict, String> {
     // A file that cannot be read is a failure, not a silently skipped file.
     let source = fs::read_to_string(file).map_err(|e| format!("cannot read: {e}"))?;
     let raw_lines: Vec<String> = source.lines().map(String::from).collect();
@@ -335,8 +346,9 @@ pub(crate) fn verify_emulated(
     };
 
     let hw = emu::Hardware {
-        mpu,
-        no_ustep: !ustep,
+        mpu: hw.mpu,
+        no_ustep: !hw.ustep,
+        no_seg7raw: !hw.seg7raw,
         ..emu::Hardware::default()
     };
     let result = emu::emulate_image_input(&image.to_ddr(), image.entry, max_instructions, hw, &[], &[], None);
@@ -405,9 +417,10 @@ mod tests {
     /// The corpus `--emulate-test tests/fixtures` runs: every file with expected
     /// UART values must assemble and print exactly those values on the emulator,
     /// both with the stage 2 MPU (`--mpu`) and without it (the default, the
-    /// Nexys A7), and without the user single step and watchpoints
-    /// (`--no-ustep`), except that `hw_mpu.kla` needs the MPU and
-    /// `hw_ustep.kla` the user step: without them the program reads its
+    /// Nexys A7), and without the user single step and watchpoints or the
+    /// display's `SEG_RAW` (`--no-ustep --no-seg7raw`), except that
+    /// `hw_mpu.kla` needs the MPU, `hw_ustep.kla` the user step and
+    /// `hw_seg7raw.kla` `SEG_RAW`: without them the program reads its
     /// `CPU_FEATURES` bits clear, prints 0 and stops.
     #[test]
     fn emulator_corpus_passes() {
@@ -415,6 +428,8 @@ mod tests {
         const NEEDS_MPU: [&str; 1] = ["hw_mpu.kla"];
         /// The fixtures that fail with `--no-ustep`.
         const NEEDS_USTEP: [&str; 1] = ["hw_ustep.kla"];
+        /// The fixtures that fail with `--no-seg7raw`.
+        const NEEDS_SEG7RAW: [&str; 1] = ["hw_seg7raw.kla"];
         let (isa, macro_list) = v2_tables();
         let mut files: Vec<PathBuf> = fs::read_dir(fixture_dir())
             .expect("read fixture dir")
@@ -424,12 +439,25 @@ mod tests {
             .collect();
         files.sort();
 
-        for (mpu, ustep) in [(true, true), (false, true), (false, false)] {
+        for (mpu, ustep, seg7raw) in [(true, true, true), (false, true, true), (false, false, false)] {
             let mut passed: Vec<String> = Vec::new();
             let mut failures: Vec<String> = Vec::new();
             for path in &files {
                 let file = path.to_string_lossy();
-                let verdict = verify_emulated(&file, &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, mpu, ustep);
+                let hw = TestHw { mpu, ustep, seg7raw };
+                let verdict = verify_emulated(&file, &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, hw);
+                if !seg7raw && NEEDS_SEG7RAW.iter().any(|name| file.ends_with(name)) {
+                    // a1, CPU_FEATURES[30], reads 0.
+                    let no_seg7raw = Verdict::Fail {
+                        matched: 0,
+                        expected: 33,
+                        diff: "at #1: expected 00000001, got 00000000".to_owned(),
+                    };
+                    if verdict != Ok(no_seg7raw) {
+                        failures.push(format!("{file} with --no-seg7raw: {verdict:?}"));
+                    }
+                    continue;
+                }
                 if !ustep && NEEDS_USTEP.iter().any(|name| file.ends_with(name)) {
                     // a1, CPU_FEATURES[29:28], reads 0.
                     let no_ustep = Verdict::Fail {
@@ -460,13 +488,16 @@ mod tests {
                     other => failures.push(format!("{file}: {other:?}")),
                 }
             }
-            assert!(failures.is_empty(), "emulator corpus failures (mpu {mpu}, ustep {ustep}): {failures:#?}");
+            assert!(
+                failures.is_empty(),
+                "emulator corpus failures (mpu {mpu}, ustep {ustep}, seg7raw {seg7raw}): {failures:#?}"
+            );
             // Guards against the corpus silently shrinking (e.g. a file that stops
             // declaring its expected values).
-            let want = 30 + usize::from(mpu) + usize::from(ustep);
+            let want = 30 + usize::from(mpu) + usize::from(ustep) + usize::from(seg7raw);
             assert!(
                 passed.len() >= want,
-                "only {} validated files passed (mpu {mpu}, ustep {ustep}): {passed:#?}",
+                "only {} validated files passed (mpu {mpu}, ustep {ustep}, seg7raw {seg7raw}): {passed:#?}",
                 passed.len()
             );
         }
@@ -483,10 +514,13 @@ mod tests {
         //   feature, off in the Nexys A7 bitstream for timing margin
         //   (klaussCPU MMU_PLAN §10; Graham, 2026-11-09).  It passed 17/17
         //   on the MPU bitstream mmu_da8c085.
+        // - hw_seg7raw.kla: SEG_RAW / SEG_MODE (CPU_FEATURES[30], klaussCPU
+        //   branch seg7raw) are built but not yet in a release bitstream;
+        //   the test joins the list once a board run passes it.
         // (hw_tlb.kla joined the list when the stage 3 release bitstream,
         // klaussCPU mmu 98fe470, passed it 19/19, and hw_ustep.kla when
         // ustep_release_60bcc36 passed it 47/47.)
-        const NEEDS_NEWER_BITSTREAM: [&str; 1] = ["hw_mpu.kla"];
+        const NEEDS_NEWER_BITSTREAM: [&str; 2] = ["hw_mpu.kla", "hw_seg7raw.kla"];
         let mut with_values: Vec<String> = fs::read_dir(fixture_dir())
             .expect("read fixture dir")
             .flatten()
@@ -527,7 +561,7 @@ mod tests {
         fs::write(&file, source).expect("write fixture");
 
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false, false);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, TestHw::OLD);
         assert_eq!(
             verdict,
             Ok(Verdict::Fail {
@@ -554,7 +588,7 @@ mod tests {
         fs::write(&file, source).expect("write test_regs");
 
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false, false);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, TestHw::OLD);
         assert!(matches!(verdict, Ok(Verdict::Pass { matched: 6, .. })), "{verdict:?}");
     }
 
@@ -574,7 +608,7 @@ mod tests {
         fs::copy(fixture_dir().join("test_regs.kla"), &file).expect("copy test_regs");
 
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false, false);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, TestHw::OLD);
         let Ok(Verdict::Fail { expected: 6, diff, .. }) = &verdict else {
             panic!("{verdict:?}");
         };
@@ -606,7 +640,7 @@ mod tests {
         let file = dir.path().join("plain.kla");
         fs::write(&file, "// no expected values here\nHALT\n").expect("write fixture");
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false, false);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, TestHw::OLD);
         assert_eq!(verdict, Ok(Verdict::NotValidatable));
     }
 
@@ -615,7 +649,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let file = dir.path().join("missing.kla");
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false, false);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, TestHw::OLD);
         assert!(matches!(&verdict, Err(reason) if reason.starts_with("cannot read: ")), "{verdict:?}");
     }
 
@@ -625,7 +659,7 @@ mod tests {
         let file = dir.path().join("bad.kla");
         fs::write(&file, "//   00000001  (never printed)\nNOTANOPCODE A\nHALT\n").expect("write fixture");
         let (isa, macro_list) = v2_tables();
-        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, false, false);
+        let verdict = verify_emulated(&file.to_string_lossy(), &isa, &macro_list, emu::DEFAULT_MAX_INSTRUCTIONS, TestHw::OLD);
         assert_eq!(verdict, Err("assembly error".to_owned()));
     }
 }

@@ -198,7 +198,12 @@ fn run_mode(cli: &Cli, mode: &Mode<'_>, msg_list: &mut Diagnostics) -> Result<()
         // Emulator batch-verify mode: assemble + emulate each .kla and check UART.
         Mode::EmulateTest(path) => {
             let (isa, macro_list) = opcode_tables(msg_list);
-            run_emulate_test(&isa, &macro_list, Path::new(path), cli.max_instructions, cli.mpu, !cli.no_ustep, msg_list)
+            let hw = commands::TestHw {
+                mpu: cli.mpu,
+                ustep: !cli.no_ustep,
+                seg7raw: !cli.no_seg7raw,
+            };
+            run_emulate_test(&isa, &macro_list, Path::new(path), cli.max_instructions, hw, msg_list)
         }
         // Batch test list mode.
         Mode::TestList { list, port } => {
@@ -348,6 +353,7 @@ fn emu_hardware(cli: &Cli, msg_list: &mut Diagnostics) -> Result<emu::Hardware, 
         sd_hs_window: cli.sd_hs_window,
         dcache_range_ops: cli.dcache_range_ops,
         no_ustep: cli.no_ustep,
+        no_seg7raw: cli.no_seg7raw,
         switches: cli.switches.unwrap_or(0),
         board_io_log,
     })

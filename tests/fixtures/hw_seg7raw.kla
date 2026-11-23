@@ -1,0 +1,183 @@
+// Test 32: the 7-segment display's SEG_RAW (0xF003_0020) and SEG_MODE
+// (0xF003_0028) registers (klaussCPU MMIO_MAP.md, branch seg7raw).  Needs a
+// bitstream with CPU_FEATURES (0xF00F_0048) bit 30: on an older one a1
+// prints zero and the test halts there (a mismatch, not a park).
+//
+// SEG_RAW byte k is digit k from the right (bits 0-6 segments a-g, bit 7
+// the decimal point); it honours the byte enables, shares its 64 bits with
+// SEG_ALL's read, and a store sets SEG_MODE[0] RAW.  SEG_LOW / SEG_HIGH,
+// SEG_ALL and SEG_BLANK clear RAW, SEG_LOW / SEG_HIGH blanking the other
+// four digits (0x22 each) when it was set.  Each 64-bit value prints as
+// two lines, [63:32] then [31:0].  The program ends in raw mode with the
+// pattern 807F3F065B4F666D shown ("8." "8" "0" "1" "2" "3" "4" "5"):
+// HALT keeps a raw display.
+//
+//   a) CPU_FEATURES[30], SEG_MODE after the load
+//   b) a 64-bit SEG_RAW store: SEG_RAW, SEG_ALL and SEG_MODE read back
+//   c) byte, 32- and 16-bit stores set only their digits; narrow loads
+//   d) SEG_LOW / SEG_HIGH leave raw mode, blanking the other half; outside
+//      raw mode they leave it alone
+//   e) SEG_ALL and SEG_BLANK leave raw mode; a byte store enters it; a
+//      SEG_MODE write is dropped
+//
+// Expected UART output:
+//   00000001  a1 CPU_FEATURES[30]
+//   00000000  a2 SEG_MODE after the load
+//   807F3F06  b1 SEG_RAW [63:32]
+//   5B4F666D  b2 SEG_RAW [31:0]
+//   807F3F06  b3 SEG_ALL reads the same bytes
+//   5B4F666D  b4
+//   00000001  b5 SEG_MODE RAW
+//   11223344  c1 SEG_RAW after a byte store to digit 3, 32 bits to 7-4 and
+//   AB4F5566  c2 16 bits to 1-0
+//   000000AB  c3 a byte load of digit 3
+//   0000AB4F  c4 a 16-bit load of digits 3-2
+//   11223344  c5 a 32-bit load of digits 7-4
+//   00000011  c6 a byte load of digit 7
+//   AB4F5566  c7 a 32-bit load of digits 3-0
+//   00000001  c8 a byte load of SEG_MODE
+//   22222222  d1 SEG_LOW 1234 in raw mode: the upper half blank
+//   01020304  d2
+//   00000000  d3 SEG_MODE
+//   0A0B0C0D  d4 SEG_HIGH ABCD in raw mode: the lower half blank
+//   22222222  d5
+//   00000000  d6 SEG_MODE
+//   0A0B0C0D  d7 SEG_LOW 5678 outside raw mode keeps the upper half
+//   05060708  d8
+//   00000000  e1 SEG_MODE after SEG_ALL DEADBEEF in raw mode
+//   0D0E0A0D  e2 SEG_ALL
+//   0B0E0E0F  e3
+//   00000001  e4 SEG_MODE after a byte store to digit 7
+//   010E0A0D  e5 SEG_RAW: only digit 7 changed
+//   0B0E0E0F  e6
+//   00000000  e7 SEG_MODE after SEG_BLANK
+//   22222222  e8 SEG_ALL
+//   22222222  e9
+//   00000001  e10 SEG_MODE after a SEG_RAW store and a dropped SEG_MODE write
+
+_start
+DELAYV 0x0500
+$NEWLINE
+
+// a) CPU_FEATURES[30], SEG_MODE
+SETR B 0xF00F0048
+MEMGET64 A B
+SHRV A 30
+ANDV A 1
+$TXR A
+$NEWLINE
+BNEV A 1 NO_SEG7RAW:
+SETR B 0xF0030000
+LDIDX64 A B 0x28
+$TXR A
+$NEWLINE
+
+// b) a 64-bit store
+SETR64 A 0x807F3F065B4F666D
+STIDX64 A B 0x20
+LDIDX64 A B 0x20
+CALL PR64:
+LDIDX64 A B 0x10
+CALL PR64:
+LDIDX64 A B 0x28
+$TXR A
+$NEWLINE
+
+// c) narrow stores and loads
+SETR A 0xAB
+STIDX8 A B 0x23
+SETR A 0x11223344
+STIDX32 A B 0x24
+SETR A 0x5566
+STIDX16 A B 0x20
+LDIDX64 A B 0x20
+CALL PR64:
+LDIDX8 A B 0x23
+$TXR A
+$NEWLINE
+LDIDX16 A B 0x22
+$TXR A
+$NEWLINE
+LDIDX32 A B 0x24
+$TXR A
+$NEWLINE
+LDIDX8 A B 0x27
+$TXR A
+$NEWLINE
+LDIDX32 A B 0x20
+$TXR A
+$NEWLINE
+LDIDX8 A B 0x28
+$TXR A
+$NEWLINE
+
+// d) SEG_LOW / SEG_HIGH
+SETR A 0x1234
+STIDX32 A B 0x00
+LDIDX64 A B 0x10
+CALL PR64:
+LDIDX64 A B 0x28
+$TXR A
+$NEWLINE
+SETR64 A 0x807F3F065B4F666D
+STIDX64 A B 0x20
+SETR A 0xABCD
+STIDX32 A B 0x08
+LDIDX64 A B 0x10
+CALL PR64:
+LDIDX64 A B 0x28
+$TXR A
+$NEWLINE
+SETR A 0x5678
+STIDX32 A B 0x00
+LDIDX64 A B 0x10
+CALL PR64:
+
+// e) SEG_ALL, a byte store, SEG_BLANK, a SEG_MODE write
+SETR64 A 0x807F3F065B4F666D
+STIDX64 A B 0x20
+SETRU A 0xDEADBEEF
+STIDX32 A B 0x10
+LDIDX64 A B 0x28
+$TXR A
+$NEWLINE
+LDIDX64 A B 0x10
+CALL PR64:
+SETR A 0x01
+STIDX8 A B 0x27
+LDIDX64 A B 0x28
+$TXR A
+$NEWLINE
+LDIDX64 A B 0x20
+CALL PR64:
+SETR A 0
+STIDX64 A B 0x18
+LDIDX64 A B 0x28
+$TXR A
+$NEWLINE
+LDIDX64 A B 0x10
+CALL PR64:
+SETR64 A 0x807F3F065B4F666D
+STIDX64 A B 0x20
+SETR A 0
+STIDX64 A B 0x28
+LDIDX64 A B 0x28
+$TXR A
+$NEWLINE
+HALT
+
+NO_SEG7RAW:
+HALT
+
+// Print A as two lines, [63:32] then [31:0].
+PR64:
+PUSH A
+SHRV A 32
+$TXR A
+$NEWLINE
+POP A
+$TXR A
+$NEWLINE
+RET
+
+!include uart_stubs.kla

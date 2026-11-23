@@ -230,7 +230,10 @@ makes SRs 0x35-0x37 ILLEGAL. Bits 28-29, the user single step and the
 watchpoints, are set as on the release bitstream (klaussCPU
 `ustep_release_60bcc36`); `--no-ustep` (`Cpu::set_has_udbg`) clears them,
 makes SRs 0x40-0x43 ILLEGAL, `ECAUSE` 9 bits, and frame bit 45 ignored
-(`0x02C0_200D` in all, against `0x32C0_200D`).
+(`0x02C0_200D` in all, against `0x32C0_200D`). Bit 30, the 7-segment
+display's `SEG_RAW` / `SEG_MODE` (klaussCPU branch `seg7raw`, "Board
+I/O" below), is set; `--no-seg7raw` (`Cpu::set_has_seg_raw`) clears it.
+The default reads `0x72C0_200D`.
 
 **CYCLE** is the emulator's modelled cycle count since reset: 2 cycles
 per retired instruction (`CYCLES_PER_INSTRUCTION`), 2 per exception
@@ -813,6 +816,8 @@ RTL (the MMIO read mux and write handler in `KlaussCPU.sv`):
 | `0xF003_0008` | `SEG_HIGH` | 4 hex digits `[15:0]` to the upper display | its padded value, 32 bits |
 | `0xF003_0010` | `SEG_ALL` | 8 hex digits `[31:0]`, `[31:16]` to the upper display | `{upper, lower}` padded, 64 bits |
 | `0xF003_0018` | `SEG_BLANK` | any write blanks both displays | 0 |
+| `0xF003_0020` | `SEG_RAW` | segment patterns, byte *k* = digit *k* from the right; byte enables honoured | the same 64 bits as `SEG_ALL`, the access's lanes |
+| `0xF003_0028` | `SEG_MODE` | dropped | `[0]` RAW |
 | `0xF004_0000` | `LEDS` | `[15:0]` | the last write, 16 bits |
 | `0xF004_0008` | `SWITCHES` | dropped | `--switches VALUE` (default 0), 16 bits |
 
@@ -825,6 +830,21 @@ displays as it starts the pipeline, so `LEDS`, `RGB1` and `RGB2` read 0
 and `SEG_LOW` / `SEG_HIGH` read `0x2222_2222`. Every other offset in the
 three windows reads 0 and ignores writes.
 
+`SEG_RAW` and `SEG_MODE` (klaussCPU `MMIO_MAP.md`, branch `seg7raw`,
+`CPU_FEATURES[30]`) drive the segments directly. In each byte of
+`SEG_RAW`, bits 0-6 are segments a-g and bit 7 the decimal point, 1 =
+lit; byte 0 is the rightmost digit. Unlike the other registers it honours
+the byte enables: a 64-bit store sets all eight digits, a 32-bit store at
+`0x20` / `0x24` the right / left four, a 16-bit or byte store only its
+own. It is the storage `SEG_ALL` reads, so `SEG_RAW` reads the same as
+`SEG_ALL`, and a load of any width returns its own lanes (a 32-bit load at
+`0x24` the left four digits). Any `SEG_RAW` store sets `SEG_MODE[0]`
+RAW; `SEG_ALL` and `SEG_BLANK` clear it as they set all eight digits, and
+`SEG_LOW` / `SEG_HIGH` clear it and, if it was set, blank the other four
+digits (`0x22` each), which held segment patterns. A program starts with
+RAW clear; `HALT` leaves it. `--no-seg7raw` models the bitstreams before
+them: both read 0 and drop writes, and `CPU_FEATURES[30]` reads 0.
+
 These devices ignore the byte enables, and the core replicates a sub-word
 store's data across the doubleword (`pipeline_core.sv` `exo_wdata`:
 `{8{c[7:0]}}`, `{4{c[15:0]}}`, `{2{c[31:0]}}`), so the emulator does the
@@ -835,9 +855,14 @@ bytes of the register, as for every device.
 `--board-io-log FILE` writes one line for each store to an LED, RGB LED
 or display register, with what the device latched: `LEDS 0x5a5a`,
 `RGB1 0xf00`, `RGB2 0x00f`, `SEG_LOW 1234`, `SEG_HIGH abcd`, `SEG_ALL
-deadbeef` (the digits written) and `SEG_BLANK`. A store of the same value
+deadbeef` (the digits written), `SEG_BLANK` and `SEG_RAW
+807f3f065b4f666d` (a 64-bit store). A narrower `SEG_RAW` store logs the
+digits it set, numbered from the right, and their bytes, leftmost first:
+`SEG_RAW[3] ab`, `SEG_RAW[1:0] 5566`, `SEG_RAW[7:4] 11223344`. A
+`SEG_LOW` / `SEG_HIGH` line after a `SEG_RAW` one also blanked the other
+four digits. A store of the same value
 twice is logged twice; stores to `SWITCHES` or unlisted offsets are not
-logged. Each line is written as it happens, unbuffered, so a run that is
+logged, nor are `SEG_MODE` writes. Each line is written as it happens, unbuffered, so a run that is
 killed keeps its log. With `-` the lines go to stderr after `klausscc io:
 `, as the emulator's other stderr notes do. Before this model these
 windows read 0 and dropped writes, which no bitstream ever did, so there is

@@ -227,11 +227,15 @@ pub(crate) struct Cli {
     #[arg(long, conflicts_with = "board")]
     pub(crate) no_ustep: bool,
 
+    /// Model a bitstream without the 7-segment display's SEG_RAW and SEG_MODE registers (klaussCPU MMIO_MAP.md, branch seg7raw): CPU_FEATURES bit 30 reads 0, and SEG_RAW (0xF003_0020) and SEG_MODE (0xF003_0028) read 0 and drop writes. Without it the emulator has them: SEG_RAW sets the eight digits' segments directly (byte k is digit k from the right, bits 0-6 segments a-g, bit 7 the decimal point; the byte enables are honoured, so a narrower store sets only its own digits), any SEG_RAW store sets SEG_MODE[0] RAW, and SEG_LOW, SEG_HIGH (which then blank the other four digits), SEG_ALL, SEG_BLANK and a program start clear it. For --emulate, --emulate-test and --gdbserver on the emulator
+    #[arg(long, conflicts_with = "board")]
+    pub(crate) no_seg7raw: bool,
+
     /// What the emulator's 16 slide switches read (SWITCHES, 0xF004_0008), e.g. 0x1234; 0 without it. For --emulate and --gdbserver on the emulator
     #[arg(long, value_name = "VALUE", value_parser = parse_u16, requires = "emu_host", conflicts_with = "board")]
     pub(crate) switches: Option<u16>,
 
-    /// Log each store the program makes to the emulator's LED bar (LEDS, 0xF004_0000), RGB LEDs (RGB1, RGB2, 0xF002_0000) and 7-segment display (SEG_LOW, SEG_HIGH, SEG_ALL, SEG_BLANK, 0xF003_0000) to FILE, one line a store with what the device latched: "LEDS 0x5a5a", "RGB1 0xf00", "SEG_LOW 1234", "SEG_HIGH abcd", "SEG_ALL deadbeef", "SEG_BLANK". With '-' the lines go to stderr, after "klausscc io: ". For --emulate and --gdbserver on the emulator
+    /// Log each store the program makes to the emulator's LED bar (LEDS, 0xF004_0000), RGB LEDs (RGB1, RGB2, 0xF002_0000) and 7-segment display (SEG_LOW, SEG_HIGH, SEG_ALL, SEG_BLANK, SEG_RAW, 0xF003_0000) to FILE, one line a store with what the device latched: "LEDS 0x5a5a", "RGB1 0xf00", "SEG_LOW 1234", "SEG_HIGH abcd", "SEG_ALL deadbeef", "SEG_BLANK", "SEG_RAW 807f3f065b4f666d"; a SEG_RAW (0xF003_0020) store narrower than 64 bits logs the digits it set, numbered from the right, and their bytes, leftmost first: "SEG_RAW[3] ab", "SEG_RAW[1:0] 5566", "SEG_RAW[7:4] 11223344". With '-' the lines go to stderr, after "klausscc io: ". For --emulate and --gdbserver on the emulator
     #[arg(long, value_name = "FILE", requires = "emu_host", conflicts_with = "board")]
     pub(crate) board_io_log: Option<PathBuf>,
 
@@ -799,6 +803,8 @@ mod tests {
             "the user single step and watchpoints by default, as on the release bitstream"
         );
         assert!(parse(&["-i", "prog.elf", "--emulate", "--no-ustep"]).unwrap().no_ustep);
+        assert!(!cli.no_seg7raw, "SEG_RAW / SEG_MODE by default");
+        assert!(parse(&["-i", "prog.elf", "--emulate", "--no-seg7raw"]).unwrap().no_seg7raw);
         assert!(!cli.no_tlb_walker, "the TLB walker by default, as on the release bitstream");
         assert!(parse(&["-i", "prog.elf", "--emulate", "--no-tlb-walker"]).unwrap().no_tlb_walker);
         assert_eq!(cli.switches, None, "the switches read 0 by default");

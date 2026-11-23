@@ -127,8 +127,9 @@ The input's extension picks what `-i` does: a `.kla` file is assembled, a `.kbt`
 | `--mpu` | Give the emulator the MMU stage 2 MPU (see [MPU and TLB](#mpu-and-tlb)), for `--emulate`, `--emulate-test` and `--gdbserver` without `--board`. Without it the emulator has no MPU, as the Nexys A7 bitstream has none |
 | `--uart-in FILE` | With `--emulate` or `-m`: type FILE's bytes into the emulated UART receiver, one byte whenever the receive FIFO has room and 2,000 instructions have passed since the last, like keyboard input. For scripted sessions with programs that read the console (the UART output is printed when the run ends). With `-m` (board serial monitor) the bytes go to the board a line at a time, one byte every 3 ms, in place of the keyboard (no raw mode; Ctrl+C still ends the run); lines are 200 ms apart unless `--uart-prompt` paces them. Not for `--gdbserver` |
 | `--uart-prompt TEXT` | With `--uart-in`: type each line (the first one too) only after the program has printed TEXT since the previous line, e.g. a shell's prompt, so typed input doesn't interleave with output. The run stops (`stop = InputDone`) when TEXT is printed again after the file's last line (end the file with a newline). With `-m` the monitor prints `Script done.` and exits when TEXT comes back after the last line |
+| `--no-seg7raw` | Model a bitstream without the 7-segment `SEG_RAW` / `SEG_MODE` registers (`CPU_FEATURES` bit 30): both read 0 and drop writes. Without it the emulator has them. For `--emulate`, `--emulate-test` and `--gdbserver` without `--board` |
 | `--switches <VALUE>` | What the emulator's 16 slide switches read (`SWITCHES`, `0xF004_0008`), e.g. `0x1234`; default 0. For `--emulate` and `--gdbserver` without `--board` |
-| `--board-io-log <FILE>` | Log each store to the emulator's LED bar, RGB LEDs and 7-segment display to `FILE`, one line each with what the device latched (`LEDS 0x5a5a`, `RGB1 0xf00`, `SEG_LOW 1234`, `SEG_HIGH abcd`, `SEG_ALL deadbeef`, `SEG_BLANK`); `-` writes them to stderr after `klausscc io: `. For `--emulate` and `--gdbserver` without `--board` |
+| `--board-io-log <FILE>` | Log each store to the emulator's LED bar, RGB LEDs and 7-segment display to `FILE`, one line each with what the device latched (`LEDS 0x5a5a`, `RGB1 0xf00`, `SEG_LOW 1234`, `SEG_HIGH abcd`, `SEG_ALL deadbeef`, `SEG_BLANK`, `SEG_RAW 807f3f065b4f666d`; a narrower `SEG_RAW` store logs its digits, numbered from the right, and their bytes: `SEG_RAW[3] ab`, `SEG_RAW[7:4] 11223344`); `-` writes them to stderr after `klausscc io: `. For `--emulate` and `--gdbserver` without `--board` |
 | `--gdbserver <PORT>` | Debug an ELF on the emulator over the GDB remote protocol on `127.0.0.1:PORT` (for lldb) |
 | `--board` | With `--gdbserver`, debug the real board over its USB-JTAG instead (needs a `DEBUG_EN=1` bitstream and a klausscc built with `--features board`). With `-s`, the ELF is first loaded over the UART. |
 | `--jtag-khz <KHZ>` | JTAG clock for `--board` (default: 10000) |
@@ -1311,10 +1312,14 @@ The emulator models them: reads return what the board would, the switches read t
 | `0xF003_0008` | `SEG_HIGH` | W | 4 hex digits (bits 15:0) for the upper group |
 | `0xF003_0010` | `SEG_ALL` | W | 8 hex digits (bits 31:0) across both groups |
 | `0xF003_0018` | `SEG_BLANK` | W | Any write blanks both groups |
+| `0xF003_0020` | `SEG_RAW` | RW | One segment pattern per digit, 64 bits: byte *k* is digit *k* from the right, bits 0-6 segments a-g, bit 7 the decimal point (`CPU_FEATURES` bit 30) |
+| `0xF003_0028` | `SEG_MODE` | R | Bit 0: the display shows `SEG_RAW` patterns (`CPU_FEATURES` bit 30) |
 | `0xF002_0000` | `RGB1` | RW | RGB LED 1: bits 11:8 red, 7:4 green, 3:0 blue |
 | `0xF002_0008` | `RGB2` | RW | RGB LED 2, same layout |
 
 Reading `SEG_LOW`, `SEG_HIGH` and `SEG_ALL` returns the display's internal padded form (`0x0d` per digit), not the value written: `SEG_LOW` and `SEG_HIGH` 32 bits, `SEG_ALL` 64 bits (upper display in bits 63:32). A blank display reads `0x22` per digit, and both displays are blank when a program starts. These devices ignore the store size: a byte or halfword store is repeated across the register, so `MEMSET8` of `0x5A` to `LEDS` lights `0x5A5A`.
+
+`SEG_RAW` is the exception: it shows any pattern (letters, a decimal point on any digit, blank digits) and a byte, halfword or 32-bit store sets only its own digits (a 32-bit store at `0x24` the left four). It is the same 64 bits `SEG_ALL` reads, so after glyph-mode writes start with a 64-bit store. Any `SEG_RAW` store sets `SEG_MODE` bit 0; `SEG_ALL`, `SEG_BLANK`, `SEG_LOW` and `SEG_HIGH` clear it, the last two also blanking the other four digits when it was set, and so does a program start (`HALT` does not). On bitstreams without it (`CPU_FEATURES` bit 30 clear; the emulator with `--no-seg7raw`) both read 0 and ignore writes.
 
 ```
 _start

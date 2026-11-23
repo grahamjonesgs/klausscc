@@ -59,6 +59,7 @@ fn cpu(card: bool, native: bool) -> Cpu {
         sd_hs_window: None,
         dcache_range_ops: false,
         no_ustep: false,
+        no_seg7raw: false,
         switches: 0,
         board_io_log: None,
     });
@@ -273,7 +274,7 @@ fn no_card_reads_zero_as_before() {
         wr(&mut cpu, offset, u64::MAX);
         assert_eq!(rd(&mut cpu, offset), 0, "offset 0x{offset:03X}");
     }
-    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (3 << 22) | (1 << 25) | (3 << 28));
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (3 << 22) | (1 << 25) | (3 << 28) | (1 << 30));
     cpu.mmio_write(INT2_EN, 3);
     assert_eq!(cpu.mmio_read(INT2_EN), 0);
     assert_eq!(cpu.mmio_read(INT2_PENDING), 0);
@@ -295,7 +296,7 @@ fn spi_controller_without_native_matches_release_bitstream() {
         wr(&mut cpu, offset, 0x1234);
         assert_eq!(rd(&mut cpu, offset), 0, "offset 0x{offset:03X}");
     }
-    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (3 << 22) | (1 << 25) | (3 << 28));
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x200D | (3 << 22) | (1 << 25) | (3 << 28) | (1 << 30));
     cpu.mmio_write(INT2_EN, 3);
     assert_eq!(cpu.mmio_read(INT2_EN), 0);
     // SD_BUF is plain RAM, byte-addressable like RAM.
@@ -566,7 +567,7 @@ fn pop(cpu: &mut Cpu, n: usize) -> Vec<u8> {
 fn native_init(cpu: &mut Cpu) {
     assert_eq!(
         cpu.mmio_read(CPU_FEATURES) & !(1 << 27),
-        0x200D | (1 << 21) | (3 << 22) | (1 << 25) | (3 << 28)
+        0x200D | (1 << 21) | (3 << 22) | (1 << 25) | (3 << 28) | (1 << 30)
     );
     assert_eq!(rd(cpu, SDM_CAPS) & !CAPS_DMA & !CAPS_HS, 0x0008_0101);
     wr(cpu, SD_CTRL, CLK_IDENT | CTRL_SD_MODE);
@@ -1470,6 +1471,7 @@ fn cpu_dma(range_ops: bool) -> Cpu {
         sd_dma: true,
         dcache_range_ops: range_ops,
         no_ustep: false,
+        no_seg7raw: false,
         ..Hardware::default()
     });
     cpu
@@ -1554,14 +1556,14 @@ fn dma_registers_and_caps() {
     assert_eq!(cpu.mmio_read(CACHE_OP_LEN_REG), 0);
     assert!(cpu.sd_dma_summary().is_none());
 
-    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x32E0_200D, "--sd-native");
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x72E0_200D, "--sd-native");
     // With it: SDM_CAPS[10], the version still 1.  CPU_FEATURES with
-    // --sd-native --sd-dma --dcache-range-ops: the ustep release's
-    // 0x3FF0_200D less [20] TRNG, [24] ETH_RX_SLOTS and [26] L2, which
+    // --sd-native --sd-dma --dcache-range-ops: the seg7raw build's
+    // 0x7FF0_200D less [20] TRNG, [24] ETH_RX_SLOTS and [26] L2, which
     // the emulator does not model (as without these options).
-    assert_eq!(cpu_dma(true).mmio_read(CPU_FEATURES), 0x3AE0_200D);
+    assert_eq!(cpu_dma(true).mmio_read(CPU_FEATURES), 0x7AE0_200D);
     let mut cpu = cpu_dma(false);
-    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x32E0_200D, "--sd-dma alone adds no CPU_FEATURES bit");
+    assert_eq!(cpu.mmio_read(CPU_FEATURES), 0x72E0_200D, "--sd-dma alone adds no CPU_FEATURES bit");
     assert_eq!(rd(&mut cpu, SDM_CAPS), 0x0708_0F01, "the sdhs bitstream's");
     assert_eq!(rd(&mut cpu, SDM_CAPS) & 0xFF, 1);
     assert_eq!(cpu.mmio_read(CPU_FEATURES) & (1 << 27), 0, "the range ops are a separate option");
@@ -2073,6 +2075,7 @@ fn range_walk_timings() {
         sd_dma: true,
         dcache_range_ops: true,
         no_ustep: false,
+        no_seg7raw: false,
         ..Hardware::default()
     });
     let base = 0x1_0000;

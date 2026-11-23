@@ -2138,15 +2138,15 @@ fn stage1_reset_state_and_cpu_features() {
     assert!(!cpu.has_mpu());
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x200D | (3 << 22) | (1 << 25) | (3 << 28),
-        "CPU_FEATURES: stages 1 and 3 and LR/SC, 32 entries, no MPU, DCBZ and MAL64, the TLB walker, the user step and watchpoints"
+        0x200D | (3 << 22) | (1 << 25) | (3 << 28) | (1 << 30),
+        "CPU_FEATURES: stages 1 and 3 and LR/SC, 32 entries, no MPU, DCBZ and MAL64, the TLB walker, the user step and watchpoints, SEG_RAW"
     );
     assert_eq!(cpu.mmio_read(0xF00F_0050), 0, "the next offset reads 0");
     cpu.set_has_mpu(true);
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x20FF | (3 << 22) | (1 << 25) | (3 << 28),
-        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 32 entries, DCBZ and MAL64, the TLB walker, the user step and watchpoints"
+        0x20FF | (3 << 22) | (1 << 25) | (3 << 28) | (1 << 30),
+        "CPU_FEATURES with the MPU: stages 1-3 and LR/SC, 16 regions, 32 entries, DCBZ and MAL64, the TLB walker, the user step and watchpoints, SEG_RAW"
     );
 }
 
@@ -3418,7 +3418,11 @@ fn tlb_kseg_is_direct_and_the_hole_faults() {
     // MMIO is identity in supervisor mode.
     let mut cpu = te_cpu(&[LOAD64, HALT], &[HALT], false);
     step_with_b(&mut cpu, 0xF00F_0048);
-    assert_eq!(cpu.regs[3], 0x200D | (3 << 22) | (1 << 25) | (3 << 28), "CPU_FEATURES (no MPU)");
+    assert_eq!(
+        cpu.regs[3],
+        0x200D | (3 << 22) | (1 << 25) | (3 << 28) | (1 << 30),
+        "CPU_FEATURES (no MPU)"
+    );
 }
 
 #[test]
@@ -4463,7 +4467,7 @@ fn tlb_walker_cpu_features_bit_25_and_no_tlb_walker() {
     cpu.set_has_tlb_walker(false);
     assert_eq!(
         cpu.mmio_read(0xF00F_0048),
-        0x200D | (3 << 22) | (3 << 28),
+        0x200D | (3 << 22) | (3 << 28) | (1 << 30),
         "--no-tlb-walker: bit 25 clear"
     );
     // Hardware { no_tlb_walker } (--no-tlb-walker) does the same.
@@ -5278,6 +5282,8 @@ const SEG_LOW_REG: u32 = 0xF003_0000;
 const SEG_HIGH_REG: u32 = 0xF003_0008;
 const SEG_ALL_REG: u32 = 0xF003_0010;
 const SEG_BLANK_REG: u32 = 0xF003_0018;
+const SEG_RAW_REG: u32 = 0xF003_0020;
+const SEG_MODE_REG: u32 = 0xF003_0028;
 const LEDS_REG: u32 = 0xF004_0000;
 const SWITCHES_REG: u32 = 0xF004_0008;
 
@@ -5317,9 +5323,10 @@ fn board_io_reads_at_program_start() {
     assert_eq!(cpu.mmio_read(SEG_BLANK_REG), 0, "write only");
     assert_eq!(cpu.mmio_read(LEDS_REG), 0);
     assert_eq!(cpu.mmio_read(SWITCHES_REG), 0, "no --switches");
-    for addr in [0xF002_0010, 0xF003_0020, 0xF004_0010, 0xF004_0004, 0xF003_0004] {
+    for addr in [0xF002_0010, 0xF003_0030, 0xF004_0010, 0xF004_0004, 0xF003_0004] {
         assert_eq!(cpu.mmio_read(addr), 0, "0x{addr:08X}");
     }
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0, "SEG_MODE: glyph mode");
 }
 
 #[test]
@@ -5363,8 +5370,8 @@ fn board_io_seven_segment_pads_digits() {
     // SEG_BLANK: any write, both displays 32'h22222222.
     cpu.mmio_write(SEG_BLANK_REG, 0);
     assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_2222_2222);
-    cpu.mmio_write(0xF003_0020, 0x1234);
-    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_2222_2222, "no register at 0x20");
+    cpu.mmio_write(0xF003_0030, 0x1234);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_2222_2222, "no register at 0x30");
 }
 
 #[test]
@@ -5432,11 +5439,240 @@ fn board_io_log_records_each_store() {
     cpu.mmio_store(LEDS_REG, 0x01, 1);
     // Not logged: the read-only switches, unlisted offsets, reads.
     cpu.mmio_write(SWITCHES_REG, 1);
-    cpu.mmio_write(0xF003_0020, 1);
+    cpu.mmio_write(0xF003_0030, 1);
+    cpu.mmio_write(SEG_MODE_REG, 1);
     let _ = cpu.mmio_read(LEDS_REG);
     assert_eq!(
         log.text(),
         "LEDS 0x5a5a\nLEDS 0x5a5a\nRGB1 0xf00\nRGB2 0x00f\nSEG_LOW 1234\nSEG_HIGH abcd\nSEG_ALL 12345678\nSEG_BLANK\nLEDS 0x0101\n"
+    );
+}
+
+// ---- 7-segment SEG_RAW / SEG_MODE (klaussCPU MMIO_MAP.md, seg7raw) ----
+
+/// A segment pattern for each digit, digit 7 (leftmost) first: "8." "8"
+/// "0" "1" "2" "3" "4" "5" (klaussCPU `tools/board/seg7_test.c`).
+const SEG_P: u64 = 0x807F_3F06_5B4F_666D;
+
+#[test]
+fn seg_raw_byte_enables_set_only_their_digits() {
+    // KlaussCPU.sv: SEG_RAW is decoded on addr[15:3] and each byte lane
+    // with its byte enable set writes its digit (byte k = digit k from the
+    // right, value2[7:0] = AN0).  The store's data is lane-replicated by
+    // the core, so the emulator's mmio_store gets the low bytes only.
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.mmio_write(SEG_RAW_REG, SEG_P);
+    assert_eq!(cpu.mmio_read(SEG_RAW_REG), SEG_P, "a 64-bit store sets all eight digits");
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), SEG_P, "the same 64 bits as SEG_ALL's read");
+    assert_eq!(cpu.mmio_read(SEG_LOW_REG), SEG_P & 0xFFFF_FFFF, "SEG_LOW: value2, the right four");
+    assert_eq!(cpu.mmio_read(SEG_HIGH_REG), SEG_P >> 32, "SEG_HIGH: value1, the left four");
+    // 32 bits at 0x20 / 0x24: the right / left four digits.
+    cpu.mmio_store(SEG_RAW_REG, 0xFFFF_FFFF_1122_3344, 4);
+    assert_eq!(cpu.mmio_read(SEG_RAW_REG), 0x807F_3F06_1122_3344);
+    cpu.mmio_store(SEG_RAW_REG + 4, 0x5566_7788, 4);
+    assert_eq!(cpu.mmio_read(SEG_RAW_REG), 0x5566_7788_1122_3344);
+    // 16 bits: their two digits.
+    for (lane, want) in [
+        (0, 0x5566_7788_1122_ABCD),
+        (2, 0x5566_7788_ABCD_ABCD),
+        (4, 0x5566_ABCD_ABCD_ABCD),
+        (6, 0xABCD_ABCD_ABCD_ABCD),
+    ] {
+        cpu.mmio_store(SEG_RAW_REG + lane, 0xFFFF_ABCD, 2);
+        assert_eq!(cpu.mmio_read(SEG_RAW_REG), want, "16-bit store at lane {lane}");
+    }
+    // A byte: its digit only.
+    cpu.mmio_write(SEG_RAW_REG, 0);
+    let mut want = 0_u64;
+    for k in 0..8_u32 {
+        let b = 0x11 * u64::from(k + 1);
+        cpu.mmio_store(SEG_RAW_REG + k, 0xFF00 | b, 1);
+        want |= b << (8 * k);
+        assert_eq!(cpu.mmio_read(SEG_RAW_REG), want, "byte store to digit {k}");
+    }
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 1);
+}
+
+#[test]
+fn seg_raw_loads_of_each_width_return_their_lanes() {
+    // A load of any width at 0x20..0x27 returns the stored bytes of its
+    // lanes (seg7_test.c "narrow loads"); SEG_MODE likewise.  Through the
+    // core's load path: LDIDX8/16/32/64 and MEMGET32.
+    let cpu = run_source(
+        "_start
+SETR B 0xF0030000
+SETR64 A 0x807F3F065B4F666D
+STIDX64 A B 0x20
+LDIDX64 C B 0x20
+LDIDX32 D B 0x20
+LDIDX32 E B 0x24
+LDIDX16 F B 0x22
+LDIDX16 G B 0x26
+LDIDX8 H B 0x23
+LDIDX8 I B 0x27
+LDIDX8 J B 0x20
+LDIDX64 K B 0x28
+LDIDX8 L B 0x28
+LDIDX32 M B 0x2C
+SETR N 0xF0030024
+MEMGET32 O N
+HALT",
+    );
+    assert_eq!(cpu.regs[2], SEG_P, "64 bits");
+    assert_eq!(cpu.regs[3], 0x5B4F_666D, "32 bits at 0x20: digits 3-0");
+    assert_eq!(cpu.regs[4], 0x807F_3F06, "32 bits at 0x24: digits 7-4");
+    assert_eq!(cpu.regs[5], 0x5B4F, "16 bits at 0x22: digits 3-2");
+    assert_eq!(cpu.regs[6], 0x807F, "16 bits at 0x26: digits 7-6");
+    assert_eq!(cpu.regs[7], 0x5B, "a byte at 0x23: digit 3");
+    assert_eq!(cpu.regs[8], 0x80, "a byte at 0x27: digit 7");
+    assert_eq!(cpu.regs[9], 0x6D, "a byte at 0x20: digit 0");
+    assert_eq!(cpu.regs[10], 1, "SEG_MODE: RAW");
+    assert_eq!(cpu.regs[11], 1, "a byte load of SEG_MODE");
+    assert_eq!(cpu.regs[12], 0, "SEG_MODE [63:32]");
+    assert_eq!(cpu.regs[14], 0x807F_3F06, "MEMGET32 at 0x24");
+}
+
+#[test]
+fn seg_mode_is_read_only_and_set_by_any_seg_raw_store() {
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0, "glyph mode when a program starts");
+    cpu.mmio_write(SEG_MODE_REG, 1);
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0, "a SEG_MODE write is dropped");
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_2222_2222, "and changes nothing else");
+    for (lane, bytes) in [(0, 8), (0, 4), (4, 4), (2, 2), (7, 1)] {
+        cpu.mmio_write(SEG_BLANK_REG, 0);
+        assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0);
+        cpu.mmio_store(SEG_RAW_REG + lane, 0, bytes);
+        assert_eq!(cpu.mmio_read(SEG_MODE_REG), 1, "a {bytes}-byte SEG_RAW store at lane {lane}");
+    }
+    cpu.mmio_write(SEG_MODE_REG, 0);
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 1, "clearing it by a write does nothing either");
+    // A narrow SEG_RAW store from glyph mode leaves the other digits'
+    // glyph codes, now shown as segment patterns.
+    cpu.mmio_write(SEG_BLANK_REG, 0);
+    cpu.mmio_store(SEG_RAW_REG, 0x3F, 1);
+    assert_eq!(cpu.mmio_read(SEG_RAW_REG), 0x2222_2222_2222_223F);
+}
+
+#[test]
+fn seg_raw_mode_is_left_by_each_glyph_register() {
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    // SEG_ALL: all eight digits, as before.
+    cpu.mmio_write(SEG_RAW_REG, SEG_P);
+    cpu.mmio_write(SEG_ALL_REG, 0xDEAD_BEEF);
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0, "SEG_ALL");
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0D0E_0A0D_0B0E_0E0F);
+    // SEG_BLANK: both displays blank.
+    cpu.mmio_write(SEG_RAW_REG, SEG_P);
+    cpu.mmio_write(SEG_BLANK_REG, 0);
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0, "SEG_BLANK");
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_2222_2222);
+    // SEG_LOW in raw mode blanks the upper half, which held patterns.
+    cpu.mmio_write(SEG_RAW_REG, SEG_P);
+    cpu.mmio_write(SEG_LOW_REG, 0x1234);
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0, "SEG_LOW");
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x2222_2222_0102_0304);
+    // SEG_HIGH in raw mode blanks the lower half.
+    cpu.mmio_write(SEG_RAW_REG, SEG_P);
+    cpu.mmio_write(SEG_HIGH_REG, 0xABCD);
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0, "SEG_HIGH");
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0A0B_0C0D_2222_2222);
+    // Outside raw mode they leave the other half alone, as before.
+    cpu.mmio_write(SEG_LOW_REG, 0x5678);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0A0B_0C0D_0506_0708, "SEG_LOW, RAW = 0");
+    cpu.mmio_write(SEG_HIGH_REG, 0x9876);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0908_0706_0506_0708, "SEG_HIGH, RAW = 0");
+    // A sub-word SEG_LOW store in raw mode is the same (replicated data).
+    cpu.mmio_write(SEG_RAW_REG, SEG_P);
+    cpu.mmio_store(SEG_HIGH_REG, 0x4321, 2);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0403_0201_2222_2222, "16-bit SEG_HIGH");
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0);
+}
+
+#[test]
+fn seg_raw_survives_halt_and_a_program_start_leaves_it() {
+    // HALT does not clear RAW: a halted program's raw display stays up.
+    let cpu = run_source(
+        "_start
+SETR B 0xF0030000
+SETR64 A 0x807F3F065B4F666D
+STIDX64 A B 0x20
+HALT",
+    );
+    let mut cpu = cpu;
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 1, "after HALT");
+    assert_eq!(cpu.mmio_read(SEG_RAW_REG), SEG_P);
+    // The next program starts (LOAD_COMPLETE, START_WAIT) in glyph mode
+    // with both displays blank.
+    let mut cpu = run_source(
+        "_start
+SETR B 0xF0030000
+LDIDX64 C B 0x28
+LDIDX64 D B 0x20
+HALT",
+    );
+    assert_eq!(cpu.regs[2], 0, "SEG_MODE when the program starts");
+    assert_eq!(cpu.regs[3], 0x2222_2222_2222_2222, "SEG_RAW: blank glyph codes");
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0);
+}
+
+#[test]
+fn seg_raw_absent_with_no_seg7raw() {
+    // --no-seg7raw (the bitstreams before klaussCPU seg7raw):
+    // CPU_FEATURES[30] clear, SEG_RAW and SEG_MODE read 0 and drop
+    // writes (unlogged), and SEG_LOW / SEG_HIGH never blank the other half.
+    let log = SharedLog::default();
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.install(Hardware {
+        no_seg7raw: true,
+        board_io_log: Some(BoardIoLog::new(log.clone())),
+        ..Hardware::default()
+    });
+    assert!(!cpu.has_seg_raw());
+    assert_eq!(cpu.mmio_read(0xF00F_0048) & (1 << 30), 0, "CPU_FEATURES[30]");
+    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22) | (1 << 25) | (3 << 28));
+    cpu.mmio_write(SEG_ALL_REG, 0x1234_5678);
+    cpu.mmio_write(SEG_RAW_REG, SEG_P);
+    cpu.mmio_store(SEG_RAW_REG + 3, 0xAB, 1);
+    cpu.mmio_write(SEG_MODE_REG, 1);
+    assert_eq!(cpu.mmio_read(SEG_RAW_REG), 0);
+    assert_eq!(cpu.mmio_read(SEG_RAW_REG + 4), 0);
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0102_0304_0506_0708, "SEG_RAW writes dropped");
+    cpu.mmio_write(SEG_LOW_REG, 0x9999);
+    assert_eq!(cpu.mmio_read(SEG_ALL_REG), 0x0102_0304_0909_0909, "SEG_LOW keeps the upper half");
+    assert_eq!(log.text(), "SEG_ALL 12345678\nSEG_LOW 9999\n");
+    // Taking the registers away in raw mode leaves it.
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.mmio_write(SEG_RAW_REG, SEG_P);
+    cpu.set_has_seg_raw(false);
+    cpu.set_has_seg_raw(true);
+    assert_eq!(cpu.mmio_read(SEG_MODE_REG), 0);
+}
+
+#[test]
+fn seg_raw_log_lines() {
+    // --board-io-log: a 64-bit store logs the 16 hex digits; a narrower one
+    // the digits it set (numbered from the right) and their bytes, leftmost
+    // first.  SEG_MODE writes are not logged.
+    let log = SharedLog::default();
+    let mut cpu = cpu_with(&image_from_words(&[HALT]));
+    cpu.install(Hardware {
+        board_io_log: Some(BoardIoLog::new(log.clone())),
+        ..Hardware::default()
+    });
+    cpu.mmio_write(SEG_RAW_REG, 0x3F06_5B4F_666D_7D07);
+    cpu.mmio_store(SEG_RAW_REG + 3, 0xAB, 1);
+    cpu.mmio_store(SEG_RAW_REG, 0x5566, 2);
+    cpu.mmio_store(SEG_RAW_REG + 6, 0x0080, 2);
+    cpu.mmio_store(SEG_RAW_REG + 4, 0x1122_3344, 4);
+    cpu.mmio_store(SEG_RAW_REG, 0x0000_0006, 4);
+    cpu.mmio_write(SEG_MODE_REG, 0);
+    cpu.mmio_write(SEG_LOW_REG, 0x1234);
+    assert_eq!(
+        log.text(),
+        "SEG_RAW 3f065b4f666d7d07\nSEG_RAW[3] ab\nSEG_RAW[1:0] 5566\nSEG_RAW[7:6] 0080\n\
+         SEG_RAW[7:4] 11223344\nSEG_RAW[3:0] 00000006\nSEG_LOW 1234\n"
     );
 }
 
@@ -5595,7 +5831,7 @@ fn ustep_cpu_features_srs_and_ecause() {
         ..Hardware::default()
     });
     assert!(!cpu.has_udbg());
-    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22) | (1 << 25));
+    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22) | (1 << 25) | (1 << 30));
     for sr in SR_WP0_ADDR..=SR_WP1_CTRL {
         assert_eq!(cpu.sr_read(sr), None, "SR {sr:#x} without --ustep");
         assert!(!cpu.sr_write(sr, 1), "SR {sr:#x} without --ustep");
@@ -5613,7 +5849,7 @@ fn ustep_cpu_features_srs_and_ecause() {
     let mut cpu = cpu_with(&image_from_words(&[HALT]));
     cpu.install(Hardware::default());
     assert!(cpu.has_udbg());
-    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22) | (1 << 25) | (3 << 28));
+    assert_eq!(cpu.mmio_read(0xF00F_0048), 0x200D | (3 << 22) | (1 << 25) | (3 << 28) | (1 << 30));
     for (sr, back) in [
         (SR_WP0_ADDR, 0xFFFF_FFF8),
         (SR_WP0_CTRL, 0x7FF),
