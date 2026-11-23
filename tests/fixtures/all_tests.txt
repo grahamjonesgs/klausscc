@@ -60,10 +60,9 @@ hw_mmu.kla
 // hw_mpu.kla (the MPU) is not listed: the MPU is off in the Nexys A7
 // bitstream (klaussCPU MMU_PLAN §10).  Run it by hand on an MPU build.
 
-// hw_seg7raw.kla (the 7-segment SEG_RAW / SEG_MODE registers,
-// CPU_FEATURES[30], klaussCPU branch seg7raw) is not listed yet: they are
-// built but not in a release bitstream.  Add it once a board run passes it
-// (33/33 on the emulator).
+// The 7-segment SEG_RAW / SEG_MODE registers (CPU_FEATURES[30], release
+// bitstream seg7raw_release_8ad3039): 33/33 on the board, 2026-11-23.
+hw_seg7raw.kla
 
 // The user single step and watchpoints (klaussCPU MMU_PLAN §13, release
 // bitstream ustep_release_60bcc36): 47/47 on the board, 2026-11-23.

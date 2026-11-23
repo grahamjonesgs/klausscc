@@ -514,13 +514,11 @@ mod tests {
         //   feature, off in the Nexys A7 bitstream for timing margin
         //   (klaussCPU MMU_PLAN §10; Graham, 2026-11-09).  It passed 17/17
         //   on the MPU bitstream mmu_da8c085.
-        // - hw_seg7raw.kla: SEG_RAW / SEG_MODE (CPU_FEATURES[30], klaussCPU
-        //   branch seg7raw) are built but not yet in a release bitstream;
-        //   the test joins the list once a board run passes it.
         // (hw_tlb.kla joined the list when the stage 3 release bitstream,
-        // klaussCPU mmu 98fe470, passed it 19/19, and hw_ustep.kla when
-        // ustep_release_60bcc36 passed it 47/47.)
-        const NEEDS_NEWER_BITSTREAM: [&str; 2] = ["hw_mpu.kla", "hw_seg7raw.kla"];
+        // klaussCPU mmu 98fe470, passed it 19/19, hw_ustep.kla when
+        // ustep_release_60bcc36 passed it 47/47, and hw_seg7raw.kla when
+        // seg7raw_release_8ad3039 passed it 33/33.)
+        const NEEDS_NEWER_BITSTREAM: [&str; 1] = ["hw_mpu.kla"];
         let mut with_values: Vec<String> = fs::read_dir(fixture_dir())
             .expect("read fixture dir")
             .flatten()
